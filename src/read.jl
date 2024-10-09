@@ -440,6 +440,8 @@ function internal_xml_file_read(xf::XLSXFile, filename::String) :: EzXML.Documen
         
     try
         xf.data[filename] = EzXML.parsexml(ZipArchives.zip_readentry(xf.io, filename))
+        xf.files[filename] = true # set file as read
+
     catch err
         @error("Failed to parse internal XML file `$filename`")
         rethrow()
