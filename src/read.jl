@@ -194,8 +194,9 @@ function open_or_read_xlsx(source::Union{IO, AbstractString}, read_files::Bool, 
     xf = XLSXFile(source, enable_cache, read_as_template)
 
     try
-        for (i, f) in enumerate(ZipArchives.zip_names(xf.io))
-
+        for i in 1:ZipArchives.zip_nentries(xf.io)
+            f = ZipArchives.zip_name(xf.io, i)
+            
             # ignore xl/calcChain.xml in any case (#31)
             if f == "xl/calcChain.xml"
                 continue
@@ -220,9 +221,7 @@ function open_or_read_xlsx(source::Union{IO, AbstractString}, read_files::Bool, 
             elseif read_as_template
                 # Binary and customXML files
                 # we only read these files to save the Excel file later
-                bytes = read(IOBuffer(ZipArchives.zip_readentry(xf.io, f, String)))
-                @assert sizeof(bytes) == ZipArchives.zip_uncompressed_size(xf.io, i)
-                xf.binary_data[f] = bytes
+                xf.binary_data[f] = ZipArchives.zip_readentry(xf.io, f)
             end
         end
 
@@ -454,11 +453,11 @@ function Base.close(xl::XLSXFile)
     xl.io_is_open = false
 #    close(xl.io)
     # close all internal file streams from worksheet caches
-    for sheet in xl.workbook.sheets
-        if sheet.cache != nothing && sheet.cache.stream_state != nothing
-            close(sheet.cache.stream_state)
-        end
-    end
+#    for sheet in xl.workbook.sheets
+#        if sheet.cache != nothing && sheet.cache.stream_state != nothing
+#            close(sheet.cache.stream_state)
+#        end
+#    end
 end
 
 Base.isopen(xl::XLSXFile) = xl.io_is_open
