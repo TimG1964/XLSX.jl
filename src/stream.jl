@@ -80,7 +80,7 @@ function Base.iterate(itr::SheetRowStreamIterator)
         rownode === nothing && return nothing # no rows found
     end
 
-    # rownode is the now the first row
+    # rownode is now the first row
     a = XML.attributes(rownode) # get row number and row height (if specified)
     current_row = parse(Int, a["r"])
     current_row_ht = haskey(a, "ht") ? parse(Float64, a["ht"]) : nothing
@@ -111,7 +111,7 @@ function Base.iterate(itr::SheetRowStreamIterator, state::SheetRowStreamIterator
         return nothing
     end
 
-    # get row number and row heigth (if specified)
+    # get row number and row height (if specified)
     a = XML.attributes(rownode)
     current_row = parse(Int, a["r"])
     current_row_ht = haskey(a, "ht") ? parse(Float64, a["ht"]) : nothing

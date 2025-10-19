@@ -28,6 +28,7 @@ XLSX.writetable!
 
 ```@docs
 XLSX.setFormula
+XLSX.getFormula
 ```
 
 ## Defined names

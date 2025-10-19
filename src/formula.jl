@@ -5,76 +5,118 @@ const metadata = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 #-----------------------------------------------------------------------------------------------------
 
 const RGX_FORMULA_SHEET_CELL = r"!\$?[A-Z]+\$?[0-9]" # to recognise sheetcell references like "otherSheet!A1"
-const EXCEL_FUNCTION_PREFIX = Dict( # Prefixes needed for newer Excel functions - previously two different prefixes (hence Dict) but now only one.
+
+# Prefixes needed for newer Excel functions - previously two different prefixes (hence Dict) but now only one.
+# Retain as Dict in case Excel introduces other namespace prefixes in future
+# name => prefix
+const EXCEL_FUNCTION_PREFIX = Dict( 
     # Core dynamic array + higher-order
-    "MAKEARRAY"   => "_xlfn.",
-    "SEQUENCE"    => "_xlfn.",
-    "RANDARRAY"   => "_xlfn.",
-    "ANCHORARRAY" => "_xlfn.", # used internally to handle spill references like A1#
-    "LAMBDA"      => "_xlfn.", # not well supported at present
-    "MAP"         => "_xlfn.",
-    "REDUCE"      => "_xlfn.",
-    "SCAN"        => "_xlfn.",
-    "BYROW"       => "_xlfn.",
-    "BYCOL"       => "_xlfn.",
-    "LET"         => "_xlfn.",  # not well supported at present. Parameters may be tagged with _xlpm.
+    "MAKEARRAY"    => "_xlfn.",
+    "SEQUENCE"     => "_xlfn.",
+    "RANDARRAY"    => "_xlfn.",
+    "ANCHORARRAY"  => "_xlfn.", # used internally to handle spill references like A1#
+    "LAMBDA"       => "_xlfn.", # not well supported at present
+    "MAP"          => "_xlfn.",
+    "REDUCE"       => "_xlfn.",
+    "SCAN"         => "_xlfn.",
+    "BYROW"        => "_xlfn.",
+    "BYCOL"        => "_xlfn.",
+    "LET"          => "_xlfn.",  # not well supported at present. Parameters may be tagged with _xlpm.
 
     # Array shaping/stacking
-    "VSTACK"      => "_xlfn.",
-    "HSTACK"      => "_xlfn.",
-    "TOCOL"       => "_xlfn.",
-    "TOROW"       => "_xlfn.",
-    "WRAPROWS"    => "_xlfn.",
-    "WRAPCOLS"    => "_xlfn.",
-    "TAKE"        => "_xlfn.",
-    "DROP"        => "_xlfn.",
-    "EXPAND"      => "_xlfn.",
-    "CHOOSECOLS"  => "_xlfn.",
-    "CHOOSEROWS"  => "_xlfn.",
+    "VSTACK"       => "_xlfn.",
+    "HSTACK"       => "_xlfn.",
+    "TOCOL"        => "_xlfn.",
+    "TOROW"        => "_xlfn.",
+    "WRAPROWS"     => "_xlfn.",
+    "WRAPCOLS"     => "_xlfn.",
+    "TAKE"         => "_xlfn.",
+    "DROP"         => "_xlfn.",
+    "EXPAND"       => "_xlfn.",
+    "CHOOSECOLS"   => "_xlfn.",
+    "CHOOSEROWS"   => "_xlfn.",
 
     # Sort/filter/distinct/group/pivot
-    "SORT"        => "_xlfn.",  # historically also _xlws.
-    "SORTBY"      => "_xlfn.",  # historically also _xlws.
-    "FILTER"      => "_xlfn.",  # historically also _xlws.
-    "UNIQUE"      => "_xlfn.",  # historically also _xlws.
-    "GROUPBY"     => "_xlfn.",
-    "PIVOTBY"     => "_xlfn.",
+    "SORT"         => "_xlfn.",  # historically also _xlws.
+    "SORTBY"       => "_xlfn.",  # historically also _xlws.
+    "FILTER"       => "_xlfn.",  # historically also _xlws.
+    "UNIQUE"       => "_xlfn.",  # historically also _xlws.
+    "GROUPBY"      => "_xlfn.",
+    "PIVOTBY"      => "_xlfn.",
 
     # Text spill functions
-    "TEXTSPLIT"   => "_xlfn.",
-    "TEXTBEFORE"  => "_xlfn.",
-    "TEXTAFTER"   => "_xlfn.",
+    "TEXTSPLIT"    => "_xlfn.",
+    "TEXTBEFORE"   => "_xlfn.",
+    "TEXTAFTER"    => "_xlfn.",
 
     # Lookup
-    "XLOOKUP"     => "_xlfn.",
-    "XMATCH"      => "_xlfn.",
+    "XLOOKUP"      => "_xlfn.",
+    "XMATCH"       => "_xlfn.",
+    "STOCKHISTORY" => "_xlfn.",
+    "FIELDVALUE"   => "_xlfn.",
 
     # Other modern functions commonly serialized with _xlfn.
-    "IFS"         => "_xlfn.",
-    "SWITCH"      => "_xlfn.",
-    "IFNA"        => "_xlfn.",
-    "CONCAT"      => "_xlfn.",
-    "TEXTJOIN"    => "_xlfn.",
+    "IFS"          => "_xlfn.",
+    "MAXIFS"       => "_xlfn.",
+    "MINIFS"       => "_xlfn.",
+    "SWITCH"       => "_xlfn.",
+    "IFNA"         => "_xlfn.",
+    "SINGLE"       => "_xlfn.",
+    "CONCAT"       => "_xlfn.",
+    "TEXTJOIN"     => "_xlfn.",
 
     # Image insertion (modern Excel)
-    "IMAGE"       => "_xlfn."
+    "IMAGE"        => "_xlfn."
 )
-# Map of aggregator names → serialization style
+
+const SPILL_FUNCTIONS = Set([
+    "SEQUENCE",
+    "RANDARRAY",
+    "MAKEARRAY",
+    "UNIQUE",
+    "SORT",
+    "SORTBY",
+    "FILTER",
+    "TOCOL",
+    "TOROW",
+    "VSTACK",
+    "HSTACK",
+    "WRAPROWS",
+    "WRAPCOLS",
+    "EXPAND",
+    "TEXTSPLIT",
+    "STOCKHISTORY",
+    "GROUPBY",
+    "PIVOTBY",
+    "ANCHORARRAY"
+#    "XLOOKUP",
+#    "TEXTBEFORE",
+#    "TEXTAFTER"
+])  
+# Map of aggregator functions used in LAMBDA functions as name => prefix
+# Retain as Dict in case Excel introduces other namespace prefixes in future
 const GROUPBY_AGGREGATORS = Dict(
     # Eta-reduced aggregators (become _xleta.FUNC)
-    "SUM"      => "_xleta.",
-    "AVERAGE"  => "_xleta.",
-    "COUNT"    => "_xleta.",
-    "COUNTA"   => "_xleta.",
-    "MIN"      => "_xleta.",
-    "MAX"      => "_xleta.",
-    "MEDIAN"   => "_xleta.",
-    "PRODUCT"  => "_xleta.",
-    "STDEV"    => "_xleta.",
-    "STDEVP"   => "_xleta.",
-    "VAR"      => "_xleta.",
-    "VARP"     => "_xleta.",
-
+    "SUM"        => "_xleta.",
+    "AVERAGE"    => "_xleta.",
+    "COUNT"      => "_xleta.",
+    "COUNTA"     => "_xleta.",
+    "COUNTBLANK" => "_xleta.",
+    "MIN"        => "_xleta.",
+    "MAX"        => "_xleta.",
+    "MEDIAN"     => "_xleta.",
+    "MODE"       => "_xleta.",
+    "MODE.SNGL"  => "_xleta.",
+    "MODE.MULT"  => "_xleta.",
+    "PRODUCT"    => "_xleta.",
+    "STDEV"      => "_xleta.",
+    "STDEVP"     => "_xleta.",
+    "STDEV.S"    => "_xleta.",
+    "STDEV.P"    => "_xleta.",
+    "VAR"        => "_xleta.",
+    "VARP"       => "_xleta.",
+    "VAR.S"      => "_xleta.",
+    "VAR.P"      => "_xleta."
     # Everything else stays as _xlfn.LAMBDA(...)
     # (or _xlfn.FUNC if used directly)
 )
@@ -87,17 +129,53 @@ Base.hash(f::FormulaReference) = hash(f.id) + hash(f.unhandled)
 Base.hash(f::ReferencedFormula) = hash(f.formula) + hash(f.id) + hash(f.ref) + hash(f.unhandled)
 
 function new_ReferencedFormula_Id(ws::Worksheet)
-    # get all referenceFormaula Ids currently in use
-    all_f=([z.formula.id for x in [values(last(x)) for x in (ws.cache.cells)] for z in x if isa(z.formula, ReferencedFormula)])
+    # return the first positive integer (or 0) not currently used as a ReferencedFormula Id
 
-    # find the lowest integer not currently used as an Id
-    id = 0
-    while id ∈ all_f
-        id +=1
+    ids = Set{Int}()
+    for r in eachrow(ws) # first find all Ids currently in use
+        for cell in values(r.rowcells)
+            if cell.formula isa ReferencedFormula
+                push!(ids, (cell.formula::ReferencedFormula).id)
+            end
+        end
     end
 
+    id = 0
+    while id ∈ ids # then find first Id not currently in use
+        id += 1
+    end
     return id
+end
 
+function build_reference_index(ws::Worksheet)
+    # Create Dict of all ReferencedFormulae in worksheet
+    refs = Dict{Int,ReferencedFormula}() # Id => ReferencedFormula
+    for r in eachrow(ws)
+        for cell in values(r.rowcells)
+            f = cell.formula
+            if f isa ReferencedFormula
+                refs[f.id] = f
+            end
+        end
+    end
+    return refs
+end
+
+function get_referenced_formula(ws::Worksheet, cellref::CellRef; refs::Union{Nothing,Dict{Int,ReferencedFormula}}=nothing)
+    # find the actual formula a cell's FormulaReference refers to
+    if isnothing(refs)
+        refs = build_reference_index(ws)
+    end
+    cell = getcell(ws, cellref)
+    if isa(cell.formula, FormulaReference)
+        id = cell.formula.id
+        haskey(refs, id) || throw(XLSXError("No ReferencedFormula found for id=$id"))
+        offset = cell_offset(CellRange(refs[id].ref).start, cellref)
+        f = shift_excel_references(refs[id].formula, offset)
+        return f
+    else
+        throw(XLSXError("Cell `$CellRef` does not contain a formula reference!"))
+    end
 end
 
 # If overwriting a cell containing a referencedFormula, need to re-reference all referring cells.
@@ -131,10 +209,11 @@ function rereference_formulae(ws::Worksheet, cell::Cell)
         end
     end
 end
+
 function rereference_formulae(ws::Worksheet, oldcell::Cell, newrng::CellRange, newid::Int64)
     oldform = oldcell.formula.formula
     oldunhandled = oldcell.formula.unhandled
-    offset = (newrng.start.row_number - oldcell.ref.row_number, newrng.start.column_number - oldcell.ref.column_number)
+    offset = cell_offset(oldcell.ref, newrng.start)
     newform = ReferencedFormula(shift_excel_references(oldform, offset), newid, string(newrng), oldunhandled)
     for fr in newrng
         newfr = getcell(ws, fr)
@@ -251,10 +330,189 @@ function split_function_args(formula::String; fname::Union{Nothing,String}=nothi
 end
 
 """
-    setFormula(ws::Worksheet, RefOrRange::AbstractString, formula::String)
-    setFormula(xf::XLSXFile,  RefOrRange::AbstractString, formula::String)
+    is_array_formula(formula::String) -> Bool
 
-    setFormula(sh::Worksheet, row, col, formula::String)
+Detects whether a formula implies an array spill (thus needing t="array").
+Currently flags:
+  - Binary operators (+, -, *, /, ^) applied to ranges
+  - Functions with range arguments that return arrays (e.g. MMULT, TRANSPOSE)
+"""
+function is_array_formula(formula::String)
+    # Simplistic regex for a cell/range reference like A1:B13
+    range_re = "[\$]?[A-Z]+[\$]?\\d+:[\$]?[A-Z]+[\$]?\\d+"
+
+    # Case 1: is a bare range
+    if occursin(Regex("^=$(range_re)\$"), formula)
+        return true
+    end
+    # Case 2: binary operator applied to a range
+    if occursin(Regex("[+\\-*/^]\\s*$(range_re)|$(range_re)\\s*[+\\-*/^]"), formula)
+        return true
+    end
+
+    # Case 3: known array-returning functions
+    array_funcs = ["FREQUENCY", "LINEST", "LOGEST", "MINVERSE", "MMULT", "MUNIT", "MODE.MULT", "TRANSPOSE", "TREND", "GROWTH"]
+    for f in array_funcs
+        if occursin(Regex("\\b$f\\s*\\("), formula)
+            return true
+        end
+    end
+
+    # Case 4: _xlfn functions
+#    array_funcs = SPILL_FUNCTIONS # not all of these do? May need a different set here!
+    for f in SPILL_FUNCTIONS
+        if occursin(Regex("\\b$f\\s*\\("), formula)
+            return true
+        end
+    end
+
+    # Case 5: functions that spill conditional on given range
+    array_funcs = ["INDEX", "OFFSET", "IF", "CHOOSE"]
+    for f in array_funcs
+        args = split_function_args(formula; fname=f)
+        !isempty(args) && return needs_array_attr(fname, args)
+    end
+    return false
+end
+
+# Finally got one that works from Claude
+const SPILL_REF_RE = r"""
+    (                                       # capture group 1: full reference before #
+        (?:                                 # optional sheet/workbook prefix
+            (?:
+                (?:'[^']+'|\[[^\]]+\])      # quoted sheet or [Book] - already handles Unicode
+                | [\p{L}\p{N}_]+            # unquoted sheet - Unicode letters/numbers
+            )
+            !
+        )?
+        (?:
+            \$?[A-Za-z]{1,3}\$?\d+          # cell reference (A1 notation is ASCII-only)
+          | [\p{L}_][\p{L}\p{N}_.\\/]*      # named range - Unicode support
+            (?!\[)                          # negative lookahead: not followed by [
+          | (?:                             # structured reference
+                (?:'[^']+'|[\p{L}_][\p{L}\p{N}_ ]*)   # table name with Unicode
+                (?:
+                    \[(?:[^\[\]]|\[[^\]]*\])*\]      # single [...] with potential nested []
+                  | \[\[(?:[^\[\]]|\[[^\]]*\])+\]\]  # [[...]] with nested elements
+                )
+            )
+        )
+    )
+    \#                                      # literal spill operator
+"""x
+
+function anchor_spill_refs(formula::String)
+    return replace(formula, SPILL_REF_RE => s -> "ANCHORARRAY($(s[1:end-1]))")
+end
+
+function process_dynamic_array_functions(xf::XLSXFile, cellref::CellRef, val::String; raw::Bool, spill::Union{Nothing,Bool})
+
+    t = ""
+    ref = ""
+    cm = ""
+ 
+    formula=val
+    if !raw
+        if occursin("#", formula) # handle spill references like A1# or myName#
+            formula = anchor_spill_refs(formula)
+        end
+
+        # Handle the 3rd/4th (function) arg of GROUPBY and PIVOTBY (NOTE. Can't handle anything but simple aggregation functions yet)
+        m = match(r"(?i)\b(GROUPBY|PIVOTBY)\s*\(", formula)
+        if !isnothing(m)
+            fname = uppercase(m.captures[1])
+            idx = fname=="GROUPBY" ? 3 : 4
+            # Extract arguments
+            args = split_function_args(formula; fname=fname)
+            if length(args) >= idx
+
+                # Transform 3rd/4th argument if it's a bare identifier
+                agg = args[idx]
+                if haskey(GROUPBY_AGGREGATORS, uppercase(agg))
+                    prefix = GROUPBY_AGGREGATORS[uppercase(agg)]
+                    args[idx] = prefix*agg
+                else
+                    throw(XLSXError("Currently only simple aggregation functions like sum or average are supported with `raw=false`."))
+                end
+
+                # Reconstruct
+                formula = fname*"(" * join(args, ",") * ")"
+            end
+        end
+
+        for (k, v) in EXCEL_FUNCTION_PREFIX # add prefixes to any array functions
+            r = "(?i)\\b"*k
+            formula = replace(formula, Regex(r) => v*k) # replace any dynamic array function name with its prefixed name
+        end
+    end
+
+    iaf = is_array_formula(formula)
+    if !isnothing(spill) && (spill || !spill && iaf) || isnothing(spill) && iaf
+        t = "array"
+        ref = cellref.name*":"*cellref.name
+        cm = "1"
+        if !haskey(xf.files, "xl/metadata.xml") # add metadata.xml on first use of a dynamicArray formula
+#            xf.data["xl/metadata.xml"] = XML.Node(XML.Raw(read(joinpath(_relocatable_data_path(), "metadata.xml"))))
+            xf.data["xl/metadata.xml"] = parse(metadata, XML.Node)
+            xf.files["xl/metadata.xml"] = true # set file as read
+            add_override!(xf, "/xl/metadata.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml")
+            rId = add_relationship!(get_workbook(xf), "metadata.xml", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata")
+        end
+    end
+    return formula, t, ref, cm
+end
+
+const EXTERNAL_REF_RE = r"\[(\d+)\]([\p{L}\p{N}_]+)!\$?[A-Za-z]+\$?\d+"
+
+# Extract all external references from a formula string (eg like "[1]Sheet1!$A$1")
+function get_external_refs(formula::String)
+    [ExternalRef(parse(Int, m.captures[1]),
+                 m.captures[2],
+                 m.match) for m in eachmatch(EXTERNAL_REF_RE, formula)] # workbook_path to be filled in later
+end
+
+# Lookup an external file reference from its index in the workbook's externalReferences
+function get_external_workbook_path(xf::XLSXFile, id::Int)
+    extRef=get_wb_ext_refs(xf)
+    rel=get_relationship_target_by_id("xl", get_workbook(xf), extRef[id])
+    extXml=xmlroot(xf, rel)
+    i, j = get_idces(extXml, "externalLink", "externalBook") # we are looking for ExternalBook to find an external filename
+    isnothing(i) && throw(XLSXError("Malformed external reference in workbook. Missing externalLink node."))
+    isnothing(j) && throw(XLSXError("Malformed external reference in workbook. Missing externalBook node."))
+    k, l = get_idces(extXml[i], "externalBook", "externalBookPr")
+    k==j || throw(XLSXError("Something wrong here!"))
+
+    # find the file name directly, if present, searching in order:
+    # 1. externalBook filename attribute
+    # 2. externalBookPr filename attribute
+    # 3. first alternateUrls r:id attribute (to be further resolved via relationships)
+    atts=XML.attributes(extXml[i][k])
+    haskey(atts, "filename") && return atts["filename"] # externalBook filename attribute
+    if !isnothing(l)
+        atts=XML.attributes(extXml[i][k][l])
+        haskey(atts, "filename") && return atts["filename"] # externalBookPr filename attribute
+    end
+    k, l = get_idces(extXml[i], "externalBook", "xxl21:alternateUrls")
+    atts=XML.attributes(extXml[i][k][l][1]) # prefer the first alternateUrls r:id if multiple
+    haskey(atts, "r:id") || throw(XLSXError("Something wrong here!"))
+    rId=atts["r:id"]
+    # now need a second lookup of this further r:id
+    altUrls = XML.children(xmlroot(xf, "xl/externalLinks/_rels/$(basename(rel)).rels")[end])
+    for c in altUrls
+        atts=XML.attributes(c)
+        if haskey(atts, "Id") && atts["Id"] == rId
+            haskey(atts, "Target") || throw(XLSXError("Something wrong here!"))
+            return atts["Target"]
+        end
+    end
+    throw(XLSXError("Unreachable reached!"))
+end
+
+"""
+    setFormula(ws::Worksheet, RefOrRange::AbstractString, formula::String; raw=false, spill=false)
+    setFormula(xf::XLSXFile,  RefOrRange::AbstractString, formula::String; raw=false, spill=false)
+
+    setFormula(sh::Worksheet, row, col, formula::String; raw=false, spill=false)
 
 Set the Excel formula to be used in the given cell or cell range.
 
@@ -263,35 +521,29 @@ separators. Cell references may be absolute or relative references in either
 the row or the column or both (e.g. `\$A\$2`). No validation of the specified 
 formula is made by `XLSX.jl` and formulae are stored verbatim, as given.
 
-If a contiguous range is specfied, `setFormula` will usually create a 
-referencedFormula. This is the same as Excel would use if using drag fill to 
-copy a formula into a range of cells.
-
 Non-contiguous ranges are not supported by `setFormula`. Set the formula in 
 each cell or contiguous range separately.
 
-An `XLSXFile` must be open in write mode to use `setFormula`.
+Use `raw=true` if entering a formula in xml-ready format to prevent any processing 
+by `setFormula)`.
+
+Use `spill=true` to force the formula to be treated as an array formula that spills 
+and `spill-false` to prevent it being treated as such. By default (`spill=nothing`).
+
+Keyword options should be rarely needed - `setFormula` should handle most formulae.
 
 Since XLSX.jl does not and cannot replicate all the functions built in to Excel, 
 setting a formula in a cell does not permit the cell's value to be re-calculated 
 within XLSX.jl. Instead, although the formula is properly added to the cell, the 
-value is set to missing so that Excel will re-calculate it on opening. 
+value is set to missing. However, the saved XLSXFile is set to force Excel to 
+re-calculate on opening. 
 
-Unlike with conventional functions, dynamic array functions (e.g. `SORT` or `UNIQUE`)
-should not be put into ReferencedFormulae and neither should functions that refer to 
-cells in other sheets. When functions of this type are identified, they will instead be 
-duplicated individually in each cell in the given range (but with relative cell references 
-appropriately adjusted). This is an internal process that should be transparent 
-to the user.
+If a cell spills but any of the cells in the spill range already contains a value, Excel will 
+show a `#SPILL` error.
 
-Functions GROUPBY and PIVOTBY need an aggregation function as their 3rd argument. Currently 
-only simple aggregator functions are supported (e.g. `SUM`, `AVERAGE`, `COUNT`, `MIN`, `MAX` etc).
+More details can be found in the section [Using formulas](@ref).
 
-In general, the Excel `LAMBDA` function is not well supported (in GROUPBY/PIVOTBY or otherwise).
-
-Note that dynamic array functions will return values into a spill range the extent of 
-which depends on the data on which the function is operating. If any of the cells in the 
-spill range already contains a value, Excel will show a `#SPILL` error.
+See also [XLSX.getFormula](@ref).
 
 # Examples:
 
@@ -316,26 +568,7 @@ julia> s["A1:J1"]=1
 1
 
 julia> setFormula(s, "B2:J10", "=A2+B1") # adds formulae but cannot update calculated values
-
-julia> s[:]
-10×10 Matrix{Any}:
- 1  1         1         1         1         1         1         1         1         1
- 1   missing   missing   missing   missing   missing   missing   missing   missing   missing
- 1   missing   missing   missing   missing   missing   missing   missing   missing   missing
- 1   missing   missing   missing   missing   missing   missing   missing   missing   missing
- 1   missing   missing   missing   missing   missing   missing   missing   missing   missing
- 1   missing   missing   missing   missing   missing   missing   missing   missing   missing
- 1   missing   missing   missing   missing   missing   missing   missing   missing   missing
- 1   missing   missing   missing   missing   missing   missing   missing   missing   missing
- 1   missing   missing   missing   missing   missing   missing   missing   missing   missing
- 1   missing   missing   missing   missing   missing   missing   missing   missing   missing
-
-# formulae are there for when the saved file is opened in Excel.
-julia> XLSX.getcell(s, "B2")
-XLSX.Cell(B2, "", "", "", XLSX.ReferencedFormula("=A2+B1", 0, "B2:J10", nothing))
-
-julia> XLSX.getcell(s, "J10")
-XLSX.Cell(J10, "", "", "", XLSX.FormulaReference(0, nothing))
+"=A2+B1"
 
 julia> addsheet!(f, "trig functions")
 1×1 Worksheet: ["trig functions"](A1:A1) 
@@ -358,6 +591,9 @@ julia> setFormula(s2, "B1:B100", "=sin(A1)")
 julia> setFormula(s2, "C1:C100", "=cos(A1)")
 
 julia> setFormula(s2, "D1:D100", "=sin(A1)^2 + cos(A1)^2")
+
+julia> XLSX.getFormula(s2, "D100")
+"=sin(A100)^2 + cos(A100)^2"
 
 julia> f=newxlsx("mysheet")
 XLSXFile("blank.xlsx") containing 1 Worksheet
@@ -386,77 +622,48 @@ julia> setFormula(s, "E1:G1", "=sort(unique(A2:A7),,-1)") # using dynamic array 
 
 f = CSV.read("iris.csv", XLSXFile) # read a CSV file into an XLSXFile
 
-XLSX.setFormula(f[1], "G1", "=GROUPBY(E1:E151,A1:D151,AVERAGE,3,1)") # Find average of each species
+XLSX.setFormula(f[1], "G1", "=GROUPBY(E1:E151,A1:D151,AVERAGE,3,1)") # Find average of each characteristic by species
+"_xlfn.GROUPBY(E1:E151,A1:D151,_xleta.AVERAGE,3,1)"
 
 f[1]["M1"] = "versicolor"
-XLSX.setFormula(f[1], "M2", "=VLOOKUP(M1,G1#,3,FALSE)") # Lookup average sepal length for versicolor using the spill range of G1
+XLSX.setFormula(f[1], "M2", "=VLOOKUP(M1,G1#,3,FALSE)") # Lookup average sepal width for versicolor using the spill range of G1
+"=VLOOKUP(M1,_xlfn.ANCHORARRAY(G1),3,FALSE)"
 
-
+XLSX.setFormula(f[1], "G10", "_xlfn.GROUPBY(E1:E151,A1:D151,_xlfn.LAMBDA(_xlpm.x,AVERAGE(_xlpm.x)),3,1)"; raw=true) # using `raw` format
+"_xlfn.GROUPBY(E1:E151,A1:D151,_xlfn.LAMBDA(_xlpm.x,AVERAGE(_xlpm.x)),3,1)"
 ```
 
 !!! note
 
-    Excel is often very fussy about the internal structure of an xlsx file but often the resulting 
-    error messages (when Excel tries to open a file it considers mal-formed) are somewhat cryptic. 
-    If there is an error in the formula you enter, it may not be clear what it is from the error 
-    Excel produces. A safe fall back may be to test the formula in Excel itself and copy/paste 
-    it into julia.
-
-    For example:
-
-    ```julia
-
-    julia> f=newxlsx()
-    XLSXFile("blank.xlsx") containing 1 Worksheet
-                sheetname size          range        
-    -------------------------------------------------
-                Sheet1 1x1           A1:A1        
-
-    julia> f[1][1:3, 1]=collect(1:3)
-    3-element Vector{Int64}:
-    1
-    2
-    3
-
-    julia> setFormula(f[1], "B1", "=max(A1:A3") # missing closing parenthesis in the formula
-    ""
-
-    julia> XLSX.getcell(f[1], "B1")
-    XLSX.Cell(B1, "", "", "", "", XLSX.Formula("=max(A1:A3", "", "", nothing))
-
-    julia> writexlsx("mytest.xlsx", f, overwrite=true)
-    "C:\\Users\\tim\\OneDrive\\Documents\\Julia\\XLSX\\mytest.xlsx"
-
-    ```
-
-    ![image|320x500](../images/problemContent.png)
-    ![image|320x500](../images/ExcelRepairs.png)
+    It is not yet possible for `setFormula` to create external references in formulas. 
+    It is therefore not possible to set a formula that refers to a sheet in another Excel 
+    file.
 
 """
-setFormula(w, r, f::AbstractString) = setFormula(w, r; val=f)
-setFormula(w, r, c, f::AbstractString) = setFormula(w, r, c; val=f)
+setFormula(w, r, f::AbstractString; raw::Bool=false, spill::Union{Nothing,Bool}=nothing) = setFormula(w, r; val=f, raw=raw, spill=spill) # move formula to a kw to take advantage of cellformat-helpers functions
+setFormula(w, r, c, f::AbstractString; raw::Bool=false, spill::Bool=false) = setFormula(w, r, c; val=f, raw=raw, spill=spill) # move formula to a kw to take advantage of cellformat-helpers functions
 setFormula(ws::Worksheet, ref::SheetCellRef; kw...) = do_sheet_names_match(ws, ref) && setFormula(ws, ref.cellref; kw...)
 setFormula(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setFormula(ws, rng.rng; kw...)
 setFormula(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setFormula(ws, rng.colrng; kw...)
 setFormula(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setFormula(ws, rng.rowrng; kw...)
-#setFormula(ws::Worksheet, rng::CellRange; kw...) = process_cellranges(setFormula, ws, rng; kw...) # do this explicitly, below
 setFormula(ws::Worksheet, colrng::ColumnRange; kw...) = process_columnranges(setFormula, ws, colrng; kw...)
 setFormula(ws::Worksheet, rowrng::RowRange; kw...) = process_rowranges(setFormula, ws, rowrng; kw...)
-#setFormula(ws::Worksheet, ncrng::NonContiguousRange; kw...) = process_ncranges(setFormula, ws, ncrng; kw...)
 setFormula(ws::Worksheet, ref_or_rng::AbstractString; kw...) = process_ranges(setFormula, ws, ref_or_rng; kw...)
 setFormula(xl::XLSXFile, sheetcell::String; kw...) = process_sheetcell(setFormula, xl, sheetcell; kw...)
 setFormula(ws::Worksheet, row::Integer, col::Integer; kw...) = setFormula(ws, CellRef(row, col); kw...)
+setFormula(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setFormula(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
 setFormula(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setFormula, ws, row, nothing; kw...)
 setFormula(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setFormula, ws, nothing, col; kw...)
 setFormula(ws::Worksheet, ::Colon, ::Colon; kw...) = setFormula(ws, :; kw...)
 setFormula(ws::Worksheet, ::Colon; kw...) = process_colon(setFormula, ws, nothing, nothing; kw...)
+# These all give rise to (potentially) non-contiguous ranges so would need special handling if implemented. The cellformat-helpers functions won't work here because the kw will need processing.
+#setFormula(ws::Worksheet, ncrng::NonContiguousRange; kw...) = process_ncranges(setFormula, ws, ncrng; kw...)
 #setFormula(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_veccolon(setFormula, ws, row, nothing; kw...)
 #setFormula(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_veccolon(setFormula, ws, nothing, col; kw...)
 #setFormula(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint(setFormula, ws, row, col; kw...)
 #setFormula(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_vecint(setFormula, ws, row, col; kw...)
 #setFormula(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint(setFormula, ws, row, col; kw...)
-setFormula(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setFormula(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-function setFormula(ws::Worksheet, rng::CellRange; val::AbstractString)
+function setFormula(ws::Worksheet, rng::CellRange; val::AbstractString, raw::Bool, spill::Union{Nothing,Bool}=nothing)
 
     xf=get_xlsxfile(ws)
 
@@ -464,36 +671,43 @@ function setFormula(ws::Worksheet, rng::CellRange; val::AbstractString)
         throw(XLSXError("Cannot set formula because because XLSXFile is not writable."))
     end
 
-    is_array=false
-    for k in keys(EXCEL_FUNCTION_PREFIX) # Identify formulas containing dynamic array functions
-        r = Regex(k, "i")
-        is_array |= occursin(r, val)
-    end
+    is_array=is_array_formula(val)
+#    is_array=false
+#    for k in keys(EXCEL_FUNCTION_PREFIX) # Identify formulas containing dynamic array functions
+#        r = Regex(k, "i")
+#        is_array |= occursin(r, val)
+#    end
 
     is_sheetcell = occursin(RGX_FORMULA_SHEET_CELL, val)
     
     if is_array || is_sheetcell || occursin("#", val) # Don't use ReferencedFormulas for sheetcell formulas or dynamic array functions. Set each cell individually.
         start = rng.start
+        first=true
+        f1=""
         for c in rng
             offset = (c.row_number - start.row_number, c.column_number - start.column_number)
             newval=shift_excel_references(val, offset)
-            setFormula(ws, c, newval)
+            f=setFormula(ws, c, newval)
+            first && (first=false; f1=f) # return the formula from the first cell only
         end
-        return
+        return f1
     end
 
+    # now we know the formula does not include a dynamic array function, so no need to process for prefixes
     first_cell = getcell(ws, rng.start)
     if !isa(first_cell, EmptyCell) && first_cell.formula isa ReferencedFormula
         if CellRange(first_cell.formula.ref) == rng # range matches, so just need to change the referenced formula
-            first_cell.formula.formula = val
-            return
+            first_cell.formula.formula = val 
+            return val
         end
     end
     
     newid = new_ReferencedFormula_Id(ws)
+    f=""
     for c in rng
         if c == rng.start
             newform = ReferencedFormula(val, newid, string(rng), nothing)
+            f=newform.formula
         else
             newform = FormulaReference(newid, nothing)
         end
@@ -504,9 +718,10 @@ function setFormula(ws::Worksheet, rng::CellRange; val::AbstractString)
             setdata!(ws, c, CellFormula(newform, CellDataFormat(parse(Int,cell.style))))
         end
     end
-    return
+    return f
 end
-function setFormula(ws::Worksheet, cellref::CellRef; val::AbstractString)
+function setFormula(ws::Worksheet, cellref::CellRef; val::AbstractString, raw::Bool=false, spill::Union{Nothing,Bool}=nothing)
+    # cell references in formulas have already been adjusted for offset in a range before here
 
     xf=get_xlsxfile(ws)
 
@@ -515,62 +730,107 @@ function setFormula(ws::Worksheet, cellref::CellRef; val::AbstractString)
     end
 
     c=getcell(ws, cellref)
-    t   = ""
-    ref = ""
-    cm  = ""
 
-
-    formula=val
-    if occursin("#", formula) # handle spill references like A1# or myName#
-        formula=replace(formula, r"(\$?[A-Za-z]{1,3}\$?\d+|[A-Za-z_][A-Za-z0-9_.]*)#" => s"ANCHORARRAY(\1)")
-    end
-
-    # Handle the 3rd (function) arg of GROUPBY and PIVOTBY (NOTE. Can't handle anything but simple aggregation functions yet)
-    m = match(r"(?i)\b(GROUPBY|PIVOTBY)\s*\(", formula)
-    if !isnothing(m)
-        fname = uppercase(m.captures[1])
-
-        # Extract arguments
-        args = split_function_args(formula; fname=fname)
-        if length(args) >= 3
-
-            # Transform 3rd argument if it's a bare identifier
-            agg = args[3]
-            if haskey(GROUPBY_AGGREGATORS, uppercase(agg))
-                prefix = GROUPBY_AGGREGATORS[uppercase(agg)]
-                args[3] = prefix*agg
-            else
-                throw(XLSXError("Currently only simple aggregation functions like sum or average are supported."))
-            end
-
-            # Reconstruct
-            formula = fname*"(" * join(args, ",") * ")"
-        end
-    end
-
-    for (k, v) in EXCEL_FUNCTION_PREFIX # add prefixes to any array functions
-        r = "(?i)\\b"*k
-        formula = replace(formula, Regex(r) => v*k) # replace any dynamic array function name with its prefixed name
-    end
-    if formula != val # contains a dynamic array function (now with prefix(es))
-        if occursin(r"^\s*=?\s*_xlfn", formula)
-            t = "array"
-            ref = cellref.name*":"*cellref.name
-            cm = "1"
-        end
-        if !haskey(xf.files, "xl/metadata.xml") # add metadata.xml on first use of a dynamicArray formula
-#            xf.data["xl/metadata.xml"] = XML.Node(XML.Raw(read(joinpath(_relocatable_data_path(), "metadata.xml"))))
-            xf.data["xl/metadata.xml"] = parse(metadata, XML.Node)
-            xf.files["xl/metadata.xml"] = true # set file as read
-            add_override!(xf, "/xl/metadata.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml")
-            rId = add_relationship!(get_workbook(ws), "metadata.xml", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata")
-        end
-    end
+    formula, t, ref, cm = process_dynamic_array_functions(xf, cellref, val; raw, spill)
+    f = raw ? val : formula
     if c isa EmptyCell || c.style==""
-        setdata!(ws, cellref, CellFormula(ws, Formula(formula, t, ref, nothing)))
+        setdata!(ws, cellref, CellFormula(ws, Formula(f, t, ref, nothing)))
     else
-        setdata!(ws, cellref, CellFormula(Formula(formula, t, ref, nothing), CellDataFormat(parse(Int,c.style))))
+        setdata!(ws, cellref, CellFormula(Formula(f, t, ref, nothing), CellDataFormat(parse(Int,c.style))))
     end
     c=getcell(ws, cellref)
     c.meta = cm
+    return f
 end
+
+#=
+function getCellHyperlink(ws::Worksheet, cellref::CellRef) # addresses #165
+    cellref ∉ get_dimension(ws) && throw(XLSXError("Cell $cellref is out of range for worksheet '$(ws.name)'"))
+    cell=getcell(ws, cellref)
+    f = getFormula(ws, cellref)
+    args = split_function_args(f; fname="hyperlink")
+    isempty(args) && return nothing # cell doesn't contain the `HYPERLINK` Excel function
+    return cell.ref, args[1], length(args)>1 ? args[2] : "" # CellRef, link_location, [friendly_name]
+end
+=#
+"""
+    getFormula(sh::Worksheet, cr::String; find_external_refs::Bool=false) -> Union{String,Nothing}
+    getFormula(xf::XLSXFile, cr::String; find_external_refs::Bool=false) -> Union{String,Nothing}
+
+    getFormula(sh::Worksheet, row::Int, col::Int; find_external_refs::Bool=false) -> Union{String,Nothing}
+
+Get the formula for a single cell reference in a worksheet `sh` or XLSXfile `xf`.
+The specified cell must be within the sheet dimension.
+
+If the cell does not contain any formula (but is not an `EmptyCell`), return an empty string ("").
+If the cell is an EmptyCell, return `nothing`.
+
+If the cell contains a `FormulaReference`, look up the actual formula.
+
+A formula may contain references to cells in external workbooks, in the form
+`[index]SheetName!A1` where `index` is an integer providing an intrenal Excel reference 
+to the external workbook. Use the keyword option `find_external_refs=true` to replace
+the index with the actual workbook path (as stored in the workbook's externalReferences).
+By default, `find_external_refs=false` and the formula is returned unchanged.
+
+See also [XLSX.setFormula](@ref).
+
+# Examples:
+```julia
+
+julia> setFormula(s, "B2:B5", "=A2+2")
+"=A2+2"
+
+julia> XLSX.getcell(s, "B2")
+XLSX.Cell(B2, "", "", "", "", XLSX.ReferencedFormula("=A2+2", 0, "B2:B5", nothing))
+
+julia> XLSX.getcell(s, "B3")
+XLSX.Cell(B3, "", "", "", "", XLSX.FormulaReference(0, nothing))
+
+julia> XLSX.getFormula(s, XLSX.CellRef("B3"))
+"=A3+2"
+
+julia> XLSX.getFormula(s, XLSX.CellRef("A1"))
+"HYPERLINK(\"https://www.bbc.co.uk/news\", \"BBC News\")"
+
+julia> XLSX.getFormula(s, XLSX.CellRef("B1"))
+"[1]Sheet1!\$A\$1"
+
+julia> XLSX.getFormula(s, XLSX.CellRef("B1"); find_external_refs=true)
+"[https://d.docs.live.net/ee85442dac9ca7a7/Documents/Julia/XLSX/linked-2.xlsx]Sheet1!\$A\$1"
+```
+
+"""
+getFormula(ws::Worksheet, cr::String; kw...) = process_get_cellname(getFormula, ws, cr; kw...)
+getFormula(xl::XLSXFile, sheetcell::String; kw...) = process_get_sheetcell(getFormula, xl, sheetcell; kw...)
+getFormula(ws::Worksheet, row::Integer, col::Integer; kw...) = getFormula(ws, CellRef(row, col); kw...)
+function getFormula(ws::Worksheet, cellref::CellRef; find_external_refs::Bool=false)
+    cellref ∉ get_dimension(ws) && throw(XLSXError("Cell $cellref is out of range for worksheet '$(ws.name)'"))
+    xf=get_xlsxfile(ws)
+    if !xf.use_cache_for_sheet_data
+        throw(XLSXError("Cannot get formula because cache is not enabled."))
+    end
+    cell=getcell(ws, cellref)
+    isa(cell, EmptyCell) && return nothing
+    if cell.formula isa FormulaReference
+        # need to look up the ReferencedFormula this FormulaReference points to
+        f = get_referenced_formula(ws, cell.ref; refs=build_reference_index(ws))
+    else
+        f = cell.formula.formula
+    end
+
+    if find_external_refs # to address #224
+        ext=get_external_refs(f)
+        for e in ext
+            extLink = get_external_workbook_path(get_xlsxfile(ws), e.index)
+            f=replace(f, "[" * string(e.index) * "]" => "[" * extLink * "]") # replace index with actual workbook path
+        end
+    end
+
+    if !startswith(f, "=")
+        f = "=" * f
+    end 
+
+    return f
+end
+

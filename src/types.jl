@@ -93,6 +93,13 @@ struct CellFormula# <: AbstractFormula
     styleid::AbstractCellDataFormat
 end
 
+# Keeps track of external references in formulas.
+struct ExternalRef
+    index::Int          # the [n] index in the formula
+    sheet::String       # sheet name
+    full::String        # raw "[n]Sheet!$A$1" formula element
+end
+
 
 mutable struct CellFont
     fontId::Int

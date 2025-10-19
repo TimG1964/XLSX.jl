@@ -513,6 +513,19 @@ function parse_workbook!(xf::XLSXFile)
     nothing
 end
 
+# Returns a Dict mapping Workbook <externalReferences>: index => relationship id.
+function get_wb_ext_refs(xf::XLSXFile)
+    ext_refs = Dict{Int, String}()
+    xroot = xmlroot(xf, "xl/workbook.xml")
+    i, j = get_idces(xroot, "workbook", "externalReferences")
+    if !isnothing(j)
+        for (i, ref) in enumerate(XML.children(xroot[i][j]))
+            ext_refs[i] = ref["r:id"]
+        end
+    end
+    return ext_refs
+end
+
 # delete Override PartName=calcChain since this was never loaded (#31)
 function remove_calcChain!(xf::XLSXFile)
     xf.data["[Content_Types].xml"]
@@ -934,18 +947,20 @@ end
 
 Read and parse an Excel worksheet, materializing directly using the 
 `sink` function, which can be any `Tables.jl`-compatible function 
-(e.g. `DataFrame` or `StructArray`).
+(e.g. `DataFrame`, `StructArray` or `TypedTable``).
 
 Takes the same keyword arguments as [`XLSX.readtable`](@ref) 
 
 # Example
 
 ```julia
-julia> using DataFrames, StructArrays, XLSX
+julia> using DataFrames, StructArrays, TypedTables, XLSX
 
 julia> df = XLSX.readto("myfile.xlsx", DataFrame)
 
 julia> df = XLSX.readto("myfile.xlsx", StructArray)
+
+julia> df = XLSX.readto("myfile.xlsx", Table) # from TypedTables.jl
 
 julia> df = XLSX.readto("myfile.xlsx", "mysheet", DataFrame)
 

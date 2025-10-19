@@ -633,6 +633,78 @@ end
         @test XLSX.getcell(f[1], "B1") == XLSX.Cell(XLSX.CellRef("B1"), "", "", "", "1", XLSX.Formula("=_xlfn.SORT(A1:A5, , -1)", "array", "B1:B1", nothing))
 
     end
+    @testset "getFormula" begin
+        f=XLSX.newxlsx()
+        s=f[1]
+        s[1:10, 1]=10:10:100
+        s[1:6, 7]=1:6
+        XLSX.setFormula(s, "B1", "=A1")
+        XLSX.setFormula(s, "B2:B10", "=A2+B1")
+        XLSX.setFormula(f, "Sheet1!C1", "=B1:B10")
+        XLSX.setFormula(s, "D1", "=INT(B1:B10/100)+1")
+        XLSX.setFormula(s, "E1", "=groupby(D1#,B1:B10,sum)")
+        XLSX.setFormula(s, "H1", "=frequency(D1#,G1:G6)")
+        @test XLSX.get_referenced_formula(s, XLSX.CellRef("B4")) == "=A4+B3"
+        @test XLSX.getFormula(s, "B1") == "=A1"
+        @test XLSX.getFormula(s, 2, 2) == "=A2+B1"
+        @test XLSX.getFormula(f, "Sheet1!B10") == "=A10+B9"
+        @test XLSX.getFormula(s, "D1") == "=INT(B1:B10/100)+1"
+        @test XLSX.getFormula(s, "E1") == "=_xlfn.GROUPBY(_xlfn.ANCHORARRAY(D1),B1:B10,_xleta.sum)"
+        @test XLSX.getFormula(s, "H1") == "=frequency(_xlfn.ANCHORARRAY(D1),G1:G6)"
+    end
+
+    @testset "spillranges" begin
+        SPILL_REF_TESTS = [
+            # Basic spill references
+            ("=G1#", "=ANCHORARRAY(G1)", "basic_cell"),
+            ("=Sheet1!A1#", "=ANCHORARRAY(Sheet1!A1)", "basic_sheet"),
+            ("='My Sheet'!B2#", "=ANCHORARRAY('My Sheet'!B2)", "quoted_sheet"),
+            ("=Table1[Column]#", "=ANCHORARRAY(Table1[Column])", "structured_ref"),
+
+            # Spill references inside functions
+            ("=VLOOKUP(M1,G1#,3,FALSE)", "=VLOOKUP(M1,ANCHORARRAY(G1),3,FALSE)", "vlookup"),
+            ("=SUM(Table1[Column]#)", "=SUM(ANCHORARRAY(Table1[Column]))", "sum_structured"),
+            ("=IF(G1#>0, G1#, 0)", "=IF(ANCHORARRAY(G1)>0, ANCHORARRAY(G1), 0)", "if_branch"),
+            ("=INDEX(Table1[Column]#, 2)", "=INDEX(ANCHORARRAY(Table1[Column]), 2)", "index_structured"),
+            ("=FILTER(G1#, G1#>0)", "=FILTER(ANCHORARRAY(G1), ANCHORARRAY(G1)>0)", "filter"),
+
+            # Multiple spill references
+            ("=G1#+H1#", "=ANCHORARRAY(G1)+ANCHORARRAY(H1)", "add_two"),
+            ("=SUM(G1#,H1#)", "=SUM(ANCHORARRAY(G1),ANCHORARRAY(H1))", "sum_two"),
+            ("=IF(G1#>H1#, G1#, H1#)", "=IF(ANCHORARRAY(G1)>ANCHORARRAY(H1), ANCHORARRAY(G1), ANCHORARRAY(H1))", "if_compare"),
+            ("=VLOOKUP(M1,G1#,3,FALSE)+VLOOKUP(M2,H1#,2,FALSE)", "=VLOOKUP(M1,ANCHORARRAY(G1),3,FALSE)+VLOOKUP(M2,ANCHORARRAY(H1),2,FALSE)", "vlookup_double"),
+
+            # Sheet and workbook prefixes
+            ("='Sales Data'!Table1[Revenue]#", "=ANCHORARRAY('Sales Data'!Table1[Revenue])", "sheet_structured"),
+            ("='[Book1.xlsx]Sheet1'!A1#", "=ANCHORARRAY('[Book1.xlsx]Sheet1'!A1)", "book_sheet"),
+            ("=Sheet1!\$B\$2#", "=ANCHORARRAY(Sheet1!\$B\$2)", "absolute_sheet"),
+            ("=Table1[[#All],[Column]]#", "=ANCHORARRAY(Table1[[#All],[Column]])", "multi_structured"),
+            ("='Table 1'[[#All],[Column]]#", "=ANCHORARRAY('Table 1'[[#All],[Column]])", "quoted_structured"),
+            ("='My Table'[[#Headers],[Column1],[Column2]]#", "=ANCHORARRAY('My Table'[[#Headers],[Column1],[Column2]])", "quoted_multi_structured"),
+
+            # Non-spill references (should remain unchanged)
+            ("=G1", "=G1", "plain_cell"),
+            ("=Sheet1!A1", "=Sheet1!A1", "plain_sheet"),
+            ("=Table1[Column]", "=Table1[Column]", "plain_structured"),
+            ("=VLOOKUP(M1,G1,3,FALSE)", "=VLOOKUP(M1,G1,3,FALSE)", "vlookup_plain"),
+            ("=SUM(A1:A10)", "=SUM(A1:A10)", "sum_range")
+        ]
+        for (input, expected, label) in SPILL_REF_TESTS
+            output = XLSX.anchor_spill_refs(input)
+            @test output == expected
+        end
+    end
+    @testset "external references" begin
+        f = XLSX.openxlsx(joinpath(data_directory, "linked-1.xlsx"))
+        s = f[1]
+        @test XLSX.getFormula(s, "A1") == "=[1]Sheet1!\$A\$1"
+        @test occursin("linked-2.xlsx]", XLSX.getFormula(s, "A1"; find_external_refs=true))
+        f = XLSX.openxlsx(joinpath(data_directory, "linked-2.xlsx"))
+        s = f[1]
+        @test XLSX.getFormula(s, "B1") == "=[1]Sheet1!\$B\$1"
+        @test occursin("linked-1.xlsx]", XLSX.getFormula(s, "B1"; find_external_refs=true))
+    end
+
     @testset "ReferencedFormulae" begin
 
         f=XLSX.openxlsx(joinpath(data_directory, "reftest.xlsx"), mode="rw")
@@ -6391,8 +6463,10 @@ end
         f[1]["M1"] = "versicolor"
         XLSX.setFormula(f[1], "M2", "=VLOOKUP(M1,G1#,3,FALSE)")
         @test getcell(sheet, "M2").formula == XLSX.Formula("=VLOOKUP(M1,_xlfn.ANCHORARRAY(G1),3,FALSE)", "", "", nothing)
-        XLSX.setFormula(f[1], "G1", "=GROUPBY(E1:E151,A1:D151,STDEV,3,1)")
-        @test getcell(sheet, "G1").formula == XLSX.Formula("_xlfn.GROUPBY(E1:E151,A1:D151,_xleta.STDEV,3,1)", "array", "G1:G1", nothing)
+        XLSX.setFormula(f[1], "G1", "=GROUPBY(E1:E151,A1:D151,STDEV.P,3,1)")
+        @test getcell(sheet, "G1").formula == XLSX.Formula("_xlfn.GROUPBY(E1:E151,A1:D151,_xleta.STDEV.P,3,1)", "array", "G1:G1", nothing)
+        XLSX.setFormula(f[1], "G10", "_xlfn.GROUPBY(E1:E151,A1:D151,_xlfn.LAMBDA(_xlpm.x,AVERAGE(_xlpm.x)),3,1)"; raw=true)
+        @test getcell(sheet, "G10").formula == XLSX.Formula("_xlfn.GROUPBY(E1:E151,A1:D151,_xlfn.LAMBDA(_xlpm.x,AVERAGE(_xlpm.x)),3,1)", "array", "G1:G1", nothing)
     end
 end
 

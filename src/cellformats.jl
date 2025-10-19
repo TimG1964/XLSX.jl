@@ -2330,7 +2330,7 @@ The Excel file must be opened in write mode to work with merged cells.
 # Examples:
 ```julia
 julia> f = XLSX.readxlsx("test.xlsx")
-XLSXFile("C:\\Users\\tim\\Downloads\\test.xlsx") containing 1 Worksheet
+XLSXFile("C:\\Users\\...\\test.xlsx") containing 1 Worksheet
             sheetname size          range
 -------------------------------------------------
                Sheet1 2x2           A1:B2
