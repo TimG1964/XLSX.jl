@@ -541,7 +541,7 @@ re-calculate on opening.
 If a cell spills but any of the cells in the spill range already contains a value, Excel will 
 show a `#SPILL` error.
 
-More details can be found in the section [Using formulas](@ref).
+More details can be found in the section [Using Formulas](@ref).
 
 See also [XLSX.getFormula](@ref).
 
