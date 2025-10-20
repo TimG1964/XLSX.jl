@@ -6,82 +6,6 @@ import DataFrames, Random
 import Distributions as Dist
 import CSV
 
-const SPREADSHEET_NAMESPACE_XPATH_ARG = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-struct xpath
-    node::XML.Node
-    path::String
-
-    function xpath(node::XML.Node, path::String)
-        new(node, path)
-    end
-end
-
-function get_namespaces(r::XML.Node)::Dict{String,String}
-    nss = Dict{String,String}()
-    for (key, value) in XML.attributes(r)
-        if startswith(key, "xmlns")
-            prefix = split(key, ':')
-            if length(prefix) == 1
-                nss[""] = value  # Default namespace
-            else
-                nss[prefix[2]] = value
-            end
-        end
-    end
-    return nss
-end
-
-function get_default_namespace(r::XML.Node)::String
-    nss = get_namespaces(r)
-
-    # in case that only one namespace is defined, assume that it is the default one
-    # even if it has a prefix
-    length(nss) == 1 && return first(values(nss))
-
-    # otherwise, look for the default namespace (without prefix)
-    for (prefix, ns) in nss
-        if prefix == ""
-            return ns
-        end
-    end
-
-    error("No default namespace found.")
-end
-function find_all_nodes(givenpath::String, doc::XML.Node)::Vector{XML.Node}
-    @assert XML.nodetype(doc) == XML.Document
-    found_nodes = Vector{XML.Node}()
-    for xp in get_node_paths(doc)
-        if xp.path == givenpath
-            push!(found_nodes, xp.node)
-        end
-    end
-    return found_nodes
-end
-function get_node_paths(node::XML.Node)
-    @assert XML.nodetype(node) == XML.Document
-    default_ns = get_default_namespace(node[end])
-    xpaths = Vector{xpath}()
-    get_node_paths!(xpaths, node, default_ns, "")
-    return xpaths
-end
-
-function get_node_paths!(xpaths::Vector{xpath}, node::XML.Node, default_ns, path)
-    for c in XML.children(node)
-        if XML.nodetype(c) ∉ [XML.Declaration, XML.Comment, XML.Text]
-            node_tag = XML.tag(c)
-            if !occursin(":", node_tag)
-                node_tag = default_ns * ":" * node_tag
-            end
-            npath = path * "/" * node_tag
-            push!(xpaths, xpath(c, npath))
-            if length(XML.children(c)) > 0
-                get_node_paths!(xpaths, c, default_ns, npath)
-            end
-        end
-    end
-    return nothing
-end
-
 data_directory = joinpath(dirname(pathof(XLSX)), "..", "data")
 @assert isdir(data_directory)
 
@@ -455,6 +379,18 @@ end
     @test s[1:2:3, 1] == Any[1, 1]
     s["A1,B2,C3"] = "non-contiguous"
     @test s["Sheet1!A1,Sheet1!B2,Sheet1!C3"] == [["non-contiguous";;], ["non-contiguous";;], ["non-contiguous";;]]
+
+    f = XLSX.newxlsx()
+    s = f[1]
+    s["A1:A3"] = "Hello world"
+    s["A2:C2"] = 42:44
+    s[[1, 3], 2:3] = true
+    @test s["A1:C3"] == Any["Hello world" true true; 42 43 44; "Hello world" true true]
+    s["A2:C2"] = 44:2:48
+    @test s[[1, 2, 3], 1:3] == Any["Hello world" true true; 44 46 48; "Hello world" true true]
+    s["A2:C2"] = [98,99,100]
+    s["A3:C3"] = ["goodbye World","goodbye World","goodbye World"]
+    @test s[[1, 2, 3], 1:3] == Any["Hello world" true true; 98 99 100; "goodbye World" "goodbye World" "goodbye World"]
 
     f = XLSX.newxlsx()
     s = f[1]
@@ -2142,7 +2078,7 @@ end
 
         font = XLSX.styles_add_cell_font(wb, Dict("b" => nothing, "sz" => Dict("val" => "24")))
         xroot = XLSX.styles_xmlroot(wb)
-        fontnodes = find_all_nodes("/$SPREADSHEET_NAMESPACE_XPATH_ARG:styleSheet/$SPREADSHEET_NAMESPACE_XPATH_ARG:fonts/$SPREADSHEET_NAMESPACE_XPATH_ARG:font", xroot)
+        fontnodes = XLSX.find_all_nodes("/$(XLSX.SPREADSHEET_NAMESPACE_XPATH_ARG):styleSheet/$(XLSX.SPREADSHEET_NAMESPACE_XPATH_ARG):fonts/$(XLSX.SPREADSHEET_NAMESPACE_XPATH_ARG):font", xroot)
         fontnode = fontnodes[font+1] # XML is zero indexed so we need to add 1 to get the right node
 
         # Check the font was written correctly

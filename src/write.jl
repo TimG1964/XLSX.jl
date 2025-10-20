@@ -652,6 +652,21 @@ setdata!(ws::Worksheet, ref::CellRef, val::AbstractString) = setdata!(ws, ref, C
 setdata!(ws::Worksheet, ref::CellRef, val::Integer) = setdata!(ws, ref, convert(Int, val))
 setdata!(ws::Worksheet, ref::CellRef, val::Real) = setdata!(ws, ref, convert(Float64, val))
 
+function setdata!(sheet::Worksheet, ref::CellRange, data::AbstractVector) # vector to row or column range
+    rows = ref.start.row_number:ref.stop.row_number
+    cols = ref.start.column_number:ref.stop.column_number
+    length(rows)==1 || length(cols)==1 || throw(XLSXError("Can only write 1D data to a row or column range."))
+    if length(cols)==1
+        length(rows) != length(data) && throw(XLSXError("Row count mismatch between `data` ($(length(data)) rows) and row range $rows ($(length(rows)) rows)."))
+        anchor_cell_ref = CellRef(first(rows), first(cols))
+        setdata!(sheet, anchor_cell_ref, data, 1)
+    elseif length(rows)==1
+        length(cols) != length(data) && throw(XLSXError("Column count mismatch between `data` ($(length(data)) columns) and column range $cols ($(length(cols)) columns)."))
+        anchor_cell_ref = CellRef(first(rows), first(cols))
+        setdata!(sheet, anchor_cell_ref, data, 2)
+    end
+end
+
 # convert nothing to missing when writing
 setdata!(ws::Worksheet, ref::CellRef, ::Nothing) = setdata!(ws, ref, CellValue(ws, missing))
 
@@ -811,10 +826,18 @@ setdata!(ws::Worksheet, ref::SheetCellRef, value) = do_sheet_names_match(ws, ref
 setdata!(ws::Worksheet, rng::SheetCellRange, value) = do_sheet_names_match(ws, rng) && setdata!(ws, rng.rng, value)
 setdata!(ws::Worksheet, rng::SheetColumnRange, value) = do_sheet_names_match(ws, rng) && setdata!(ws, rng.colrng, value)
 setdata!(ws::Worksheet, rng::SheetRowRange, value) = do_sheet_names_match(ws, rng) && setdata!(ws, rng.rowrng, value)
-setdata!(ws::Worksheet, ref_str::AbstractString, value::Vector, dim::Integer) = setdata!(ws, CellRef(ref_str), value, dim)
 setdata!(ws::Worksheet, row::Integer, col::Integer, data) = setdata!(ws, CellRef(row, col), data)
 setdata!(ws::Worksheet, ref::CellRef, value) = throw(XLSXError("Unsupported datatype $(typeof(value)) for writing data to Excel file. Supported data types are $(CellValueType) or $(CellValue)."))
 setdata!(ws::Worksheet, row::Integer, col::Integer, data::AbstractVector, dim::Integer) = setdata!(ws, CellRef(row, col), data, dim)
+function setdata!(ws::Worksheet, ref_str::AbstractString, value::AbstractVector, dim::Integer)
+    if is_valid_cellrange(ref_str)
+        setdata!(ws, CellRange(ref_str), value)
+    elseif is_valid_cellname(ref_str)
+        setdata!(ws, CellRef(ref_str), value, dim)
+    else
+        throw(XLSXError("Invalid cell reference or range: $ref_or_rng"))
+    end
+end
 
 function setdata!(sheet::Worksheet, ref::CellRef, data::AbstractVector, dim::Integer)
     for (i, val) in enumerate(data)
