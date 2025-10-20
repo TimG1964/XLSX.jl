@@ -567,7 +567,15 @@ end
         s[1:5, 2]=""
         XLSX.setFormula(s, "mySheet!B1", "=sort(A1:A5, , -1)")
         @test XLSX.getcell(f[1], "B1") == XLSX.Cell(XLSX.CellRef("B1"), "", "", "", "1", XLSX.Formula("=_xlfn.SORT(A1:A5, , -1)", "array", "B1:B1", nothing))
-
+        XLSX.setFormula(s, "C1", "=if(A1:A5>30, \"High\", \"Low\")")
+        XLSX.setFormula(s, "D1", "=OFFSET(A2:A5, -1, 0)")
+        XLSX.setFormula(s, "E1", "=CHOOSE(1,A1:A2,A3:A4)")
+        s["F1:F2"] = [2;4]
+        XLSX.setFormula(s, "G1", "=INDEX(A1:A5,F1:F2)")
+        @test XLSX.getFormula(s, "C1") == "=if(A1:A5>30, \"High\", \"Low\")"
+        @test XLSX.getFormula(s, "D1") == "=OFFSET(A2:A5, -1, 0)"
+        @test XLSX.getFormula(s, "E1") == "=CHOOSE(1,A1:A2,A3:A4)"
+        @test XLSX.getFormula(s, "G1") == "=INDEX(A1:A5,F1:F2)"
     end
     @testset "getFormula" begin
         f=XLSX.newxlsx()

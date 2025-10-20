@@ -329,6 +329,55 @@ function split_function_args(formula::String; fname::Union{Nothing,String}=nothi
     return args
 end
 
+# Simplified regex for cell/range references
+const RGX_RANGE_RE = r"[A-Z]+\$?\d+:[A-Z]+\$?\d+"
+
+"""
+    needs_array_attr(fname::String, args::Vector{String}) -> Bool
+
+Determine if a function call will spill and thus require t="array".
+"""
+function needs_array_attr(fname::AbstractString, args::Vector{String})
+    f = uppercase(fname)
+
+    # Helper: does an argument look like a range?
+    is_range(arg) = occursin(RGX_RANGE_RE, arg)
+
+    # INDEX(array, row_num, [col_num])
+    if f == "INDEX"
+        # If row_num or col_num are omitted or themselves arrays, INDEX can return multiple cells
+        return is_range(args[1]) && (length(args) < 3 || args[2] == "" || args[3] == "")
+    end
+
+    # OFFSET(reference, rows, cols, [height], [width])
+    if f == "OFFSET"
+        # If first arg is a range, OFFSET can spill
+        if is_range(args[1])
+            return true
+        end
+        # If height or width > 1, OFFSET returns a multi-cell reference
+        if length(args) >= 5
+            return (tryparse(Int, args[4]) |> x -> x > 1 ? true : false) ||
+                   (tryparse(Int, args[5]) |> x -> x > 1 ? true : false)
+        end
+        return false
+    end
+
+    # IF(logical_test, value_if_true, value_if_false)
+    if f == "IF"
+        # IF spills if either branch is a range/array
+        return any(is_range, args[1:3])
+    end
+
+    # CHOOSE(index_num, value1, value2, ...)
+    if f == "CHOOSE"
+        # If any chosen value is a range/array, CHOOSE can spill
+        return any(is_range, args[2:end])
+    end
+
+    return false
+end
+
 """
     is_array_formula(formula::String) -> Bool
 
@@ -370,7 +419,7 @@ function is_array_formula(formula::String)
     array_funcs = ["INDEX", "OFFSET", "IF", "CHOOSE"]
     for f in array_funcs
         args = split_function_args(formula; fname=f)
-        !isempty(args) && return needs_array_attr(fname, args)
+        !isempty(args) && return needs_array_attr(f, args)
     end
     return false
 end
