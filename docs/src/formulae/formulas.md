@@ -2,20 +2,21 @@
 
 `XLSX.jl` provides two functions allowing direct access to cell formulas, [XLSX.getFormula](@ref) and [setFormula](@ref).
 
-Formulae must be valid Excel formulae and written in US english with comma
-separators. Cell references may be absolute or relative references in either 
-the row or the column or both (e.g. `\$A\$2`). No validation of the specified 
-formula is made by `XLSX.jl` and formulae are accepted as given.
-
 ## Using a simple formula
 
 Find the formula in a cell using the [XLSX.getFormula](@ref) function. This returns a string representation 
 of the function used in the specified cell (e.g. `"=A1+B1"`). For most standard functions, this is the 
 same as the representation of the same formula in the Excel formula bar (but see the section on Newer 
-Functions for exceptions).
+Functions (below) for exceptions).
 
 Similarly, set a formula in a cell using the [setFormula](@ref) function, entering the function 
 exactly as it would appear in the Excel formula bar.
+
+To set a formula, it must be a valid Excel formula and written in US english with 
+a comma separator. Cell references may be absolute or relative references in either 
+the row or the column or both (e.g. `\$A\$2`). No validation of the specified 
+formula is made by `XLSX.jl` and the formula wil be accepted as given.
+
 
 For example:
 
@@ -57,7 +58,7 @@ julia> XLSX.getFormula(s, "B1")
 
 ![image|320x500](../images/hyperlinkFormula.png)
 
-Formulae of arbitrary complexity and degree of nesting are supported.
+Valid formulae of arbitrary complexity and degree of nesting are supported.
 
 ```julia
 julia> setFormula(s, "B1", "=MID(A1, FIND(\"-\",A1)+1, FIND(\"-\",A1, FIND(\"-\",A1)))")
@@ -70,7 +71,7 @@ julia> setFormula(s, "B2", "AND(ROUNDDOWN(A1,0)-TODAY()>(7-WEEKDAY(TODAY())),ROU
 Since `XLSX.jl` does not and cannot replicate all the functions built in to Excel, 
 setting a formula in a cell does not permit the cell's value to be re-calculated 
 within `XLSX.jl`. Instead, although the formula is properly added to the cell, the 
-value is set to missing. However, the saved XLSXFile is set to force Excel to 
+value is set to `missing`. However, the saved `XLSXFile` is set to force Excel to 
 re-calculate on opening.
 
 ```julia
@@ -144,7 +145,7 @@ julia> setFormula(s, "B2:B4", "=B1+A2") # creates a running total
 "=B1+A2"
 
 julia> XLSX.getcell(s, "B2")
-XLSX.Cell(B2, "", "", "", "", XLSX.ReferencedFormula("=B1+A2", 0, "B2:B4", nothing)) # this is the reference cell
+XLSX.Cell(B2, "", "", "", "", XLSX.ReferencedFormula("=B1+A2", 0, "B2:B4", nothing)) # this is the reference cell. It has index 0.
 
 julia> XLSX.getcell(s, "B4")
 XLSX.Cell(B4, "", "", "", "", XLSX.FormulaReference(0, nothing)) # this refers to the reference cell with index 0
@@ -166,7 +167,7 @@ to the user.
 ## External references
 
 An existing formula may contain references to cells in external workbooks, in the form
-`[index]SheetName!A1` where `index` is an integer providing an intrenal Excel reference 
+`[index]SheetName!A1` where `index` is an integer providing an internal Excel reference 
 to the external workbook. [XLSX.getFormula](@ref) can be used to obtain the file name of the external 
 reference using the keyword option `find_external_refs=true` to replace the index with the 
 actual workbook path (as stored in the workbook's externalReferences).
@@ -177,7 +178,7 @@ julia> XLSX.getFormula(s, "B1")
 "[1]Sheet1!\$A\$1"
 
 julia> XLSX.getFormula(s, "B1"; find_external_refs=true)
-"[https://d.docs.live.net/ee85442dac9ca7a7/Documents/Julia/XLSX/linked-2.xlsx]Sheet1!\$A\$1"
+"[https://d.docs.live.net/.../Documents/Julia/XLSX/linked-2.xlsx]Sheet1!\$A\$1"
 ```
 
 It is not currently possible to use `setFormula` to create a formula that references a worksheet 
@@ -205,12 +206,13 @@ julia> setFormula(s, "A6", "sum(A1:A5)") # traditional function
 julia> setFormula(s, "B1", "sort(A1:A5)") # needs a prefix. `setFormula` adds this transparently to the user.
 "_xlfn.SORT(A1:A5)"
 
-julia> writexlsx("mytest.xlsx", f, overwrite=true)
-"C:\\Users\\...\\Julia\\XLSX\\mytest.xlsx"
-
 julia> setBorder(s, "A6";top=["style"=>"double"])
 1
+
+julia> writexlsx("mytest.xlsx", f, overwrite=true)
+"C:\\Users\\...\\Julia\\XLSX\\mytest.xlsx"
 ```
+
 The prefix is not shown by Excel in the formula bar, but it is needed in the internal xml file.
 [setFormula](@ref) adds this prefix automatically. A dummy `ref` xml attribute is also created 
 by [setFormula](@ref) and will be properly calculated on opening when Excel determines the spill range.
@@ -219,7 +221,7 @@ by [setFormula](@ref) and will be properly calculated on opening when Excel dete
 
 ```
 <c r="B1" cm="1">
-  <f t="array" ref="B1:B1">_xlfn.SORT(A1:A5)</f> # prefix `_xlfn` and `t` and `ref` attributes required by Excel
+  <f t="array" ref="B1:B1">_xlfn.SORT(A1:A5)</f> # prefix `_xlfn.` and `t` and `ref` attributes required by Excel
 </c>
 
 <c r="A6" s="1">
@@ -232,7 +234,7 @@ Currently only simple aggregator functions are supported (e.g. `SUM`, `AVERAGE`,
 `MIN`, `MAX`, `MEDIAN`, `PRODUCT`, `STDEV`, `STDEVP`, `VAR` and `VARP`) by default (i.e. with `raw=false`).
 
 More complex versions of theses functions and some of the other newer Excel functions are 
-not easy to parse. For example, the Excel's `LAMBDA` function is not well supported (in 
+not easy to parse. For example, Excel's `LAMBDA` function is not well supported (in 
 `GROUPBY`/`PIVOTBY` or otherwise). Moreover, as Microsoft adds more new functions in future that 
 require a prefix or that generate a spill range (or both), [setFormula](@ref) may not recognise them 
 automatically.
@@ -253,7 +255,7 @@ setFormula(f[1], "H21", "_xlfn.GROUPBY(E1:E151,A1:D151,_xlfn.LAMBDA(_xlpm.x,AVER
 
 ## Spill ranges
 
-Some functions such as `SORT` or `UNIQUE` will return multiple values and Excel will "spill" these 
+Some functions, such as `SORT` or `UNIQUE`, will return multiple values and Excel will "spill" these 
 into a spill range the extent of which depends on the data on which the function is operating.
 Generally, [setFormula](@ref) will handle this transparently and create a cell formula that spills when 
 needed by adding an attribute `t="array"` to the cell in the internal xml file. For example
@@ -283,7 +285,7 @@ Even simple formulas can be made to spill in recent versions of Excel. For examp
 given the formula `"=A1:A5"` would produce a 5-element result and would spill to fill 5 cells.
 
 You may include a spill range in a formula using the base cell name with a `#` suffix, and 
-this is treated as a reference to the ful spill range. For example, to add an extra column 
+this is treated as a reference to the full spill range. For example, to add an extra column 
 to the above table, use `setFormula(s, "C1", "=2*B1#")` just as in Excel. The result will 
 spill to fill cells `C1:C5`.
 
@@ -297,19 +299,19 @@ from the same row as the formula.
 For most formulas, [setFormula](@ref) will determine the correct attribute value for `t`. In cases 
 where it doesn't (usually when using `raw=true`), it is possible to force the formula to indicate 
 (to Excel) that it spills using the `spill=true` keyword option as described above. Similarly, in 
-the unlikely event that [setFormula](@ref) might choose to create a spill function incorrectly, ths can 
+the unlikely event that [setFormula](@ref) might choose to create a spill function incorrectly, this can 
 be prevented with `spill=false`.
 
-Rarely, in complex, nested formulae involving cell range references, aggregator functions and/or 
+Only rarely in complex, nested formulae involving cell range references, aggregator functions and/or 
 dynamic array functions, and for any function that spills as a direct result of using a 
-named cell range, it may be necessary to use the `raw` keyword option described above.
+named cell range, should it be necessary to use the `raw` keyword option described above.
 
 !!! note
 
     Excel is often very fussy about the internal structure of an xlsx file but the resulting
     error messages (when Excel tries to open a file it considers mal-formed) may be somewhat cryptic. 
     If there is an error in the formula you enter, it may not be clear what it is from the error 
-    Excel produces. A safe fall back may be to test the formula in Excel itself and copy/paste 
+    Excel produces (as shown below). A safe fall back may be to test the formula in Excel itself and copy/paste 
     it into julia. Alternatively, copy the formula directly from the xml representation of a working 
     Excel file and use the `raw=true` keyword option (and `spill=true` if the function used creates 
     a spill range).

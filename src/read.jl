@@ -5,21 +5,76 @@
 @inline get_workbook(xl::XLSXFile)::Workbook = xl.workbook
 
 const ZIP_FILE_HEADER = [0x50, 0x4b, 0x03, 0x04]
-const XLS_FILE_HEADER = [0xd0, 0xcf, 0x11, 0xe0]
+const XLS_FILE_HEADER = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1] #[0xd0, 0xcf, 0x11, 0xe0]
+
+function is_encrypted_xlsx(io::IO) # This function suggested by Claude AI
+
+    # Read sector size from header (bytes 0x1E-0x1F)
+    seek(io, 0x1E)
+    sector_shift = read(io, UInt16)
+    sector_size = 1 << sector_shift
+    
+    # Read the directory entries starting position (bytes 0x30-0x33)
+    seek(io, 0x30)
+    first_dir_sector = read(io, UInt32)
+    
+    # Calculate directory position
+    dir_offset = 512 + first_dir_sector * sector_size
+    
+    # Read directory entries and look for encryption markers
+    seek(io, dir_offset)
+    
+    # Check first several directory entries (each is 128 bytes)
+    for i in 1:20
+        entry_start = position(io)
+        
+        # Read name (64 bytes, UTF-16LE)
+        name_bytes = read(io, 64)
+        # Read name length in bytes (includes null terminator)
+        name_length = read(io, UInt16)
+        
+        if name_length > 2 && name_length <= 64
+            # Convert UTF-16LE to String
+            # Take pairs of bytes and convert to Char
+            chars = Char[]
+            for j in 1:2:min(name_length-2, 64)
+                if j+1 <= length(name_bytes)
+                    code_point = UInt16(name_bytes[j]) | (UInt16(name_bytes[j+1]) << 8)
+                    if code_point != 0
+                        push!(chars, Char(code_point))
+                    end
+                end
+            end
+            name = String(chars)
+            
+            if occursin("EncryptionInfo", name) || occursin("EncryptedPackage", name)
+                return true
+            end
+        end
+        
+        # Move to next directory entry (128 bytes total)
+        seek(io, entry_start + 128)
+    end
+    return false
+end
 
 function check_for_xlsx_file_format(source::IO, label::AbstractString="input")
     local header::Vector{UInt8}
 
     mark(source)
-    header = Base.read(source, 4)
+    header = Base.read(source, 8)
     reset(source)
 
-    if header == ZIP_FILE_HEADER # valid Zip file header
+    if header[1:4] == ZIP_FILE_HEADER # valid Zip file header
         return
     elseif header == XLS_FILE_HEADER # old XLS file
-        throw(XLSXError("$label looks like an old XLS file (not XLSX). This package does not support XLS file format."))
+        if is_encrypted_xlsx(source) # Issue #251
+            throw(XLSXError("'$label' looks like a password protected XLSX file. This package does not support password protected files."))
+        else
+            throw(XLSXError("'$label' looks like an old XLS file (not XLSX). This package does not support XLS file format."))
+        end
     else
-        throw(XLSXError("$label is not a valid XLSX file."))
+        throw(XLSXError("'$label' is not a valid XLSX file."))
     end
 end
 

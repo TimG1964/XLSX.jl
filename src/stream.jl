@@ -417,7 +417,8 @@ function match_rows(ws::Worksheet, rows_to_match::Vector{Int})::Vector{SheetRow}
 
     sort!(rows_to_match)
     i=1
-
+    l=length(rows_to_match)
+    
     target_file = get_relationship_target_by_id("xl", get_workbook(ws), ws.relationship_id)
     lznode = open_internal_file_stream(get_xlsxfile(ws), target_file)
 
@@ -447,7 +448,7 @@ function match_rows(ws::Worksheet, rows_to_match::Vector{Int})::Vector{SheetRow}
                 sheetrow = SheetRow(ws, row_num, current_row_ht, rowcells)
                 push!(matched_rows, sheetrow)
                 i+=1
-                i>length(rows_to_match) && break # stop once all rows matched
+                i>l && break # stop once all rows matched
                 continue
             end
         end

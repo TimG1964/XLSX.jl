@@ -568,23 +568,24 @@ Set the Excel formula to be used in the given cell or cell range.
 Formulae must be valid Excel formulae and written in US english with comma
 separators. Cell references may be absolute or relative references in either 
 the row or the column or both (e.g. `\$A\$2`). No validation of the specified 
-formula is made by `XLSX.jl` and formulae are stored verbatim, as given.
+formula is made by `XLSX.jl` and formulae are usually stored verbatim, as given.
 
 Non-contiguous ranges are not supported by `setFormula`. Set the formula in 
 each cell or contiguous range separately.
 
 Use `raw=true` if entering a formula in xml-ready format to prevent any processing 
-by `setFormula)`.
+by `setFormula`.
 
 Use `spill=true` to force the formula to be treated as an array formula that spills 
-and `spill-false` to prevent it being treated as such. By default (`spill=nothing`).
+and `spill=false` to prevent it being treated as such. By default `spill=nothing` and
+`setFormula` will determine whether a formula should spill or not automatically.
 
 Keyword options should be rarely needed - `setFormula` should handle most formulae.
 
-Since XLSX.jl does not and cannot replicate all the functions built in to Excel, 
+Since `XLSX.jl` does not and cannot replicate all the functions built in to Excel, 
 setting a formula in a cell does not permit the cell's value to be re-calculated 
-within XLSX.jl. Instead, although the formula is properly added to the cell, the 
-value is set to missing. However, the saved XLSXFile is set to force Excel to 
+within `XLSX.jl`. Instead, although the formula is properly added to the cell, the 
+value is set to `missing`. However, the saved `XLSXFile` is set to force Excel to 
 re-calculate on opening. 
 
 If a cell spills but any of the cells in the spill range already contains a value, Excel will 
@@ -793,6 +794,7 @@ function setFormula(ws::Worksheet, cellref::CellRef; val::AbstractString, raw::B
 end
 
 #=
+# Not required since the functionality is more generally offered by `getFormula`.
 function getCellHyperlink(ws::Worksheet, cellref::CellRef) # addresses #165
     cellref ∉ get_dimension(ws) && throw(XLSXError("Cell $cellref is out of range for worksheet '$(ws.name)'"))
     cell=getcell(ws, cellref)
@@ -808,7 +810,7 @@ end
 
     getFormula(sh::Worksheet, row::Int, col::Int; find_external_refs::Bool=false) -> Union{String,Nothing}
 
-Get the formula for a single cell reference in a worksheet `sh` or XLSXfile `xf`.
+Get the formula for a single cell reference in a worksheet `sh` or XLSXFile `xf`.
 The specified cell must be within the sheet dimension.
 
 If the cell does not contain any formula (but is not an `EmptyCell`), return an empty string ("").
@@ -817,7 +819,7 @@ If the cell is an EmptyCell, return `nothing`.
 If the cell contains a `FormulaReference`, look up the actual formula.
 
 A formula may contain references to cells in external workbooks, in the form
-`[index]SheetName!A1` where `index` is an integer providing an intrenal Excel reference 
+`[index]SheetName!A1` where `index` is an integer providing an internal Excel reference 
 to the external workbook. Use the keyword option `find_external_refs=true` to replace
 the index with the actual workbook path (as stored in the workbook's externalReferences).
 By default, `find_external_refs=false` and the formula is returned unchanged.

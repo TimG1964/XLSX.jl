@@ -59,6 +59,17 @@ data_directory = joinpath(dirname(pathof(XLSX)), "..", "data")
 
     end
 
+    @testset "Read password protected file error" begin
+        @test_throws XLSX.XLSXError XLSX.readxlsx(joinpath(data_directory, "password.xlsx")) # password for this file is simply "password"
+        try
+            XLSX.readxlsx(joinpath(data_directory, "password.xlsx"))
+            @test false # didn't throw exception
+        catch e
+            @test occursin("This package does not support password protected files", "$e")
+        end
+
+    end
+
     @testset "Read invalid XLSX error" begin
         @test_throws XLSX.XLSXError XLSX.readxlsx(joinpath(data_directory, "sheet_template.xml"))
         try

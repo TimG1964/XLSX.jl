@@ -453,7 +453,7 @@ function get_rowcells!(rowcells::Dict{Int, Cell}, row::XML.LazyNode, ws::Workshe
         end
         cellnode = XML.next(cellnode)
     end
-    if !isnothing(cellnode) && cellnode.tag == "row" # have reached the end of last row, beginning of next
+    if !isnothing(cellnode) && cellnode.tag == "row" # have reached the beginning of next row
         return cellnode, sst_count
     else                                             # no more rows
         return nothing, sst_count
