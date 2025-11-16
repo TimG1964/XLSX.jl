@@ -514,7 +514,7 @@ end
 const EXTERNAL_REF_RE = r"\[(\d+)\]([\p{L}\p{N}_]+)!\$?[A-Za-z]+\$?\d+"
 
 # Extract all external references from a formula string (eg like "[1]Sheet1!$A$1")
-function get_external_refs(formula::String)
+function get_ext_refs(formula::String)
     [ExternalRef(parse(Int, m.captures[1]),
                  m.captures[2],
                  m.match) for m in eachmatch(EXTERNAL_REF_RE, formula)] # workbook_path to be filled in later
@@ -542,16 +542,18 @@ function get_external_workbook_path(xf::XLSXFile, id::Int)
         haskey(atts, "filename") && return atts["filename"] # externalBookPr filename attribute
     end
     k, l = get_idces(extXml[i], "externalBook", "xxl21:alternateUrls")
-    atts=XML.attributes(extXml[i][k][l][1]) # prefer the first alternateUrls r:id if multiple
-    haskey(atts, "r:id") || throw(XLSXError("Something wrong here!"))
-    rId=atts["r:id"]
-    # now need a second lookup of this further r:id
-    altUrls = XML.children(xmlroot(xf, "xl/externalLinks/_rels/$(basename(rel)).rels")[end])
-    for c in altUrls
-        atts=XML.attributes(c)
-        if haskey(atts, "Id") && atts["Id"] == rId
-            haskey(atts, "Target") || throw(XLSXError("Something wrong here!"))
-            return atts["Target"]
+    if !isnothing(l)
+        atts=XML.attributes(extXml[i][k][l][1]) # prefer the first alternateUrls r:id if multiple
+        haskey(atts, "r:id") || throw(XLSXError("Something wrong here!"))
+        rId=atts["r:id"]
+        # now need a second lookup of this further r:id
+        altUrls = XML.children(xmlroot(xf, "xl/externalLinks/_rels/$(basename(rel)).rels")[end])
+        for c in altUrls
+            atts=XML.attributes(c)
+            if haskey(atts, "Id") && atts["Id"] == rId
+                haskey(atts, "Target") || throw(XLSXError("Something wrong here!"))
+                return atts["Target"]
+            end
         end
     end
     throw(XLSXError("Unreachable reached!"))
@@ -805,10 +807,10 @@ function getCellHyperlink(ws::Worksheet, cellref::CellRef) # addresses #165
 end
 =#
 """
-    getFormula(sh::Worksheet, cr::String; find_external_refs::Bool=false) -> Union{String,Nothing}
-    getFormula(xf::XLSXFile, cr::String; find_external_refs::Bool=false) -> Union{String,Nothing}
+    getFormula(sh::Worksheet, cr::String; get_external_refs::Bool=false) -> Union{String,Nothing}
+    getFormula(xf::XLSXFile, cr::String; get_external_refs::Bool=false) -> Union{String,Nothing}
 
-    getFormula(sh::Worksheet, row::Int, col::Int; find_external_refs::Bool=false) -> Union{String,Nothing}
+    getFormula(sh::Worksheet, row::Int, col::Int; get_external_refs::Bool=false) -> Union{String,Nothing}
 
 Get the formula for a single cell reference in a worksheet `sh` or XLSXFile `xf`.
 The specified cell must be within the sheet dimension.
@@ -820,9 +822,9 @@ If the cell contains a `FormulaReference`, look up the actual formula.
 
 A formula may contain references to cells in external workbooks, in the form
 `[index]SheetName!A1` where `index` is an integer providing an internal Excel reference 
-to the external workbook. Use the keyword option `find_external_refs=true` to replace
+to the external workbook. Use the keyword option `get_external_refs=true` to replace
 the index with the actual workbook path (as stored in the workbook's externalReferences).
-By default, `find_external_refs=false` and the formula is returned unchanged.
+By default, `get_external_refs=false` and the formula is returned unchanged.
 
 See also [XLSX.setFormula](@ref).
 
@@ -847,7 +849,7 @@ julia> XLSX.getFormula(s, XLSX.CellRef("A1"))
 julia> XLSX.getFormula(s, XLSX.CellRef("B1"))
 "[1]Sheet1!\$A\$1"
 
-julia> XLSX.getFormula(s, XLSX.CellRef("B1"); find_external_refs=true)
+julia> XLSX.getFormula(s, XLSX.CellRef("B1"); get_external_refs=true)
 "[https://d.docs.live.net/ee85442dac9ca7a7/Documents/Julia/XLSX/linked-2.xlsx]Sheet1!\$A\$1"
 ```
 
@@ -855,7 +857,7 @@ julia> XLSX.getFormula(s, XLSX.CellRef("B1"); find_external_refs=true)
 getFormula(ws::Worksheet, cr::String; kw...) = process_get_cellname(getFormula, ws, cr; kw...)
 getFormula(xl::XLSXFile, sheetcell::String; kw...) = process_get_sheetcell(getFormula, xl, sheetcell; kw...)
 getFormula(ws::Worksheet, row::Integer, col::Integer; kw...) = getFormula(ws, CellRef(row, col); kw...)
-function getFormula(ws::Worksheet, cellref::CellRef; find_external_refs::Bool=false)
+function getFormula(ws::Worksheet, cellref::CellRef; get_external_refs::Bool=false)
     cellref ∉ get_dimension(ws) && throw(XLSXError("Cell $cellref is out of range for worksheet '$(ws.name)'"))
     xf=get_xlsxfile(ws)
     if !xf.use_cache_for_sheet_data
@@ -870,8 +872,9 @@ function getFormula(ws::Worksheet, cellref::CellRef; find_external_refs::Bool=fa
         f = cell.formula.formula
     end
 
-    if find_external_refs # to address #224
-        ext=get_external_refs(f)
+    if get_external_refs # to address #224
+        iserror(cell) && cell.value=="#REF!" && throw(XLSXError("Cell $cellref contains a `#REF!` error - external reference not found"))
+        ext=get_ext_refs(f)
         for e in ext
             extLink = get_external_workbook_path(get_xlsxfile(ws), e.index)
             f=replace(f, "[" * string(e.index) * "]" => "[" * extLink * "]") # replace index with actual workbook path

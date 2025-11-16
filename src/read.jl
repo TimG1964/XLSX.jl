@@ -67,14 +67,14 @@ function check_for_xlsx_file_format(source::IO, label::AbstractString="input")
 
     if header[1:4] == ZIP_FILE_HEADER # valid Zip file header
         return
-    elseif header == XLS_FILE_HEADER # old XLS file
+    elseif header == XLS_FILE_HEADER # either an old XLS file or a password protected XLSX file
         if is_encrypted_xlsx(source) # Issue #251
-            throw(XLSXError("'$label' looks like a password protected XLSX file. This package does not support password protected files."))
+            throw(XLSXError("`$label` looks like a password protected XLSX file. This package does not support password protected files."))
         else
-            throw(XLSXError("'$label' looks like an old XLS file (not XLSX). This package does not support XLS file format."))
+            throw(XLSXError("`$label` looks like an old XLS file (not XLSX). This package does not support XLS file format."))
         end
     else
-        throw(XLSXError("'$label' is not a valid XLSX file."))
+        throw(XLSXError("`$label` is not a valid XLSX file."))
     end
 end
 
@@ -466,7 +466,6 @@ function parse_workbook!(xf::XLSXFile)
                     end
                 end
             end
-
 
             break
         end

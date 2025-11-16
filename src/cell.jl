@@ -200,21 +200,12 @@ function getdata(ws::Worksheet, cell::Cell) :: CellValueType
 
     if iserror(cell)
         return missing
+#        return cell.value
     end
 
     ecv=isempty(cell.value)
     ecd=isempty(cell.datatype)
     ecs=isempty(cell.style)
-
-#=
-    if cell.datatype == "inlineStr" # Now converted to shared strings on read
-        if ecv
-            return missing
-        else
-            return cell.value
-        end
-    end
-=#
 
     if cell.datatype == "s"
 

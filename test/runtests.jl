@@ -653,11 +653,11 @@ end
         f = XLSX.openxlsx(joinpath(data_directory, "linked-1.xlsx"))
         s = f[1]
         @test XLSX.getFormula(s, "A1") == "=[1]Sheet1!\$A\$1"
-        @test occursin("linked-2.xlsx]", XLSX.getFormula(s, "A1"; find_external_refs=true))
+        @test occursin("linked-2.xlsx]", XLSX.getFormula(s, "A1"; get_external_refs=true))
         f = XLSX.openxlsx(joinpath(data_directory, "linked-2.xlsx"))
         s = f[1]
         @test XLSX.getFormula(s, "B1") == "=[1]Sheet1!\$B\$1"
-        @test occursin("linked-1.xlsx]", XLSX.getFormula(s, "B1"; find_external_refs=true))
+        @test occursin("linked-1.xlsx]", XLSX.getFormula(s, "B1"; get_external_refs=true))
     end
 
     @testset "ReferencedFormulae" begin

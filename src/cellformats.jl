@@ -316,7 +316,7 @@ Here's a list of some common tags and their purposes (thanks to Copilot!):
 - `charset`  : Specifies the character set code (e.g., 204 for Cyrillic).
 - `scheme`   : Specifies whether the font is part of the major or minor theme.
 
-Excel defines colours in several ways. Get font will return the colour in any of these
+Excel defines colours in several ways. `getFont` will return the colour in any of these
 e.g. `"color" => ("theme" => "1")`.
 
 # Examples:

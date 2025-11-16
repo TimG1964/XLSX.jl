@@ -169,15 +169,15 @@ to the user.
 An existing formula may contain references to cells in external workbooks, in the form
 `[index]SheetName!A1` where `index` is an integer providing an internal Excel reference 
 to the external workbook. [XLSX.getFormula](@ref) can be used to obtain the file name of the external 
-reference using the keyword option `find_external_refs=true` to replace the index with the 
+reference using the keyword option `get_external_refs=true` to replace the index with the 
 actual workbook path (as stored in the workbook's externalReferences).
-By default, `find_external_refs=false` and the formula is returned unchanged.
+By default, `get_external_refs=false` and the formula is returned unchanged.
 
 ```julia
 julia> XLSX.getFormula(s, "B1")
 "[1]Sheet1!\$A\$1"
 
-julia> XLSX.getFormula(s, "B1"; find_external_refs=true)
+julia> XLSX.getFormula(s, "B1"; get_external_refs=true)
 "[https://d.docs.live.net/.../Documents/Julia/XLSX/linked-2.xlsx]Sheet1!\$A\$1"
 ```
 

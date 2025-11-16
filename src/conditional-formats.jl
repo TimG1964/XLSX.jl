@@ -440,6 +440,7 @@ const allIcons::Dict{String,Tuple{String,String}} = Dict(
     "51" => ("5Boxes", "3"),
     "52" => ("5Boxes", "4")
 )
+
 const timeperiods::Dict{String,String} = Dict(
     "last7Days" => "AND(TODAY()-FLOOR(__CR__,1)<=6,FLOOR(__CR__,1)<=TODAY())",
     "yesterday" => "FLOOR(__CR__,1)=TODAY()-1",
@@ -452,7 +453,6 @@ const timeperiods::Dict{String,String} = Dict(
     "thisMonth" => "AND(MONTH(__CR__)=MONTH(TODAY()),YEAR(__CR__)=YEAR(TODAY()))",
     "nextMonth" => "AND(MONTH(__CR__)=MONTH(EDATE(TODAY(),0+1)),YEAR(__CR__)=YEAR(EDATE(TODAY(),0+1)))"
 )
-
 
 """
     getConditionalFormats(ws::Worksheet)
@@ -1778,32 +1778,15 @@ function setCfTimePeriod(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}
 
     !issubset(rng, get_dimension(ws)) && throw(XLSXError("Range `$rng` goes outside worksheet dimension."))
 
-    allcfs = allCfs(ws)                    # get all conditional format blocks
+    allcfs = allCfs(ws)                # get all conditional format blocks
     old_cf = getConditionalFormats(ws) # extract conditional format info
 
-    if operator == "yesterday"
-        formula = "FLOOR(__CR__,1)=TODAY()-1"
-    elseif operator == "today"
-        formula = "FLOOR(__CR__,1)=TODAY()"
-    elseif operator == "tomorrow"
-        formula = "FLOOR(__CR__,1)=TODAY()+1"
-    elseif operator == "last7Days"
-        formula = "AND(TODAY()-FLOOR(__CR__,1)<=6,FLOOR(__CR__,1)<=TODAY())"
-    elseif operator == "lastWeek"
-        formula = "AND(TODAY()-ROUNDDOWN(__CR__,0)>=(WEEKDAY(TODAY())),TODAY()-ROUNDDOWN(__CR__,0)<(WEEKDAY(TODAY())+7))"
-    elseif operator == "thisWeek"
-        formula = "AND(TODAY()-ROUNDDOWN(__CR__,0)<=WEEKDAY(TODAY())-1,ROUNDDOWN(__CR__,0)-TODAY()<=7-WEEKDAY(TODAY()))"
-    elseif operator == "nextWeek"
-        formula = "AND(ROUNDDOWN(__CR__,0)-TODAY()>(7-WEEKDAY(TODAY())),ROUNDDOWN(__CR__,0)-TODAY()<(15-WEEKDAY(TODAY())))"
-    elseif operator == "lastMonth"
-        formula = "AND(MONTH(__CR__)=MONTH(EDATE(TODAY(),0-1)),YEAR(__CR__)=YEAR(EDATE(TODAY(),0-1)))"
-    elseif operator == "thisMonth"
-        formula = "AND(MONTH(__CR__)=MONTH(TODAY()),YEAR(__CR__)=YEAR(TODAY()))"
-    elseif operator == "nextMonth"
-        formula = "AND(MONTH(__CR__)=MONTH(EDATE(TODAY(),0+1)),YEAR(__CR__)=YEAR(EDATE(TODAY(),0+1)))"
+    if haskey(timeperiods, operator)
+        formula = timeperiods[operator]
     else
         throw(XLSXError("Invalid operator: $operator. Valid options are: `yesterday`, `today`, `tomorrow`, `last7Days`, `lastWeek`, `thisWeek`, `nextWeek`, `lastMonth`, `thisMonth`, `nextMonth`."))
     end
+
     formula = replace(formula, "__CR__" => string(first(rng)))
 
     wb = get_workbook(ws)
@@ -1870,7 +1853,7 @@ function setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::CellRange; allkws::D
 
     !issubset(rng, get_dimension(ws)) && throw(XLSXError("Range `$rng` goes outside worksheet dimension."))
 
-    allcfs = allCfs(ws)                    # get all conditional format blocks
+    allcfs = allCfs(ws)                # get all conditional format blocks
     old_cf = getConditionalFormats(ws) # extract conditional format info
     if operator == "containsBlanks"
         formula = "LEN(TRIM(__CR__))=0"
@@ -2025,7 +2008,7 @@ function setCfColorScale(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}
 
     !issubset(rng, get_dimension(ws)) && throw(XLSXError("Range `$rng` goes outside worksheet dimension ($(get_dimension(ws)))."))
 
-    allcfs = allCfs(ws)                    # get all conditional format blocks
+    allcfs = allCfs(ws)                # get all conditional format blocks
     old_cf = getConditionalFormats(ws) # extract conditional format info
 
     let new_pr, new_cf
