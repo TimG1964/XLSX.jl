@@ -2,6 +2,20 @@
 module XLSX
 
 import Artifacts
+import Dates
+import Printf.@printf
+import ZipArchives
+import XML
+import Tables
+import Unicode
+import Colors
+import Base.convert
+import Random
+import UUIDs
+import Mmap
+import Base.Threads
+#=
+import Artifacts
 import Base.convert
 import Base.Threads
 import Colors
@@ -14,6 +28,7 @@ import Unicode
 import UUIDs
 import XML
 import ZipArchives
+=#
 
 import PrecompileTools as PCT    # this is a small dependency.
 
@@ -78,6 +93,5 @@ PCT.@setup_workload begin
         writexlsx(t, f)
     end
 end
-
 
 end # module XLSX
