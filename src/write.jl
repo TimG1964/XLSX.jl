@@ -558,8 +558,9 @@ function setdata!(ws::Worksheet, cell::Cell)
     nothing
 end
 
-#= 
-# I think this issue went away when XML issue #48 was fixed
+ 
+# Issue #284
+# I think this issue went away when XML issue #48 was fixed - No it didn't! I still need to replace 0x12 characters at least.
 #
 # This set of characters works in my use case. I don't know:
 # - if the set is sufficient, or if other charachers may be needed in other use cases
@@ -575,25 +576,25 @@ const ILLEGAL_CHARS = [
     Char(0x06) => "",
     Char(0x07) => "",
     Char(0x08) => "",
-    Char(0x12) => "&apos;",
+    Char(0x12) => "",
     Char(0x16) => ""
 ]
-function strip_illegal_chars(x::String) # No-longer needed. Issue arose in XML.jl (https://github.com/JuliaComputing/XML.jl/issues/48)
+function strip_illegal_chars(x::String) # Issue #284
     result = x
     for (pat, r) in ILLEGAL_CHARS
         result = replace(result, pat => r)
     end
     return result
 end
-=#
+
 
 # Returns the datatype and value for `val` to be inserted into `ws`.
 function xlsx_encode(ws::Worksheet, val::AbstractString)
     if isempty(val)
         return ("", "")
     end
-#    sst_ind = add_shared_string!(get_workbook(ws), strip_illegal_chars(val))
-    sst_ind = add_shared_string!(get_workbook(ws), val)
+    sst_ind = add_shared_string!(get_workbook(ws), strip_illegal_chars(val))
+#    sst_ind = add_shared_string!(get_workbook(ws), val)
     ws.sst_count+=1
 
     return ("s", string(sst_ind))

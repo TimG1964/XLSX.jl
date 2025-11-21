@@ -81,12 +81,12 @@ and send a Pull Request.
 
 ## Alternative Packages
 
-* [LibXLSXWriter.jl](https://github.com/jaakkor2/LibXLSXWriter.jl)
-
 * [ExcelFiles.jl](https://github.com/davidanthoff/ExcelFiles.jl)
 
-* [ExcelReaders.jl](https://github.com/davidanthoff/ExcelReaders.jl)
+* [FileIO.jl](https://github.com/JuliaIO/FileIO.jl)
 
-* [XLSXReader.jl](https://github.com/mpastell/XLSXReader.jl)
+* [LibXLSXWriter.jl](https://github.com/jaakkor2/LibXLSXWriter.jl)
 
 * [Taro.jl](https://github.com/aviks/Taro.jl)
+
+* [XLSXReader.jl](https://github.com/mpastell/XLSXReader.jl)

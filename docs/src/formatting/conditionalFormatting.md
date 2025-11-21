@@ -136,7 +136,7 @@ whether or not to apply the formatting. Valid `operator` values for `:cellIs` ar
 - `between`         (cell between `value` and `value2`)
 - `notBetween`      (cell not between `value` and `value2`)
 
-Each of these need the keyword `value` to be specified and, for `between` and `notBetween`, `value2` 
+Each of these needs the keyword `value` to be specified and, for `between` and `notBetween`, `value2` 
 must also be specified.
 
 Like all the cell value formatting types, `:cellIs` can use one of six built-in Excel formats, as 
