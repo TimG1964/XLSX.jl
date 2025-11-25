@@ -1012,9 +1012,9 @@ julia> using DataFrames, StructArrays, TypedTables, XLSX
 
 julia> df = XLSX.readto("myfile.xlsx", DataFrame)
 
-julia> df = XLSX.readto("myfile.xlsx", StructArray)
+julia> sa = XLSX.readto("myfile.xlsx", StructArray)
 
-julia> df = XLSX.readto("myfile.xlsx", Table) # from TypedTables.jl
+julia> tt = XLSX.readto("myfile.xlsx", Table) # from TypedTables.jl
 
 julia> df = XLSX.readto("myfile.xlsx", "mysheet", DataFrame)
 

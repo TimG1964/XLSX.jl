@@ -850,7 +850,7 @@ julia> XLSX.getFormula(s, XLSX.CellRef("B1"))
 "[1]Sheet1!\$A\$1"
 
 julia> XLSX.getFormula(s, XLSX.CellRef("B1"); get_external_refs=true)
-"[https://d.docs.live.net/ee85442dac9ca7a7/Documents/Julia/XLSX/linked-2.xlsx]Sheet1!\$A\$1"
+"[https://d.docs.live.net/.../Documents/Julia/XLSX/linked-2.xlsx]Sheet1!\$A\$1"
 ```
 
 """
