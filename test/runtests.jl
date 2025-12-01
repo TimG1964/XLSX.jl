@@ -1680,7 +1680,7 @@ end
 
 @testset "Save" begin
     f=XLSX.openxlsx("saveable.xlsx", mode="w")
-    XLSX.rename!(f["Sheet1"], "new_name")
+    XLSX.renamesheet!(f["Sheet1"], "new_name")
     s=f[1]
     s[1:10, 1:10] = "hello world"
     @test XLSX.savexlsx(f) == abspath("saveable.xlsx")
@@ -1783,7 +1783,7 @@ end
     @testset "copysheet!" begin
 
         f=XLSX.newxlsx()
-        XLSX.rename!(f["Sheet1"], "new_name")
+        XLSX.renamesheet!(f["Sheet1"], "new_name")
         XLSX.addsheet!(f)
         for x=1:10, y=1:10
             f["Sheet1"][x, y] = x + y
@@ -1892,9 +1892,9 @@ end
     f = XLSX.open_xlsx_template(joinpath(data_directory, "general.xlsx"))
     s = f["general"]
     @test_throws XLSX.XLSXError s["A1"] = :sym
-    XLSX.rename!(s, "general") # no-op
-    @test_throws XLSX.XLSXError XLSX.rename!(s, "table") # name is taken
-    XLSX.rename!(s, "renamed_sheet")
+    XLSX.renamesheet!(s, "general") # no-op
+    @test_throws XLSX.XLSXError XLSX.renamesheet!(s, "table") # name is taken
+    XLSX.rename!(s, "renamed_sheet") # retain old function to avoid breaking change
     @test s.name == "renamed_sheet"
     s["A1"] = "Hey You!"
     s["B1"] = "Out there in the cold..."
@@ -5838,7 +5838,7 @@ end
     # test create new file
     XLSX.openxlsx(filename, mode="w") do xf
         sheet = xf[1]
-        XLSX.rename!(sheet, sheetname)
+        XLSX.renamesheet!(sheet, sheetname)
 
         sheet["A1"] = data[1, :]
         sheet[2, :] = data[2, :]
@@ -6031,7 +6031,7 @@ end
 @testset "escape" begin
 
     # These tests are not sufficient. It may be possible using these tests (or similar) to create XLSX files
-    # that are not valid Excel files and will not successfully open. I do not now how to test this here but
+    # that are not valid Excel files and will not successfully open. I do not know how to test this here but
     # have successfully tested `output_table_escape_test.xlsx` and `escape.xlsx` manually.
     @test XML.escape("hello&world<'") == "hello&amp;world&lt;&apos;"
     @test XML.unescape("hello&amp;world&lt;&apos;") == "hello&world<'"
@@ -6348,7 +6348,7 @@ end
 
     XLSX.openxlsx("output_table2.xlsx", mode="w") do xf
         sheet = XLSX.getsheet(xf, 1)
-        XLSX.rename!(sheet, "report")
+        XLSX.renamesheet!(sheet, "report")
         XLSX.writetable!(sheet, table)
     end
 

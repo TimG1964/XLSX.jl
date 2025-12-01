@@ -20,7 +20,8 @@ import PrecompileTools as PCT    # this is a small dependency.
 export
     # Files and worksheets
     XLSXFile, readxlsx, openxlsx, opentemplate, newxlsx, writexlsx, savexlsx,
-    Worksheet, sheetnames, sheetcount, hassheet, rename!, addsheet!, copysheet!, deletesheet!, 
+    Worksheet, sheetnames, sheetcount, hassheet, 
+    addsheet!, renamesheet!, copysheet!, deletesheet!, 
     # Cells & data
     CellRef, row_number, column_number, eachtablerow,
     readdata, getdata, gettable, readtable, readto, writetable, writetable!,

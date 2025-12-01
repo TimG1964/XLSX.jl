@@ -20,8 +20,8 @@ XLSX.Worksheet
 XLSX.sheetnames
 XLSX.sheetcount
 XLSX.hassheet
-XLSX.rename!
 XLSX.addsheet!
+XLSX.renamesheet!
 XLSX.copysheet!
 XLSX.deletesheet!
 ```

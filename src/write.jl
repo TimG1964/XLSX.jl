@@ -994,13 +994,15 @@ function writetable!(
     end
 end
 
+rename!(ws::Worksheet, name::AbstractString) = renamesheet!(ws, name)
+
 """
-    rename!(ws::Worksheet, name::AbstractString)
+    renamesheet!(ws::Worksheet, name::AbstractString)
 
 Rename a `Worksheet` to `name`.
 
 """
-function rename!(ws::Worksheet, name::AbstractString)
+function renamesheet!(ws::Worksheet, name::AbstractString)
 
     # no-op if the name has not changed
     if ws.name == name
@@ -1583,7 +1585,7 @@ function writetable(filename::Union{AbstractString,IO}; overwrite::Bool=false, k
         if is_first
             # first sheet already exists in template file
             sheet = xf[1]
-            rename!(sheet, string(sheetname))
+            renamesheet!(sheet, string(sheetname))
             writetable!(sheet, data, column_names)
 
             is_first = false
@@ -1611,7 +1613,7 @@ function writetable(filename::Union{AbstractString,IO}, tables::Vector{Tuple{Str
         if is_first
             # first sheet already exists in template file
             sheet = xf[1]
-            rename!(sheet, string(sheetname))
+            renamesheet!(sheet, string(sheetname))
             writetable!(sheet, data, column_names)
 
             is_first = false

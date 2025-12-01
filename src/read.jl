@@ -143,7 +143,7 @@ function open_empty_template(
     xf[1].cache.is_full = true
 
     if sheetname != ""
-        rename!(xf[1], sheetname)
+        renamesheet!(xf[1], sheetname)
     end
     xf.source = "blank.xlsx"
     return xf
