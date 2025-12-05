@@ -474,7 +474,7 @@ end
         XLSX.setFormula(f[1], 11, 1:3, "sum(A1:A10)")
         @test XLSX.getcell(f[1], "C11").formula == XLSX.FormulaReference(1, nothing)
         XLSX.setFormula(f[1], 11, 4, "=sum(A1:C10)")
-        @test XLSX.getcell(f[1], "D11").formula == XLSX.Formula("=sum(A1:C10)", "", "", nothing)
+        @test XLSX.getcell(f[1], "D11").formula == XLSX.Formula("=sum(A1:C10)", nothing, nothing, nothing)
         XLSX.setFormula(f, "mySheet!A11:C11", "=A10/\$D11")
         XLSX.writexlsx("formulas.xlsx", f, overwrite=true)
  
@@ -484,7 +484,7 @@ end
         @test XLSX.getcell(f[1], "C10").formula == XLSX.FormulaReference(0, nothing)
         @test XLSX.getcell(f[1], "A11").formula == XLSX.ReferencedFormula("=A10/\$D11", 1, "A11:C11", nothing)
         @test XLSX.getcell(f[1], "C11").formula == XLSX.FormulaReference(1, nothing)
-        @test XLSX.getcell(f[1], "D11").formula == XLSX.Formula("=sum(A1:C10)", "", "", nothing)
+        @test XLSX.getcell(f[1], "D11").formula == XLSX.Formula("=sum(A1:C10)", nothing, nothing, nothing)
         isfile("formulas.xlsx") && rm("formulas.xlsx")
 
         f=XLSX.newxlsx("mySheet")
@@ -504,9 +504,9 @@ end
         @test XLSX.getcell(f[1], "B1").formula == XLSX.ReferencedFormula("=\$A1+A1", 0, "B1:L12", nothing)
         @test XLSX.getcell(f[1], "B2").formula == XLSX.FormulaReference(0, nothing)
         @test XLSX.getcell(f[1], "L10").formula == XLSX.FormulaReference(0, nothing)
-        @test XLSX.getcell(f[2], "A1").formula == XLSX.Formula("=max(mySheet!A1:A12)", "", "", nothing)
-        @test XLSX.getcell(f[2], "G1").formula == XLSX.Formula("=max(mySheet!G1:G12)", "", "", nothing)
-        @test XLSX.getcell(f[2], "L1").formula == XLSX.Formula("=max(mySheet!L1:L12)", "", "", nothing)
+        @test XLSX.getcell(f[2], "A1").formula == XLSX.Formula("=max(mySheet!A1:A12)", nothing, nothing, nothing)
+        @test XLSX.getcell(f[2], "G1").formula == XLSX.Formula("=max(mySheet!G1:G12)", nothing, nothing, nothing)
+        @test XLSX.getcell(f[2], "L1").formula == XLSX.Formula("=max(mySheet!L1:L12)", nothing, nothing, nothing)
         @test XLSX.getcell(f[2], "A2").formula == XLSX.ReferencedFormula("=min(\$A1:A1)", 0, "A2:L2", nothing)
         @test XLSX.getcell(f[2], "L2").formula == XLSX.FormulaReference(0, nothing)
         @test XLSX.getcell(f[3], "A1").formula == XLSX.Formula("=mySheet!A\$1+mySheet!A1", nothing, nothing, nothing)
@@ -518,9 +518,9 @@ end
         @test XLSX.getcell(f[1], "B1").formula == XLSX.ReferencedFormula("=\$A1+A1", 0, "B1:L12", nothing)
         @test XLSX.getcell(f[1], "B2").formula == XLSX.FormulaReference(0, nothing)
         @test XLSX.getcell(f[1], "L10").formula == XLSX.FormulaReference(0, nothing)
-        @test XLSX.getcell(f[2], "A1").formula == XLSX.Formula("=max(mySheet!A1:A12)", "", "", nothing)
-        @test XLSX.getcell(f[2], "G1").formula == XLSX.Formula("=max(mySheet!G1:G12)", "", "", nothing)
-        @test XLSX.getcell(f[2], "L1").formula == XLSX.Formula("=max(mySheet!L1:L12)", "", "", nothing)
+        @test XLSX.getcell(f[2], "A1").formula == XLSX.Formula("=max(mySheet!A1:A12)", nothing, nothing, nothing)
+        @test XLSX.getcell(f[2], "G1").formula == XLSX.Formula("=max(mySheet!G1:G12)", nothing, nothing, nothing)
+        @test XLSX.getcell(f[2], "L1").formula == XLSX.Formula("=max(mySheet!L1:L12)", nothing, nothing, nothing)
         @test XLSX.getcell(f[2], "A2").formula == XLSX.ReferencedFormula("=min(\$A1:A1)", 0, "A2:L2", nothing)
         @test XLSX.getcell(f[2], "L2").formula == XLSX.FormulaReference(0, nothing)
         @test XLSX.getcell(f[3], "A1").formula == XLSX.Formula("=mySheet!A\$1+mySheet!A1", nothing, nothing, nothing)
@@ -555,7 +555,7 @@ end
         @test XLSX.getcell(f[1], "C1") == XLSX.Cell(XLSX.CellRef("C1"), "", "", "1", "1", XLSX.Formula("_xlfn.UNIQUE(A1:A9)", "array", "C1:C3", nothing))
         s=f[1]
         XLSX.setFormula(s, "B1", "=A1")
-        @test XLSX.getcell(f[1], "B1").formula == XLSX.Formula("=A1", "", "", nothing)
+        @test XLSX.getcell(f[1], "B1").formula == XLSX.Formula("=A1", nothing, nothing, nothing)
         XLSX.setFormula(s, "B2:B10", "=A2+B1")
         @test XLSX.getcell(f[1], "B2").formula == XLSX.ReferencedFormula("=A2+B1", 0, "B2:B10", nothing)
         @test XLSX.getcell(f[1], "B5").formula == XLSX.FormulaReference(0, nothing)
@@ -566,7 +566,7 @@ end
         XLSX.readxlsx("formulas.xlsx")
         @test XLSX.getcell(f[1], "C1") == XLSX.Cell(XLSX.CellRef("C1"), "", "", "1", "1", XLSX.Formula("_xlfn.UNIQUE(A1:A9)", "array", "C1:C3", nothing))
         s=f[1]
-        @test XLSX.getcell(f[1], "B1").formula == XLSX.Formula("=A1", "", "", nothing)
+        @test XLSX.getcell(f[1], "B1").formula == XLSX.Formula("=A1", nothing, nothing, nothing)
         @test XLSX.getcell(f[1], "B2").formula == XLSX.ReferencedFormula("=A2+B1", 0, "B2:B10", nothing)
         @test XLSX.getcell(f[1], "B5").formula == XLSX.FormulaReference(0, nothing)
         @test XLSX.getcell(f[1], "D1") == XLSX.Cell(XLSX.CellRef("D1"), "", "", "", "1", XLSX.Formula("=_xlfn.SORT(B1:B10,,-1)", "array", "D1:D1", nothing))
@@ -6417,11 +6417,11 @@ end
         @test getcell(sheet, "G1").formula == XLSX.Formula("_xlfn.GROUPBY(E1:E151,A1:D151,_xleta.AVERAGE,3,1)", "array", "G1:G1", nothing)
         f[1]["M1"] = "versicolor"
         XLSX.setFormula(f[1], "M2", "=VLOOKUP(M1,G1#,3,FALSE)")
-        @test getcell(sheet, "M2").formula == XLSX.Formula("=VLOOKUP(M1,_xlfn.ANCHORARRAY(G1),3,FALSE)", "", "", nothing)
+        @test getcell(sheet, "M2").formula == XLSX.Formula("=VLOOKUP(M1,_xlfn.ANCHORARRAY(G1),3,FALSE)", "array", "M2:M2", nothing)
         XLSX.setFormula(f[1], "G1", "=GROUPBY(E1:E151,A1:D151,STDEV.P,3,1)")
         @test getcell(sheet, "G1").formula == XLSX.Formula("_xlfn.GROUPBY(E1:E151,A1:D151,_xleta.STDEV.P,3,1)", "array", "G1:G1", nothing)
         XLSX.setFormula(f[1], "G10", "_xlfn.GROUPBY(E1:E151,A1:D151,_xlfn.LAMBDA(_xlpm.x,AVERAGE(_xlpm.x)),3,1)"; raw=true)
-        @test getcell(sheet, "G10").formula == XLSX.Formula("_xlfn.GROUPBY(E1:E151,A1:D151,_xlfn.LAMBDA(_xlpm.x,AVERAGE(_xlpm.x)),3,1)", "array", "G1:G1", nothing)
+        @test getcell(sheet, "G10").formula == XLSX.Formula("_xlfn.GROUPBY(E1:E151,A1:D151,_xlfn.LAMBDA(_xlpm.x,AVERAGE(_xlpm.x)),3,1)", "array", "G10:G10", nothing)
     end
 end
 

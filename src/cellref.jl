@@ -76,6 +76,8 @@ Base.:(==)(rf1::FormulaReference, rf2::FormulaReference) = (
 
 Base.:(==)(rf1::Formula, rf2::Formula) = (
     rf1.formula == rf2.formula &&
+    rf1.type == rf2.type &&
+    rf1.ref == rf2.ref &&
     rf1.unhandled == rf2.unhandled
 )
 
@@ -330,13 +332,13 @@ end
 
 Base.string(cr::ColumnRange) = encode_column_number(cr.start)*":"*encode_column_number(cr.stop)
 Base.show(io::IO, cr::ColumnRange) = print(io, string(cr))
-Base.:(==)(cr1::ColumnRange, cr2::ColumnRange) = cr1.start == cr2.start && cr2.stop == cr2.stop
+Base.:(==)(cr1::ColumnRange, cr2::ColumnRange) = cr1.start == cr2.start && cr1.stop == cr2.stop
 Base.hash(cr::ColumnRange) = hash(cr.start) + hash(cr.stop)
 Base.in(column_number::Integer, rng::ColumnRange) = rng.start <= column_number && column_number <= rng.stop
 
 Base.string(cr::RowRange) = string(cr.start)*":"*string(cr.stop)
 Base.show(io::IO, cr::RowRange) = print(io, string(cr))
-Base.:(==)(cr1::RowRange, cr2::RowRange) = cr1.start == cr2.start && cr2.stop == cr2.stop
+Base.:(==)(cr1::RowRange, cr2::RowRange) = cr1.start == cr2.start && cr1.stop == cr2.stop
 Base.hash(cr::RowRange) = hash(cr.start) + hash(cr.stop)
 Base.in(row_number::Integer, rng::RowRange) = rng.start <= row_number && row_number <= rng.stop
 
@@ -470,27 +472,27 @@ end
 
 Base.string(cr::SheetCellRef) = string(quoteit(cr.sheet), "!", cr.cellref)
 Base.show(io::IO, cr::SheetCellRef) = print(io, string(cr))
-Base.:(==)(cr1::SheetCellRef, cr2::SheetCellRef) = cr1.sheet == cr2.sheet && cr2.cellref == cr2.cellref
+Base.:(==)(cr1::SheetCellRef, cr2::SheetCellRef) = cr1.sheet == cr2.sheet && cr1.cellref == cr2.cellref
 Base.hash(cr::SheetCellRef) = hash(cr.sheet) + hash(cr.cellref)
 
 Base.string(cr::SheetCellRange) = string(quoteit(cr.sheet), "!", cr.rng)
 Base.show(io::IO, cr::SheetCellRange) = print(io, string(cr))
-Base.:(==)(cr1::SheetCellRange, cr2::SheetCellRange) = cr1.sheet == cr2.sheet && cr2.rng == cr2.rng
+Base.:(==)(cr1::SheetCellRange, cr2::SheetCellRange) = cr1.sheet == cr2.sheet && cr1.rng == cr2.rng
 Base.hash(cr::SheetCellRange) = hash(cr.sheet) + hash(cr.rng)
 
 Base.string(cr::SheetColumnRange) = string(quoteit(cr.sheet), "!", cr.colrng)
 Base.show(io::IO, cr::SheetColumnRange) = print(io, string(cr))
-Base.:(==)(cr1::SheetColumnRange, cr2::SheetColumnRange) = cr1.sheet == cr2.sheet && cr2.colrng == cr2.colrng
+Base.:(==)(cr1::SheetColumnRange, cr2::SheetColumnRange) = cr1.sheet == cr2.sheet && cr1.colrng == cr2.colrng
 Base.hash(cr::SheetColumnRange) = hash(cr.sheet) + hash(cr.colrng)
 
 Base.string(cr::SheetRowRange) = string(quoteit(cr.sheet), "!", cr.rowrng)
 Base.show(io::IO, cr::SheetRowRange) = print(io, string(cr))
-Base.:(==)(cr1::SheetRowRange, cr2::SheetRowRange) = cr1.sheet == cr2.sheet && cr2.rowrng == cr2.rowrng
+Base.:(==)(cr1::SheetRowRange, cr2::SheetRowRange) = cr1.sheet == cr2.sheet && cr1.rowrng == cr2.rowrng
 Base.hash(cr::SheetRowRange) = hash(cr.sheet) + hash(cr.colrng)
 
 Base.string(cr::NonContiguousRange) = join([string(quoteit(cr.sheet), "!", x) for x in cr.rng],",")
 Base.show(io::IO, cr::NonContiguousRange) = print(io, string(cr))
-Base.:(==)(cr1::NonContiguousRange, cr2::NonContiguousRange) = cr1.sheet == cr2.sheet && cr2.rng == cr2.rng
+Base.:(==)(cr1::NonContiguousRange, cr2::NonContiguousRange) = cr1.sheet == cr2.sheet && cr1.rng == cr2.rng
 Base.hash(cr::NonContiguousRange) = hash(cr.sheet) + hash(cr.rng)
 
 function Base.in(ref::SheetCellRef, ncrng::NonContiguousRange) :: Bool

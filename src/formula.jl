@@ -786,9 +786,9 @@ function setFormula(ws::Worksheet, cellref::CellRef; val::AbstractString, raw::B
     formula, t, ref, cm = process_dynamic_array_functions(xf, cellref, val; raw, spill)
     f = raw ? val : formula
     if c isa EmptyCell || c.style==""
-        setdata!(ws, cellref, CellFormula(ws, Formula(f, t, ref, nothing)))
+        setdata!(ws, cellref, CellFormula(ws, Formula(f, t=="" ? nothing : t, ref=="" ? nothing : ref, nothing)))
     else
-        setdata!(ws, cellref, CellFormula(Formula(f, t, ref, nothing), CellDataFormat(parse(Int,c.style))))
+        setdata!(ws, cellref, CellFormula(Formula(f, t=="" ? nothing : t, ref=="" ? nothing : ref, nothing), CellDataFormat(parse(Int,c.style))))
     end
     c=getcell(ws, cellref)
     c.meta = cm
