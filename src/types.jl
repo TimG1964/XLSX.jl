@@ -456,8 +456,7 @@ end
     XLSXFile(table)
 
 Take a `Tables.jl` compatible table and create a new `XLSXFile` object for writing.
-Can act as a sink
- for functions such as `CSV.read`.
+Can act as a sink for functions such as `CSV.read`.
 
 # Example
 
