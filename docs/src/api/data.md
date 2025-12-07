@@ -20,6 +20,8 @@ XLSX.getcellrange
 XLSX.gettable
 XLSX.readtable
 XLSX.readto
+XLSX.gettransposedtable
+XLSX.readtransposedtable
 XLSX.writetable
 XLSX.writetable!
 ```

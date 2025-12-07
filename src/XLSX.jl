@@ -23,7 +23,9 @@ export
     Worksheet, sheetnames, sheetcount, hassheet, rename!, addsheet!, copysheet!, deletesheet!, 
     # Cells & data
     CellRef, row_number, column_number, eachrow, eachtablerow,
-    readdata, getdata, gettable, readtable, readto, writetable, writetable!,
+    readdata, getdata, gettable, readtable, readto, 
+    gettransposedtable, readtransposedtable,
+    writetable, writetable!,
     addDefinedName,
     # Formats
     setFormat, setFont, setBorder, setFill, setAlignment,
