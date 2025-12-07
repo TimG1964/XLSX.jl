@@ -700,14 +700,13 @@ function transposetable(m::Matrix; header::Bool=true) # transpose a matrix and e
     end
     data = [] # convert matrix to vector of vectors and infer types
     for c in axes(cols, 2) 
-    d = cols[:, c]
-    T = infer_eltype(cols[:, c])
-    if T !== "Any"
-        d = convert(Vector{T}, cols[:, c])
-    else
-        d = cols[:, c]
-    end
-    push!(data, d)                                                                                                                                                                      
+        T = infer_eltype(cols[:, c])
+        if T !== Any
+            d = convert(Vector{T}, cols[:, c])
+        else
+            d = cols[:, c]
+        end
+        push!(data, d)                                                                                                                                                                      
     end
     return data, headers
 end
