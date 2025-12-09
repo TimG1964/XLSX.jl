@@ -67,6 +67,10 @@ Return an empty, writable `XLSXFile` with 1 worksheet for editing and
 subsequent saving to a file with [XLSX.writexlsx](@ref).
 By default, the worksheet is `Sheet1`. Specify `sheetname` to give the worksheet a different name.
 
+Use keyword argument `update_timestamp=false` to prevent timestamps in the file properties from being 
+updated to the current date/time. This ensures bit-for-bit reproducible output when the file is written.
+The default is `update_timestamp=true`.
+
 # Examples
 ```julia
 julia> xf = XLSX.newxlsx()
@@ -75,7 +79,7 @@ julia> xf = XLSX.newxlsx("MySheet")
 ```
 
 """
-newxlsx(sheetname::AbstractString="")::XLSXFile = open_empty_template(sheetname)
+newxlsx(sheetname::AbstractString=""; update_timestamp::Bool=true)::XLSXFile = open_empty_template(sheetname; update_timestamp)
 
 function fix_datestamp!(xf::XLSXFile)
     # Fix datestamp in blank.xlsx. It is specified in the file `docProps/core.xml`.
@@ -94,7 +98,8 @@ end
 
 function open_empty_template(
     sheetname::AbstractString="";
-    path::AbstractString=_relocatable_data_path()
+    path::AbstractString=_relocatable_data_path(),
+    update_timestamp::Bool=true
 )::XLSXFile
 
     empty_excel_template = joinpath(path, "blank.xlsx")
@@ -106,7 +111,7 @@ function open_empty_template(
         rename!(xf[1], sheetname)
     end
     xf.source = "blank.xlsx"
-    fix_datestamp!(xf) # blank.xlsx has fixed datestamp in 2018 that should be updated to now.
+    update_timestamp && fix_datestamp!(xf) # blank.xlsx has fixed datestamp in 2018 that should be updated to now.
     return xf
 end
 
