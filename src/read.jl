@@ -86,9 +86,9 @@ function fix_datestamp!(xf::XLSXFile)
     f = "docProps/core.xml"
     date_format = Dates.dateformat"yyyy-mm-ddTHH:MM:SSZ"
     i, j = get_idces(xf.data[f], "cp:coreProperties", "dcterms:created")
-    any(isnothing, [i, j]) || (xf.data[f][i][j][1]=Dates.format(Dates.now(), date_format))
+    any(isnothing, [i, j]) || (xf.data[f][i][j][1]=Dates.format(Dates.now(Dates.UTC), date_format))
     i, j = get_idces(xf.data[f], "cp:coreProperties", "dcterms:modified")
-    any(isnothing, [i, j]) || (xf.data[f][i][j][1]=Dates.format(Dates.now()+Dates.Second(1), date_format))
+    any(isnothing, [i, j]) || (xf.data[f][i][j][1]=Dates.format(Dates.now(Dates.UTC)+Dates.Second(1), date_format))
     return nothing
 end
 
