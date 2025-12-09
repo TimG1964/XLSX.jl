@@ -180,6 +180,17 @@ data_directory = joinpath(dirname(pathof(XLSX)), "..", "data")
         end
     end
 
+    @testset "Fix timestamp" begin
+        t=Dates.now() - Second(1)
+        xf=XLSX.newxlsx()
+        f = "docProps/core.xml"
+        date_format = Dates.dateformat"yyyy-mm-ddTHH:MM:SSZ"
+        i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:created") # i, j should always be found unless the `blank.xlsx` file is updated
+        @test  t < DateTime(XML.value(xf.data[f][i][j][1]), date_format)
+        i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:modified")
+        @test  t < DateTime(XML.value(xf.data[f][i][j][1]), date_format)
+    end
+
 end
 
 @testset "Cell names" begin

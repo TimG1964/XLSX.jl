@@ -77,6 +77,21 @@ julia> xf = XLSX.newxlsx("MySheet")
 """
 newxlsx(sheetname::AbstractString="")::XLSXFile = open_empty_template(sheetname)
 
+function fix_datestamp!(xf::XLSXFile)
+    # Fix datestamp in blank.xlsx. It is specified in the file `docProps/core.xml`.
+    # These two dated dictate the created and modified dates shown in Excel file properties
+    # and in Windows File Explorer.
+    # The values in the file are `2018-05-22T02:41:32Z` and `2018-05-22T02:42:04Z` respectively.
+    # Reset them to current date/time.
+    f = "docProps/core.xml"
+    date_format = Dates.dateformat"yyyy-mm-ddTHH:MM:SSZ"
+    i, j = get_idces(xf.data[f], "cp:coreProperties", "dcterms:created")
+    any(isnothing, [i, j]) || (xf.data[f][i][j][1]=Dates.format(Dates.now(), date_format))
+    i, j = get_idces(xf.data[f], "cp:coreProperties", "dcterms:modified")
+    any(isnothing, [i, j]) || (xf.data[f][i][j][1]=Dates.format(Dates.now()+Dates.Second(1), date_format))
+    return nothing
+end
+
 function open_empty_template(
     sheetname::AbstractString="";
     path::AbstractString=_relocatable_data_path()
@@ -91,6 +106,7 @@ function open_empty_template(
         rename!(xf[1], sheetname)
     end
     xf.source = "blank.xlsx"
+    fix_datestamp!(xf) # blank.xlsx has fixed datestamp in 2018 that should be updated to now.
     return xf
 end
 
