@@ -69,7 +69,8 @@ By default, the worksheet is `Sheet1`. Specify `sheetname` to give the worksheet
 
 Use keyword argument `update_timestamp=false` to prevent timestamps in the file properties from being 
 updated to the current date/time. This ensures bit-for-bit reproducible output when the file is written.
-The default is `update_timestamp=true`.
+The file `Date` will remain as `2018-05-22T02:41:32Z`.
+The default is `update_timestamp=true`, resulting in the `Date` being set to the current time in the new file.
 
 # Examples
 ```julia
