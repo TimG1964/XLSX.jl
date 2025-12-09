@@ -189,6 +189,12 @@ data_directory = joinpath(dirname(pathof(XLSX)), "..", "data")
         @test  t < DateTime(XML.value(xf.data[f][i][j][1]), date_format)
         i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:modified")
         @test  t < DateTime(XML.value(xf.data[f][i][j][1]), date_format)
+
+        xf=XLSX.newxlsx(;update_timestamp=false) # do not update timestamp
+        i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:created") # i, j should always be found unless the `blank.xlsx` file is updated
+        @test  XML.value(xf.data[f][i][j][1]) == "2018-05-22T02:41:32Z"
+        i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:modified")
+        @test  XML.value(xf.data[f][i][j][1]) == "2018-05-22T02:42:04Z"
     end
 
 end
