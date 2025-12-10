@@ -53,6 +53,30 @@ const floatformats = r"""
 %
 """ix
 
+# Regex fragments for canonical tokens
+const DECIMAL      = raw"\.[0#?]"
+const EXPONENT     = raw"[0#?][eE][+-]?[0#?]"
+const FRACTION     = raw"[0#?]/[0#?]"
+const PERCENT      = raw"%"
+const DIGIT        = raw"[0#?]"
+const LITERAL      = raw"\"[^\"]*\""      # quoted text
+const ESCAPE       = raw"\\."
+const ALIGN        = raw"_[^;]"           # underscore + char
+const FILL         = raw"\*."
+const TEXTPLACE    = raw"@"
+const COLOR        = raw"\[[A-Za-z]+\]"
+const CONDITION    = raw"\[[<>=].+?\]"
+const DATETIME     = raw"(d{1,4}|m{1,4}|y{2,4}|h{1,2}|s{1,2}|AM/PM)"
+
+# Combine into a master regex
+const TOKEN = Regex(
+    join([
+        DECIMAL, EXPONENT, FRACTION, PERCENT, DIGIT,
+        LITERAL, ESCAPE, ALIGN, FILL, TEXTPLACE,
+        COLOR, CONDITION, DATETIME
+    ], "|"),"ix"
+)
+
 #
 # -- A bunch of helper functions ...
 #
@@ -165,13 +189,40 @@ function isInDim(ws::Worksheet, dim::CellRange, row, col)
     end
     return true
 end
+
+"""
+    is_valid_format(fmt::AbstractString) -> Bool
+
+Check if `fmt` is a syntactically valid Excel number format string.
+"""
+function is_valid_format(fmt::AbstractString)
+    # Split into up to 4 sections
+    sections = split(fmt, ';')
+    length(sections) > 4 && return false
+
+    for sec in sections
+        pos = 1
+        while pos <= lastindex(sec)
+            m = match(TOKEN, sec, pos)
+            if m === nothing || first(m).offset != pos
+                return false
+            end
+            pos = last(m).offset + last(m).length
+        end
+    end
+    return true
+end
+
 function get_new_formatId(wb::Workbook, format::String)::Int
     if haskey(builtinFormatNames, uppercasefirst(format)) # User specified a format by name
         return builtinFormatNames[format]
+    elseif haskey(builtinFormatNames, uppercasefirst(format)) # User specified a format by ID
+        return Int(format)
     else                                      # user specified a format code
         code = lowercase(format)
         code = remove_formatting(code)
         if !occursin(floatformats, code) && !any(map(x -> occursin(x, code), DATETIME_CODES)) # Only a very weak test!
+#        if !is_valid_format(code)
             throw(XLSXError("Specified format is not a valid numFmt: $format"))
         end
 
