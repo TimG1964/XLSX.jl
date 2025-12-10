@@ -46,14 +46,17 @@ const builtinFormatNames = Dict(
     "Time" => 21,
     "Scientific" => 48
 )
+
+#=
 const floatformats = r"""
 \.[0#?]|
 [0#?]e[+-]?[0#?]|
 [0#?]/[0#?]|
 %
 """ix
+=#
 
-# Regex fragments for canonical tokens
+# Regex fragments for canonical tokens (from Copilot)
 const DECIMAL      = raw"\.[0#?]"
 const EXPONENT     = raw"[0#?][eE][+-]?[0#?]"
 const FRACTION     = raw"[0#?]/[0#?]"
@@ -69,7 +72,7 @@ const CONDITION    = raw"\[[<>=].+?\]"
 const DATETIME     = raw"(d{1,4}|m{1,4}|y{2,4}|h{1,2}|s{1,2}|AM/PM)"
 
 # Combine into a master regex
-const TOKEN = Regex(
+const RGX_FMT = Regex(
     join([
         DECIMAL, EXPONENT, FRACTION, PERCENT, DIGIT,
         LITERAL, ESCAPE, ALIGN, FILL, TEXTPLACE,
@@ -190,6 +193,7 @@ function isInDim(ws::Worksheet, dim::CellRange, row, col)
     return true
 end
 
+#=
 """
     is_valid_format(fmt::AbstractString) -> Bool
 
@@ -212,16 +216,18 @@ function is_valid_format(fmt::AbstractString)
     end
     return true
 end
+=#
 
 function get_new_formatId(wb::Workbook, format::String)::Int
     if haskey(builtinFormatNames, uppercasefirst(format)) # User specified a format by name
         return builtinFormatNames[format]
-    elseif haskey(builtinFormatNames, uppercasefirst(format)) # User specified a format by ID
+    elseif haskey(builtinFormats, format) # User specified a format by ID
         return Int(format)
     else                                      # user specified a format code
         code = lowercase(format)
         code = remove_formatting(code)
-        if !occursin(floatformats, code) && !any(map(x -> occursin(x, code), DATETIME_CODES)) # Only a very weak test!
+        if !occursin(RGX_FMT, code)# && !any(map(x -> occursin(x, code), DATETIME_CODES)) # Only a very weak test!
+        #if !occursin(floatformats, code) && !any(map(x -> occursin(x, code), DATETIME_CODES)) # Only a very weak test!
 #        if !is_valid_format(code)
             throw(XLSXError("Specified format is not a valid numFmt: $format"))
         end
