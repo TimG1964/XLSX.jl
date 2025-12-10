@@ -181,7 +181,7 @@ data_directory = joinpath(dirname(pathof(XLSX)), "..", "data")
     end
 
     @testset "Fix timestamp" begin
-        t=Dates.now(Dates.UTC) - Second(1)
+        t=Dates.now(Dates.UTC) - Dates.Second(1)
         xf=XLSX.newxlsx()
         f = "docProps/core.xml"
         date_format = Dates.dateformat"yyyy-mm-ddTHH:MM:SSZ"
