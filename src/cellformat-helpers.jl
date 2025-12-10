@@ -222,11 +222,11 @@ function get_new_formatId(wb::Workbook, format::String)::Int
     if haskey(builtinFormatNames, uppercasefirst(format)) # User specified a format by name
         return builtinFormatNames[format]
     elseif haskey(builtinFormats, format) # User specified a format by ID
-        return Int(format)
+        return parse(Int64, format)
     else                                      # user specified a format code
         code = lowercase(format)
         code = remove_formatting(code)
-        if !occursin(RGX_FMT, code)# && !any(map(x -> occursin(x, code), DATETIME_CODES)) # Only a very weak test!
+        if !occursin(RGX_FMT, code) # Only a very weak test!
         #if !occursin(floatformats, code) && !any(map(x -> occursin(x, code), DATETIME_CODES)) # Only a very weak test!
 #        if !is_valid_format(code)
             throw(XLSXError("Specified format is not a valid numFmt: $format"))
