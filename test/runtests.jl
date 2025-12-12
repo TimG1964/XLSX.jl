@@ -3092,6 +3092,10 @@ end
         @test XLSX.getFormat(s, "Q7").format == Dict("numFmt" => Dict("numFmtId" => "7", "formatCode" => "\$#,##0.00_);(\$#,##0.00)"))
         XLSX.setFormat(s, "N4,M8:M15,Z25:Z26"; format="#,##0.000")
         @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+        XLSX.setFormat(s, "Sheet1!4:8"; format = "39")
+        @test XLSX.getFormat(s, "Q7").format == Dict("numFmt" => Dict("numFmtId" => "39", "formatCode" => "#,##0.00_);(#,##0.00)"))
+        XLSX.setFormat(s, "Sheet1!4:8"; format = "#,##0")
+        @test XLSX.getFormat(s, "Q7").format == Dict("numFmt" => Dict("formatCode" => "#,##0"))
 
         f = XLSX.newxlsx()
         s = f[1]
