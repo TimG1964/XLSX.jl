@@ -3203,14 +3203,14 @@ end
 
 
         @test XLSX.setFormat(s, "A2"; format="""_-£* #,##0.00_-;-£* #,##0.00_-;_-£* "-"??_-;_-@_-""") == 164
-        @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("formatCode" => "_-£* #,##0.00_-;-£* #,##0.00_-;_-£* \"-\"??_-;_-@_-"))
+        @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "_-£* #,##0.00_-;-£* #,##0.00_-;_-£* \"-\"??_-;_-@_-"))
         @test XLSX.setFormat(s, "A2"; format="_-£* #,##0.00_-;-£* #,##0.00_-;_-£* \"-\"??_-;_-@_-") == 164
-        @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("formatCode" => "_-£* #,##0.00_-;-£* #,##0.00_-;_-£* \"-\"??_-;_-@_-"))
+        @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "_-£* #,##0.00_-;-£* #,##0.00_-;_-£* \"-\"??_-;_-@_-"))
 
-        @test XLSX.setFormat(s, "D2"; format="h:mm AM/PM") == 165
-        @test XLSX.setFormat(s, "A2"; format="# ??/??") == 166
-        @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("formatCode" => "# ??/??"))
-        @test XLSX.getFormat(s, "D2").format == Dict("numFmt" => Dict("formatCode" => "h:mm AM/PM"))
+        @test XLSX.setFormat(s, "D2"; format="h:mm AM/PM") == 18
+        @test XLSX.setFormat(s, "A2"; format="# ??/??") == 13
+        @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("numFmtId" => "13", "formatCode" => "# ??/??"))
+        @test XLSX.getFormat(s, "D2").format == Dict("numFmt" => Dict("numFmtId" => "18", "formatCode" => "h:mm AM/PM"))
 
         @test XLSX.setFormat(s, "E1:E5"; format="General") == -1
         @test XLSX.setFormat(s, "F1:F5"; format="Currency") == -1
@@ -3220,8 +3220,8 @@ end
 
         @test XLSX.setFormat(f, "Sheet1!E1:F5"; format="#,##0.000") == -1
         @test XLSX.setFormat(s, "F1:F5"; format="#,##0.000") == -1
-        @test XLSX.getFormat(s, "E2").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
-        @test XLSX.getFormat(f, "Sheet1!F2").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "E2").format == Dict("numFmt" => Dict("numFmtId" => "165", "formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(f, "Sheet1!F2").format == Dict("numFmt" => Dict("numFmtId" => "165", "formatCode" => "#,##0.000"))
         @test_throws XLSX.XLSXError XLSX.setFormat(s, "Z100"; format="Currency")
         @test_throws XLSX.XLSXError XLSX.setFormat(s, "Sheet1!Z100"; format="Currency")
         @test_throws XLSX.XLSXError XLSX.setFormat(s, "Sheet1!E1:F5,Sheet1!Z100"; format="Currency")
@@ -3232,10 +3232,10 @@ end
 
         XLSX.openxlsx("test.xlsx") do f # Check the updated formats were written correctly
             s = f["Sheet1"]
-            @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("formatCode" => "# ??/??"))
-            @test XLSX.getFormat(s, "D2").format == Dict("numFmt" => Dict("formatCode" => "h:mm AM/PM"))
-            @test XLSX.getFormat(s, "E2").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
-            @test XLSX.getFormat(f, "Sheet1!F2").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+            @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("numFmtId" => "13", "formatCode" => "# ??/??"))
+            @test XLSX.getFormat(s, "D2").format == Dict("numFmt" => Dict("numFmtId" => "18", "formatCode" => "h:mm AM/PM"))
+            @test XLSX.getFormat(s, "E2").format == Dict("numFmt" => Dict("numFmtId" => "165", "formatCode" => "#,##0.000"))
+            @test XLSX.getFormat(f, "Sheet1!F2").format == Dict("numFmt" => Dict("numFmtId" => "165", "formatCode" => "#,##0.000"))
         end
 
         isfile("test.xlsx") && rm("test.xlsx")
@@ -3252,9 +3252,11 @@ end
         XLSX.setFormat(s, "Sheet1!4:8"; format="Currency")
         @test XLSX.getFormat(s, "Q7").format == Dict("numFmt" => Dict("numFmtId" => "7", "formatCode" => "\$#,##0.00_);(\$#,##0.00)"))
         XLSX.setFormat(s, "N4,M8:M15,Z25:Z26"; format="#,##0.000")
-        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
         XLSX.setFormat(s, "Sheet1!4:8"; format = "39")
         @test XLSX.getFormat(s, "Q7").format == Dict("numFmt" => Dict("numFmtId" => "39", "formatCode" => "#,##0.00_);(#,##0.00)"))
+        XLSX.setFormat(s, "Sheet1!4:8"; format = "#,##0")
+        @test XLSX.getFormat(s, "Q7").format == Dict("numFmt" => Dict("numFmtId" => "3", "formatCode" => "#,##0"))
 
         f = XLSX.newxlsx()
         s = f[1]
@@ -3266,11 +3268,11 @@ end
         XLSX.setFormat(s, :, [8, 23, 4]; format="Currency")
         @test XLSX.getFormat(s, "H1").format == Dict("numFmt" => Dict("numFmtId" => "7", "formatCode" => "\$#,##0.00_);(\$#,##0.00)"))
         XLSX.setFormat(s, 25:26, 20:26; format="#,##0.000")
-        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
         XLSX.setFormat(s, 25:26, 15; format="#,##0.0000")
-        @test XLSX.getFormat(s, "O26").format == Dict("numFmt" => Dict("formatCode" => "#,##0.0000"))
+        @test XLSX.getFormat(s, "O26").format == Dict("numFmt" => Dict("numFmtId" => "165", "formatCode" => "#,##0.0000"))
         XLSX.setFormat(s, 21:2:25, [15, 16]; format="#,##0.0")
-        @test XLSX.getFormat(s, "P25").format == Dict("numFmt" => Dict("formatCode" => "#,##0.0"))
+        @test XLSX.getFormat(s, "P25").format == Dict("numFmt" => Dict("numFmtId" => "166", "formatCode" => "#,##0.0"))
 
         f = XLSX.newxlsx()
         s = f[1]
@@ -3282,7 +3284,7 @@ end
         XLSX.setUniformFormat(s, "Sheet1!4:8"; format="Currency")
         @test XLSX.getFormat(s, "Q7").format == Dict("numFmt" => Dict("numFmtId" => "7", "formatCode" => "\$#,##0.00_);(\$#,##0.00)"))
         XLSX.setUniformFormat(s, "N4,M8:M15,Z25:Z26"; format="#,##0.000")
-        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
         @test_throws XLSX.XLSXError XLSX.setUniformFormat(s, "Z100:Z101"; format="Currency")
         @test_throws XLSX.XLSXError XLSX.setUniformFormat(s, "Sheet1!Z100:Z101"; format="Currency")
         @test_throws XLSX.XLSXError XLSX.setUniformFormat(s, "Sheet1!E1:F5,Sheet1!Z100"; format="Currency")
@@ -3297,11 +3299,11 @@ end
         XLSX.setUniformFormat(s, :, [8, 23, 4]; format="Currency")
         @test XLSX.getFormat(s, "H1").format == Dict("numFmt" => Dict("numFmtId" => "7", "formatCode" => "\$#,##0.00_);(\$#,##0.00)"))
         XLSX.setUniformFormat(s, 25:26, 20:26; format="#,##0.000")
-        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
         XLSX.setUniformFormat(s, 25:26, 15; format="#,##0.0000")
-        @test XLSX.getFormat(s, "O26").format == Dict("numFmt" => Dict("formatCode" => "#,##0.0000"))
+        @test XLSX.getFormat(s, "O26").format == Dict("numFmt" => Dict("numFmtId" => "165", "formatCode" => "#,##0.0000"))
         XLSX.setUniformFormat(s, 21:2:25, [15, 16]; format="#,##0.0")
-        @test XLSX.getFormat(s, "P25").format == Dict("numFmt" => Dict("formatCode" => "#,##0.0"))
+        @test XLSX.getFormat(s, "P25").format == Dict("numFmt" => Dict("numFmtId" => "166", "formatCode" => "#,##0.0"))
 
         f = XLSX.newxlsx()
         s = f[1]
@@ -3309,9 +3311,9 @@ end
         XLSX.setUniformFormat(s, :, :; format="Currency")
         @test XLSX.getFormat(f, "Sheet1!B23").format == Dict("numFmt" => Dict("numFmtId" => "7", "formatCode" => "\$#,##0.00_);(\$#,##0.00)"))
         XLSX.setUniformFormat(s, 4:10, :; format="#,##0.000")
-        @test XLSX.getFormat(s, "Q7").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "Q7").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
         XLSX.setUniformFormat(s, [8, 23, 4], 8; format="#,##0.0")
-        @test XLSX.getFormat(s, "H8").format == Dict("numFmt" => Dict("formatCode" => "#,##0.0"))
+        @test XLSX.getFormat(s, "H8").format == Dict("numFmt" => Dict("numFmtId" => "165", "formatCode" => "#,##0.0"))
 
     end
 
@@ -3711,7 +3713,7 @@ end
         @test_throws XLSX.XLSXError XLSX.getFormat(s, 2, 3)
         s[1:3, 1:3] = ""
         XLSX.setFormat(s, "A1"; format="#,##0.000;(#,##0.000)")
-        @test XLSX.getFormat(s, "A1").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000;(#,##0.000)"))
+        @test XLSX.getFormat(s, "A1").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000;(#,##0.000)"))
         XLSX.setFormat(s, 2, 2; format="Currency")
         @test XLSX.getFormat(s, 2, 2).format == Dict("numFmt" => Dict("numFmtId" => "7", "formatCode" => "\$#,##0.00_);(\$#,##0.00)"))
         XLSX.setFormat(s, [2, 3], 1:3; format="LongDate")
@@ -3760,10 +3762,10 @@ end
         @test XLSX.getFill(s, "F30").fill == Dict("patternFill" => Dict("bgrgb" => "FF00FF00", "patternType" => "lightGrid", "fgrgb" => "FF0000FF"))
 
         XLSX.setUniformFormat(s, :; format="#,##0.000")
-        @test XLSX.getFormat(s, "A1").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
-        @test XLSX.getFormat(s, "G10").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
-        @test XLSX.getFormat(s, "M20").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
-        @test XLSX.getFormat(s, "X30").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "A1").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "G10").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "M20").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "X30").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
 
         f = XLSX.open_xlsx_template(joinpath(data_directory, "Borders.xlsx"))
         s = f["Sheet1"]
@@ -3778,6 +3780,7 @@ end
         @test XLSX.getBorder(s, 4, 4).border == Dict("left" => Dict("style" => "dotted", "rgb" => "FF9BCD9B"), "bottom" => Dict("style" => "medium", "rgb" => "FF0000FF"), "right" => Dict("style" => "medium", "rgb" => "FF765000"), "top" => Dict("style" => "thick", "rgb" => "FF230000"), "diagonal" => nothing)
 
     end
+    
     @testset "existing formatting" begin
         f = XLSX.opentemplate(joinpath(data_directory, "customXml.xlsx"))
         s = f[1]
