@@ -46,12 +46,6 @@ const builtinFormatNames = Dict(
     "Time" => 21,
     "Scientific" => 48
 )
-const floatformats = r"""
-\.[0#?]|
-[0#?]e[+-]?[0#?]|
-[0#?]/[0#?]|
-%
-"""ix
 
 #
 # -- A bunch of helper functions ...
@@ -170,9 +164,6 @@ function get_new_formatId(wb::Workbook, format::String)::Int
     if haskey(builtinFormatNames, uppercasefirst(format)) # User specified a format by name
         return builtinFormatNames[format]
     else                                      # user specified a format code
-        code = lowercase(format)
-        code = remove_formatting(code)
-        if !occursin(floatformats, code) && !any(map(x -> occursin(x, code), DATETIME_CODES)) # Only a very weak test!
             throw(XLSXError("Specified format is not a valid numFmt: $format"))
         end
 
