@@ -46,6 +46,38 @@ const builtinFormatNames = Dict(
     "Time" => 21,
     "Scientific" => 48
 )
+# Regex fragments for canonical tokens (from Claude)
+const LITERAL      = raw"\"[^\"]*\""       # quoted text (check first)
+const CONDITION    = raw"\[[<>=].+?\]"
+const COLOR        = raw"\[[A-Za-z]+\]"
+const DATETIME     = raw"(?:AM/PM|A/P|am/pm|a/p|d{1,4}|m{1,5}|y{2,4}|h{1,2}|s{1,2})"
+const DECIMAL      = raw"\.[0#?]+"         
+const EXPONENT     = raw"[0#?]+[eE][+-]?[0#?]+"
+const FRACTION     = raw"\?+/\?+"          # fraction with multiple ?
+const PERCENT      = raw"%"
+const ESCAPE       = raw"\\."              
+const ALIGN        = raw"_."               
+const FILL         = raw"\*."              
+const TEXTPLACE    = raw"@"
+const DIGIT        = raw"[0#?]"            # single digit placeholder
+const COMMA        = raw","                # thousand separator
+const PAREN        = raw"[\(\)]"
+const COLON        = raw":"                # time separator
+const SPACE        = raw" +"               # one or more spaces
+const DASH         = raw"-"                # minus/dash
+const CURRENCY     = raw"[\$£€¥₹]"
+const PLUS         = raw"\+"
+
+# Combine into a master regex - ORDER MATTERS!
+const RGX_FMT = Regex(
+    join([
+        LITERAL, CONDITION, COLOR, DATETIME,
+        DECIMAL, EXPONENT, FRACTION, PERCENT,
+        ESCAPE, ALIGN, FILL, TEXTPLACE,
+        DIGIT, COMMA, COLON, DASH, PAREN, SPACE, 
+        CURRENCY, PLUS
+    ], "|")
+)
 
 #
 # -- A bunch of helper functions ...
@@ -160,10 +192,53 @@ function isInDim(ws::Worksheet, dim::CellRange, row, col)
     end
     return true
 end
+"""
+    is_valid_format(fmt::AbstractString) -> Bool
+
+Check if `fmt` is a syntactically valid Excel number format string.
+"""
+function is_valid_format(fmt::AbstractString) # From Claude
+    # Split into up to 4 sections
+    sections = split(fmt, ';')
+    length(sections) > 4 && return false
+
+    for sec in sections
+        pos = 1
+        while pos <= lastindex(sec)
+            # Use SubString to match from current position
+            m = match(RGX_FMT, SubString(sec, pos))
+
+            # No token matches at this position
+            if m === nothing
+                return false
+            end
+
+            # Token must start at beginning of substring (offset should be 1)
+            if m.offset != 1
+                return false
+            end
+
+            # Zero-length matches are invalid (avoid infinite loops)
+            tok = m.match
+            if isempty(tok)
+                return false
+            end
+
+            # Advance by the number of characters in the match
+            pos = nextind(sec, pos, length(tok))
+        end
+    end
+
+    return true
+end
+
 function get_new_formatId(wb::Workbook, format::String)::Int
     if haskey(builtinFormatNames, uppercasefirst(format)) # User specified a format by name
         return builtinFormatNames[format]
-    else                                      # user specified a format code
+    elseif haskey(builtinFormats, format)                 # User specified a built-in format by ID
+        return parse(Int64, format)
+    else                                                  # user specified a format code
+        if !is_valid_format(format)
             throw(XLSXError("Specified format is not a valid numFmt: $format"))
         end
 
