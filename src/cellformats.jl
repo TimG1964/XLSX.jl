@@ -1669,9 +1669,11 @@ function getFormat(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellFormat
             if length(XML.attributes(current_format)) != 2
                 throw(XLSXError("Wrong number of attributes found for $(XML.tag(current_format)) Expected 2, found $(length(XML.attributes(current_format)))."))
             end
+            atts=Dict{String,String}()
             for (k, v) in XML.attributes(current_format)
-                format_atts[XML.tag(current_format)] = Dict(k => XML.unescape(v))
+                push!(atts, k => XML.unescape(v))
             end
+            format_atts[XML.tag(current_format)] = atts
         else
             ranges = [0:22, 37:40, 45:49]
             if !any(parse(Int, numfmtid) == n for r ∈ ranges for n ∈ r)
@@ -1826,8 +1828,11 @@ function setFormat(sh::Worksheet, cellref::CellRef;
     if isnothing(format)                          # User didn't specify any format so this is a no-op
         return cell_format.numFmtId
     end
-
-    new_formatid = get_new_formatId(wb, format)
+    if format ∈ values(builtinFormats)    # User specified a built-in format code
+        new_formatid = parse(Int, first(k for (k, v) in builtinFormats if v == format))
+    else                                  # find the next available custom format ID
+        new_formatid = get_new_formatId(wb, format)
+    end
 
     if new_formatid == 0
         atts = ["numFmtId"]
