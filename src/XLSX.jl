@@ -23,6 +23,11 @@ export
     Worksheet, sheetnames, sheetcount, hassheet, 
     addsheet!, renamesheet!, copysheet!, deletesheet!, 
     # Cells & data
+    CellRef, row_number, column_number, eachrow, eachtablerow,
+    readdata, getdata, gettable, readtable, readto, 
+    gettransposedtable, readtransposedtable,
+    writetable, writetable!,
+    addDefinedName,
     CellRef, row_number, column_number, eachtablerow,
     readdata, getdata, gettable, readtable, readto, writetable, writetable!,
     addDefinedName, setFormula,
