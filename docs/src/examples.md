@@ -1,6 +1,38 @@
-
-
 # Examples
+
+## Applying formulas
+
+Using the widely used [Iris data set](https://archive.ics.uci.edu/dataset/53/iris):
+
+```julia
+
+using CSV
+using DataFrames
+using XLSX
+
+f = CSV.read("iris.csv", XLSXFile)
+f[1][1, 6]="year" # arbitrary data column for aggregation purposes
+f[1][2:3:151, 6]=1993
+f[1][3:3:151, 6]=1994
+f[1][4:3:151, 6]=1995
+XLSX.setFormula(f[1], "J3", "=GROUPBY(E1:E151,A1:D151,AVERAGE,3,1)")
+f[1]["P3"] = "versicolor"
+XLSX.setFormula(f[1], "P4", "=VLOOKUP(P3,J3#,3,FALSE)")
+XLSX.setFormula(f[1], "J11", "=PIVOTBY(E1:E151,F1:F151,A1:D151,COUNT,3,1,,0)")
+XLSX.setFormula(f[1], "J21", "_xlfn.GROUPBY(E1:E151,A1:D151,_xlfn.LAMBDA(_xlpm.x,AVERAGE(_xlpm.x)),3,1)"; raw=true)
+XLSX.setFormula(f[1], "H2", "=A2:A151+B2:B151+C2:C151+D2:D151")
+
+f[1]["H1"] = "Using ranges in simple formula:"
+f[1]["J2"] = "Using GROUPBY:"
+f[1]["P2"] = "Using VLOOKUP with a spill range:"
+f[1]["J10"] = "Using PIVOTBY:"
+f[1]["J20"] = "Using LAMBDA with 'raw=true':"
+setFont(f[1], "H1,J2,P2,J10,J20"; size=12, bold=true)
+setAlignment(f[1], "H1"; horizontal="center")
+
+```
+
+![image|320x500](./images/iris.png)
 
 ## Applying cell format to an existing table
 
@@ -41,11 +73,11 @@ XLSX.writexlsx("mytable_unformatted.xlsx", xf, overwrite=true)
 
 By default, this table will look like this in Excel:
 
-![image|320x500](../images/unformatted-table.png)
+![image|320x500](./images/unformatted-table.png)
 
 We can apply some formatting choices to change the table's appearance:
 
-![image|320x500](../images/formatted-table.png)
+![image|320x500](./images/formatted-table.png)
 
 This is achieved with the following code:
 

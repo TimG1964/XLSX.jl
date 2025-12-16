@@ -58,13 +58,15 @@ A default formula simply storing the formula string.
 """
 mutable struct Formula <: AbstractFormula
     formula::String
+    type::Union{String,Nothing} # usually nothing but has value "array" for dynamic array functions.
+    ref::Union{String,Nothing} # usually nothing but refers to the "spill" range for dynamic array functions.
     unhandled::Union{Dict{String,String},Nothing}
 end
 function Formula()
-    return Formula("", nothing)
+    return Formula("", nothing, nothing, nothing)
 end
 function Formula(s::String)
-    return Formula(s, nothing)
+    return Formula(s, nothing, nothing, nothing)
 end
 
 
@@ -86,9 +88,16 @@ mutable struct ReferencedFormula <: AbstractFormula
     unhandled::Union{Dict{String,String},Nothing}
 end
 
-struct CellFormula <: AbstractFormula
+struct CellFormula# <: AbstractFormula
     value::T where T<:AbstractFormula
     styleid::AbstractCellDataFormat
+end
+
+# Keeps track of external references in formulas.
+struct ExternalRef
+    index::Int          # the [n] index in the formula
+    sheet::String       # sheet name
+    full::String        # raw "[n]Sheet!$A$1" formula element
 end
 
 
@@ -156,6 +165,7 @@ mutable struct Cell <: AbstractCell
     datatype::String
     style::String
     value::String
+    meta::String
     formula::AbstractFormula
 end
 
@@ -303,15 +313,14 @@ Implementations: SheetRowStreamIterator, WorksheetCache.
 abstract type SheetRowIterator end
 
 mutable struct SheetRowStreamIteratorState
-    itr::XML.LazyNode # Worksheet being processed
-    itr_state::Union{Nothing, XML.LazyNode} # Worksheet state
-    row::Int # number of current row in the worksheet. It´s set to 0 in the start state.
-    ht::Union{Float64, Nothing} # row height
+    next_rownode::Union{Nothing, XML.LazyNode} # Worksheet row being processed
+    rowcells::Dict{Int,Cell}
+    lock::ReentrantLock
 end
 
 mutable struct WorksheetCacheIteratorState
     row_from_last_iteration::Int
-    full_cache::Bool # is the cache full (true) or does it need filling (false)
+#    full_cache::Bool # is the cache full (true) or does it need filling (false)
 end
 
 mutable struct WorksheetCache{I<:SheetRowIterator} <: SheetRowIterator
@@ -349,7 +358,7 @@ mutable struct Worksheet
     dimension::Union{Nothing, CellRange}
     is_hidden::Bool
     cache::Union{WorksheetCache, Nothing}
-    unhandled_attributes::Union{Nothing,Dict{Int,Dict{String,String}}}
+    unhandled_attributes::Union{Nothing,Dict{Int,Dict{String,String}}} # row => attributes(name=>value)
     sst_count::Int # number of cells containing a shared string
 
     function Worksheet(package::MSOfficePackage, sheetId::Int, relationship_id::String, name::String, dimension::Union{Nothing, CellRange}, is_hidden::Bool)
@@ -377,7 +386,7 @@ struct Sst
     formatted::String
     idx::Int
 end
-const DefinedNameValueTypes = Union{SheetCellRef, SheetCellRange, NonContiguousRange, Int, Float64, String, Missing}
+const DefinedNameValueTypes = Union{SheetCellRef, SheetCellRange, NonContiguousRange, CellValueType}#Int, Float64, String, Missing}
 const DefinedNameRangeTypes = Union{SheetCellRef, SheetCellRange, NonContiguousRange}
 
 struct DefinedNameValue
@@ -405,10 +414,10 @@ end
 """
 `XLSXFile` represents a reference to an Excel file.
 
-It is created by using [`XLSX.readxlsx`](@ref) or [`XLSX.openxlsx`](@ref) 
-or [`XLSX.opentemplate`](@ref) or [`XLSX.newxlsx`](@ref).
+It is created by using [`XLSX.readxlsx`](@ref), [`XLSX.openxlsx`](@ref), 
+[`XLSX.opentemplate`](@ref) or [`XLSX.newxlsx`](@ref).
 
-From a `XLSXFile` you can navigate to a `XLSX.Worksheet` reference
+From an `XLSXFile` you can navigate to an `XLSX.Worksheet` reference
 as shown in the example below.
 
 # Example
@@ -428,20 +437,45 @@ mutable struct XLSXFile <: MSOfficePackage
     workbook::Workbook
     relationships::Vector{Relationship} # contains package level relationships
     is_writable::Bool # indicates whether this XLSX file can be edited
+    uuid_rng::Random.Xoshiro # rng used to generate uuids for this file
 
     function XLSXFile(source::Union{AbstractString, IO}, use_cache::Bool, is_writable::Bool)
         check_for_xlsx_file_format(source)
         if use_cache || (source isa IO)
             io = ZipArchives.ZipReader(read(source))
         else
-            io = ZipArchives.ZipReader(FileArray(abspath(source)))
+            io = ZipArchives.ZipReader(Mmap.mmap(abspath(source)))
         end
-        xl = new(source, use_cache, io, Dict{String, Bool}(), Dict{String, XML.Node}(), Dict{String, Vector{UInt8}}(), EmptyWorkbook(), Vector{Relationship}(), is_writable)
+        xl = new(source, use_cache, io, Dict{String, Bool}(), Dict{String, XML.Node}(), Dict{String, Vector{UInt8}}(), EmptyWorkbook(), Vector{Relationship}(), is_writable, Random.Xoshiro(2468))
         xl.workbook.package = xl
         return xl
     end
 end
 
+"""
+    XLSXFile(table)
+
+Take a `Tables.jl` compatible table and create a new `XLSXFile` object for writing.
+Can act as a sink for functions such as `CSV.read`.
+
+# Example
+
+```julia
+julia> using CSV, XLSX
+
+julia> xf = CSV.read("iris.csv", XLSXFile)
+XLSXFile("blank.xlsx") containing 1 Worksheet
+            sheetname size          range
+-------------------------------------------------
+               Sheet1 151x5         A1:E151
+```
+
+"""
+function XLSXFile(table)
+    xf=newxlsx()
+    writetable!(xf[1], table)
+    return xf
+end
 struct ReadFile
     node::Union{Nothing,XML.Node}
     raw::Union{Nothing,XML.Raw}
@@ -552,4 +586,16 @@ struct FileArray <: AbstractVector{UInt8}
     filename::String
     offset::Int64
     len::Int64
+end
+
+mutable struct Locked{T}
+    value::T
+    lock::ReentrantLock
+    Locked(x::T) where {T} = new{T}(x, ReentrantLock())
+end
+
+function withlock(f, obj::Locked)
+    lock(obj.lock) do
+        f(obj.value)
+    end
 end

@@ -5,21 +5,76 @@
 @inline get_workbook(xl::XLSXFile)::Workbook = xl.workbook
 
 const ZIP_FILE_HEADER = [0x50, 0x4b, 0x03, 0x04]
-const XLS_FILE_HEADER = [0xd0, 0xcf, 0x11, 0xe0]
+const XLS_FILE_HEADER = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1] #[0xd0, 0xcf, 0x11, 0xe0]
+
+function is_encrypted_xlsx(io::IO) # This function suggested by Claude AI
+
+    # Read sector size from header (bytes 0x1E-0x1F)
+    seek(io, 0x1E)
+    sector_shift = read(io, UInt16)
+    sector_size = 1 << sector_shift
+    
+    # Read the directory entries starting position (bytes 0x30-0x33)
+    seek(io, 0x30)
+    first_dir_sector = read(io, UInt32)
+    
+    # Calculate directory position
+    dir_offset = 512 + first_dir_sector * sector_size
+    
+    # Read directory entries and look for encryption markers
+    seek(io, dir_offset)
+    
+    # Check first several directory entries (each is 128 bytes)
+    for i in 1:20
+        entry_start = position(io)
+        
+        # Read name (64 bytes, UTF-16LE)
+        name_bytes = read(io, 64)
+        # Read name length in bytes (includes null terminator)
+        name_length = read(io, UInt16)
+        
+        if name_length > 2 && name_length <= 64
+            # Convert UTF-16LE to String
+            # Take pairs of bytes and convert to Char
+            chars = Char[]
+            for j in 1:2:min(name_length-2, 64)
+                if j+1 <= length(name_bytes)
+                    code_point = UInt16(name_bytes[j]) | (UInt16(name_bytes[j+1]) << 8)
+                    if code_point != 0
+                        push!(chars, Char(code_point))
+                    end
+                end
+            end
+            name = String(chars)
+            
+            if occursin("EncryptionInfo", name) || occursin("EncryptedPackage", name)
+                return true
+            end
+        end
+        
+        # Move to next directory entry (128 bytes total)
+        seek(io, entry_start + 128)
+    end
+    return false
+end
 
 function check_for_xlsx_file_format(source::IO, label::AbstractString="input")
     local header::Vector{UInt8}
 
     mark(source)
-    header = Base.read(source, 4)
+    header = Base.read(source, 8)
     reset(source)
 
-    if header == ZIP_FILE_HEADER # valid Zip file header
+    if header[1:4] == ZIP_FILE_HEADER # valid Zip file header
         return
-    elseif header == XLS_FILE_HEADER # old XLS file
-        throw(XLSXError("$label looks like an old XLS file (not XLSX). This package does not support XLS file format."))
+    elseif header == XLS_FILE_HEADER # either an old XLS file or a password protected XLSX file
+        if is_encrypted_xlsx(source) # Issue #251
+            throw(XLSXError("`$label` looks like a password protected XLSX file. This package does not support password protected files."))
+        else
+            throw(XLSXError("`$label` looks like an old XLS file (not XLSX). This package does not support XLS file format."))
+        end
     else
-        throw(XLSXError("$label is not a valid XLSX file."))
+        throw(XLSXError("`$label` is not a valid XLSX file."))
     end
 end
 
@@ -67,6 +122,11 @@ Return an empty, writable `XLSXFile` with 1 worksheet for editing and
 subsequent saving to a file with [XLSX.writexlsx](@ref).
 By default, the worksheet is `Sheet1`. Specify `sheetname` to give the worksheet a different name.
 
+Use keyword argument `update_timestamp=false` to prevent timestamps in the file properties from being 
+updated to the current date/time. This ensures bit-for-bit reproducible output when the file is written.
+The file `Date` will remain as `2018-05-22T02:41:32Z`.
+The default is `update_timestamp=true`, resulting in the `Date` being set to the current time in the new file.
+
 # Examples
 ```julia
 julia> xf = XLSX.newxlsx()
@@ -75,11 +135,28 @@ julia> xf = XLSX.newxlsx("MySheet")
 ```
 
 """
-newxlsx(sheetname::AbstractString="")::XLSXFile = open_empty_template(sheetname)
+newxlsx(sheetname::AbstractString=""; update_timestamp::Bool=true)::XLSXFile = open_empty_template(sheetname; update_timestamp)
+
+function fix_datestamp!(xf::XLSXFile)
+    # Fix datestamp in blank.xlsx. It is specified in the file `docProps/core.xml`.
+    # These two dates dictate the created and modified dates shown in Excel file properties
+    # and in Windows File Explorer.
+    # The values in the file are `2018-05-22T02:41:32Z` and `2018-05-22T02:42:04Z` respectively.
+    # Reset them to current date/time.
+    f = "docProps/core.xml"
+    time_now=Dates.now(Dates.UTC)
+    date_format = Dates.dateformat"yyyy-mm-ddTHH:MM:SSZ"
+    i, j = get_idces(xf.data[f], "cp:coreProperties", "dcterms:created")
+    any(isnothing, [i, j]) || (xf.data[f][i][j][1]=Dates.format(time_now, date_format))
+    i, j = get_idces(xf.data[f], "cp:coreProperties", "dcterms:modified")
+    any(isnothing, [i, j]) || (xf.data[f][i][j][1]=Dates.format(time_now+Dates.Second(1), date_format))
+    return nothing
+end
 
 function open_empty_template(
     sheetname::AbstractString="";
-    path::AbstractString=_relocatable_data_path()
+    path::AbstractString=_relocatable_data_path(),
+    update_timestamp::Bool=true
 )::XLSXFile
 
     empty_excel_template = joinpath(path, "blank.xlsx")
@@ -88,9 +165,10 @@ function open_empty_template(
     xf[1].cache.is_full = true
 
     if sheetname != ""
-        rename!(xf[1], sheetname)
+        renamesheet!(xf[1], sheetname)
     end
     xf.source = "blank.xlsx"
+    update_timestamp && fix_datestamp!(xf) # blank.xlsx has fixed datestamp in 2018 that should be updated to now.
     return xf
 end
 
@@ -133,9 +211,11 @@ The `mode` argument controls how the file is opened. The following modes are all
 
 !!! warning
 
-    The `rw` mode is known occasionally to produce some data loss. See [#159](https://github.com/felipenoris/XLSX.jl/issues/159). (Now fixed!)
-
-    Simple data should work fine. Users are advised to use this feature with caution when working with charts.
+    Using do-block syntax in "rw" mode will overwrite the file you read in with the modified data when the do block ends.
+    Care is needed to ensure data are not inadvertantly overwritten, especially if the xlsx file contains any elements 
+    that `XLSX.jl` cannot process (such as charts, pivot tables, etc), but that would otherwise be preserved if not 
+    overwritten. You may avoid this risk by choosing to open files in "rw" mode without using do-block syntax, in which 
+    case it becomes necessary explicitly to write the `XLSXFile` out again, providing the option to write to another file name.
 
 # Arguments
 
@@ -281,6 +361,9 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
     parse_relationships!(xf)
     parse_workbook!(xf)
 
+    # need to remove calcChain.xml from [Content_Types].xml since file is never loaded
+    _write && remove_calcChain!(xf)
+
     load_files!(xf; pass=2) # multi-threaded file load
 
     for sheet in get_workbook(xf).sheets
@@ -407,7 +490,6 @@ function parse_workbook!(xf::XLSXFile)
                 end
             end
 
-
             break
         end
     end
@@ -508,6 +590,30 @@ function parse_workbook!(xf::XLSXFile)
     nothing
 end
 
+# Returns a Dict mapping Workbook <externalReferences>: index => relationship id.
+function get_wb_ext_refs(xf::XLSXFile)
+    ext_refs = Dict{Int, String}()
+    xroot = xmlroot(xf, "xl/workbook.xml")
+    i, j = get_idces(xroot, "workbook", "externalReferences")
+    if !isnothing(j)
+        for (i, ref) in enumerate(XML.children(xroot[i][j]))
+            ext_refs[i] = ref["r:id"]
+        end
+    end
+    return ext_refs
+end
+
+# delete Override PartName=calcChain since this was never loaded (#31)
+function remove_calcChain!(xf::XLSXFile)
+    xf.data["[Content_Types].xml"]
+    ctype_root = xmlroot(xf, "[Content_Types].xml")[end]
+    for (i, c) in enumerate(XML.children(ctype_root))
+        if c.tag == "Override" && haskey(c.attributes, "PartName") && c.attributes["PartName"]=="/xl/calcChain.xml"
+            deleteat!(ctype_root.children, i)
+            break
+        end
+    end
+end
 # Lists internal files from the XLSX package.
 @inline filenames(xl::XLSXFile) = keys(xl.files)
 
@@ -525,6 +631,10 @@ end
 
 function strip_bom_and_lf!(bytes::Vector{UInt8})
     # Issue 243 - Need to remove BOM characters that precede the XML declaration.
+    # Note: If an Excel file containing a BOM is opened in Excel itself and 
+    # subsequently saved, Excel will strip the BOM out. This means the test for 
+    # this issue will stop testing the fix if the file "BOM - issue243.xlsx" is 
+    # opened in Excel because the offending BOM will have been removed.
     bom = UInt8[0xEF, 0xBB, 0xBF]
     l = length(bytes)
     if l >= 3 && bytes[1:3] == bom
@@ -600,7 +710,7 @@ function load_files!(xf::XLSXFile; pass::Int)
     (pass < 1 || pass > 2) && throw(XLSXError("Unknown pass to read files."))
     wb=get_workbook(xf)
 
-    read_files = Channel{ReadFile}(1 << 20)
+    read_files = Channel{ReadFile}(1 << 10)
     files = stream_files(xf; pass)
 
     consumer = @async begin
@@ -645,6 +755,7 @@ function load_files!(xf::XLSXFile; pass::Int)
             end
         end
     end
+    
     close(read_files)
 
     wait(consumer)
@@ -853,7 +964,7 @@ and `stop_in_row_function` (if specified).
 `keep_empty_rows` is only checked once the first and last row of the table 
 have been determined, to see whether to keep or drop empty rows between the 
 first and the last row.
-The default behavior is ``keep_empty_rows=false`.
+The default behavior is `keep_empty_rows=false`.
 
 # Example
 
@@ -863,7 +974,7 @@ julia> using DataFrames, XLSX
 julia> df = DataFrame(XLSX.readtable("myfile.xlsx", "mysheet"))
 ```
 
-See also: [`XLSX.gettable`](@ref).
+See also: [`XLSX.gettable`](@ref), [`XLSX.readto`](@ref).
 """
 function readtable(source::Union{AbstractString,IO}; first_row::Union{Nothing,Int}=nothing, column_labels=nothing, header::Bool=true, infer_eltypes::Bool=true, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Nothing,Function}=nothing, enable_cache::Bool=true, keep_empty_rows::Bool=false, normalizenames::Bool=false)
     c = openxlsx(source; enable_cache) do xf
@@ -911,19 +1022,22 @@ end
         [normalizenames]
     ) -> sink
 
-Read and parse an Excel worksheet, materializing directly using 
-the `sink` function (e.g. `DataFrame` or `StructArray`).
+Read and parse an Excel worksheet, materializing directly using the 
+`sink` function, which can be any `Tables.jl`-compatible function 
+(e.g. `DataFrame`, `StructArray` or `TypedTable``).
 
 Takes the same keyword arguments as [`XLSX.readtable`](@ref) 
 
 # Example
 
 ```julia
-julia> using DataFrames, StructArrays, XLSX
+julia> using DataFrames, StructArrays, TypedTables, XLSX
 
 julia> df = XLSX.readto("myfile.xlsx", DataFrame)
 
-julia> df = XLSX.readto("myfile.xlsx", StructArray)
+julia> sa = XLSX.readto("myfile.xlsx", StructArray)
+
+julia> tt = XLSX.readto("myfile.xlsx", Table) # from TypedTables.jl
 
 julia> df = XLSX.readto("myfile.xlsx", "mysheet", DataFrame)
 
@@ -934,19 +1048,126 @@ See also: [`XLSX.gettable`](@ref).
 """
 function readto(source::Union{AbstractString,IO}, sheet::Union{AbstractString,Int}, range::AbstractString, sink=nothing; kw...)
     if sink === nothing
-        throw(XLSXError("provide a valid sink argument, like `using DataFrames; XLSX.readdf(source, sheet, columns, DataFrame)`"))
+        throw(XLSXError("provide a valid sink argument, like `using DataFrames; XLSX.readto(source, sheet, columns, DataFrame)`"))
     end
     return Tables.CopiedColumns(readtable(source, sheet, range; kw...)) |> sink
 end
 function readto(source::Union{AbstractString,IO}, sheet::Union{AbstractString,Int}, sink=nothing; kw...)
     if sink === nothing
-        throw(XLSXError("provide a valid sink argument, like `using DataFrames; XLSX.readdf(source, sheet, DataFrame)`"))
+        throw(XLSXError("provide a valid sink argument, like `using DataFrames; XLSX.readto(source, sheet, DataFrame)`"))
     end
     return Tables.CopiedColumns(readtable(source, sheet; kw...)) |> sink
 end
 function readto(source::Union{AbstractString,IO}, sink=nothing; kw...)
     if sink === nothing
-        throw(XLSXError("provide a valid sink argument, like `using DataFrames; XLSX.readdf(source, sheet, DataFrame)`"))
+        throw(XLSXError("provide a valid sink argument, like `using DataFrames; XLSX.readto(source, DataFrame)`"))
     end
     return Tables.CopiedColumns(readtable(source; kw...)) |> sink
+end
+
+#---------------------------------------------------------------------------------------------- Transposed Table
+
+"""
+    readtransposedtable(
+        source,
+        [sheet,
+        [rows]];
+        [first_column],
+        [column_labels],
+        [header],
+        [normalizenames]
+    ) -> DataTable
+
+Read a transposed table from an Excel file, `source`, in which data are arranged in 
+rows rather than columns in a worksheet. For example:
+```
+Category    "A", "B", "C", "D"
+variable 1  10,  20,  30,  40
+variable 2  15,  25,  35,  40
+variable 3  20,  30,  40,  50
+```
+Returns data from a worksheet as a struct `XLSX.DataTable` which
+can be passed directly to any function that accepts `Tables.jl` data.
+(e.g. `DataFrame` from package `DataFrames.jl`).
+
+If `sheet` is not given, the first sheet in the `XLSXFile` will be used.
+
+Use the `rows` argument to specify which worksheeet rows to include.
+For example, `"2:7"` will select rows 2 to 7 (inclusive).
+If `rows` is not given, the algorithm will find the first sequence
+of consecutive non-empty cells. If `rows` includes leading or trailing 
+rows that are completely empty, these rows will be omitted from the 
+returned table. In any case, the table will be truncated at the first 
+and last non-empty rows, even if this range is smaller than `rows`. 
+A valid `sheet` must be specified when specifying `rows`.
+
+Use `first_column` to indicate the first column of the table. May be given 
+as a column number or as a string, so that `first_column="E"` and
+`first_column=5` will both look for a table starting at column `5` ("E").
+Any leading completely empty columns will be ignored, including 
+the `first_column`. If `first_column` is not given, the algorithm will 
+look for the first non-empty column in the spreadsheet.
+
+`header` is a `Bool` indicating if the first row is a header.
+If `header=true` and `column_labels` is not specified, the column labels
+for the table will be read from the first column of the table.
+If `header=false` and `column_labels` is not specified, the algorithm
+will generate column labels. The default value is `header=true`.
+
+Use `column_labels` as a vector of symbols to specify names for the 
+header of the table. If `header=true` and `column_labels` is also given, 
+column_labels will be preferred and the first column of the table will 
+be ignored.
+
+Use `normalizenames=true` to normalize column names to valid Julia identifiers. 
+The default is `normalizenames=false`.
+
+# Examples
+
+```julia
+julia> using DataFrames, XLSX, PrettyTables
+
+julia> DataFrame(readtransposedtable("HTable.xlsx", "Example"))
+4×4 DataFrame
+ Row │ Category  Variable 1  Variable 2  Variable 3 
+     │ String    Int64       Int64       Int64
+─────┼──────────────────────────────────────────────
+   1 │ A                 10          15          20
+   2 │ B                 20          25          30
+   3 │ C                 30          35          40
+   4 │ D                 40          40          50
+
+julia> PrettyTable(readtransposedtable("HTable.xlsx", "Multiple", "2:7"; first_column=13))
+┌──────┬───────┬───────┬───────┬──────────┬────────────┐
+│ date │ name1 │ name2 │ name3 │    name4 │      name5 │
+├──────┼───────┼───────┼───────┼──────────┼────────────┤
+│ 1840 │  12.4 │ 0.045 │  true │ 10:22:00 │      Hello │
+│ 1841 │  12.6 │ 0.046 │  true │ 10:23:00 │ 2025-12-19 │
+│ 1842 │  12.8 │ 0.047 │ false │ 10:24:00 │          3 │
+│ 1843 │  13.0 │ 0.048 │  true │ 10:25:00 │       3.33 │
+│ 1844 │  13.2 │ 0.049 │ false │ 10:26:00 │      Hello │
+│ 1845 │  13.4 │  0.05 │  true │ 10:27:00 │ 2025-12-19 │
+│ 1846 │  13.6 │ 0.051 │  true │ 10:28:00 │          3 │
+│ 1847 │  13.8 │ 0.052 │  true │ 10:29:00 │       3.33 │
+│ 1848 │  14.0 │ 0.053 │ false │ 10:30:00 │       true │
+└──────┴───────┴───────┴───────┴──────────┴────────────┘
+```
+
+See also: [`XLSX.gettransposedtable`](@ref), [`XLSX.readtable`](@ref).
+"""
+function readtransposedtable(filename::AbstractString, sheetname::AbstractString, rows::AbstractString; first_column=nothing, column_labels=nothing, header::Bool=true, normalizenames::Bool=false)
+    xf = XLSX.readxlsx(filename)
+    XLSX.hassheet(xf, sheetname) || throw(XLSX.XLSXError("Sheet $sheetname not found in file $filename"))
+    return gettransposedtable(xf[sheetname], rows; first_column, column_labels, header, normalizenames)
+end
+function readtransposedtable(filename::AbstractString, sheetname::AbstractString; first_column=nothing, column_labels=nothing, header::Bool=true, normalizenames::Bool=false)
+    xf = XLSX.readxlsx(filename)
+    XLSX.hassheet(xf, sheetname) || throw(XLSX.XLSXError("Sheet $sheetname not found in file $filename"))
+    dim=XLSX.get_dimension(xf[sheetname])
+    return gettransposedtable(xf[sheetname], "$(dim.start.row_number):$(dim.stop.row_number)"; first_column, column_labels, header, normalizenames)
+end
+function readtransposedtable(filename::AbstractString; first_column=nothing, column_labels=nothing, header::Bool=true, normalizenames::Bool=false)
+    xf = XLSX.readxlsx(filename)
+    dim=XLSX.get_dimension(xf[1])
+    return gettransposedtable(xf[1], "$(dim.start.row_number):$(dim.stop.row_number)"; first_column, column_labels, header, normalizenames)
 end

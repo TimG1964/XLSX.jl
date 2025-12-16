@@ -12,12 +12,13 @@
 @inline relative_column_position(c::Cell, rng::ColumnRange) = relative_column_position(c.ref, rng)
 @inline relative_column_position(c::EmptyCell, rng::ColumnRange) = relative_column_position(c.ref, rng)
 
-Base.:(==)(c1::Cell, c2::Cell) = c1.ref == c2.ref && c1.datatype == c2.datatype && c1.style == c2.style && c1.value == c2.value && c1.formula == c2.formula
-Base.hash(c::Cell) = hash(c.ref) + hash(c.datatype) + hash(c.style) + hash(c.value) + hash(c.formula)
+Base.:(==)(c1::Cell, c2::Cell) = c1.ref == c2.ref && c1.datatype == c2.datatype && c1.style == c2.style && c1.value == c2.value && c1.meta == c2.meta && c1.formula == c2.formula
+Base.hash(c::Cell) = hash(c.ref) + hash(c.datatype) + hash(c.style) + hash(c.value) + hash(c.meta) + hash(c.formula)
 
 Base.:(==)(c1::EmptyCell, c2::EmptyCell) = c1.ref == c2.ref
 Base.hash(c::EmptyCell) = hash(c.ref) + 10
 
+#=
 function find_t_node_recursively(n::XML.LazyNode) :: Union{Nothing, XML.LazyNode}
     if XML.tag(n) == "t"
         return n
@@ -32,11 +33,13 @@ function find_t_node_recursively(n::XML.LazyNode) :: Union{Nothing, XML.LazyNode
 
     return nothing
 end
-
-function Cell(c::XML.LazyNode)
+=#
+function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothing}=nothing) :: Union{Cell, EmptyCell}
     # c (Cell) element is defined at section 18.3.1.4
     # t (Cell Data Type) is an enumeration representing the cell's data type. The possible values for this attribute are defined by the ST_CellType simple type (§18.18.11).
     # s (Style Index) is the index of this cell's style. Style records are stored in the Styles Part.
+
+    wb=get_workbook(ws)
 
     if XML.tag(c) != "c"
         throw(XLSXError("`Cell` Expects a `c` (cell) XML node."))
@@ -60,6 +63,13 @@ function Cell(c::XML.LazyNode)
         s = ""
     end
 
+    # Cell metadata flag (for dynamicArrays)
+    if haskey(a, "cm")
+        m = a["cm"]
+    else
+        m = ""
+    end
+
     # iterate v and f elements
     local v::String = ""
     local f::AbstractFormula = Formula()
@@ -68,21 +78,18 @@ function Cell(c::XML.LazyNode)
 
     for c_child_element in XML.children(c)
 
-        if t == "inlineStr"
+        if t == "inlineStr" # Convert to sharedString
             if XML.tag(c_child_element) == "is"
-                t_node = find_t_node_recursively(c_child_element)
-                if t_node !== nothing
-                    c = XML.children(t_node)
-                    if length(c) == 0
-                        v = ""
-                    elseif length(c) == 1
-                        v= XML.value(c[1])
-                    else
-                        throw(XLSXError("Too amny children in `t` node. Expected >=1, found: $(length(c))"))
-                    end
+                uft = unformatted_text(c_child_element)
+                if uft=="" # Convert empty inlineStrings to missing. Can't have empty sharedStrings
+                    v=""
+                    t=""
+                else
+                    ft=("<si>\n  "*join(XML.write.(XML.children(c_child_element)), "\n")*"\n</si>")
+                    t = "s"
+                    v = string(add_shared_string!(wb, uft, ft; mylock))
                 end
             end
-
         else
             if XML.tag(c_child_element) == "v"
                 if found_v # we should have only one v element
@@ -103,7 +110,7 @@ function Cell(c::XML.LazyNode)
             end
         end
     end
-    return Cell(ref, t, s, v, f)
+    return Cell(ref, t, s, v, m, f)
 end
 
 function parse_formula_from_element(c_child_element) :: AbstractFormula
@@ -132,31 +139,42 @@ function parse_formula_from_element(c_child_element) :: AbstractFormula
             end
         end
     end
-    if !isnothing(a)
-        if haskey(a, "t") && a["t"] == "shared"
-            haskey(a, "si") || throw(XLSXError("Expected shared formula to have an index. `si` attribute is missing: $c_child_element"))
-            if haskey(a, "ref")
-                return ReferencedFormula(
-                    formula_string,
-                    parse(Int, a["si"]),
-                    a["ref"],
-                    length(unhandled_attributes) > 0 ? unhandled_attributes : nothing,
-                )
-            else
-                return FormulaReference(
-                    parse(Int, a["si"]),
-                    length(unhandled_attributes) > 0 ? unhandled_attributes : nothing,
-                )
+    is_array=false
+    let ref = nothing
+        if !isnothing(a)
+            if haskey(a, "t")
+                if a["t"] == "shared"
+                    haskey(a, "si") || throw(XLSXError("Expected shared formula to have an index. `si` attribute is missing: $c_child_element"))
+                    if haskey(a, "ref")
+                        return ReferencedFormula(
+                            formula_string,
+                            parse(Int, a["si"]),
+                            a["ref"],
+                            length(unhandled_attributes) > 0 ? unhandled_attributes : nothing,
+                        )
+                    else
+                        return FormulaReference(
+                            parse(Int, a["si"]),
+                            length(unhandled_attributes) > 0 ? unhandled_attributes : nothing,
+                        )
+                    end
+                elseif a["t"] == "array"
+                    is_array=true
+                    ref = haskey(a,"ref") ? a["ref"] : nothing
+                end
             end
         end
+        return Formula(
+            formula_string,
+            is_array ? "array" : nothing,
+            ref,
+            length(unhandled_attributes) > 0 ? unhandled_attributes : nothing)
     end
-
-    return Formula(formula_string, length(unhandled_attributes) > 0 ? unhandled_attributes : nothing)
 end
 
 # Constructor with simple formula string for backward compatibility
-function Cell(ref::CellRef, datatype::String, style::String, value::String, formula::String)
-    return Cell(ref, datatype, style, value, Formula(formula))
+function Cell(ref::CellRef, datatype::String, style::String, value::String, meta::String, formula::String)
+    return Cell(ref, datatype, style, value, meta, Formula(formula))
 end
 
 @inline getdata(ws::Worksheet, empty::EmptyCell) = missing
@@ -182,21 +200,12 @@ function getdata(ws::Worksheet, cell::Cell) :: CellValueType
 
     if iserror(cell)
         return missing
+#        return cell.value
     end
 
     ecv=isempty(cell.value)
     ecd=isempty(cell.datatype)
     ecs=isempty(cell.style)
-
-    if cell.datatype == "inlineStr"
-
-        if ecv
-            return missing
-        else
-            return cell.value
-        end
-
-    end
 
     if cell.datatype == "s"
 
@@ -337,4 +346,108 @@ end
 
 function datetime_to_excel_value(dt::Dates.DateTime, _is_date_1904::Bool) :: Float64
     return date_to_excel_value(Dates.Date(dt), _is_date_1904) + time_to_excel_value(Dates.Time(dt))
+end
+
+# Extract cells from a <row> LazyNode and push them (in place) into a Dict(column -> Cell)
+function get_rowcells!(rowcells::Dict{Int, Cell}, row::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothing}=nothing)
+
+#=
+    # threaded cell extraction causes hugely more lock conflicts for low cellchunk size.
+    # may be worthwhile if many columns (hundreds+), with a cellchunk size > ~10 or ~20, but this is unverified.
+
+    # debug
+    # @assert row.tag == "row" "Not a row node"
+    cellchunk=8 # bigger chunks, fewer lock conflicts but columns are generally relatively few.
+    sst_count=0
+    d=row.depth
+
+    row_cellnodes = Channel{Vector{XML.LazyNode}}(1 << 10)
+    row_cells = Channel{Vector{XLSX.Cell}}(1 << 10)
+
+    # consumer task
+    consumer = @async begin
+        for cells in row_cells  
+            for cell in cells      
+                sst_count += cell.datatype == "s" ? 1 : 0
+                rowcells[column_number(cell)] = cell
+            end
+        end
+    end
+
+    # Feed row_cellnodes
+    cellnodes = Vector{XML.LazyNode}(undef, cellchunk)
+    pos=0
+    cellnode=XML.next(row)
+    while !isnothing(cellnode) && cellnode.depth > d
+        if cellnode.tag == "c" # This is a cell
+            pos += 1
+            cellnodes[pos] = cellnode
+        end
+        if pos >= cellchunk
+            put!(row_cellnodes, copy(cellnodes))
+            pos=0
+        end
+        cellnode = XML.next(cellnode)
+    end
+    if pos>0 # handle last incomplete chunk
+        put!(row_cellnodes, cellnodes[1:pos])
+    end
+    close(row_cellnodes)
+
+    # Producer tasks
+    mylock = ReentrantLock() # lock for thread-safe access to shared string table in case of inlineStrings
+    @sync for _ in 1:Threads.nthreads()
+        Threads.@spawn begin
+            chunk = Vector{XLSX.Cell}(undef, cellchunk)
+            for cns in row_cellnodes
+                cell_count=0
+                for cn in cns
+                    cell_count += 1
+                    chunk[cell_count] = Cell(cn, ws; mylock)
+                    if cell_count >= cellchunk
+                        put!(row_cells, copy(chunk))
+                        cell_count=0
+                    end
+                end
+                if cell_count > 0 # handle last incomplete chunk
+                    put!(row_cells, chunk[1:cell_count])
+                end
+            end
+        end
+    end
+    close(row_cells)
+
+    wait(consumer)  # ensure consumer is done
+
+    if !isnothing(cellnode) && cellnode.tag == "row" # have reached the end of last row, beginning of next
+        return cellnode, sst_count
+    else                                             # no more rows
+        return nothing, sst_count
+    end
+=#
+    # unthreaded cell extraction is (exceedingly marginally) slower but no lock conflicts introduced.
+
+    # debug
+    # @assert row.tag == "row" "Not a row node"
+
+    sst_count=0
+
+    d=row.depth
+
+    cellnode=XML.next(row)
+
+    while !isnothing(cellnode) && cellnode.depth > d
+        if cellnode.tag == "c" # This is a cell
+            cell = Cell(cellnode, ws; mylock) # construct an XLSX.Cell from an XML.LazyNode
+            sst_count += cell.datatype == "s" ? 1 : 0
+            rowcells[column_number(cell)] = cell
+        end
+        cellnode = XML.next(cellnode)
+    end
+    if !isnothing(cellnode) && cellnode.tag == "row" # have reached the beginning of next row
+        return cellnode, sst_count
+    else                                             # no more rows
+        return nothing, sst_count
+    end
+
 end

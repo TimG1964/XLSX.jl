@@ -2,28 +2,35 @@
 module XLSX
 
 import Artifacts
+import Base.convert
+import Base.Threads
+import Colors
 import Dates
+import Mmap
 import Printf.@printf
-import ZipArchives
-import XML
+import Random
 import Tables
 import Unicode
-import Colors
-import Base.convert
 import UUIDs
-import Mmap
-import Base.Threads
+import XML
+import ZipArchives
 
 import PrecompileTools as PCT    # this is a small dependency.
 
 export
     # Files and worksheets
     XLSXFile, readxlsx, openxlsx, opentemplate, newxlsx, writexlsx, savexlsx,
-    Worksheet, sheetnames, sheetcount, hassheet, rename!, addsheet!, copysheet!, deletesheet!, 
+    Worksheet, sheetnames, sheetcount, hassheet, 
+    addsheet!, renamesheet!, copysheet!, deletesheet!, 
     # Cells & data
     CellRef, row_number, column_number, eachrow, eachtablerow,
-    readdata, getdata, gettable, readtable, readto, writetable, writetable!,
+    readdata, getdata, gettable, readtable, readto, 
+    gettransposedtable, readtransposedtable,
+    writetable, writetable!,
     addDefinedName,
+    CellRef, row_number, column_number, eachtablerow,
+    readdata, getdata, gettable, readtable, readto, writetable, writetable!,
+    addDefinedName, setFormula,
     # Formats
     setFormat, setFont, setBorder, setFill, setAlignment,
     setUniformFormat, setUniformFont, setUniformBorder, setUniformFill, setUniformAlignment, setUniformStyle,
@@ -53,7 +60,6 @@ include("cellformats.jl")
 include("conditional-format-helpers.jl") # must load before conditional-formats.jl
 include("conditional-formats.jl")
 include("write.jl")
-include("fileArray.jl")
 
 PCT.@setup_workload begin
     # Putting some things in `@setup_workload` instead of `@compile_workload` can reduce the size of the

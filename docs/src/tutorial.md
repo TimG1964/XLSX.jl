@@ -253,7 +253,7 @@ Opening a file in `write` mode with `XLSX.openxlsx` will open a new (blank) Exce
 ```julia
 XLSX.openxlsx("my_new_file.xlsx", mode="w") do xf
     sheet = xf[1]
-    XLSX.rename!(sheet, "new_sheet")
+    XLSX.renamesheet!(sheet, "new_sheet")
     sheet["A1"] = "this"
     sheet["A2"] = "is a"
     sheet["A3"] = "new file"
@@ -284,9 +284,7 @@ end
 
 !!! warning
 
-    The `read-write` mode is known occasionally to produce some data loss. See [#159](https://github.com/felipenoris/XLSX.jl/issues/159) (now fixed!)
-
-    Simple data should work fine. Users are advised to use this feature with caution when working with charts.
+    Using do-block syntax in "rw" mode will overwrite the file you read in with the modified data when the do block ends. Care is needed to ensure data are not inadvertantly overwritten, especially if the xlsx file contains any elements that `XLSX.jl` cannot process (such as charts, pivot tables, etc), but that would otherwise be preserved if not overwritten. You may avoid this risk by choosing to open files in "rw" mode without using do-block syntax, in which case it becomes necessary explicitly to write the `XLSXFile` out again, providing the option to write to another file name.
 
 ### Export Tabular Data from a Worksheet
 
@@ -388,7 +386,7 @@ XLSX.openxlsx("report.xlsx", mode="w") do xf
         
         if i == firstindex(sheet_names)
             sheet = xf[1]
-            XLSX.rename!(sheet, sheet_name)
+            XLSX.renamesheet!(sheet, sheet_name)
             XLSX.writetable!(sheet, df)
         else
             sheet = XLSX.addsheet!(xf, sheet_name)

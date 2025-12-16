@@ -6,6 +6,7 @@
 
 ```@docs
 XLSX.XLSXFile
+XLSXFile(::Any)
 XLSX.readxlsx
 XLSX.openxlsx
 XLSX.opentemplate
@@ -28,11 +29,14 @@ XLSX.row_number
 XLSX.column_number
 XLSX.eachrow
 XLSX.readtable
-XLSX.readdf
+XLSX.readto
 XLSX.gettable
 XLSX.eachtablerow
+XLSX.readtransposedtable
+XLSX.gettransposedtable
 XLSX.writetable
 XLSX.writetable!
+XLSX.setFormula
 XLSX.setConditionalFormat
 XLSX.setFormat
 XLSX.setUniformFormat
