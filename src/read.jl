@@ -1042,3 +1042,109 @@ function readto(source::Union{AbstractString,IO}, sink=nothing; kw...)
     return Tables.CopiedColumns(readtable(source; kw...)) |> sink
 end
 
+#---------------------------------------------------------------------------------------------- Transposed Table
+
+"""
+    readtransposedtable(
+        source,
+        [sheet,
+        [rows]];
+        [first_column],
+        [column_labels],
+        [header],
+        [normalizenames]
+    ) -> DataTable
+
+Read a transposed table from an Excel file, `source`, in which data are arranged in 
+rows rather than columns in a worksheet. For example:
+```
+Category    "A", "B", "C", "D"
+variable 1  10,  20,  30,  40
+variable 2  15,  25,  35,  40
+variable 3  20,  30,  40,  50
+```
+Returns data from a worksheet as a struct `XLSX.DataTable` which
+can be passed directly to any function that accepts `Tables.jl` data.
+(e.g. `DataFrame` from package `DataFrames.jl`).
+
+If `sheet` is not given, the first sheet in the `XLSXFile` will be used.
+
+Use the `rows` argument to specify which worksheeet rows to include.
+For example, `"2:7"` will select rows 2 to 7 (inclusive).
+If `rows` is not given, the algorithm will find the first sequence
+of consecutive non-empty cells. If `rows` includes leading or trailing 
+rows that are completely empty, these rows will be omitted from the 
+returned table. In any case, the table will be truncated at the first 
+and last non-empty rows, even if this range is smaller than `rows`. 
+A valid `sheet` must be specified when specifying `rows`.
+
+Use `first_column` to indicate the first column of the table. May be given 
+as a column number or as a string, so that `first_column="E"` and
+`first_column=5` will both look for a table starting at column `5` ("E").
+Any leading completely empty columns will be ignored, including 
+the `first_column`. If `first_column` is not given, the algorithm will 
+look for the first non-empty column in the spreadsheet.
+
+`header` is a `Bool` indicating if the first row is a header.
+If `header=true` and `column_labels` is not specified, the column labels
+for the table will be read from the first column of the table.
+If `header=false` and `column_labels` is not specified, the algorithm
+will generate column labels. The default value is `header=true`.
+
+Use `column_labels` as a vector of symbols to specify names for the 
+header of the table. If `header=true` and `column_labels` is also given, 
+column_labels will be preferred and the first column of the table will 
+be ignored.
+
+Use `normalizenames=true` to normalize column names to valid Julia identifiers. 
+The default is `normalizenames=false`.
+
+# Examples
+
+```julia
+julia> using DataFrames, XLSX, PrettyTables
+
+julia> DataFrame(readtransposedtable("HTable.xlsx", "Example"))
+4×4 DataFrame
+ Row │ Category  Variable 1  Variable 2  Variable 3 
+     │ String    Int64       Int64       Int64
+─────┼──────────────────────────────────────────────
+   1 │ A                 10          15          20
+   2 │ B                 20          25          30
+   3 │ C                 30          35          40
+   4 │ D                 40          40          50
+
+julia> PrettyTable(readtransposedtable("HTable.xlsx", "Multiple", "2:7"; first_column=13))
+┌──────┬───────┬───────┬───────┬──────────┬────────────┐
+│ date │ name1 │ name2 │ name3 │    name4 │      name5 │
+├──────┼───────┼───────┼───────┼──────────┼────────────┤
+│ 1840 │  12.4 │ 0.045 │  true │ 10:22:00 │      Hello │
+│ 1841 │  12.6 │ 0.046 │  true │ 10:23:00 │ 2025-12-19 │
+│ 1842 │  12.8 │ 0.047 │ false │ 10:24:00 │          3 │
+│ 1843 │  13.0 │ 0.048 │  true │ 10:25:00 │       3.33 │
+│ 1844 │  13.2 │ 0.049 │ false │ 10:26:00 │      Hello │
+│ 1845 │  13.4 │  0.05 │  true │ 10:27:00 │ 2025-12-19 │
+│ 1846 │  13.6 │ 0.051 │  true │ 10:28:00 │          3 │
+│ 1847 │  13.8 │ 0.052 │  true │ 10:29:00 │       3.33 │
+│ 1848 │  14.0 │ 0.053 │ false │ 10:30:00 │       true │
+└──────┴───────┴───────┴───────┴──────────┴────────────┘
+```
+
+See also: [`XLSX.gettransposedtable`](@ref), [`XLSX.readtable`](@ref).
+"""
+function readtransposedtable(filename::AbstractString, sheetname::AbstractString, rows::AbstractString; first_column=nothing, column_labels=nothing, header::Bool=true, normalizenames::Bool=false)
+    xf = XLSX.readxlsx(filename)
+    XLSX.hassheet(xf, sheetname) || throw(XLSX.XLSXError("Sheet $sheetname not found in file $filename"))
+    return gettransposedtable(xf[sheetname], rows; first_column, column_labels, header, normalizenames)
+end
+function readtransposedtable(filename::AbstractString, sheetname::AbstractString; first_column=nothing, column_labels=nothing, header::Bool=true, normalizenames::Bool=false)
+    xf = XLSX.readxlsx(filename)
+    XLSX.hassheet(xf, sheetname) || throw(XLSX.XLSXError("Sheet $sheetname not found in file $filename"))
+    dim=XLSX.get_dimension(xf[sheetname])
+    return gettransposedtable(xf[sheetname], "$(dim.start.row_number):$(dim.stop.row_number)"; first_column, column_labels, header, normalizenames)
+end
+function readtransposedtable(filename::AbstractString; first_column=nothing, column_labels=nothing, header::Bool=true, normalizenames::Bool=false)
+    xf = XLSX.readxlsx(filename)
+    dim=XLSX.get_dimension(xf[1])
+    return gettransposedtable(xf[1], "$(dim.start.row_number):$(dim.stop.row_number)"; first_column, column_labels, header, normalizenames)
+end

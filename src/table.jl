@@ -667,3 +667,238 @@ function gettable(sheet::Worksheet; first_row::Union{Nothing, Int}=nothing, colu
     itr = eachtablerow(sheet; first_row, column_labels, header, stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames)
     return gettable(itr; infer_eltypes)
 end
+
+#---------------------------------------------------------------------------------------------------------------------------- Transposed Tables
+
+function transposetable(m::Matrix; header::Bool=true) # transpose a matrix and extract to vector of vectors (data columns) and vector of column names
+    
+    v = collect(PermutedDimsArray(m, (2, 1))) # transpose rows and columns
+
+    #identify leading and trailing missing rows
+    stop_row = axes(v, 1)[end]
+    start_row = 0
+    for i in 1:stop_row
+        if all(ismissing, v[i, :])
+            if start_row != 0
+                stop_row = i-1
+                break
+            end
+        else
+            start_row==0 && (start_row=i)
+        end
+    end
+
+    #identify leading and trailing missing columns
+    stop_col = axes(v, 2)[end]
+    start_col = 0
+    for i in 1:stop_col
+        if all(ismissing, v[:, i])
+            if start_col != 0
+                stop_col = i-1
+                break
+            end
+        else
+            start_col==0 && (start_col=i)
+        end
+    end
+
+    if header # separate the header row if present
+        cols = v[start_row+1:stop_row, start_col:stop_col]
+        headers = (v[start_row, start_col:stop_col])
+    else
+        cols = v[start_row:stop_row, start_col:stop_col]
+        headers = []
+    end
+    data = [] # convert matrix to vector of vectors and infer types
+    for c in axes(cols, 2) 
+        T = infer_eltype(cols[:, c])
+        if T !== Any
+            d = convert(Vector{T}, cols[:, c])
+        else
+            d = cols[:, c]
+        end
+        push!(data, d)                                                                                                                                                                      
+    end
+    return data, headers
+end
+
+"""
+    gettransposedtable(
+        sheet,
+        [rows];
+        [first_column],
+        [column_labels],
+        [header],
+        [normalizenames]
+    ) -> DataTable
+
+Read a transposed table from a worksheet, in which data are arranged in 
+rows rather than columns. For example:
+```
+Category    "A", "B", "C", "D"
+variable 1  10,  20,  30,  40
+variable 2  15,  25,  35,  40
+variable 3  20,  30,  40,  50
+```
+Returns data from a worksheet as a struct `XLSX.DataTable` which
+can be passed directly to any function that accepts `Tables.jl` data.
+(e.g. `DataFrame` from package `DataFrames.jl`).
+
+Use the `rows` argument to specify which worksheeet rows to include.
+For example, `"2:7"` will select rows 2 to 7 (inclusive).
+If `rows` is not given, the algorithm will find the first sequence
+of consecutive non-empty cells. If `rows` includes leading or trailing 
+rows that are completely empty, these rows will be omitted from the 
+returned table. In any case, the table will be truncated at the first 
+and last non-empty rows, even if this range is smaller than `rows`. 
+A valid `sheet` must be specified when specifying `rows`.
+
+Use `first_column` to indicate the first column of the table. May be given 
+as a column number or as a string, so that `first_column="E"` and
+`first_column=5` will both look for a table starting at column `5` ("E").
+Any leading completely empty columns will be ignored, including 
+the `first_column`. If `first_column` is not given, the algorithm will 
+look for the first non-empty column in the spreadsheet.
+
+`header` is a `Bool` indicating if the first row is a header.
+If `header=true` and `column_labels` is not specified, the column labels
+for the table will be read from the first column of the table.
+If `header=false` and `column_labels` is not specified, the algorithm
+will generate column labels. The default value is `header=true`.
+
+Use `column_labels` as a vector of symbols to specify names for the 
+header of the table. If `header=true` and `column_labels` is also given, 
+column_labels will be preferred and the first column of the table will 
+be ignored.
+
+Use `normalizenames=true` to normalize column names to valid Julia identifiers. 
+The default is `normalizenames=false`
+
+# Examples
+
+```julia
+julia> using DataFrames, PrettyTables, XLSX
+
+julia> xf = XLSX.openxlsx("HTable.xlsx")
+XLSXFile("HTable.xlsx") containing 4 Worksheets
+            sheetname size          range
+-------------------------------------------------
+               Origin 6x10          B2:K7
+               Offset 8x12          A1:L8
+             Multiple 8x22          A1:V8
+              Example 4x5           B2:F5
+              
+julia> DataFrame(XLSX.gettransposedtable(xf["Example"]))
+4×4 DataFrame
+ Row │ Category  Variable 1  Variable 2  Variable 3 
+     │ String    Int64       Int64       Int64
+─────┼──────────────────────────────────────────────
+   1 │ A                 10          15          20
+   2 │ B                 20          25          30
+   3 │ C                 30          35          40
+   4 │ D                 40          40          50
+
+julia> PrettyTable(XLSX.gettransposedtable(xf["Example"]; normalizenames=true))
+┌──────────┬────────────┬────────────┬────────────┐
+│ Category │ Variable_1 │ Variable_2 │ Variable_3 │
+├──────────┼────────────┼────────────┼────────────┤
+│        A │         10 │         15 │         20 │
+│        B │         20 │         25 │         30 │
+│        C │         30 │         35 │         40 │
+│        D │         40 │         40 │         50 │
+└──────────┴────────────┴────────────┴────────────┘
+
+julia> DataFrame(gettransposedtable(xf["Example"]; header=false))
+5×4 DataFrame
+ Row │ Col_1     Col_2       Col_3       Col_4      
+     │ String    Any         Any         Any
+─────┼──────────────────────────────────────────────
+   1 │ Category  Variable 1  Variable 2  Variable 3
+   2 │ A         10          15          20
+   3 │ B         20          25          30
+   4 │ C         30          35          40
+   5 │ D         40          40          50
+
+```
+The worksheet `Multiple` contains two tables side by side, separated by an empty column.
+Only the first table is read by default. Read the second table by additionally specifying 
+the `first_column`.
+
+```julia
+julia> DataFrame(XLSX.gettransposedtable(xf["Multiple"], "2:7"))
+9×6 DataFrame
+ Row │ Year   Col A  Col B  Col C  Col D    Col E      
+     │ Int64  Int64  Int64  Int64  Float64  Any
+─────┼─────────────────────────────────────────────────
+   1 │  1940      1     10    100      0.1  Hello
+   2 │  1950      2     20    200      0.2  2025-12-19
+   3 │  1960      3     30    300      0.3  3
+   4 │  1970      4     40    400      0.4  3.33
+   5 │  1980      5     50    500      0.5  Hello
+   6 │  1990      6     60    600      0.6  2025-12-19
+   7 │  2000      7     70    700      0.7  3
+   8 │  2010      8     80    800      0.8  3.33
+   9 │  2020      9     90    900      0.9  true
+
+julia> DataFrame(XLSX.gettransposedtable(xf["Multiple"], "2:7"; first_column="M"))
+9×6 DataFrame
+ Row │ date   name1    name2    name3  name4     name5      
+     │ Int64  Float64  Float64  Bool   Time      Any
+─────┼──────────────────────────────────────────────────────
+   1 │  1840     12.4    0.045   true  10:22:00  Hello
+   2 │  1841     12.6    0.046   true  10:23:00  2025-12-19
+   3 │  1842     12.8    0.047  false  10:24:00  3
+   4 │  1843     13.0    0.048   true  10:25:00  3.33
+   5 │  1844     13.2    0.049  false  10:26:00  Hello
+   6 │  1845     13.4    0.05    true  10:27:00  2025-12-19
+   7 │  1846     13.6    0.051   true  10:28:00  3
+   8 │  1847     13.8    0.052   true  10:29:00  3.33
+   9 │  1848     14.0    0.053  false  10:30:00  true
+
+```
+
+See also: [`XLSX.readtransposedtable`](@ref), [`XLSX.readtable`](@ref).
+"""
+function gettransposedtable(sheet::Worksheet, rows::Union{AbstractString,Nothing}=nothing; first_column=nothing, column_labels=nothing, header::Bool=true, normalizenames::Bool=false)
+    dim = get_dimension(sheet)
+    if isnothing(rows)
+        rng=RowRange(dim.start.row_number, dim.stop.row_number) 
+    else
+        is_valid_row_range(rows) || throw(XLSXError("Invalid row range: $rows"))
+        rng=RowRange(rows)
+    end
+    if rng.start < dim.start.row_number || rng.stop > dim.stop.row_number
+        throw(XLSXError("Row range $rows extends outside sheet dimension ($(dim.start.row_number):$(dim.stop.row_number))"))
+    end
+    if first_column isa String
+        first_column=decode_column_number(first_column)
+    elseif first_column !== nothing && !(first_column isa Int)
+        throw(XLSXError("first_column must be an integer column number or a column string like \"A\", \"B\", etc."))
+    end
+    if isnothing(first_column)
+        first_column=0
+    else
+        if (first_column > dim.stop.column_number || first_column < dim.start.column_number)
+            throw(XLSXError("First column $first_column ($(encode_column_number(first_column))) is outside of sheet dimension ($(dim.start.column_number):$(dim.stop.column_number))"))
+        end
+    end
+    start = CellRef(rng.start, max(dim.start.column_number, first_column))
+    stop = CellRef(rng.stop, dim.stop.column_number)
+    m = sheet[CellRange(start, stop)]
+    data, h = transposetable(m; header)
+    if isnothing(column_labels)
+        if header==true
+            column_labels=h
+        else
+            column_labels=["Col_$(i)" for i in 1:length(data)]
+        end
+    end
+    if normalizenames
+        column_labels = Symbol.(normalizename.(column_labels))
+    else
+        column_labels = Symbol.(column_labels)
+    end
+    check_table_data_dimension(data)
+
+    return DataTable(data, column_labels)
+end

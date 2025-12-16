@@ -1503,6 +1503,108 @@ end
             check_test_data(data, test_data)
         end
     end
+
+    @testset "Transposed Tables" begin
+        test_data = Vector{Any}(undef, 6)
+        test_data[1] = [1940,1950,1960,1970,1980,1990,2000,2010,2020]
+        test_data[2] = [1,2,3,4,5,6,7,8,9]
+        test_data[3] = [10,20,30,40,50,60,70,80,90]
+        test_data[4] = [100,200,300,400,500,600,700,800,900]
+        test_data[5] = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]
+        test_data[6] = Any["Hello",Date(2025,12,19),3,3.33,"Hello",Date(2025,12,19),3,3.33,true]
+
+        f = XLSX.openxlsx(joinpath(data_directory, "HTable.xlsx"), mode="rw")
+        dtable = XLSX.gettransposedtable(f[1])
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Year", "Col A", "Col B", "Col C", "Col D", "Col E"])
+        dtable = XLSX.gettransposedtable(f[1]; normalizenames=true)
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Year", "Col_A", "Col_B", "Col_C", "Col_D", "Col_E"])
+        check_test_data(data, test_data)
+
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"))
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Year", "Col A", "Col B", "Col C", "Col D", "Col E"])
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"); normalizenames=true)
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Year", "Col_A", "Col_B", "Col_C", "Col_D", "Col_E"])
+        check_test_data(data, test_data)
+
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Offset", "2:7")
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Year", "Col A", "Col B", "Col C", "Col D", "Col E"])
+        check_test_data(data, test_data)
+
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7")
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Year", "Col A", "Col B", "Col C", "Col D", "Col E"])
+        check_test_data(data, test_data)
+
+        @test_throws XLSX.XLSXError XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:9") # Beyond worksheet dimension
+        @test_throws XLSX.XLSXError XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "b:d") # Invalid row range
+        test_data[1] = [1840, 1841, 1842, 1843, 1844, 1845, 1846, 1847, 1848]
+        test_data[2] = [12.4, 12.6, 12.8, 13.0, 13.2, 13.4, 13.6, 13.8, 14.0]
+        test_data[3] = [0.045, 0.046, 0.047, 0.048, 0.049, 0.050, 0.051, 0.052, 0.053]
+        test_data[4] = [true,true,false,true,false,true, true, true,false]
+        test_data[5] = [Time(10,22), Time(10,23), Time(10,24), Time(10,25), Time(10,26), Time(10,27), Time(10,28), Time(10,29), Time(10,30)]
+        test_data[6] = Any["Hello",Date(2025,12,19),3,3.33,"Hello",Date(2025,12,19),3,3.33,true]
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7"; first_column="M")
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["date", "name1", "name2", "name3", "name4", "name5"])
+        check_test_data(data, test_data)
+
+        @test_throws XLSX.XLSXError XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7"; first_column=4.2) # Invalid first_column
+        @test_throws XLSX.XLSXError XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7"; first_column=200) # first_column beyond worksheet dimension
+        
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7"; first_column=13, column_labels = ["year", "Col_2", "Col_3", "Col_4", "Col_5", "Col_6"])
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["year", "Col_2", "Col_3", "Col_4", "Col_5", "Col_6"])
+        check_test_data(data, test_data)
+
+        @test_throws XLSX.XLSXError XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7"; first_column=13, column_labels = ["Col_2", "Col_3", "Col_4", "Col_5", "Col_6"]) # Missing one label
+        
+        test_data[1] = Any["date", 1840, 1841, 1842, 1843, 1844, 1845, 1846, 1847, 1848]
+        test_data[2] = Any["name1", 12.4, 12.6, 12.8, 13.0, 13.2, 13.4, 13.6, 13.8, 14.0]
+        test_data[3] = Any["name2", 0.045, 0.046, 0.047, 0.048, 0.049, 0.050, 0.051, 0.052, 0.053]
+        test_data[4] = Any["name3", true,true,false,true,false,true, true, true,false]
+        test_data[5] = Any["name4", Time(10,22), Time(10,23), Time(10,24), Time(10,25), Time(10,26), Time(10,27), Time(10,28), Time(10,29), Time(10,30)]
+        test_data[6] = Any["name5", "Hello",Date(2025,12,19),3,3.33,"Hello",Date(2025,12,19),3,3.33,true]
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7"; first_column=13, header=false, column_labels = ["year", "Col2", "Col3", "Col4", "Col5", "Col6"])
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["year", "Col2", "Col3", "Col4", "Col5", "Col6"])
+
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7"; first_column=13, header=false)
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Col_1", "Col_2", "Col_3", "Col_4", "Col_5", "Col_6"])
+
+        test_data = Vector{Any}(undef, 4)
+        test_data[1] = ["A", "B", "C", "D"]
+        test_data[2] = [10, 20, 30, 40]
+        test_data[3] = [15, 25, 35, 40]
+        test_data[4] = [20, 30, 40, 50]
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Example")
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Category", "Variable 1", "Variable 2", "Variable 3"])
+        check_test_data(data, test_data)
+
+        XLSX.addsheet!(f, "ExpandedDim")
+        s=f["ExpandedDim"]
+        s["B2"] = "Category"
+        s["B3"] = "Variable 1"
+        s["B4"] = "Variable 2"
+        s["B5"] = "Variable 3"
+        s["C2"] = test_data[1]
+        s["C3"] = test_data[2]
+        s["C4"] = test_data[3]
+        s["C5"] = test_data[4]
+        s["M10"] = "ExtraData"
+        @test XLSX.get_dimension(s) == XLSX.CellRange("A1:M10")
+        dtable = XLSX.gettransposedtable(s)
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Category", "Variable 1", "Variable 2", "Variable 3"])
+        check_test_data(data, test_data)
+
+    end
 end
 
 @testset "Helper functions" begin

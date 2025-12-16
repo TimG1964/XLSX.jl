@@ -29,9 +29,11 @@ XLSX.row_number
 XLSX.column_number
 XLSX.eachrow
 XLSX.readtable
-XLSX.readdf
+XLSX.readto
 XLSX.gettable
 XLSX.eachtablerow
+XLSX.readtransposedtable
+XLSX.gettransposedtable
 XLSX.writetable
 XLSX.writetable!
 XLSX.setFormula
