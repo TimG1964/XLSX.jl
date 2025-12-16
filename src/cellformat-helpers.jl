@@ -47,15 +47,6 @@ const builtinFormatNames = Dict(
     "Scientific" => 48
 )
 
-#=
-const floatformats = r"""
-\.[0#?]|
-[0#?]e[+-]?[0#?]|
-[0#?]/[0#?]|
-%
-"""ix
-=#
-
 # Regex fragments for canonical tokens (from Claude)
 const LITERAL      = raw"\"[^\"]*\""       # quoted text (check first)
 const CONDITION    = raw"\[[<>=].+?\]"
