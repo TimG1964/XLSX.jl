@@ -6,6 +6,7 @@
 
 ```@docs
 XLSX.XLSXFile
+XLSXFile(::Any)
 XLSX.readxlsx
 XLSX.openxlsx
 XLSX.opentemplate
@@ -35,6 +36,7 @@ XLSX.readtransposedtable
 XLSX.gettransposedtable
 XLSX.writetable
 XLSX.writetable!
+XLSX.setFormula
 XLSX.setConditionalFormat
 XLSX.setFormat
 XLSX.setUniformFormat

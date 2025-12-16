@@ -4,6 +4,7 @@
 
 ```@docs
 XLSX.XLSXFile
+XLSXFile(::Any)
 XLSX.readxlsx
 XLSX.openxlsx
 XLSX.opentemplate
@@ -19,8 +20,8 @@ XLSX.Worksheet
 XLSX.sheetnames
 XLSX.sheetcount
 XLSX.hassheet
-XLSX.rename!
 XLSX.addsheet!
+XLSX.renamesheet!
 XLSX.copysheet!
 XLSX.deletesheet!
 ```

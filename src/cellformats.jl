@@ -41,8 +41,7 @@ The `color` attribute can be defined using 8-digit rgb values.
 - The next two digits give the blue component.
 So, FF000000 means a fully opaque black color.
 
-Alternatively, you can use the name of any named color from Colors.jl
-([here](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/)).
+Alternatively, you can use the name of any named color from [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/).
 
 Font attributes cannot be set for `EmptyCell`s. Set a cell value first.
 If a cell range or column range includes any `EmptyCell`s, they will be
@@ -317,7 +316,7 @@ Here's a list of some common tags and their purposes (thanks to Copilot!):
 - `charset`  : Specifies the character set code (e.g., 204 for Cyrillic).
 - `scheme`   : Specifies whether the font is part of the major or minor theme.
 
-Excel defines colours in several ways. Get font will return the colour in any of these
+Excel defines colours in several ways. `getFont` will return the colour in any of these
 e.g. `"color" => ("theme" => "1")`.
 
 # Examples:
@@ -550,8 +549,7 @@ Allowed values for `style` are:
 The `color` attribute can be set by specifying an 8-digit hexadecimal value 
 in the format "FFRRGGBB". The transparency ("FF") is ignored by Excel but 
 is required.
-Alternatively, you can use the name of any named color from Colors.jl
-([here](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/)).
+Alternatively, you can use the name of any named color from [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/).
 
 Valid values for the `direction` keyword (for diagonal borders) are:
 - `up`   : diagonal border runs bottom-left to top-right
@@ -1107,8 +1105,7 @@ Here is a list of the available `pattern` values (thanks to Copilot!):
 
 The two colors may be set by specifying an 8-digit hexadecimal value for the `fgColor`
 and/or `bgColor` keywords. 
-Alternatively, you can use the name of any named color from Colors.jl
-([here](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/)).
+Alternatively, you can use the name of any named color from [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/).
 
 Setting only one or two of the attributes leaves the other attribute(s) unchanged 
 for that cell's fill.
@@ -1676,9 +1673,11 @@ function getFormat(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellFormat
             if length(XML.attributes(current_format)) != 2
                 throw(XLSXError("Wrong number of attributes found for $(XML.tag(current_format)) Expected 2, found $(length(XML.attributes(current_format)))."))
             end
+            atts=Dict{String,String}()
             for (k, v) in XML.attributes(current_format)
-                format_atts[XML.tag(current_format)] = Dict(k => XML.unescape(v))
+                push!(atts, k => XML.unescape(v))
             end
+            format_atts[XML.tag(current_format)] = atts
         else
             ranges = [0:22, 37:40, 45:49]
             if !any(parse(Int, numfmtid) == n for r ∈ ranges for n ∈ r)
@@ -1720,11 +1719,46 @@ The format keyword can define some built-in formats by name:
 
 If `Currency` is specified, Excel will use the appropriate local currency symbol.
 
-Alternatively, `format` can be used to specify any custom format directly. 
+Alternatively, the format keyword can define built-in formats by their internal 
+format ID (as a string). The following built-in format IDs are supported:
+* "0" => "General"
+* "1" => "0"
+* "2" => "0.00",
+* "3" => "#,##0"
+* "4" => "#,##0.00"
+* "5" => "\$#,##0_);(\$#,##0)"
+* "6" => "\$#,##0_);Red"
+* "7" => "\$#,##0.00_);(\$#,##0.00)"
+* "8" => "\$#,##0.00_);Red"
+* "9" => "0%"
+* "10" => "0.00%"
+* "11" => "0.00E+00"
+* "12" => "# ?/?"
+* "13" => "# ??/??"
+* "14" => "m/d/yyyy"
+* "15" => "d-mmm-yy"
+* "16" => "d-mmm"
+* "17" => "mmm-yy"
+* "18" => "h:mm AM/PM"
+* "19" => "h:mm:ss AM/PM"
+* "20" => "h:mm"
+* "21" => "h:mm:ss"
+* "22" => "m/d/yyyy h:mm"
+* "37" => "#,##0_);(#,##0)"
+* "38" => "#,##0_);Red"
+* "39" => "#,##0.00_);(#,##0.00)"
+* "40" => "#,##0.00_);Red"
+* "45" => "mm:ss"
+* "46" => "[h]:mm:ss"
+* "47" => "mmss.0"
+* "48" => "##0.0E+0"
+* "49" => "@"
+
+Lastly, `format` can be used to specify any custom format directly. 
 Only weak checks are made of custom formats specified - they are otherwise added 
 to the XLSXfile verbatim.
 
-Formats may need characters that must be escaped when specified (see third 
+Formats may need characters that must be escaped when specified (see last 
 example, below).
 
 # Examples:
@@ -1738,6 +1772,8 @@ julia> XLSX.setFormat(sh, "F1:F5"; format = "Currency")
 julia> XLSX.setFormat(sh, "named_range"; format = "Percentage")
 
 julia> XLSX.setFormat(sh, "A2"; format = "_-£* #,##0.00_-;-£* #,##0.00_-;_-£* \\\"-\\\"??_-;_-@_-")
+
+julia> XLSX.setFormat(sh, "named_range"; format = "39") # specifies thee built in format "#,##0.00_);(#,##0.00)"
  
 ```
 """
@@ -1797,7 +1833,11 @@ function setFormat(sh::Worksheet, cellref::CellRef;
         return cell_format.numFmtId
     end
 
-    new_formatid = get_new_formatId(wb, format)
+    if format ∈ values(builtinFormats)    # User specified a built-in format code
+        new_formatid = parse(Int, first(k for (k, v) in builtinFormats if v == format))
+    else                                  # find the next available custom format ID
+        new_formatid = get_new_formatId(wb, format)
+    end
 
     if new_formatid == 0
         atts = ["numFmtId"]
@@ -1830,7 +1870,7 @@ then applied to each remaining cell in the range.
 As a result, every cell in the range will have a uniform number format.
 
 This is functionally equivalent to applying `setFormat()` to each cell in the range 
-but may be very marginally more efficient.
+but may be more efficient.
 
 Applying `setUniformFormat()` without any keyword arguments simply copies the `Format` 
 attributes from the first cell specified to all the others.
@@ -2047,13 +2087,14 @@ function setColumnWidth(ws::Worksheet, rng::CellRange; width::Union{Nothing,Real
         k, l = get_idces(sheetdoc, "worksheet", "sheetData")
         len = length(sheetdoc[k])
         i != k && throw(XLSXError("Some problem here!"))
-        push!(sheetdoc[k], sheetdoc[k][end])
-        if l < len
-            for pos = len-1:-1:l
-                sheetdoc[k][pos+1] = sheetdoc[k][pos]
-            end
-        end
-        sheetdoc[k][l] = XML.Element("Cols")
+#        push!(sheetdoc[k], sheetdoc[k][end])
+#        if l < len
+#            for pos = len-1:-1:l
+#                sheetdoc[k][pos+1] = sheetdoc[k][pos]
+#            end
+#        end
+#        sheetdoc[k][l] = XML.Element("Cols")
+        insert!(sheetdoc[k].children, l, XML.Element("Cols"))
         j = l
     end
 
@@ -2332,7 +2373,7 @@ The Excel file must be opened in write mode to work with merged cells.
 # Examples:
 ```julia
 julia> f = XLSX.readxlsx("test.xlsx")
-XLSXFile("C:\\Users\\tim\\Downloads\\test.xlsx") containing 1 Worksheet
+XLSXFile("C:\\Users\\...\\test.xlsx") containing 1 Worksheet
             sheetname size          range
 -------------------------------------------------
                Sheet1 2x2           A1:B2
@@ -2591,13 +2632,14 @@ function mergeCells(ws::Worksheet, cr::CellRange)
         len = length(sheetdoc[k])
         i != k && throw(XLSXError("Some problem here!"))
         if l != len
-            push!(sheetdoc[k], sheetdoc[k][end])
-            if l + 1 < len
-                for pos = len-1:-1:l+1
-                    sheetdoc[k][pos+1] = sheetdoc[k][pos]
-                end
-            end
-            sheetdoc[k][l+1] = XML.Element("mergeCells")
+#            push!(sheetdoc[k], sheetdoc[k][end])
+#            if l + 1 < len
+#                for pos = len-1:-1:l+1
+#                    sheetdoc[k][pos+1] = sheetdoc[k][pos]
+#                end
+#            end
+#            sheetdoc[k][l+1] = XML.Element("mergeCells")
+            insert!(sheetdoc[k].children, l+1, XML.Element("mergeCells"))
         else
             push!(sheetdoc[k], XML.Element("mergeCells"))
         end

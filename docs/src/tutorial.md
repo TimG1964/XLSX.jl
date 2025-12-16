@@ -253,7 +253,7 @@ Opening a file in `write` mode with `XLSX.openxlsx` will open a new (blank) Exce
 ```julia
 XLSX.openxlsx("my_new_file.xlsx", mode="w") do xf
     sheet = xf[1]
-    XLSX.rename!(sheet, "new_sheet")
+    XLSX.renamesheet!(sheet, "new_sheet")
     sheet["A1"] = "this"
     sheet["A2"] = "is a"
     sheet["A3"] = "new file"
@@ -386,7 +386,7 @@ XLSX.openxlsx("report.xlsx", mode="w") do xf
         
         if i == firstindex(sheet_names)
             sheet = xf[1]
-            XLSX.rename!(sheet, sheet_name)
+            XLSX.renamesheet!(sheet, sheet_name)
             XLSX.writetable!(sheet, df)
         else
             sheet = XLSX.addsheet!(xf, sheet_name)

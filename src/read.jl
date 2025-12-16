@@ -5,21 +5,76 @@
 @inline get_workbook(xl::XLSXFile)::Workbook = xl.workbook
 
 const ZIP_FILE_HEADER = [0x50, 0x4b, 0x03, 0x04]
-const XLS_FILE_HEADER = [0xd0, 0xcf, 0x11, 0xe0]
+const XLS_FILE_HEADER = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1] #[0xd0, 0xcf, 0x11, 0xe0]
+
+function is_encrypted_xlsx(io::IO) # This function suggested by Claude AI
+
+    # Read sector size from header (bytes 0x1E-0x1F)
+    seek(io, 0x1E)
+    sector_shift = read(io, UInt16)
+    sector_size = 1 << sector_shift
+    
+    # Read the directory entries starting position (bytes 0x30-0x33)
+    seek(io, 0x30)
+    first_dir_sector = read(io, UInt32)
+    
+    # Calculate directory position
+    dir_offset = 512 + first_dir_sector * sector_size
+    
+    # Read directory entries and look for encryption markers
+    seek(io, dir_offset)
+    
+    # Check first several directory entries (each is 128 bytes)
+    for i in 1:20
+        entry_start = position(io)
+        
+        # Read name (64 bytes, UTF-16LE)
+        name_bytes = read(io, 64)
+        # Read name length in bytes (includes null terminator)
+        name_length = read(io, UInt16)
+        
+        if name_length > 2 && name_length <= 64
+            # Convert UTF-16LE to String
+            # Take pairs of bytes and convert to Char
+            chars = Char[]
+            for j in 1:2:min(name_length-2, 64)
+                if j+1 <= length(name_bytes)
+                    code_point = UInt16(name_bytes[j]) | (UInt16(name_bytes[j+1]) << 8)
+                    if code_point != 0
+                        push!(chars, Char(code_point))
+                    end
+                end
+            end
+            name = String(chars)
+            
+            if occursin("EncryptionInfo", name) || occursin("EncryptedPackage", name)
+                return true
+            end
+        end
+        
+        # Move to next directory entry (128 bytes total)
+        seek(io, entry_start + 128)
+    end
+    return false
+end
 
 function check_for_xlsx_file_format(source::IO, label::AbstractString="input")
     local header::Vector{UInt8}
 
     mark(source)
-    header = Base.read(source, 4)
+    header = Base.read(source, 8)
     reset(source)
 
-    if header == ZIP_FILE_HEADER # valid Zip file header
+    if header[1:4] == ZIP_FILE_HEADER # valid Zip file header
         return
-    elseif header == XLS_FILE_HEADER # old XLS file
-        throw(XLSXError("$label looks like an old XLS file (not XLSX). This package does not support XLS file format."))
+    elseif header == XLS_FILE_HEADER # either an old XLS file or a password protected XLSX file
+        if is_encrypted_xlsx(source) # Issue #251
+            throw(XLSXError("`$label` looks like a password protected XLSX file. This package does not support password protected files."))
+        else
+            throw(XLSXError("`$label` looks like an old XLS file (not XLSX). This package does not support XLS file format."))
+        end
     else
-        throw(XLSXError("$label is not a valid XLSX file."))
+        throw(XLSXError("`$label` is not a valid XLSX file."))
     end
 end
 
@@ -88,7 +143,7 @@ function open_empty_template(
     xf[1].cache.is_full = true
 
     if sheetname != ""
-        rename!(xf[1], sheetname)
+        renamesheet!(xf[1], sheetname)
     end
     xf.source = "blank.xlsx"
     return xf
@@ -283,6 +338,9 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
     parse_relationships!(xf)
     parse_workbook!(xf)
 
+    # need to remove calcChain.xml from [Content_Types].xml since file is never loaded
+    _write && remove_calcChain!(xf)
+
     load_files!(xf; pass=2) # multi-threaded file load
 
     for sheet in get_workbook(xf).sheets
@@ -409,7 +467,6 @@ function parse_workbook!(xf::XLSXFile)
                 end
             end
 
-
             break
         end
     end
@@ -510,6 +567,30 @@ function parse_workbook!(xf::XLSXFile)
     nothing
 end
 
+# Returns a Dict mapping Workbook <externalReferences>: index => relationship id.
+function get_wb_ext_refs(xf::XLSXFile)
+    ext_refs = Dict{Int, String}()
+    xroot = xmlroot(xf, "xl/workbook.xml")
+    i, j = get_idces(xroot, "workbook", "externalReferences")
+    if !isnothing(j)
+        for (i, ref) in enumerate(XML.children(xroot[i][j]))
+            ext_refs[i] = ref["r:id"]
+        end
+    end
+    return ext_refs
+end
+
+# delete Override PartName=calcChain since this was never loaded (#31)
+function remove_calcChain!(xf::XLSXFile)
+    xf.data["[Content_Types].xml"]
+    ctype_root = xmlroot(xf, "[Content_Types].xml")[end]
+    for (i, c) in enumerate(XML.children(ctype_root))
+        if c.tag == "Override" && haskey(c.attributes, "PartName") && c.attributes["PartName"]=="/xl/calcChain.xml"
+            deleteat!(ctype_root.children, i)
+            break
+        end
+    end
+end
 # Lists internal files from the XLSX package.
 @inline filenames(xl::XLSXFile) = keys(xl.files)
 
@@ -527,6 +608,10 @@ end
 
 function strip_bom_and_lf!(bytes::Vector{UInt8})
     # Issue 243 - Need to remove BOM characters that precede the XML declaration.
+    # Note: If an Excel file containing a BOM is opened in Excel itself and 
+    # subsequently saved, Excel will strip the BOM out. This means the test for 
+    # this issue will stop testing the fix if the file "BOM - issue243.xlsx" is 
+    # opened in Excel because the offending BOM will have been removed.
     bom = UInt8[0xEF, 0xBB, 0xBF]
     l = length(bytes)
     if l >= 3 && bytes[1:3] == bom
@@ -856,7 +941,7 @@ and `stop_in_row_function` (if specified).
 `keep_empty_rows` is only checked once the first and last row of the table 
 have been determined, to see whether to keep or drop empty rows between the 
 first and the last row.
-The default behavior is ``keep_empty_rows=false`.
+The default behavior is `keep_empty_rows=false`.
 
 # Example
 
@@ -866,7 +951,7 @@ julia> using DataFrames, XLSX
 julia> df = DataFrame(XLSX.readtable("myfile.xlsx", "mysheet"))
 ```
 
-See also: [`XLSX.gettable`](@ref).
+See also: [`XLSX.gettable`](@ref), [`XLSX.readto`](@ref).
 """
 function readtable(source::Union{AbstractString,IO}; first_row::Union{Nothing,Int}=nothing, column_labels=nothing, header::Bool=true, infer_eltypes::Bool=true, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Nothing,Function}=nothing, enable_cache::Bool=true, keep_empty_rows::Bool=false, normalizenames::Bool=false)
     c = openxlsx(source; enable_cache) do xf
@@ -914,19 +999,22 @@ end
         [normalizenames]
     ) -> sink
 
-Read and parse an Excel worksheet, materializing directly using 
-the `sink` function (e.g. `DataFrame` or `StructArray`).
+Read and parse an Excel worksheet, materializing directly using the 
+`sink` function, which can be any `Tables.jl`-compatible function 
+(e.g. `DataFrame`, `StructArray` or `TypedTable``).
 
 Takes the same keyword arguments as [`XLSX.readtable`](@ref) 
 
 # Example
 
 ```julia
-julia> using DataFrames, StructArrays, XLSX
+julia> using DataFrames, StructArrays, TypedTables, XLSX
 
 julia> df = XLSX.readto("myfile.xlsx", DataFrame)
 
-julia> df = XLSX.readto("myfile.xlsx", StructArray)
+julia> sa = XLSX.readto("myfile.xlsx", StructArray)
+
+julia> tt = XLSX.readto("myfile.xlsx", Table) # from TypedTables.jl
 
 julia> df = XLSX.readto("myfile.xlsx", "mysheet", DataFrame)
 
@@ -937,19 +1025,19 @@ See also: [`XLSX.gettable`](@ref).
 """
 function readto(source::Union{AbstractString,IO}, sheet::Union{AbstractString,Int}, range::AbstractString, sink=nothing; kw...)
     if sink === nothing
-        throw(XLSXError("provide a valid sink argument, like `using DataFrames; XLSX.readdf(source, sheet, columns, DataFrame)`"))
+        throw(XLSXError("provide a valid sink argument, like `using DataFrames; XLSX.readto(source, sheet, columns, DataFrame)`"))
     end
     return Tables.CopiedColumns(readtable(source, sheet, range; kw...)) |> sink
 end
 function readto(source::Union{AbstractString,IO}, sheet::Union{AbstractString,Int}, sink=nothing; kw...)
     if sink === nothing
-        throw(XLSXError("provide a valid sink argument, like `using DataFrames; XLSX.readdf(source, sheet, DataFrame)`"))
+        throw(XLSXError("provide a valid sink argument, like `using DataFrames; XLSX.readto(source, sheet, DataFrame)`"))
     end
     return Tables.CopiedColumns(readtable(source, sheet; kw...)) |> sink
 end
 function readto(source::Union{AbstractString,IO}, sink=nothing; kw...)
     if sink === nothing
-        throw(XLSXError("provide a valid sink argument, like `using DataFrames; XLSX.readdf(source, sheet, DataFrame)`"))
+        throw(XLSXError("provide a valid sink argument, like `using DataFrames; XLSX.readto(source, DataFrame)`"))
     end
     return Tables.CopiedColumns(readtable(source; kw...)) |> sink
 end

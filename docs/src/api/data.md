@@ -26,6 +26,13 @@ XLSX.writetable
 XLSX.writetable!
 ```
 
+## Cell formulas
+
+```@docs
+XLSX.setFormula
+XLSX.getFormula
+```
+
 ## Defined names
 
 ```@docs
