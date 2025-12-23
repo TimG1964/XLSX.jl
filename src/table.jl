@@ -350,13 +350,20 @@ function Base.iterate(itr::TableRowIterator)
     # go to the first_data_row
     while next !== nothing
         (sheet_row, sheet_row_iterator_state) = next
-
-        if row_number(sheet_row) == itr.first_data_row
-            table_row_index = 1
-            missing_rows=0
-            return TableRow(table_row_index, itr.index, sheet_row), TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, missing_rows, nothing)
+        table_row_index = 1
+        if row_number(sheet_row) == itr.first_data_row # first data row is not empty.
+            return TableRow(table_row_index, itr.index, sheet_row), TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, 0, nothing)
+        elseif itr.keep_empty_rows && row_number(sheet_row) > itr.first_data_row
+            # the sheetrow iterator has skipped some leading empty rows. Postpone processing this sheetrow and process empty rows if keep_empty_rows is true
+            col_count=length(sheet_column_numbers(itr.index))
+            table_row = TableRow(table_row_index, itr.index, fill(missing, col_count))
+            missing_rows = row_number(sheet_row) - itr.first_data_row - 1
+            row_pending = sheet_row
+            newstate = TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, missing_rows, row_pending)
+            return table_row, newstate
         else
-           next = iterate(itr.itr, sheet_row_iterator_state)
+            # iterate to reach first data row
+            next = iterate(itr.itr, sheet_row_iterator_state)
         end
     end
 
