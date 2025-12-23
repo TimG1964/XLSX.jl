@@ -785,13 +785,13 @@ function setdata!(ws::Worksheet, rng::ColumnRange, value)
 end
 function setdata!(ws::Worksheet, rng::NonContiguousRange, value)
     for r in rng.rng
-        if r isa CellRef
-            setdata!(ws, r, value)
-        else
-            for cell in r
-                setdata!(ws, cell, value)
-            end
-        end
+#        if r isa CellRef
+            setdata!(ws, r, value) # r may be a single Cell or a CellRange
+#        else
+#            for cell in r
+#                setdata!(ws, cell, value)
+#            end
+#        end
     end
 end
 setdata!(ws::Worksheet, ::Colon, ::Colon, v) = setdata!(ws::Worksheet, :, v)

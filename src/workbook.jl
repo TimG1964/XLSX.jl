@@ -256,14 +256,15 @@ end
 
 #=
 function get_defined_names(f::XLSXFile, type::Symbol)
+    wb=get_workbook(f)
     if type == :Workbook
-        names=keys(XLSX.get_workbook(f).workbook_names)
-        vals = values(XLSX.get_workbook(f).workbook_names)
+        names=keys(wb.workbook_names)
+        vals = values(wb.workbook_names)
         list1 = ["\"Workbook\" $k =>  $(v.value)" for (k, v) in collect(zip(names, vals))]
     elseif type == :Worksheet 
-        names=keys(XLSX.get_workbook(f).worksheet_names)
-        vals = values(XLSX.get_workbook(f).worksheet_names)
-        list2 = ["$(get_workbook(f).sheets[k[1]].name) $(k[2]) =>  $(v.value)" for (k, v) in collect(zip(names, vals))]
+        names=keys(wb.worksheet_names)
+        vals = values(wb.worksheet_names)
+        list2 = ["$(wb.sheets[k[1]].name) $(k[2]) =>  $(v.value)" for (k, v) in collect(zip(names, vals))]
         return list2
     end
 end

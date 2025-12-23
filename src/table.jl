@@ -732,7 +732,7 @@ end
         [normalizenames]
     ) -> DataTable
 
-Read a transposed table from a worksheet, in which data are arranged in 
+Read a transposed table from a worksheet in which data are arranged in 
 rows rather than columns. For example:
 ```
 Category    "A", "B", "C", "D"
@@ -901,4 +901,29 @@ function gettransposedtable(sheet::Worksheet, rows::Union{AbstractString,Nothing
     check_table_data_dimension(data)
 
     return DataTable(data, column_labels)
+end
+
+"""
+    XLSXFile(table)
+
+Take a `Tables.jl` compatible table and create a new `XLSXFile` object for writing.
+Can act as a sink for functions such as `CSV.read`.
+
+# Example
+
+```julia
+julia> using CSV, XLSX
+
+julia> xf = CSV.read("iris.csv", XLSXFile)
+XLSXFile("blank.xlsx") containing 1 Worksheet
+            sheetname size          range
+-------------------------------------------------
+               Sheet1 151x5         A1:E151
+```
+
+"""
+function XLSXFile(table)
+    xf=newxlsx()
+    writetable!(xf[1], table)
+    return xf
 end

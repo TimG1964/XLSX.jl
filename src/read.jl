@@ -116,7 +116,7 @@ function _relocatable_data_path(; path::AbstractString=Artifacts.artifact"XLSX_r
 end
 
 """
-    newxlsx([sheetname::AbstractString]) :: XLSXFile
+    newxlsx([sheetname::AbstractString]; update_timestamp::Bool) :: XLSXFile
 
 Return an empty, writable `XLSXFile` with 1 worksheet for editing and 
 subsequent saving to a file with [XLSX.writexlsx](@ref).
@@ -125,7 +125,7 @@ By default, the worksheet is `Sheet1`. Specify `sheetname` to give the worksheet
 Use keyword argument `update_timestamp=false` to prevent timestamps in the file properties from being 
 updated to the current date/time. This ensures bit-for-bit reproducible output when the file is written.
 The file `Date` will remain as `2018-05-22T02:41:32Z`.
-The default is `update_timestamp=true`, resulting in the `Date` being set to the current time in the new file.
+The default is `update_timestamp=true`, resulting in the `Date` being set to the current UTC time in the new file.
 
 # Examples
 ```julia

@@ -452,30 +452,7 @@ mutable struct XLSXFile <: MSOfficePackage
     end
 end
 
-"""
-    XLSXFile(table)
 
-Take a `Tables.jl` compatible table and create a new `XLSXFile` object for writing.
-Can act as a sink for functions such as `CSV.read`.
-
-# Example
-
-```julia
-julia> using CSV, XLSX
-
-julia> xf = CSV.read("iris.csv", XLSXFile)
-XLSXFile("blank.xlsx") containing 1 Worksheet
-            sheetname size          range
--------------------------------------------------
-               Sheet1 151x5         A1:E151
-```
-
-"""
-function XLSXFile(table)
-    xf=newxlsx()
-    writetable!(xf[1], table)
-    return xf
-end
 struct ReadFile
     node::Union{Nothing,XML.Node}
     raw::Union{Nothing,XML.Raw}

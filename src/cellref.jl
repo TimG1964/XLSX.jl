@@ -342,7 +342,7 @@ Base.:(==)(cr1::RowRange, cr2::RowRange) = cr1.start == cr2.start && cr1.stop ==
 Base.hash(cr::RowRange) = hash(cr.start) + hash(cr.stop)
 Base.in(row_number::Integer, rng::RowRange) = rng.start <= row_number && row_number <= rng.stop
 
-function cell_offset(from::CellRef, to::CellRef) # retrun tuple (row_offset, column_offset) between `from` and `to` cells
+function cell_offset(from::CellRef, to::CellRef) # return tuple (row_offset, column_offset) between `from` and `to` cells
     offset = (to.row_number - from.row_number, to.column_number - from.column_number)
     (first(offset)>=0 && last(offset) >=0) || throw(XLSXError("The 'to' cell cannot be above or to the left of the 'from' cell."))
     return offset
