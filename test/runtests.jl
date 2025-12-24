@@ -1397,11 +1397,15 @@ end
     end
 
     @testset "readtable select column range" begin
+
         dtable = XLSX.readtable(joinpath(data_directory, "general.xlsx"), "table4", "F:G")
         data, col_names = dtable.data, dtable.column_labels
         @test col_names == [:H2, :H3]
         test_data = Any[Any["C3", missing], Any[missing, "D4"]]
         check_test_data(data, test_data)
+
+        @test_throws XLSX.XLSXError XLSX.readtable(joinpath(data_directory, "general.xlsx"), "table4", "F:G"; header=false, column_labels=["a", "b", "c"])
+
     end
 
     @testset "readtable empty rows" begin
@@ -1516,6 +1520,18 @@ end
         @test t.column_labels == [Symbol("col A"), Symbol("col B")]
         @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
 
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingMixed", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true, stop_in_row_function = x -> ismissing(x.cell_values[1]))
+        @test isempty(t.data[1])
+        @test isempty(t.data[2])
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingMixed", "B:C"; first_row=2, stop_in_empty_row=true)
+        @test isempty(t.data[1])
+        @test isempty(t.data[2])
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
     end
 
     @testset "normalizenames" begin
@@ -1549,7 +1565,7 @@ end
         @test df[3, 2] == Dates.Date(1983, 04, 16)
         @test df[5, 2] == Dates.DateTime(2018, 04, 16, 19, 19, 51)
 
-        @test_throws XLSX.XLSXError df = XLSX.readto(joinpath(data_directory, "general.xlsx"))           # No sink
+        @test_throws XLSX.XLSXError XLSX.readto(joinpath(data_directory, "general.xlsx"))           # No sink
         @test_throws XLSX.XLSXError df = XLSX.readto(joinpath(data_directory, "general.xlsx"), 3)        # No sink
         @test_throws XLSX.XLSXError df = XLSX.readto(joinpath(data_directory, "general.xlsx"), 3, "F:G") # No sink
 
