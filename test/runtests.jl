@@ -1486,6 +1486,43 @@ end
         @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
     end
 
+    @testset "stop function" begin
+    
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true, stop_in_row_function = x -> !ismissing(x.cell_values[1]) && x.cell_values[1]==2)
+        test_data = Vector{Any}(undef, 2)
+        test_data[1] = [missing, missing, missing, 1]
+        test_data[2] = [missing, missing, missing, "a"]
+        check_test_data(t.data, test_data)
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false, stop_in_row_function = x -> !ismissing(x.cell_values[1]) && x.cell_values[1]==14)
+        test_data = Vector{Any}(undef, 2)
+        test_data[1] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        test_data[2] = ["a", "b", "c", "d", "e", "c", "d", "e", "c", "d", "e", "c", "d"]
+        check_test_data(t.data, test_data)
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true, stop_in_row_function = x -> ismissing(x.cell_values[1]))
+        @test isempty(t.data[1])
+        @test isempty(t.data[2])
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false, stop_in_row_function = x -> !ismissing(x.cell_values[1]) && x.cell_values[1]==1)
+        @test isempty(t.data[1])
+        @test isempty(t.data[2])
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+    end
+
+    @testset "normalizenames" begin
+        test_data = ["hello", "Hello 1", "123", Symbol("name")]
+        @test XLSX.normalizename.(test_data) == [:hello, :Hello_1, :_123, :name]
+    end
+
     @testset "Read DataFrame" begin
 
         df = XLSX.readto(joinpath(data_directory, "general.xlsx"), "table4", "F:G", DataFrames.DataFrame)
