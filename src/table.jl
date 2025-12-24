@@ -25,7 +25,7 @@ function column_bounds(sr::SheetRow)
 end
 
 # anchor_column will be the leftmost column of the column_bounds
-function last_column_index(sr::SheetRow, anchor_column::Int) :: Int
+function last_column_index(sr::SheetRow, anchor_column::Int)::Int
 
     isempty(getcell(sr, anchor_column)) && throw(XLSXError("Can't get column bounds based on an empty anchor cell."))
 
@@ -68,7 +68,7 @@ function push_unique!(vect::Vector{String}, sheet::Worksheet, cell::AbstractCell
     name = _colname_prefix_string(sheet, cell)
 
     if iter > 1
-        name = name*"_"*string(iter)
+        name = name * "_" * string(iter)
     end
 
     if name in vect
@@ -89,9 +89,9 @@ const RESERVED = Set(["local", "global", "export", "let",
 normalizename(name::Symbol) = name
 function normalizename(name::String)::Symbol
     uname = strip(Unicode.normalize(name))
-    id = Base.isidentifier(uname) ? uname : map(c->Base.is_id_char(c) ? c : '_', uname)
+    id = Base.isidentifier(uname) ? uname : map(c -> Base.is_id_char(c) ? c : '_', uname)
     cleansed = string((isempty(id) || !Base.is_id_start_char(id[1]) || id in RESERVED) ? "_" : "", id)
-    return Symbol(replace(cleansed, r"(_)\1+"=>"_"))
+    return Symbol(replace(cleansed, r"(_)\1+" => "_"))
 end
 
 """
@@ -146,16 +146,16 @@ end
 See also [`XLSX.gettable`](@ref).
 """
 function eachtablerow(
-            sheet::Worksheet,
-            cols::Union{ColumnRange, AbstractString};
-            first_row::Union{Nothing, Int}=nothing,
-            column_labels=nothing,
-            header::Bool=true,
-            stop_in_empty_row::Bool=true,
-            stop_in_row_function::Union{Nothing, Function}=nothing,
-            keep_empty_rows::Bool=false,
-            normalizenames::Bool=false
-    ) :: TableRowIterator
+    sheet::Worksheet,
+    cols::Union{ColumnRange,AbstractString};
+    first_row::Union{Nothing,Int}=nothing,
+    column_labels=nothing,
+    header::Bool=true,
+    stop_in_empty_row::Bool=true,
+    stop_in_row_function::Union{Nothing,Function}=nothing,
+    keep_empty_rows::Bool=false,
+    normalizenames::Bool=false
+)::TableRowIterator
 
     if first_row === nothing
         first_row = _find_first_row_with_data(sheet, convert(ColumnRange, cols).start)
@@ -181,14 +181,14 @@ function eachtablerow(
         end
     else
         # check consistency for column_range and column_labels
-        if length(column_labels) != length(column_range) 
+        if length(column_labels) != length(column_range)
             throw(XLSXError("`column_range` (length=$(length(column_range))) and `column_labels` (length=$(length(column_labels))) must have the same length."))
         end
     end
     if normalizenames
-        column_labels = normalizename.(column_labels===nothing ? col_lab : column_labels)
+        column_labels = normalizename.(column_labels === nothing ? col_lab : column_labels)
     else
-        column_labels = Symbol.(column_labels===nothing ? col_lab : column_labels)
+        column_labels = Symbol.(column_labels === nothing ? col_lab : column_labels)
     end
 
     first_data_row = header ? first_row + 1 : first_row
@@ -196,22 +196,22 @@ function eachtablerow(
     return TableRowIterator(sheet, Index(column_range, column_labels), first_data_row, stop_in_empty_row, stop_in_row_function, keep_empty_rows)
 end
 
-function TableRowIterator(sheet::Worksheet, index::Index, first_data_row::Int, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Nothing, Function}=nothing, keep_empty_rows::Bool=false)
+function TableRowIterator(sheet::Worksheet, index::Index, first_data_row::Int, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Nothing,Function}=nothing, keep_empty_rows::Bool=false)
     return TableRowIterator(eachrow(sheet), index, first_data_row, stop_in_empty_row, stop_in_row_function, keep_empty_rows)
 end
 
 function eachtablerow(
-            sheet::Worksheet;
-            first_row::Union{Nothing, Int}=nothing,
-            column_labels=nothing,
-            header::Bool=true,
-            stop_in_empty_row::Bool=true,
-            stop_in_row_function::Union{Nothing, Function}=nothing,
-            keep_empty_rows::Bool=false,
-            normalizenames::Bool=false
-        ) :: TableRowIterator
+    sheet::Worksheet;
+    first_row::Union{Nothing,Int}=nothing,
+    column_labels=nothing,
+    header::Bool=true,
+    stop_in_empty_row::Bool=true,
+    stop_in_row_function::Union{Nothing,Function}=nothing,
+    keep_empty_rows::Bool=false,
+    normalizenames::Bool=false
+)::TableRowIterator
 
-        if first_row === nothing
+    if first_row === nothing
         # if no columns were given,
         # first_row must be provided and cannot be inferred.
         # If it was not provided, will use first row as default value
@@ -330,7 +330,7 @@ function TableRow(table_row::Int, index::Index, sheet_row::SheetRow)
 end
 
 getdata(r::TableRow, table_column_number::Int) = r.cell_values[table_column_number]
-getdata(r::TableRow, table_column_numbers::Union{Vector{T}, UnitRange{T}}) where {T<:Integer} = [r.cell_values[x] for x in table_column_numbers]
+getdata(r::TableRow, table_column_numbers::Union{Vector{T},UnitRange{T}}) where {T<:Integer} = [r.cell_values[x] for x in table_column_numbers]
 
 function getdata(r::TableRow, column_label::Symbol)
     index = r.index
@@ -341,40 +341,115 @@ function getdata(r::TableRow, column_label::Symbol)
     end
 end
 
+# checks if there are any data inside column range (row not entirely empty)
+function is_empty_table_row(itr::TableRowIterator, sheet_row::SheetRow)::Bool
+    if isempty(sheet_row)
+        return true
+    end
+
+    for c in sheet_column_numbers(itr.index)
+        if !ismissing(getdata(get_worksheet(itr), getcell(sheet_row, c)))
+            return false
+        end
+    end
+    return true
+end
+
+
 Base.IteratorSize(::Type{<:TableRowIterator}) = Base.SizeUnknown()
 Base.eltype(::TableRowIterator) = TableRow
 
 function Base.iterate(itr::TableRowIterator)
     next = iterate(itr.itr)
-
     # go to the first_data_row
     while next !== nothing
         (sheet_row, sheet_row_iterator_state) = next
         table_row_index = 1
-        if row_number(sheet_row) == itr.first_data_row # first data row is not empty.
-            return TableRow(table_row_index, itr.index, sheet_row), TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, 0, nothing)
-        elseif itr.keep_empty_rows && row_number(sheet_row) > itr.first_data_row
-            # the sheetrow iterator has skipped some leading empty rows. Postpone processing this sheetrow and process empty rows if keep_empty_rows is true
-            col_count=length(sheet_column_numbers(itr.index))
-            table_row = TableRow(table_row_index, itr.index, fill(missing, col_count))
-            missing_rows = row_number(sheet_row) - itr.first_data_row - 1
-            row_pending = sheet_row
-            newstate = TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, missing_rows, row_pending)
-            return table_row, newstate
-        else
-            # iterate to reach first data row
+        if row_number(sheet_row) < itr.first_data_row # Not at first data row yet
             next = iterate(itr.itr, sheet_row_iterator_state)
+        elseif row_number(sheet_row) == itr.first_data_row # first data row is not empty.
+            if is_empty_table_row(itr, sheet_row) # but it is empty in column range.
+                if itr.stop_in_empty_row
+                    return nothing # First data row is empty, so stop
+                elseif itr.keep_empty_rows
+                    # Postpone processing this sheetrow and process the empty rows
+                    col_count = length(sheet_column_numbers(itr.index))
+                    table_row = TableRow(table_row_index, itr.index, fill(missing, col_count))
+                    missing_rows = 0
+                    row_pending = nothing
+                    newstate = TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, missing_rows, row_pending)
+                    if itr.stop_in_row_function !== nothing && itr.stop_in_row_function(table_row)
+                        return nothing
+                    end
+                    return table_row, newstate
+                else
+                    next = iterate(itr.itr, sheet_row_iterator_state)
+                end
+            else
+                table_row = TableRow(table_row_index, itr.index, sheet_row)
+                newstate = TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, 0, nothing)
+                if itr.stop_in_row_function !== nothing && itr.stop_in_row_function(table_row)
+                    return nothing
+                end
+                return table_row, newstate
+            end
+        elseif row_number(sheet_row) > itr.first_data_row # the sheetrow iterator has skipped some leading empty rows.
+            if itr.stop_in_empty_row
+                return nothing # First data row is empty, so stop
+            elseif itr.keep_empty_rows
+                # Postpone processing this sheetrow and process the empty rows
+                col_count = length(sheet_column_numbers(itr.index))
+                table_row = TableRow(table_row_index, itr.index, fill(missing, col_count))
+                missing_rows = row_number(sheet_row) - itr.first_data_row - 1
+                row_pending = sheet_row
+                newstate = TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, missing_rows, row_pending)
+                if itr.stop_in_row_function !== nothing && itr.stop_in_row_function(table_row)
+                    return nothing
+                end
+                return table_row, newstate
+            else
+                if is_empty_table_row(itr, sheet_row)
+                    # iterator returned a row but it is empty across selected columns
+                    if itr.stop_in_empty_row
+                        println("unreachable 1 reached!")
+                        return nothing # First data row is empty, so stop
+                    elseif itr.keep_empty_rows
+                        # Postpone processing this sheetrow and process the empty rows
+                        col_count = length(sheet_column_numbers(itr.index))
+                        table_row = TableRow(table_row_index, itr.index, fill(missing, col_count))
+                        missing_rows = row_number(sheet_row) - itr.first_data_row - 1
+                        row_pending = sheet_row
+                        newstate = TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, missing_rows, row_pending)
+                        if itr.stop_in_row_function !== nothing && itr.stop_in_row_function(table_row)
+                            return nothing
+                        end
+                        return table_row, newstate
+                    else
+                        # don't want to stop but don't want to keep empty rows. Just iterate again.
+                        next = iterate(itr.itr, sheet_row_iterator_state)
+                    end
+                else
+                    # don't keep empty rows
+                    table_row = TableRow(table_row_index, itr.index, sheet_row)
+                    newstate = TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, 0, nothing)
+                    if itr.stop_in_row_function !== nothing && itr.stop_in_row_function(table_row)
+                        return nothing
+                    end
+                    return table_row, newstate
+                end
+            end
+        else
+            println("unreachable 2 reached!")
         end
     end
-
     # no rows for this table
     return nothing
 end
 
 function Base.iterate(itr::TableRowIterator, state::TableRowIteratorState)
     table_row_index = state.table_row_index + 1
-    missing_rows=state.missing_rows
-    col_count=length(sheet_column_numbers(itr.index))
+    missing_rows = state.missing_rows
+    col_count = length(sheet_column_numbers(itr.index))
 
     if missing_rows > 0 # sheetrow iterator has skipped some completely empty rows
         if itr.stop_in_empty_row
@@ -414,20 +489,6 @@ function Base.iterate(itr::TableRowIterator, state::TableRowIteratorState)
         return nothing
     end
 
-    # checks if there are any data inside column range (row not entirely empty)
-    function is_empty_table_row(itr::TableRowIterator, sheet_row::SheetRow) :: Bool
-        if isempty(sheet_row)
-            return true
-        end
-
-        for c in sheet_column_numbers(itr.index)
-            if !ismissing(getdata(get_worksheet(itr), getcell(sheet_row, c)))
-                return false
-            end
-        end
-        return true
-    end
-
     if !isnothing(state.row_pending)
         # bring forward pending row
         table_row = TableRow(table_row_index, itr.index, state.row_pending)
@@ -446,7 +507,7 @@ function Base.iterate(itr::TableRowIterator, state::TableRowIteratorState)
     end
 
     if is_empty_table_row(itr, sheet_row) # rows are returned but specified columns are empty
-        if itr.stop_in_empty_row 
+        if itr.stop_in_empty_row
             # user asked to stop fetching table rows if we find an empty row
             return nothing
         elseif !itr.keep_empty_rows
@@ -505,7 +566,7 @@ function infer_eltype(v::Vector{Any})
         return Any
     else
         if hasmissing
-            return Union{Missing, t}
+            return Union{Missing,t}
         else
             return t
         end
@@ -541,7 +602,7 @@ function check_table_data_dimension(data::Vector)
     nothing
 end
 
-function gettable(itr::TableRowIterator; infer_eltypes::Bool=true) :: DataTable
+function gettable(itr::TableRowIterator; infer_eltypes::Bool=true)::DataTable
 
     column_labels = get_column_labels(itr)
     columns_count = table_columns_count(itr)
@@ -654,12 +715,12 @@ julia> df = XLSX.openxlsx("myfile.xlsx") do xf
         
 See also: [`XLSX.readtable`](@ref).
 """
-function gettable(sheet::Worksheet, cols::Union{ColumnRange, AbstractString}; first_row::Union{Nothing, Int}=nothing, column_labels=nothing, header::Bool=true, infer_eltypes::Bool=true, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Function, Nothing}=nothing, keep_empty_rows::Bool=false, normalizenames::Bool=false)
+function gettable(sheet::Worksheet, cols::Union{ColumnRange,AbstractString}; first_row::Union{Nothing,Int}=nothing, column_labels=nothing, header::Bool=true, infer_eltypes::Bool=true, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Function,Nothing}=nothing, keep_empty_rows::Bool=false, normalizenames::Bool=false)
     itr = eachtablerow(sheet, cols; first_row, column_labels, header, stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames)
     return gettable(itr; infer_eltypes)
 end
 
-function gettable(sheet::Worksheet; first_row::Union{Nothing, Int}=nothing, column_labels=nothing, header::Bool=true, infer_eltypes::Bool=true, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Function, Nothing}=nothing, keep_empty_rows::Bool=false, normalizenames::Bool=false)
+function gettable(sheet::Worksheet; first_row::Union{Nothing,Int}=nothing, column_labels=nothing, header::Bool=true, infer_eltypes::Bool=true, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Function,Nothing}=nothing, keep_empty_rows::Bool=false, normalizenames::Bool=false)
     itr = eachtablerow(sheet; first_row, column_labels, header, stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames)
     return gettable(itr; infer_eltypes)
 end
