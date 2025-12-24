@@ -113,6 +113,7 @@ If `stop_in_empty_row=false`, the iterator will continue to fetch rows until the
 The default behavior is `stop_in_empty_row=true`. Empty rows may be returned by the iterator when `stop_in_empty_row=false`.
 
 `stop_in_row_function` is a Function that receives a `TableRow` and returns a `Bool` indicating if the end of the table was reached.
+The row that satisfies `stop_in_row_function` is excluded from the table.
 
 Example for `stop_in_row_function`:
 
