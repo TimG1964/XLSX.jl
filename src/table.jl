@@ -383,6 +383,8 @@ function Base.iterate(itr::TableRowIterator)
                     end
                     return table_row, newstate
                 else
+                    # iterator returned a row but it is empty across selected columns
+                    # don't want to stop but don't want to keep empty rows. Just iterate again.
                     next = iterate(itr.itr, sheet_row_iterator_state)
                 end
             else
@@ -410,24 +412,8 @@ function Base.iterate(itr::TableRowIterator)
             else
                 if is_empty_table_row(itr, sheet_row)
                     # iterator returned a row but it is empty across selected columns
-                    if itr.stop_in_empty_row
-                        println("unreachable 1 reached!")
-                        return nothing # First data row is empty, so stop
-                    elseif itr.keep_empty_rows
-                        # Postpone processing this sheetrow and process the empty rows
-                        col_count = length(sheet_column_numbers(itr.index))
-                        table_row = TableRow(table_row_index, itr.index, fill(missing, col_count))
-                        missing_rows = row_number(sheet_row) - itr.first_data_row - 1
-                        row_pending = sheet_row
-                        newstate = TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, missing_rows, row_pending)
-                        if itr.stop_in_row_function !== nothing && itr.stop_in_row_function(table_row)
-                            return nothing
-                        end
-                        return table_row, newstate
-                    else
-                        # don't want to stop but don't want to keep empty rows. Just iterate again.
-                        next = iterate(itr.itr, sheet_row_iterator_state)
-                    end
+                    # don't want to stop but don't want to keep empty rows. Just iterate again.
+                    next = iterate(itr.itr, sheet_row_iterator_state)
                 else
                     # don't keep empty rows
                     table_row = TableRow(table_row_index, itr.index, sheet_row)
@@ -439,7 +425,7 @@ function Base.iterate(itr::TableRowIterator)
                 end
             end
         else
-            println("unreachable 2 reached!")
+            println("unreachable reached!")
         end
     end
     # no rows for this table
