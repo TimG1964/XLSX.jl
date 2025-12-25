@@ -127,11 +127,11 @@ end
 `keep_empty_rows` never affects the *bounds* of the iterator; the number of rows read from a sheet is only affected by `first_row`, `stop_in_empty_row` and `stop_in_row_function` (if specified).
 `keep_empty_rows` is only checked once the first and last row of the table have been determined, to see whether to keep or drop empty rows between the first and the last row.
 
-`normalizenames` controls whether column names will be "normalized" to valid Julia identifiers. By default, this is false.
-If normalizenames=true, then column names with spaces, or that start with numbers, will be adjusted with underscores to become 
-valid Julia identifiers. This is useful when you want to access columns via dot-access or getproperty, like file.col1. The 
-identifier that comes after the . must be valid, so spaces or identifiers starting with numbers aren't allowed.
-(Based ib CSV.jl's `CSV.normalizename`.)
+`normalizenames` controls whether column names will be "normalized" to valid Julia identifiers. By default, this is `false`.
+If `normalizenames=true`, then column names with spaces or that start with numbers will be adjusted with underscores to become 
+valid Julia identifiers. This is useful when you want to access columns via dot-access or getproperty, like `file.col1`. The 
+identifier that comes after the `.` must be valid, so spaces or identifiers starting with numbers aren't allowed.
+(Based on CSV.jl's `CSV.normalizename`.)
 
 Example code:
 ```

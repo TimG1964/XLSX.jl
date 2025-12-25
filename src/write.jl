@@ -1001,6 +1001,8 @@ rename!(ws::Worksheet, name::AbstractString) = renamesheet!(ws, name)
 
 Rename a `Worksheet` to `name`.
 
+See also [addsheet!](@ref), [copysheet!](@ref), [deletesheet!](@ref)
+
 """
 function renamesheet!(ws::Worksheet, name::AbstractString)
 
@@ -1042,7 +1044,7 @@ end
 Create a new worksheet named `name`.
 If `name` is not provided, a unique name is created.
 
-See also [copysheet!](@ref), [deletesheet!](@ref)
+See also [renamesheet!](@ref), [copysheet!](@ref), [deletesheet!](@ref)
 
 """
 addsheet!(xl::XLSXFile, name::AbstractString="")::Worksheet = addsheet!(get_workbook(xl), name)::Worksheet
@@ -1083,7 +1085,7 @@ See also [`XLSX.openxlsx`](@ref) and [XLSX.opentemplate](@ref).
     especially those with complex features. However, cell formats, conditional formats 
     and worksheet defined names should all copy OK. Please report any issues.
 
-See also [addsheet!](@ref), [deletesheet!](@ref)
+See also [addsheet!](@ref), [renamesheet!](@ref), [deletesheet!](@ref) 
 
 # Examples
 ```julia
@@ -1342,7 +1344,7 @@ Delete the given worksheet, the worksheet with the given name or the worksheet w
     The formulae are updated to contain a `#Ref!` error in place of each sheetcell reference.
     
 
-See also [addsheet!](@ref), [copysheet!](@ref)
+See also [addsheet!](@ref), [renamesheet!](@ref), [copysheet!](@ref)
 
 # Examples
 

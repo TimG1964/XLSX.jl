@@ -4,7 +4,7 @@
 
 ```@docs
 XLSX.XLSXFile
-XLSXFile(::Any)
+XLSX.XLSXFile(::Any)
 XLSX.readxlsx
 XLSX.openxlsx
 XLSX.opentemplate

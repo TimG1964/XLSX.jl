@@ -401,7 +401,7 @@ end
 Both types `XLSX.DataTable` and `XLSX.TableRowIterator` conforms to [Tables.jl](https://github.com/JuliaData/Tables.jl) interface.
 An instance of `XLSX.TableRowIterator` is created by the function `XLSX.eachtablerow`.
 
-Also, `XLSX.writetable` accepts an argument that conforms to the `Tables.jl` interface.
+Also, both `XLSX.writetable` and `XLSX.XLSXFile` accept an argument that conforms to the `Tables.jl` interface.
 
 As an example, the type `DataFrame` from [DataFrames](https://github.com/JuliaData/DataFrames.jl) package
 supports the `Tables.jl` interface. The following code writes and reads back a `DataFrame` to an Excel file.
@@ -442,4 +442,18 @@ julia> df2 = XLSX.eachtablerow(s) |> DataFrames.DataFrame
 │ 2   │ 2        │ You     │ 20.3    │ 2018-02-21 │ 19:20:00 │ 2018-05-20T19:20:00 │
 │ 3   │ 3        │ Out     │ 30.4    │ 2018-02-22 │ 19:30:00 │ 2018-05-20T19:30:00 │
 │ 4   │ 4        │ There   │ 40.5    │ 2018-02-23 │ 19:40:00 │ 2018-05-20T19:40:00 │
+```
+Some other packages provide functions (such as `CSV.read`) that can take a sink function 
+to accept a `Tables.jl` table. `XLSXFile` can serve as such a sink function, allowing 
+`XLSXFile` objects to be created directly.
+
+For example, using the example of `CSV.read`:
+```
+julia> using CSV, XLSX
+
+julia> xf = CSV.read("iris.csv", XLSXFile)
+XLSXFile("blank.xlsx") containing 1 Worksheet
+            sheetname size          range
+-------------------------------------------------
+               Sheet1 151x5         A1:E151
 ```
