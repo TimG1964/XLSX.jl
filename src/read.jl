@@ -277,13 +277,21 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
     end
     xf = XLSXFile(source, enable_cache, _write)
 
-    load_files!(xf; pass=1) # multi-threaded file load
+    if enable_cache || (source isa IO)
+    #if source isa IO
+        zip_io = ZipArchives.ZipReader(read(source))
+    else
+        zip_io = ZipArchives.ZipReader(FileArray(abspath(source)))
+#       zip_io = ZipArchives.ZipReader(Mmap.mmap(abspath(source)))
+    end
 
-    check_minimum_requirements(xf)
-    parse_relationships!(xf)
-    parse_workbook!(xf)
+    load_files!(xf, zip_io; pass=1) # multi-threaded file load
 
-    load_files!(xf; pass=2) # multi-threaded file load
+    check_minimum_requirements(xf, zip_io)
+    parse_relationships!(xf, zip_io)
+    parse_workbook!(xf, zip_io)
+
+    load_files!(xf, zip_io; pass=2) # multi-threaded file load
 
     for sheet in get_workbook(xf).sheets
         if isnothing(sheet.dimension)
@@ -325,7 +333,7 @@ function get_default_namespace(r::XML.Node)::String
 end
 
 # See section 12.2 - Package Structure
-function check_minimum_requirements(xf::XLSXFile)
+function check_minimum_requirements(xf::XLSXFile, zip_io::ZipArchives.ZipReader)
     mandatory_files = ["_rels/.rels",
         "xl/workbook.xml",
         "[Content_Types].xml",
@@ -341,7 +349,7 @@ function check_minimum_requirements(xf::XLSXFile)
     if internal_xml_file_isread(xf, f)
         content_types = XML.write(xf.data[f])
     else
-        content_types = ZipArchives.zip_readentry(xf.io, f, String)
+        content_types = ZipArchives.zip_readentry(zip_io, f, String)
     end
 
     if occursin("spreadsheetml.sheet", content_types)
@@ -357,10 +365,10 @@ end
 
 # Parses package level relationships defined in `_rels/.rels`.
 # Parses workbook level relationships defined in `xl/_rels/workbook.xml.rels`.
-function parse_relationships!(xf::XLSXFile)
+function parse_relationships!(xf::XLSXFile, zip_io::ZipArchives.ZipReader)
 
     # package level relationships
-    xroot = get_package_relationship_root(xf)
+    xroot = get_package_relationship_root(xf, zip_io)
     for el in XML.children(xroot)
         push!(xf.relationships, Relationship(el))
     end
@@ -368,7 +376,7 @@ function parse_relationships!(xf::XLSXFile)
 
     # workbook level relationships
     wb = get_workbook(xf)
-    xroot = get_workbook_relationship_root(xf)
+    xroot = get_workbook_relationship_root(xf, zip_io)
     for el in XML.children(xroot)
         push!(wb.relationships, Relationship(el))
     end
@@ -378,8 +386,8 @@ function parse_relationships!(xf::XLSXFile)
 end
 
 # Updates xf.workbook from xf.data[\"xl/workbook.xml\"]
-function parse_workbook!(xf::XLSXFile)
-    xroot = xmlroot(xf, "xl/workbook.xml")[end]
+function parse_workbook!(xf::XLSXFile, zip_io::ZipArchives.ZipReader)
+    xroot = xmlroot(xf, zip_io, "xl/workbook.xml")[end]
     chn = XML.children(xroot)
     XML.tag(xroot) != "workbook" && throw(XLSXError("Malformed xl/workbook.xml. Root node name should be 'workbook'. Got '$(XML.tag(xroot))'."))
 
@@ -575,9 +583,9 @@ function skipNode(r::XML.Raw, skipnode::String) # separate rows or ssts to speed
     return new, skipped
 end
 
-function stream_files(xf::XLSXFile; pass::Int, channel_size::Int=1 << 10)
+function stream_files(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int, channel_size::Int=1 << 10)
     Channel{String}(channel_size) do out
-        for f in ZipArchives.zip_names(xf.io)
+        for f in ZipArchives.zip_names(zip_io)
 
             # ignore xl/calcChain.xml in any case (#31)
             if f != "xl/calcChain.xml"
@@ -598,12 +606,13 @@ end
 # Read xml files in two passes
 # pass 1 - read all but worksheets and sharedStrings
 # pass 2 - only read worksheets and sharedStrings
-function load_files!(xf::XLSXFile; pass::Int)
+function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
+
     (pass < 1 || pass > 2) && throw(XLSXError("Unknown pass to read files."))
     wb=get_workbook(xf)
 
     read_files = Channel{ReadFile}(1 << 10)
-    files = stream_files(xf; pass)
+    files = stream_files(xf, zip_io; pass)
 
     consumer = @async begin
 
@@ -637,11 +646,12 @@ function load_files!(xf::XLSXFile; pass::Int)
     @sync for _ in 1:Threads.nthreads()
         Threads.@spawn begin
             for file in files
-                if pass==1 && !occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", file)
-                    readfile = process_file(xf, file) # Pass 1: process all files except sheets and sharedStrings
+               if pass==1 && !occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", file)
+                    readfile = process_file(zip_io, file) # Pass 1: process all files except sheets and sharedStrings
                     put!(read_files, readfile)
                 elseif pass==2 && occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", file)
-                    readfile = process_file(xf, file) # Pass 2: now process sheets and sharedStrings
+
+                    readfile = process_file(zip_io, file) # Pass 2: now process sheets and sharedStrings
                     put!(read_files, readfile)
                 end
             end
@@ -654,14 +664,14 @@ function load_files!(xf::XLSXFile; pass::Int)
 
 end
 
-function process_file(xf::XLSXFile, filename::String)
+function process_file(zip_io::ZipArchives.ZipReader, filename::String)
 
         node=nothing
         raw=nothing
         bin=nothing
 
         try
-            bytes = ZipArchives.zip_readentry(xf.io, filename)
+            bytes = ZipArchives.zip_readentry(zip_io, filename)
             if !startswith(filename, "customXml") && (endswith(filename, ".xml") || endswith(filename, ".rels"))
                 if occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", filename)
                     strip_bom_and_lf!(bytes)
@@ -684,13 +694,19 @@ function process_file(xf::XLSXFile, filename::String)
 end
 
 function internal_xml_file_read(xf::XLSXFile, filename::String)
+    !internal_xml_file_exists(xf, filename) && throw(XLSXError("Couldn't find $filename in $(xf.source)."))
+    !internal_xml_file_isread(xf, filename) && throw(XLSXError("$filename in $(xf.source) has not been read."))
+    return internal_xml_file_read(xf::XLSXFile, nothing, filename::String)
+end
+
+function internal_xml_file_read(xf::XLSXFile, zip_io::Union{Nothing,ZipArchives.ZipReader}, filename::String)
 
     !internal_xml_file_exists(xf, filename) && throw(XLSXError("Couldn't find $filename in $(xf.source)."))
 
     if !internal_xml_file_isread(xf, filename)
 
         try
-            bytes = ZipArchives.zip_readentry(xf.io, filename)
+            bytes = ZipArchives.zip_readentry(zip_io, filename)
             strip_bom_and_lf!(bytes)
             if occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", filename)
                 skipnode = filename == "xl/sharedStrings.xml" ? "sst" : "sheetData"
@@ -712,9 +728,11 @@ end
 # Utility method to find the XMLDocument associated with a given package filename.
 # Returns xl.data[filename] if it exists. Throws an error if it doesn't.
 @inline xmldocument(xl::XLSXFile, filename::String)::XML.Node = internal_xml_file_read(xl, filename)
+@inline xmldocument(xl::XLSXFile, zip_io::ZipArchives.ZipReader, filename::String)::XML.Node = internal_xml_file_read(xl, zip_io, filename)
 
 # Utility method to return the root element of a given XMLDocument from the package.
 @inline xmlroot(xl::XLSXFile, filename::String)::XML.Node = xmldocument(xl, filename)
+@inline xmlroot(xl::XLSXFile, zip_io::ZipArchives.ZipReader, filename::String)::XML.Node = xmldocument(xl, zip_io, filename)
 
 #
 # Helper Functions

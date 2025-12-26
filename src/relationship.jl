@@ -57,8 +57,8 @@ function has_relationship_by_type(wb::Workbook, _type_::String)::Bool
     false
 end
 
-function get_package_relationship_root(xf::XLSXFile)::XML.Node
-    xroot = xmlroot(xf, "_rels/.rels")[end]
+function get_package_relationship_root(xf::XLSXFile, zip_io::ZipArchives.ZipReader)::XML.Node
+    xroot = xmlroot(xf, zip_io, "_rels/.rels")[end]
     XML.tag(xroot) != "Relationships" && throw(XLSXError("Malformed XLSX file $(xf.source). _rels/.rels root node name should be `Relationships`. Found $(XML.tag(xroot))."))
     if ("" => "http://schemas.openxmlformats.org/package/2006/relationships") ∉ get_namespaces(xroot)
         throw(XLSXError("Unexpected namespace at workbook relationship file: `$(get_namespaces(xroot))`."))
@@ -66,6 +66,14 @@ function get_package_relationship_root(xf::XLSXFile)::XML.Node
     return xroot
 end
 
+function get_workbook_relationship_root(xf::XLSXFile, zip_io::ZipArchives.ZipReader)::XML.Node
+    xroot = xmlroot(xf, zip_io, "xl/_rels/workbook.xml.rels")[end]
+    XML.tag(xroot) != "Relationships" && throw(XLSXError("Malformed XLSX file $(xf.source). xl/_rels/workbook.xml.rels root node name should be `Relationships`. Found $(XML.tag(xroot))."))
+    if ("" => "http://schemas.openxmlformats.org/package/2006/relationships") ∉ get_namespaces(xroot)
+        throw(XLSXError("Unexpected namespace at workbook relationship file: `$(get_namespaces(xroot))`."))
+    end
+    return xroot
+end
 function get_workbook_relationship_root(xf::XLSXFile)::XML.Node
     xroot = xmlroot(xf, "xl/_rels/workbook.xml.rels")[end]
     XML.tag(xroot) != "Relationships" && throw(XLSXError("Malformed XLSX file $(xf.source). xl/_rels/workbook.xml.rels root node name should be `Relationships`. Found $(XML.tag(xroot))."))

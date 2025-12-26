@@ -21,6 +21,7 @@ function get_shared_string_index(sst::SharedStringTable, str_formatted::Abstract
 
 end
 function create_new_sst(wb::Workbook, sst::SharedStringTable)
+    xf=get_xlsxfile(wb)
     if !sst.is_loaded
         sst.is_loaded = true
 
@@ -29,7 +30,17 @@ function create_new_sst(wb::Workbook, sst::SharedStringTable)
         add_relationship!(wb, "sharedStrings.xml", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings")
 
         # add Content Type <Override ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml" PartName="/xl/sharedStrings.xml"/>
-        ctype_root = xmlroot(get_xlsxfile(wb), "[Content_Types].xml")[end]
+            if !internal_xml_file_isread(xf, "[Content_Types].xml")
+                if xf.use_cache_for_sheet_data || (xf.source isa IO)
+                    zip_io = ZipArchives.ZipReader(read(xf.source))
+                else
+                    zip_io = ZipArchives.ZipReader(FileArray(abspath(xf.source)))
+                end
+                ctype_root = xmlroot(get_xlsxfile(wb), zip_io, "[Content_Types].xml")[end]
+            else
+                ctype_root = xmlroot(get_xlsxfile(wb), "[Content_Types].xml")[end]
+            end
+        #ctype_root = xmlroot(get_xlsxfile(wb), "[Content_Types].xml")[end]
         XML.tag(ctype_root) != "Types" && throw(XLSXError("Something wrong here!"))
         override_node = XML.Element("Override";
             ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",
