@@ -431,17 +431,6 @@ mutable struct XLSXFile <: MSOfficePackage
 
     function XLSXFile(source::Union{AbstractString, IO}, use_cache::Bool, is_writable::Bool)
         check_for_xlsx_file_format(source)
-#        if use_cache || (source isa IO)
-#        #if source isa IO
-#            println("Reading ... ")
-#            io = ZipArchives.ZipReader(read(source))
-#        else
-#            println("FileArraying... ")
-#            io = ZipArchives.ZipReader(FileArray(abspath(source)))
-##            println("Mmapping... ")
-##            io = ZipArchives.ZipReader(Mmap.mmap(abspath(source)))
-#        end
-#        xl = new(source, use_cache, io, Dict{String, Bool}(), Dict{String, XML.Node}(), Dict{String, Vector{UInt8}}(), EmptyWorkbook(), Vector{Relationship}(), is_writable, Random.Xoshiro(2468))
         xl = new(source, use_cache, Dict{String, Bool}(), Dict{String, XML.Node}(), Dict{String, Vector{UInt8}}(), EmptyWorkbook(), Vector{Relationship}(), is_writable, Random.Xoshiro(2468))
         xl.workbook.package = xl
         return xl

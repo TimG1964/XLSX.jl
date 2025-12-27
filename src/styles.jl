@@ -77,16 +77,7 @@ function styles_xmlroot(workbook::Workbook)
         STYLES_RELATIONSHIP_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"
         if has_relationship_by_type(workbook, STYLES_RELATIONSHIP_TYPE)
             styles_target = get_relationship_target_by_type("xl", workbook, STYLES_RELATIONSHIP_TYPE)
-            if !internal_xml_file_isread(xf, styles_target)
-                if xf.use_cache_for_sheet_data || (xf.source isa IO)
-                    zip_io = ZipArchives.ZipReader(read(xf.source))
-                else
-                    zip_io = ZipArchives.ZipReader(FileArray(abspath(xf.source)))
-                end
-                styles_root = xmlroot(get_xlsxfile(workbook), zip_io, styles_target)
-            else
-                styles_root = xmlroot(get_xlsxfile(workbook), styles_target)
-            end
+            styles_root = xmlroot(get_xlsxfile(workbook), styles_target)
 
             # check root node name for styles.xml
             if get_default_namespace(styles_root[end]) != SPREADSHEET_NAMESPACE_XPATH_ARG
