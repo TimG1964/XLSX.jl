@@ -59,7 +59,7 @@ function is_encrypted_xlsx(io::IO) # This function suggested by Claude AI
 end
 
 function check_for_xlsx_file_format(source::IO, label::AbstractString="input")
-    local header::Vector{UInt8}
+#    local header::Vector{UInt8}
 
     mark(source)
     header = Base.read(source, 8)
@@ -378,11 +378,11 @@ function get_namespaces(r::XML.Node)::Dict{String,String}
     nss = Dict{String,String}()
     for (key, value) in XML.attributes(r)
         if startswith(key, "xmlns")
-            prefix = split(key, ':')
-            if length(prefix) == 1
-                nss[""] = value  # Default namespace
+            colon_idx = findfirst(':', key)
+            if isnothing(colon_idx)
+                nss[""] = value
             else
-                nss[prefix[2]] = value
+                nss[SubString(key, colon_idx+1)] = value
             end
         end
     end
@@ -635,52 +635,54 @@ function strip_bom_and_lf!(bytes::Vector{UInt8})
     # subsequently saved, Excel will strip the BOM out. This means the test for 
     # this issue will stop testing the fix if the file "BOM - issue243.xlsx" is 
     # opened in Excel because the offending BOM will have been removed.
-    bom = UInt8[0xEF, 0xBB, 0xBF]
-    l = length(bytes)
-    if l >= 3 && bytes[1:3] == bom
-        if l > 3 && bytes[4] == 0x0A
+    length(bytes) < 3 && return
+    if bytes[1] == 0xEF && bytes[2] == 0xBB && bytes[3] == 0xBF
+        if length(bytes) > 3 && bytes[4] == 0x0A
             deleteat!(bytes, 1:4)
         else
             deleteat!(bytes, 1:3)
         end
     end
 end
+
 function skipNode(r::XML.Raw, skipnode::String) # separate rows or ssts to speed up reading of large files
-    new = Vector{UInt8}() # original data with <sheetData> or <sst> node removed
-    skipped = Vector{UInt8}() # just the <sheetData> or <sst> node and its children
+#    new = Vector{UInt8}() # original data with <sheetData> or <sst> node removed
+#    skipped = Vector{UInt8}() # just the <sheetData> or <sst> node and its children
+    new = IOBuffer() # original data with <sheetData> or <sst> node removed
+    skipped = IOBuffer() # just the <sheetData> or <sst> node and its children
     n = XML.next(r)
-    append!(new, n.data[n.pos:n.pos+n.len])
+    write(new, n.data[n.pos:n.pos+n.len])
 
     while first(XML.get_name(n.data, n.pos)) != skipnode # Retain everything before the <sheetData> or <sst> node
         n = XML.next(n)
-        append!(new, n.data[n.pos:n.pos+n.len])
+        write(new, n.data[n.pos:n.pos+n.len])
     end
 
     if skipnode == "sheetData" # Add parents for <row> or <sst> elements to the excerpted data
-        append!(skipped, Vector{UInt8}("<worksheet>"))
-        append!(skipped, Vector{UInt8}("<sheetData>"))
+        write(skipped, "<worksheet>")
+        write(skipped, "<sheetData>")
     elseif skipnode == "sst"
-        append!(skipped, Vector{UInt8}("<sst>"))
+        write(skipped, "<sst>")
     else
         throw(XLSXError("Unknown skipnode $skipnode."))
     end
     sdepth = n.depth
     n = XML.next(n)
     while n !== nothing && n.depth > sdepth # Put all children of <sheetData> or <sst> into the excerpted data
-        append!(skipped, n.data[n.pos:n.pos+n.len])
+        write(skipped, n.data[n.pos:n.pos+n.len])
         n = XML.next(n)
     end
     while n !== nothing # Retain everything after the <sheetData> or <sst> node
-        append!(new, n.data[n.pos:n.pos+n.len])
+        write(new, n.data[n.pos:n.pos+n.len])
         n = XML.next(n)
     end
     if skipnode == "sheetData"  # close parents for <row> or <sst> elements in the excerpted data
-        append!(skipped, Vector{UInt8}("</sheetData>"))
-        append!(skipped, Vector{UInt8}("</workshet>"))
+        write(skipped, "</sheetData>")
+        write(skipped, "</workshet>")
     elseif skipnode == "sst"
-        append!(skipped, Vector{UInt8}("</sst>"))
+        write(skipped, "</sst>")
     end
-    return new, skipped
+    return take!(new), take!(skipped)
 end
 
 function stream_files(xf::XLSXFile; pass::Int, channel_size::Int=1 << 10)
