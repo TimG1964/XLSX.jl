@@ -38,8 +38,8 @@ println( string(cn) ) # will print out AB1
 """
 struct CellRef
     name::String
-    row_number::Int
-    column_number::Int
+    row_number::Int32
+    column_number::Int32
 end
 
 abstract type AbstractCellDataFormat end
@@ -61,7 +61,7 @@ mutable struct Formula <: AbstractFormula
     unhandled::Union{Dict{String,String},Nothing}
 end
 function Formula()
-    return Formula("", nothing)
+    return EmptyFormula()
 end
 function Formula(s::String)
     return Formula(s, nothing)
@@ -91,6 +91,7 @@ struct CellFormula <: AbstractFormula
     styleid::AbstractCellDataFormat
 end
 
+struct EmptyFormula <: AbstractFormula end
 
 mutable struct CellFont
     fontId::Int

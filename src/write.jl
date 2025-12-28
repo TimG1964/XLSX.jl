@@ -399,7 +399,7 @@ function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String, Str
         end
         print(row_node, ">")
         
-        if !isempty(cell.formula)
+        if !(cell.formula isa EmptyFormula)
             add_node_formula!(row_node, cell.formula)
         end
 
@@ -641,7 +641,7 @@ setdata!(ws::Worksheet, row::Integer, col::Integer, val::CellValue) = setdata!(w
 setdata!(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}, v) = setdata!(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))), v)
 
 # shift the relative cell references ina formula when shifting a ReferencedFormula
-function shift_excel_references(formula::String, offset::Tuple{Int64,Int64})
+function shift_excel_references(formula::String, offset::Tuple{Int32,Int32})
     # Regex to match Excel-style cell references (e.g., A1, $A$1, A$1, $A1)
     pattern = r"\$?[A-Z]{1,3}\$?[1-9][0-9]*"
     row_shift, col_shift = offset

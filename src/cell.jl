@@ -105,6 +105,14 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
     end
     return Cell(ref, t, s, v, f)
 end
+function update_cell(c::Cell; datatype::Union{Nothing,String}=nothing, style::Union{Nothing,String}=nothing, value::Union{Nothing,String}=nothing, formula::Union{Nothing,AbstractFormula}=nothing)
+    return Cell(c.ref,
+        isnothing(datatype) ? c.datatype : datatype, 
+        isnothing(style) ? c.style : style, 
+        isnothing(value) ? c.value : value,
+        isnothing(formula) ? c.formula : formula
+    )
+end
 
 function parse_formula_from_element(c_child_element) :: AbstractFormula
 
@@ -156,7 +164,11 @@ end
 
 # Constructor with simple formula string for backward compatibility
 function Cell(ref::CellRef, datatype::String, style::String, value::String, formula::String)
-    return Cell(ref, datatype, style, value, Formula(formula))
+    if formula == ""
+        return Cell(ref, datatype, style, value, Formula())
+    else
+        return Cell(ref, datatype, style, value, Formula(formula))
+    end
 end
 
 @inline getdata(ws::Worksheet, empty::EmptyCell) = missing

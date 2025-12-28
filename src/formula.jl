@@ -29,7 +29,7 @@ function rereference_formulae(ws::Worksheet, cell::Cell)
         end
     end
 end
-function rereference_formulae(ws::Worksheet, cell::Cell, newref::CellRange, offset::Tuple{Int64,Int64}, newid::Int64)::CellRange
+function rereference_formulae(ws::Worksheet, cell::Cell, newref::CellRange, offset::Tuple{Int32,Int32}, newid::Int64)::CellRange
     oldform = cell.formula.formula
     oldunhandled = cell.formula.unhandled
     newform = ReferencedFormula(shift_excel_references(oldform, offset), newid, string(newref), oldunhandled)
@@ -50,7 +50,7 @@ function update_formulas_missing_sheet!(wb::Workbook, name::String)
         s = getsheet(wb, i)
         for r in eachrow(s)
             for (_, cell) in r.rowcells
-                cell.formula isa FormulaReference && continue
+                (cell.formula isa EmptyFormula || cell.formula isa FormulaReference) && continue
                 oldform = cell.formula.formula
                 if occursin(name * "!", cell.formula.formula)
                     for (pat, r) in pattern
