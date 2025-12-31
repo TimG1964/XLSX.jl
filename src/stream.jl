@@ -88,7 +88,7 @@ function Base.iterate(itr::SheetRowStreamIterator)
         rownode === nothing && return nothing # no rows found
     end
 
-    # rownode is the now the first row
+    # rownode is now the first row
     a = XML.attributes(rownode) # get row number and row height (if specified)
     current_row = parse(Int, a["r"])
     current_row_ht = haskey(a, "ht") ? parse(Float64, a["ht"]) : nothing
@@ -119,7 +119,7 @@ function Base.iterate(itr::SheetRowStreamIterator, state::SheetRowStreamIterator
         return nothing
     end
 
-    # get row number and row heigth (if specified)
+    # get row number and row height (if specified)
     a = XML.attributes(rownode)
     current_row = parse(Int, a["r"])
     current_row_ht = haskey(a, "ht") ? parse(Float64, a["ht"]) : nothing
@@ -255,10 +255,13 @@ getdata(r::SheetRow, column::Union{Vector{T}, UnitRange{T}}) where {T<:Integer} 
 getdata(r::SheetRow, column) = getdata(get_worksheet(r), getcell(r, column))
 Base.getindex(r::SheetRow, x) = getdata(r, x)
 
+Base.eachrow(ws::Worksheet) = eachrow(ws)
 """
     eachrow(sheet)
 
 Creates a row iterator for a worksheet.
+
+Base.eachrow(sheet::Worksheet) is defined as a synonym of XLSX.eachrow(sheet::Worksheet)
 
 Example: Query all cells from columns 1 to 4.
 
@@ -274,11 +277,15 @@ for sheetrow in eachrow(sheet)
 end
 ```
 
-Note: The `eachrow` row iterator will not return any row that 
-consists entirely of `EmptyCell`s. These are simply not seen 
-by the iterator. The `length(eachrow(sheet))` function therefore 
-defines the number of rows that are not entirely empty and will, 
-in any case, only succeed if the worksheet cache is in use.
+!!! note
+
+    The `eachrow` row iterator will not return any row that 
+    consists entirely of `EmptyCell`s. These empty rows are not 
+    represented in the .xlsx file and are therefore not seen by the 
+    iterator. The `length(eachrow(sheet))` function returns 
+    the number of rows that are not entirely empty and will, in any 
+    case, only succeed if the worksheet cache is in use.
+
 """
 function eachrow(ws::Worksheet) :: SheetRowIterator
     if is_cache_enabled(ws)
@@ -418,7 +425,8 @@ function match_rows(ws::Worksheet, rows_to_match::Vector{Int})::Vector{SheetRow}
 
     sort!(rows_to_match)
     i=1
-
+    l=length(rows_to_match)
+    
     target_file = get_relationship_target_by_id("xl", get_workbook(ws), ws.relationship_id)
     lznode = open_internal_file_stream(get_xlsxfile(ws), target_file)
 
@@ -448,7 +456,7 @@ function match_rows(ws::Worksheet, rows_to_match::Vector{Int})::Vector{SheetRow}
                 sheetrow = SheetRow(ws, row_num, current_row_ht, rowcells)
                 push!(matched_rows, sheetrow)
                 i+=1
-                i>length(rows_to_match) && break # stop once all rows matched
+                i>l && break # stop once all rows matched
                 continue
             end
         end

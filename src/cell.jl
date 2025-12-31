@@ -12,8 +12,8 @@
 @inline relative_column_position(c::Cell, rng::ColumnRange) = relative_column_position(c.ref, rng)
 @inline relative_column_position(c::EmptyCell, rng::ColumnRange) = relative_column_position(c.ref, rng)
 
-Base.:(==)(c1::Cell, c2::Cell) = c1.ref == c2.ref && c1.datatype == c2.datatype && c1.style == c2.style && c1.value == c2.value && c1.formula == c2.formula
-Base.hash(c::Cell) = hash(c.ref) + hash(c.datatype) + hash(c.style) + hash(c.value) + hash(c.formula)
+Base.:(==)(c1::Cell, c2::Cell) = c1.ref == c2.ref && c1.datatype == c2.datatype && c1.style == c2.style && c1.value == c2.value && c1.meta == c2.meta && c1.formula == c2.formula
+Base.hash(c::Cell) = hash(c.ref) + hash(c.datatype) + hash(c.style) + hash(c.value) + hash(c.meta) + hash(c.formula)
 
 Base.:(==)(c1::EmptyCell, c2::EmptyCell) = c1.ref == c2.ref
 Base.hash(c::EmptyCell) = hash(c.ref) + 10
@@ -63,6 +63,13 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
         s = ""
     end
 
+    # Cell metadata flag (for dynamicArrays)
+    if haskey(a, "cm")
+        m = a["cm"]
+    else
+        m = ""
+    end
+
     # iterate v and f elements
     local v::String = ""
     local f::AbstractFormula = Formula()
@@ -74,7 +81,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
         if t == "inlineStr" # Convert to sharedString
             if XML.tag(c_child_element) == "is"
                 uft = unformatted_text(c_child_element)
-                if uft=="" # Convert empty inlineStrings to EmptyCell. Can't have empty sharedStrings
+                if uft=="" # Convert empty inlineStrings to missing. Can't have empty sharedStrings
                     v=""
                     t=""
                 else
@@ -103,7 +110,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
             end
         end
     end
-    return Cell(ref, t, s, v, f)
+    return Cell(ref, t, s, v, m, f)
 end
 #=
 function update_cell(c::Cell; datatype::Union{Nothing,String}=nothing, style::Union{Nothing,String}=nothing, value::Union{Nothing,String}=nothing, formula::Union{Nothing,AbstractFormula}=nothing)
@@ -141,26 +148,37 @@ function parse_formula_from_element(c_child_element) :: AbstractFormula
             end
         end
     end
-    if !isnothing(a)
-        if haskey(a, "t") && a["t"] == "shared"
-            haskey(a, "si") || throw(XLSXError("Expected shared formula to have an index. `si` attribute is missing: $c_child_element"))
-            if haskey(a, "ref")
-                return ReferencedFormula(
-                    formula_string,
-                    parse(Int, a["si"]),
-                    a["ref"],
-                    length(unhandled_attributes) > 0 ? unhandled_attributes : nothing,
-                )
-            else
-                return FormulaReference(
-                    parse(Int, a["si"]),
-                    length(unhandled_attributes) > 0 ? unhandled_attributes : nothing,
-                )
+    is_array=false
+    let ref = nothing
+        if !isnothing(a)
+            if haskey(a, "t")
+                if a["t"] == "shared"
+                    haskey(a, "si") || throw(XLSXError("Expected shared formula to have an index. `si` attribute is missing: $c_child_element"))
+                    if haskey(a, "ref")
+                        return ReferencedFormula(
+                            formula_string,
+                            parse(Int, a["si"]),
+                            a["ref"],
+                            length(unhandled_attributes) > 0 ? unhandled_attributes : nothing,
+                        )
+                    else
+                        return FormulaReference(
+                            parse(Int, a["si"]),
+                            length(unhandled_attributes) > 0 ? unhandled_attributes : nothing,
+                        )
+                    end
+                elseif a["t"] == "array"
+                    is_array=true
+                    ref = haskey(a,"ref") ? a["ref"] : nothing
+                end
             end
         end
+        return Formula(
+            formula_string,
+            is_array ? "array" : nothing,
+            ref,
+            length(unhandled_attributes) > 0 ? unhandled_attributes : nothing)
     end
-
-    return Formula(formula_string, length(unhandled_attributes) > 0 ? unhandled_attributes : nothing)
 end
 
 # Constructor with simple formula string for backward compatibility
@@ -195,21 +213,12 @@ function getdata(ws::Worksheet, cell::Cell) :: CellValueType
 
     if iserror(cell)
         return missing
+#        return cell.value
     end
 
     ecv=isempty(cell.value)
     ecd=isempty(cell.datatype)
     ecs=isempty(cell.style)
-
-#=
-    if cell.datatype == "inlineStr" # Now converted to sahred strings on read
-        if ecv
-            return missing
-        else
-            return cell.value
-        end
-    end
-=#
 
     if cell.datatype == "s"
 
@@ -444,11 +453,11 @@ function get_rowcells!(rowcells::Dict{Int, Cell}, row::XML.LazyNode, ws::Workshe
         if cellnode.tag == "c" # This is a cell
             cell = Cell(cellnode, ws; mylock) # construct an XLSX.Cell from an XML.LazyNode
             sst_count += cell.datatype == "s" ? 1 : 0
-            @inbounds rowcells[column_number(cell)] = cell
+            rowcells[column_number(cell)] = cell
         end
         cellnode = XML.next(cellnode)
     end
-    if !isnothing(cellnode) && cellnode.tag == "row" # have reached the end of last row, beginning of next
+    if !isnothing(cellnode) && cellnode.tag == "row" # have reached the beginning of next row
         return cellnode, sst_count
     else                                             # no more rows
         return nothing, sst_count

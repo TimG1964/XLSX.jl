@@ -6,7 +6,7 @@
 Each cell in an Excel spreadsheet may refer to an Excel `style`. Multiple cells can 
 refer to the same `style` and therefore have a uniform appearance. A `style` defines
 the cell's `alignment` directly (as part of the `style` definition), but it may also 
-refer to further formatting definitions for `font`, `fill`, `border`, `format`. 
+refer to further formatting definitions for `font`, `fill`, `border` and number `format`. 
 Multiple `style`s may each refer to the same `fill` definition or the same `font` 
 definition, etc, and therefore share these formatting characteristics.
 This hierarchy can be shown like this:
@@ -77,7 +77,7 @@ all remain unchanged from before. This new combination of attributes is unique,
 so a new `fontId` has been created.
 
 Font colors (and colors in any of the other formatting functions) can be set using a 
-hex RGB value or by name using any of the colors provided by [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/)
+hex RGB value or by name using any of the colors provided by [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/).
 
 The other set attribute functions behave in similar ways. See [`XLSX.setBorder`](@ref), 
 [`XLSX.setFill`](@ref), [`XLSX.setFormat`](@ref) and [`XLSX.setAlignment`](@ref).
@@ -357,7 +357,7 @@ If the first cell in the specified range has no defined Style (`s=""`), all cell
 In Excel, subscript and superscript formatting to a substring (for example) can only be made using this kind of rich text formatting, and cannot be set at cell level (neither in Excel nor in `setFont`). Retaining rich text format heterogeneity in the ways described here preserves these string formatting elements through format changes.
 
 To clear any rich text formatting and remove the heterogeneity it introduces, simply copy the cells over themselves.
-This strips out all formatting and style information from the cells, leaving only the cell content.
+This strips out all rich text formatting information from the cells, leaving only the cell content and Style-base formating.
 For example, for arbitrary cells:
 
 ```julia

@@ -2,35 +2,45 @@
 module XLSX
 
 import Artifacts
+import Base.convert
+import Base.Threads
+import Colors
 import Dates
+import Mmap
 import Printf.@printf
-import ZipArchives
-import XML
+import Random
 import Tables
 import Unicode
-import Colors
-import Base.convert
-import Random
 import UUIDs
-import Mmap
-import Base.Threads
+import XML
+import ZipArchives
 
 import PrecompileTools as PCT    # this is a small dependency.
 
 export
     # Files and worksheets
-    XLSXFile, readxlsx, openxlsx, opentemplate, newxlsx, writexlsx, savexlsx,
-    Worksheet, sheetnames, sheetcount, hassheet, rename!, addsheet!, copysheet!, deletesheet!, 
+    XLSXFile,
+    readxlsx, openxlsx, opentemplate, newxlsx,
+    writexlsx, savexlsx,
+    Worksheet, sheetnames, sheetcount, hassheet, 
+    addsheet!, renamesheet!, copysheet!, deletesheet!, 
     # Cells & data
-    CellRef, row_number, column_number, eachrow, eachtablerow,
-    readdata, getdata, gettable, readtable, readto, writetable, writetable!,
-    addDefinedName,
+    CellRef, row_number, column_number, eachtablerow,
+    readdata, getdata, gettable, readtable, readto, 
+    gettransposedtable, readtransposedtable,
+    writetable, writetable!,
+    addDefinedName, setFormula,
     # Formats
     setFormat, setFont, setBorder, setFill, setAlignment,
     setUniformFormat, setUniformFont, setUniformBorder, setUniformFill, setUniformAlignment, setUniformStyle,
     setConditionalFormat,
     setColumnWidth, setRowHeight,
     getMergedCells, isMergedCell, getMergedBaseCell, mergeCells
+
+#public
+#    CellRange, Cell, getcell, getcellrange,    
+#    getFormat, getFont, getBorder, getFill, getAlignment,
+#    getFormula
     
 const SPREADSHEET_NAMESPACE_XPATH_ARG = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 const EXCEL_MAX_COLS = 16_384     # total columns supported by Excel per sheet
