@@ -55,8 +55,8 @@ Base.show(io::IO, state::SheetRowStreamIteratorState) = print(io, "SheetRowStrea
         seekstart(xf.source)
         zip_io = ZipArchives.ZipReader(read(xf.source))
     else
-#        zip_io = ZipArchives.ZipReader(FileArray(abspath(xf.source)))
-       zip_io = ZipArchives.ZipReader(Mmap.mmap(abspath(xf.source)))
+        zip_io = ZipArchives.ZipReader(FileArray(abspath(xf.source))) # FileArray is marginally slower than mmap
+#       zip_io = ZipArchives.ZipReader(Mmap.mmap(abspath(xf.source))) # but Mmap is unreliable : https://discourse.julialang.org/t/struggling-to-use-mmap-with-ziparchives/129839
     end
 
     return XML.LazyNode(XML.Raw(ZipArchives.zip_readentry(zip_io, filename)))

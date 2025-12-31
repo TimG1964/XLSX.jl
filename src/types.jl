@@ -53,6 +53,8 @@ end
 
 abstract type AbstractFormula end
 
+struct EmptyFormula <: AbstractFormula end
+
 """
 A default formula simply storing the formula string.
 """
@@ -92,8 +94,6 @@ struct CellFormula# <: AbstractFormula
     value::T where T<:AbstractFormula
     styleid::AbstractCellDataFormat
 end
-
-struct EmptyFormula <: AbstractFormula end
 
 # Keeps track of external references in formulas.
 struct ExternalRef
@@ -237,7 +237,7 @@ struct ColumnRange <: ContiguousCellRange
     start::Int # column number
     stop::Int  # column number
 
-    function ColumnRange(a::Int, b::Int)
+    function ColumnRange(a::Integer, b::Integer)
         if a > b 
             throw(XLSXError("Invalid ColumnRange. Start column must be located before end column."))
         end
@@ -248,7 +248,7 @@ struct RowRange <: ContiguousCellRange
     start::Int # row number
     stop::Int  # row number
 
-    function RowRange(a::Int, b::Int)
+    function RowRange(a::Integer, b::Integer)
         if a > b
             throw(XLSXError("Invalid RowRange. Start row must be located before end row."))
         end
