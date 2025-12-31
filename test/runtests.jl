@@ -1666,11 +1666,15 @@ end
     end
 
     @testset "readtable select column range" begin
+
         dtable = XLSX.readtable(joinpath(data_directory, "general.xlsx"), "table4", "F:G")
         data, col_names = dtable.data, dtable.column_labels
         @test col_names == [:H2, :H3]
         test_data = Any[Any["C3", missing], Any[missing, "D4"]]
         check_test_data(data, test_data)
+
+        @test_throws XLSX.XLSXError XLSX.readtable(joinpath(data_directory, "general.xlsx"), "table4", "F:G"; header=false, column_labels=["a", "b", "c"])
+
     end
 
     @testset "readtable empty rows" begin
@@ -1721,6 +1725,87 @@ end
         check_test_data(t.data, test_data)
         @test t.column_labels == [Symbol("Col A"), Symbol("Col B")]
         @test t.column_label_index == Dict(Symbol("Col A") => 1, Symbol("Col B") => 2)
+
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true)
+        test_data = Vector{Any}(undef, 2)
+        test_data[1] = [missing, missing, missing, 1, 2, missing, missing, 3, 4, 5, missing, missing, missing, missing, missing, 6, 7, 8, missing, missing, missing, missing, missing, missing, missing, 9, 10, 11, 12, 13, 14, 15, 16]
+        test_data[2] = [missing, missing, missing, "a", "b", missing, missing, "c", "d", "e", missing, missing, missing, missing, missing, "c", "d", "e", missing, missing, missing, missing, missing, missing, missing, "c", "d", "e", "c", "d", "e", "c", "d"]
+        check_test_data(t.data, test_data)
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false)
+        test_data = Vector{Any}(undef, 2)
+        test_data[1] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        test_data[2] = ["a", "b", "c", "d", "e", "c", "d", "e", "c", "d", "e", "c", "d", "e", "c", "d"]
+        check_test_data(t.data, test_data)
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingMixed", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true)
+        test_data = Vector{Any}(undef, 2)
+        test_data[1] = [missing, missing, missing, 1, 2, missing, missing, 3, 4, 5, missing, missing, missing, missing, missing, 6, 7, 8, missing, missing, missing, missing, missing, missing, missing, 9, 10, 11, 12, 13, 14, 15, 16]
+        test_data[2] = [missing, missing, missing, "a", "b", missing, missing, "c", "d", "e", missing, missing, missing, missing, missing, "c", "d", "e", missing, missing, missing, missing, missing, missing, missing, "c", "d", "e", "c", "d", "e", "c", "d"]
+        check_test_data(t.data, test_data)
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingMixed", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false)
+        test_data = Vector{Any}(undef, 2)
+        test_data[1] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        test_data[2] = ["a", "b", "c", "d", "e", "c", "d", "e", "c", "d", "e", "c", "d", "e", "c", "d"]
+        check_test_data(t.data, test_data)
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+    end
+
+    @testset "stop function" begin
+    
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true, stop_in_row_function = x -> !ismissing(x.cell_values[1]) && x.cell_values[1]==2)
+        test_data = Vector{Any}(undef, 2)
+        test_data[1] = [missing, missing, missing, 1]
+        test_data[2] = [missing, missing, missing, "a"]
+        check_test_data(t.data, test_data)
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false, stop_in_row_function = x -> !ismissing(x.cell_values[1]) && x.cell_values[1]==14)
+        test_data = Vector{Any}(undef, 2)
+        test_data[1] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        test_data[2] = ["a", "b", "c", "d", "e", "c", "d", "e", "c", "d", "e", "c", "d"]
+        check_test_data(t.data, test_data)
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true, stop_in_row_function = x -> ismissing(x.cell_values[1]))
+        @test isempty(t.data[1])
+        @test isempty(t.data[2])
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false, stop_in_row_function = x -> !ismissing(x.cell_values[1]) && x.cell_values[1]==1)
+        @test isempty(t.data[1])
+        @test isempty(t.data[2])
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingMixed", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true, stop_in_row_function = x -> ismissing(x.cell_values[1]))
+        @test isempty(t.data[1])
+        @test isempty(t.data[2])
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingMixed", "B:C"; first_row=2, stop_in_empty_row=true)
+        @test isempty(t.data[1])
+        @test isempty(t.data[2])
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+    end
+
+    @testset "normalizenames" begin
+        test_data = ["hello", "Hello 1", "123", Symbol("name")]
+        @test XLSX.normalizename.(test_data) == [:hello, :Hello_1, :_123, :name]
     end
 
     @testset "Read DataFrame" begin
@@ -1749,7 +1834,7 @@ end
         @test df[3, 2] == Dates.Date(1983, 04, 16)
         @test df[5, 2] == Dates.DateTime(2018, 04, 16, 19, 19, 51)
 
-        @test_throws XLSX.XLSXError df = XLSX.readto(joinpath(data_directory, "general.xlsx"))           # No sink
+        @test_throws XLSX.XLSXError XLSX.readto(joinpath(data_directory, "general.xlsx"))           # No sink
         @test_throws XLSX.XLSXError df = XLSX.readto(joinpath(data_directory, "general.xlsx"), 3)        # No sink
         @test_throws XLSX.XLSXError df = XLSX.readto(joinpath(data_directory, "general.xlsx"), 3, "F:G") # No sink
 
@@ -6451,7 +6536,8 @@ end
     ct = XLSX.eachtablerow(f["table6"]) |> Tables.columntable
     @test length(ct) == 1
     @test isempty(ct.hey)
-    ct = XLSX.eachtablerow(f["table7"]) |> Tables.columntable
+#    @test ct.hey == Any[missing]
+    ct = XLSX.eachtablerow(f["table7"]; header=false) |> Tables.columntable
     @test length(ct) == 1
     @test length(ct[1]) == 1
 
