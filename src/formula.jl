@@ -267,7 +267,7 @@ function update_formulas_missing_sheet!(wb::Workbook, name::String)
         s = getsheet(wb, i)
         for r in eachrow(s)
             for (_, cell) in r.rowcells
-                cell.formula isa FormulaReference && continue
+                (cell.formula isa EmptyFormula || cell.formula isa FormulaReference) && continue
                 oldform = cell.formula.formula
                 if occursin(name * "!", cell.formula.formula)
                     for (pat, r) in pattern

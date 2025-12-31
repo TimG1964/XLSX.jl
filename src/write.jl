@@ -410,7 +410,7 @@ function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String, Str
         end
         print(row_node, ">")
         
-        if isa(cell.formula, AbstractFormula)
+        if !(cell.formula isa EmptyFormula) && isa(cell.formula, AbstractFormula)
             add_node_formula!(row_node, cell.formula)
         end
 
@@ -674,6 +674,39 @@ setdata!(ws::Worksheet, ref::CellRef, ::Nothing) = setdata!(ws, ref, CellValue(w
 setdata!(ws::Worksheet, row::Integer, col::Integer, val::CellValue) = setdata!(ws, CellRef(row, col), val)
 
 setdata!(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}, v) = setdata!(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))), v)
+
+# shift the relative cell references ina formula when shifting a ReferencedFormula
+function shift_excel_references(formula::String, offset::Tuple{Int32,Int32})
+    # Regex to match Excel-style cell references (e.g., A1, $A$1, A$1, $A1)
+    pattern = r"\$?[A-Z]{1,3}\$?[1-9][0-9]*"
+    row_shift, col_shift = offset
+
+    initial = [string(x.match) for x in eachmatch(pattern, formula)]
+    result = Vector{String}()
+
+    for ref in eachmatch(pattern, formula)
+        # Extract parts using regex
+        m = match(r"(\$?)([A-Z]{1,3})(\$?)([1-9][0-9]*)", ref.match)
+        col_abs, col_letters, row_abs, row_digits = m.captures
+
+        col_num = decode_column_number(col_letters)
+        row_num = parse(Int, row_digits)
+
+        # Apply shifts only if not absolute
+        new_col = col_abs == "\$" ? col_letters : encode_column_number(col_num + col_shift)
+        new_row = row_abs == "\$" ? row_digits : string(row_num + row_shift)
+
+        push!(result, col_abs * new_col * row_abs * new_row)
+    end
+
+    pairs = Dict(zip(initial, result))
+    if !isempty(pairs)
+        for (from, to) in pairs
+            formula = replace(formula, from => to)
+        end
+    end
+    return formula
+end
 
 function setdata!(ws::Worksheet, ref::CellRef, val::Union{AbstractFormula,CellValueType}) # use existing cell format if it exists
     c = getcell(ws, ref)

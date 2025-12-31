@@ -2,10 +2,10 @@
 function CellRef(n::AbstractString)
     !is_valid_cellname(n) && throw(XLSXError("$n is not a valid CellRef."))
     column_name, row_number = split_cellname(n)
-    return CellRef(n, row_number, decode_column_number(column_name))
+    return CellRef(n, Int32(row_number), Int32(decode_column_number(column_name)))
 end
 
-@inline CellRef(row::Int, col::Int) = CellRef(encode_column_number(col) * string(row))
+@inline CellRef(row::Integer, col::Integer) = CellRef(encode_column_number(col) * string(row))
 @inline CellPosition(ref::CellRef) = CellPosition(row_number(ref), column_number(ref))
 @inline row_number(p::CellPosition) = p.row
 @inline column_number(p::CellPosition) = p.column
@@ -29,7 +29,7 @@ function decode_column_number(column_name::AbstractString) :: Int
 end
 
 # Converts column number to a column name. See also XLSX.decode_column_number.
-function encode_column_number(column_number::Int) :: String
+function encode_column_number(column_number::Integer) :: String
     if column_number <= 0 && column_number > EXCEL_MAX_COLS
         throw(XLSXError("Column number should be in the range from 1 to $EXCEL_MAX_COLS."))
     end

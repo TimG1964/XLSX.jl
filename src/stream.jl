@@ -50,8 +50,16 @@ Base.show(io::IO, state::SheetRowStreamIteratorState) = print(io, "SheetRowStrea
 @inline function open_internal_file_stream(xf::XLSXFile, filename::String) :: XML.LazyNode
 
     !internal_xml_file_exists(xf, filename) && throw(XLSXError("Couldn't find $filename in $(xf.source)."))
+    if xf.use_cache_for_sheet_data || (xf.source isa IO)
+    #if source isa IO
+        xf.source isa IO && seekstart(xf.source)
+        zip_io = ZipArchives.ZipReader(read(xf.source))
+    else
+        zip_io = ZipArchives.ZipReader(FileArray(abspath(xf.source)))
+#       zip_io = ZipArchives.ZipReader(Mmap.mmap(abspath(source)))
+    end
 
-    return XML.LazyNode(XML.Raw(ZipArchives.zip_readentry(xf.io, filename)))
+    return XML.LazyNode(XML.Raw(ZipArchives.zip_readentry(zip_io, filename)))
 
 end
 

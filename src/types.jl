@@ -38,8 +38,8 @@ println( string(cn) ) # will print out AB1
 """
 struct CellRef
     name::String
-    row_number::Int
-    column_number::Int
+    row_number::Int32
+    column_number::Int32
 end
 
 abstract type AbstractCellDataFormat end
@@ -63,7 +63,7 @@ mutable struct Formula <: AbstractFormula
     unhandled::Union{Dict{String,String},Nothing}
 end
 function Formula()
-    return Formula("", nothing, nothing, nothing)
+    return EmptyFormula()
 end
 function Formula(s::String)
     return Formula(s, nothing, nothing, nothing)
@@ -92,6 +92,8 @@ struct CellFormula# <: AbstractFormula
     value::T where T<:AbstractFormula
     styleid::AbstractCellDataFormat
 end
+
+struct EmptyFormula <: AbstractFormula end
 
 # Keeps track of external references in formulas.
 struct ExternalRef
@@ -430,7 +432,6 @@ sh = xf["mysheet"] # get a reference to a Worksheet
 mutable struct XLSXFile <: MSOfficePackage
     source::Union{AbstractString, IO}
     use_cache_for_sheet_data::Bool # indicates whether Worksheet.cache will be fed while reading worksheet cells.
-    io::ZipArchives.ZipReader
     files::Dict{String, Bool} # maps filename => isread bool
     data::Dict{String, XML.Node} # maps filename => XMLDocument (with row/sst elements removed)
     binary_data::Dict{String, Vector{UInt8}} # maps filename => file content in bytes
@@ -441,12 +442,7 @@ mutable struct XLSXFile <: MSOfficePackage
 
     function XLSXFile(source::Union{AbstractString, IO}, use_cache::Bool, is_writable::Bool)
         check_for_xlsx_file_format(source)
-        if use_cache || (source isa IO)
-            io = ZipArchives.ZipReader(read(source))
-        else
-            io = ZipArchives.ZipReader(Mmap.mmap(abspath(source)))
-        end
-        xl = new(source, use_cache, io, Dict{String, Bool}(), Dict{String, XML.Node}(), Dict{String, Vector{UInt8}}(), EmptyWorkbook(), Vector{Relationship}(), is_writable, Random.Xoshiro(2468))
+        xl = new(source, use_cache, Dict{String, Bool}(), Dict{String, XML.Node}(), Dict{String, Vector{UInt8}}(), EmptyWorkbook(), Vector{Relationship}(), is_writable, Random.Xoshiro(2468))
         xl.workbook.package = xl
         return xl
     end

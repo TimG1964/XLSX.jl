@@ -355,7 +355,15 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
     end
     xf = XLSXFile(source, enable_cache, _write)
 
-    load_files!(xf; pass=1) # multi-threaded file load
+    #if enable_cache || (source isa IO)
+    if source isa IO # slower for a real file than using mmap
+        zip_io = ZipArchives.ZipReader(read(source))
+    else
+#        zip_io = ZipArchives.ZipReader(FileArray(abspath(source))) #FileArray is slower than mmap
+       zip_io = ZipArchives.ZipReader(Mmap.mmap(abspath(source)))
+    end
+
+    load_files!(xf, zip_io; pass=1) # multi-threaded file load
 
     check_minimum_requirements(xf)
     parse_relationships!(xf)
@@ -364,9 +372,9 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
     # need to remove calcChain.xml from [Content_Types].xml since file is never loaded
     _write && remove_calcChain!(xf)
 
-    load_files!(xf; pass=2) # multi-threaded file load
+    load_files!(xf, zip_io; pass=2) # multi-threaded file load
 
-    for sheet in get_workbook(xf).sheets
+        for sheet in get_workbook(xf).sheets
         if isnothing(sheet.dimension)
             sheet.dimension = read_worksheet_dimension(xf, sheet.relationship_id, sheet.name)
         end
@@ -419,11 +427,7 @@ function check_minimum_requirements(xf::XLSXFile)
 
     # Further check if this is a valid `.xlsx` file.
     f = "[Content_Types].xml"
-    if internal_xml_file_isread(xf, f)
-        content_types = XML.write(xf.data[f])
-    else
-        content_types = ZipArchives.zip_readentry(xf.io, f, String)
-    end
+    content_types = XML.write(xf.data[f])
 
     if occursin("spreadsheetml.sheet", content_types)
         return nothing
@@ -460,7 +464,7 @@ end
 
 # Updates xf.workbook from xf.data[\"xl/workbook.xml\"]
 function parse_workbook!(xf::XLSXFile)
-    xroot = xmlroot(xf, "xl/workbook.xml")[end]
+    xroot = xmlroot(xf,"xl/workbook.xml")[end]
     chn = XML.children(xroot)
     XML.tag(xroot) != "workbook" && throw(XLSXError("Malformed xl/workbook.xml. Root node name should be 'workbook'. Got '$(XML.tag(xroot))'."))
 
@@ -685,9 +689,9 @@ function skipNode(r::XML.Raw, skipnode::String) # separate rows or ssts to speed
     return take!(new), take!(skipped)
 end
 
-function stream_files(xf::XLSXFile; pass::Int, channel_size::Int=1 << 10)
+function stream_files(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int, channel_size::Int=1 << 10)
     Channel{String}(channel_size) do out
-        for f in ZipArchives.zip_names(xf.io)
+        for f in ZipArchives.zip_names(zip_io)
 
             # ignore xl/calcChain.xml in any case (#31)
             if f != "xl/calcChain.xml"
@@ -697,9 +701,9 @@ function stream_files(xf::XLSXFile; pass::Int, channel_size::Int=1 << 10)
                     internal_xml_file_add!(xf, f)
                 end
 
-                if xf.is_writable # Read files for processing and writing out later
+#                if xf.is_writable # Read files for processing and writing out later
                     put!(out, f)
-                end
+#                end
             end
         end
     end
@@ -708,12 +712,13 @@ end
 # Read xml files in two passes
 # pass 1 - read all but worksheets and sharedStrings
 # pass 2 - only read worksheets and sharedStrings
-function load_files!(xf::XLSXFile; pass::Int)
+function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
+
     (pass < 1 || pass > 2) && throw(XLSXError("Unknown pass to read files."))
     wb=get_workbook(xf)
 
     read_files = Channel{ReadFile}(1 << 10)
-    files = stream_files(xf; pass)
+    files = stream_files(xf, zip_io; pass)
 
     consumer = @async begin
 
@@ -747,11 +752,11 @@ function load_files!(xf::XLSXFile; pass::Int)
     @sync for _ in 1:Threads.nthreads()
         Threads.@spawn begin
             for file in files
-                if pass==1 && !occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", file)
-                    readfile = process_file(xf, file) # Pass 1: process all files except sheets and sharedStrings
+               if pass==1 && !occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", file)
+                    readfile = process_file(zip_io, file) # Pass 1: process all files except sheets and sharedStrings
                     put!(read_files, readfile)
                 elseif pass==2 && occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", file)
-                    readfile = process_file(xf, file) # Pass 2: now process sheets and sharedStrings
+                    readfile = process_file(zip_io, file) # Pass 2: now process sheets and sharedStrings
                     put!(read_files, readfile)
                 end
             end
@@ -764,14 +769,14 @@ function load_files!(xf::XLSXFile; pass::Int)
 
 end
 
-function process_file(xf::XLSXFile, filename::String)
+function process_file(zip_io::ZipArchives.ZipReader, filename::String)
 
         node=nothing
         raw=nothing
         bin=nothing
 
         try
-            bytes = ZipArchives.zip_readentry(xf.io, filename)
+            bytes = ZipArchives.zip_readentry(zip_io, filename)
             if !startswith(filename, "customXml") && (endswith(filename, ".xml") || endswith(filename, ".rels"))
                 if occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", filename)
                     strip_bom_and_lf!(bytes)
@@ -794,13 +799,19 @@ function process_file(xf::XLSXFile, filename::String)
 end
 
 function internal_xml_file_read(xf::XLSXFile, filename::String)
+    !internal_xml_file_exists(xf, filename) && throw(XLSXError("Couldn't find $filename in $(xf.source)."))
+    !internal_xml_file_isread(xf, filename) && throw(XLSXError("$filename in $(xf.source) has not been read."))
+    return internal_xml_file_read(xf::XLSXFile, nothing, filename::String)
+end
+
+function internal_xml_file_read(xf::XLSXFile, zip_io::Union{Nothing,ZipArchives.ZipReader}, filename::String)
 
     !internal_xml_file_exists(xf, filename) && throw(XLSXError("Couldn't find $filename in $(xf.source)."))
 
     if !internal_xml_file_isread(xf, filename)
 
         try
-            bytes = ZipArchives.zip_readentry(xf.io, filename)
+            bytes = ZipArchives.zip_readentry(zip_io, filename)
             strip_bom_and_lf!(bytes)
             if occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", filename)
                 skipnode = filename == "xl/sharedStrings.xml" ? "sst" : "sheetData"
