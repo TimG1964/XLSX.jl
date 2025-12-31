@@ -58,13 +58,15 @@ A default formula simply storing the formula string.
 """
 mutable struct Formula <: AbstractFormula
     formula::String
+    type::Union{String,Nothing} # usually nothing but has value "array" for dynamic array functions.
+    ref::Union{String,Nothing} # usually nothing but refers to the "spill" range for dynamic array functions.
     unhandled::Union{Dict{String,String},Nothing}
 end
 function Formula()
     return EmptyFormula()
 end
 function Formula(s::String)
-    return Formula(s, nothing)
+    return Formula(s, nothing, nothing, nothing)
 end
 
 
@@ -86,12 +88,20 @@ mutable struct ReferencedFormula <: AbstractFormula
     unhandled::Union{Dict{String,String},Nothing}
 end
 
-struct CellFormula <: AbstractFormula
+struct CellFormula# <: AbstractFormula
     value::T where T<:AbstractFormula
     styleid::AbstractCellDataFormat
 end
 
 struct EmptyFormula <: AbstractFormula end
+
+# Keeps track of external references in formulas.
+struct ExternalRef
+    index::Int          # the [n] index in the formula
+    sheet::String       # sheet name
+    full::String        # raw "[n]Sheet!$A$1" formula element
+end
+
 
 mutable struct CellFont
     fontId::Int
@@ -157,6 +167,7 @@ mutable struct Cell <: AbstractCell
     datatype::String
     style::String
     value::String
+    meta::String
     formula::AbstractFormula
 end
 
@@ -349,7 +360,7 @@ mutable struct Worksheet
     dimension::Union{Nothing, CellRange}
     is_hidden::Bool
     cache::Union{WorksheetCache, Nothing}
-    unhandled_attributes::Union{Nothing,Dict{Int,Dict{String,String}}}
+    unhandled_attributes::Union{Nothing,Dict{Int,Dict{String,String}}} # row => attributes(name=>value)
     sst_count::Int # number of cells containing a shared string
 
     function Worksheet(package::MSOfficePackage, sheetId::Int, relationship_id::String, name::String, dimension::Union{Nothing, CellRange}, is_hidden::Bool)
@@ -377,7 +388,7 @@ struct Sst
     formatted::String
     idx::Int
 end
-const DefinedNameValueTypes = Union{SheetCellRef, SheetCellRange, NonContiguousRange, Int, Float64, String, Missing}
+const DefinedNameValueTypes = Union{SheetCellRef, SheetCellRange, NonContiguousRange, CellValueType}#Int, Float64, String, Missing}
 const DefinedNameRangeTypes = Union{SheetCellRef, SheetCellRange, NonContiguousRange}
 
 struct DefinedNameValue
@@ -405,10 +416,10 @@ end
 """
 `XLSXFile` represents a reference to an Excel file.
 
-It is created by using [`XLSX.readxlsx`](@ref) or [`XLSX.openxlsx`](@ref) 
-or [`XLSX.opentemplate`](@ref) or [`XLSX.newxlsx`](@ref).
+It is created by using [`XLSX.readxlsx`](@ref), [`XLSX.openxlsx`](@ref), 
+[`XLSX.opentemplate`](@ref) or [`XLSX.newxlsx`](@ref).
 
-From a `XLSXFile` you can navigate to a `XLSX.Worksheet` reference
+From an `XLSXFile` you can navigate to an `XLSX.Worksheet` reference
 as shown in the example below.
 
 # Example
@@ -436,6 +447,7 @@ mutable struct XLSXFile <: MSOfficePackage
         return xl
     end
 end
+
 
 struct ReadFile
     node::Union{Nothing,XML.Node}
