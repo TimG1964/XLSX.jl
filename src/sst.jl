@@ -21,7 +21,7 @@ function get_shared_string_index(sst::SharedStringTable, str_formatted::Abstract
 
 end
 function create_new_sst(wb::Workbook, sst::SharedStringTable)
-    xf=get_xlsxfile(wb)
+#    xf=get_xlsxfile(wb)
     if !sst.is_loaded
         sst.is_loaded = true
 

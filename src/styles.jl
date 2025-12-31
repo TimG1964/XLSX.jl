@@ -72,7 +72,7 @@ end
 
 # get styles document for workbook
 function styles_xmlroot(workbook::Workbook)
-    xf=get_xlsxfile(workbook)
+#    xf=get_xlsxfile(workbook)
     if workbook.styles_xroot === nothing
         STYLES_RELATIONSHIP_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"
         if has_relationship_by_type(workbook, STYLES_RELATIONSHIP_TYPE)

@@ -370,11 +370,11 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
     parse_workbook!(xf)
 
     # need to remove calcChain.xml from [Content_Types].xml since file is never loaded
-    _write && remove_calcChain!(xf)
+    remove_calcChain!(xf)
 
     load_files!(xf, zip_io; pass=2) # multi-threaded file load
 
-        for sheet in get_workbook(xf).sheets
+    for sheet in get_workbook(xf).sheets
         if isnothing(sheet.dimension)
             sheet.dimension = read_worksheet_dimension(xf, sheet.relationship_id, sheet.name)
         end
