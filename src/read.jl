@@ -278,11 +278,11 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
     xf = XLSXFile(source, enable_cache, _write)
 
     #if enable_cache || (source isa IO)
-    if source isa IO
+    if source isa IO # slower for a real file than using mmap
         zip_io = ZipArchives.ZipReader(read(source))
     else
-        zip_io = ZipArchives.ZipReader(FileArray(abspath(source)))
-#       zip_io = ZipArchives.ZipReader(Mmap.mmap(abspath(source)))
+#        zip_io = ZipArchives.ZipReader(FileArray(abspath(source))) #FileArray is slower than mmap
+       zip_io = ZipArchives.ZipReader(Mmap.mmap(abspath(source)))
     end
 
     load_files!(xf, zip_io; pass=1) # multi-threaded file load

@@ -105,6 +105,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
     end
     return Cell(ref, t, s, v, f)
 end
+#=
 function update_cell(c::Cell; datatype::Union{Nothing,String}=nothing, style::Union{Nothing,String}=nothing, value::Union{Nothing,String}=nothing, formula::Union{Nothing,AbstractFormula}=nothing)
     return Cell(c.ref,
         isnothing(datatype) ? c.datatype : datatype, 
@@ -113,7 +114,7 @@ function update_cell(c::Cell; datatype::Union{Nothing,String}=nothing, style::Un
         isnothing(formula) ? c.formula : formula
     )
 end
-
+=#
 function parse_formula_from_element(c_child_element) :: AbstractFormula
 
     if XML.tag(c_child_element) != "f"
