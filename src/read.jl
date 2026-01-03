@@ -177,7 +177,9 @@ end
 
 Main function for reading an Excel file.
 This function will read the whole Excel file into memory
-and return a closed XLSXFile.
+and return an XLSXFile.
+
+Functionally equivalent to ``openxlsx(source; mode="r", enable_cache=true)`
 
 Consider using [`XLSX.openxlsx`](@ref) for lazy loading of Excel file contents.
 """
@@ -186,9 +188,7 @@ Consider using [`XLSX.openxlsx`](@ref) for lazy loading of Excel file contents.
 """
     openxlsx(f::F, source::Union{AbstractString, IO}; mode::AbstractString="r", enable_cache::Bool=true) where {F<:Function}
 
-Open an XLSX file for reading and/or writing. It returns an opened XLSXFile that will be automatically closed 
-after applying `f` to the file.
-
+Open an XLSX file for reading and/or writing and applies the function `f` to the content.
 # `Do` syntax
 
 This function should be used with `do` syntax, like in:
@@ -300,11 +300,11 @@ end
 """
     openxlsx(source::Union{AbstractString, IO}; mode="r", enable_cache=true) :: XLSXFile
 
-Supports opening a XLSX file without using do-syntax.
+Supports opening an XLSX file without using do-syntax.
 
-If opened with mode="rw" then use [`savexlsx`](@ref) to save the XLSX back to `source`, 
+If opened with mode="rw" then use [`savexlsx`](@ref) to save the XLSXFile back to `source`, 
 overwriting the original file.
-Alternatively, use [`writexlsx`](@ref) to save to a different filename.
+Alternatively, use [`writexlsx`](@ref) to write the XLSXFile to a different filename.
 
 These two invocations of `openxlsx` are functionally equivalent:
 ```
@@ -359,7 +359,7 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
     if source isa IO # slower for a real file than using mmap
         zip_io = ZipArchives.ZipReader(read(source))
     else
-        zip_io = ZipArchives.ZipReader(FileArray(abspath(source))) # FileArray is marginally slower than mmap
+        zip_io = ZipArchives.ZipReader(FileArray(abspath(source))) # FileArray is marginally slower than Mmap
 #       zip_io = ZipArchives.ZipReader(Mmap.mmap(abspath(source))) # but Mmap is unreliable : https://discourse.julialang.org/t/struggling-to-use-mmap-with-ziparchives/129839
     end
 

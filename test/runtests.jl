@@ -6140,6 +6140,19 @@ end
                 @test sheet[r+6, c] == test_data[r, c]
             end
         end
+
+        xf = XLSX.newxlsx()
+        sheet = xf[1]
+        sheet[7, 1] = test_data
+        XLSX.writexlsx(filename, xf, overwrite=true)
+
+        XLSX.openxlsx(filename) do xf
+            sheet = xf[1]
+            rows, cols = size(test_data)
+            for c in 1:cols, r in 1:rows
+                @test sheet[r+6, c] == test_data[r, c]
+            end
+        end
     end
 
     @testset "write matrix with range" begin
@@ -6148,6 +6161,19 @@ end
             sheet = xf[1]
             sheet["A7:C9"] = test_data
         end
+
+        XLSX.openxlsx(filename) do xf
+            sheet = xf[1]
+            rows, cols = size(test_data)
+            for c in 1:cols, r in 1:rows
+                @test sheet[r+6, c] == test_data[r, c]
+            end
+        end
+
+        xf = XLSX.newxlsx()
+        sheet = xf[1]
+        sheet[7:9, 1:3] = test_data
+        XLSX.writexlsx(filename, xf, overwrite=true)
 
         XLSX.openxlsx(filename) do xf
             sheet = xf[1]

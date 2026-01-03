@@ -35,81 +35,71 @@ function find_t_node_recursively(n::XML.LazyNode) :: Union{Nothing, XML.LazyNode
 end
 =#
 function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothing}=nothing) :: Union{Cell, EmptyCell}
-    # c (Cell) element is defined at section 18.3.1.4
-    # t (Cell Data Type) is an enumeration representing the cell's data type. The possible values for this attribute are defined by the ST_CellType simple type (§18.18.11).
-    # s (Style Index) is the index of this cell's style. Style records are stored in the Styles Part.
+    wb = get_workbook(ws)
 
-    wb=get_workbook(ws)
+    # Validate tag first (fail fast)
+    XML.tag(c) == "c" || throw(XLSXError("`Cell` Expects a `c` (cell) XML node."))
 
-    if XML.tag(c) != "c"
-        throw(XLSXError("`Cell` Expects a `c` (cell) XML node."))
-    end
-
-    a = XML.attributes(c) # Dict of cell attributes
-
+    a = XML.attributes(c)
     ref = CellRef(a["r"])
 
-    # type
-    if haskey(a, "t")
-        t = a["t"]
-    else
-        t = ""
-    end
+    # Get attributes with defaults (already optimal)
+    t = get(a, "t", "")
+    s = get(a, "s", "")
+    m = get(a, "cm", "")
 
-    # style
-    if haskey(a, "s")
-        s = a["s"]
-    else
-        s = ""
-    end
-
-    # Cell metadata flag (for dynamicArrays)
-    if haskey(a, "cm")
-        m = a["cm"]
-    else
-        m = ""
-    end
-
-    # iterate v and f elements
-    local v::String = ""
-    local f::AbstractFormula = Formula()
-    local found_v::Bool = false
-    local found_f::Bool = false
-
-    for c_child_element in XML.children(c)
-
-        if t == "inlineStr" # Convert to sharedString
-            if XML.tag(c_child_element) == "is"
-                uft = unformatted_text(c_child_element)
-                if uft=="" # Convert empty inlineStrings to missing. Can't have empty sharedStrings
-                    v=""
-                    t=""
-                else
-                    ft=("<si>\n  "*join(XML.write.(XML.children(c_child_element)), "\n")*"\n</si>")
-                    t = "s"
-                    v = string(add_shared_string!(wb, uft, ft; mylock))
+    # Pre-allocate with concrete types
+    v::String = ""
+    f::AbstractFormula = Formula()
+    
+    if t == "inlineStr"
+        # Handle inlineStr case - find "is" element
+        for child in XML.eachchild(c)
+            XML.tag(child) == "is" || continue
+            
+            uft = unformatted_text(child)
+            if isempty(uft)
+                v = ""
+                t = ""
+            else
+                # Build formatted text - pre-allocate IOBuffer
+                io = IOBuffer(sizehint=256)  # Adjust based on typical size
+                write(io, "<si>\n  ")
+                
+                # Write children more efficiently
+                first = true
+                for grandchild in XML.eachchild(child)
+                    if first
+                        first = false
+                    else
+                        write(io, "\n")
+                    end
+                    write(io, XML.write(grandchild))
                 end
+                
+                write(io, "\n</si>")
+                ft = String(take!(io))
+                
+                t = "s"
+                v = string(add_shared_string!(wb, uft, ft; mylock))
             end
-        else
-            if XML.tag(c_child_element) == "v"
-                if found_v # we should have only one v element
-                    throw(XLSXError("Unsupported: cell $(ref) has more than 1 `v` elements."))
-                else
-                    found_v = true
-                end              
-                # v = length(c_child_element)==0 ? "" : XML.unescape(XML.simple_value(c_child_element))
-                ch=XML.children(c_child_element)
-                v = length(ch)==0 ? "" : XML.unescape(XML.value(ch[1])) # saves a little time!
-            elseif XML.tag(c_child_element) == "f"
-                if found_f # we should have only one f element
-                    throw(XLSXError("Unsupported: cell $(ref) has more than 1 `f` elements."))
-                else
-                    found_f = true
+            break  # Only process first "is" element
+        end
+    else
+        # Standard cell processing
+        for child in XML.eachchild(c)
+            tag = XML.tag(child)
+            if tag == "v"
+                ch = XML.children(child)
+                if !isempty(ch)
+                    v = XML.unescape(XML.value(ch[1]))
                 end
-                f = parse_formula_from_element(c_child_element)
+            elseif tag == "f"
+                f = parse_formula_from_element(child)
             end
         end
     end
+    
     return Cell(ref, t, s, v, m, f)
 end
 #=
@@ -131,7 +121,7 @@ function parse_formula_from_element(c_child_element) :: AbstractFormula
     if XML.is_simple(c_child_element)
         formula_string = XML.unescape(XML.simple_value(c_child_element))
     else
-        fs = [x for x in XML.children(c_child_element) if XML.nodetype(x) == XML.Text]
+        fs = [x for x in XML.eachchild(c_child_element) if XML.nodetype(x) == XML.Text]
         if length(fs)==0
             formula_string=""
         else

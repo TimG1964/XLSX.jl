@@ -195,11 +195,11 @@ julia> m = hcat(dtable.data...)
 
 The method `XLSX.openxlsx` has a `enable_cache` option to control worksheet cells caching.
 
-Cache is enabled by default, so if you read a worksheet cell twice it will use the cached value instead of reading from disk
-in the second time.
+Cache is enabled by default, so if you read a worksheet cell twice it will use the cached value instead of reading from disk 
+the second time.
 
 If `enable_cache=false`, worksheet cells will always be read from disk. In addition, if `enable_cache=false` 
-and `openxlsx` is used with do-syntax, the xlsx file itself will be opened usning `Mmap.mmap` so that the 
+and `openxlsx` is used with do-syntax, the xlsx file itself will be opened as a `FileArray` so that the 
 zip archives themselves are not read into memory. This is useful when you want to read a spreadsheet that 
 doesn't fit into memory.
 
@@ -210,7 +210,7 @@ where `myfile.xlsx` is a spreadsheet that doesn't fit into memory.
 julia> XLSX.openxlsx("myfile.xlsx", enable_cache=false) do f
            sheet = f["mysheet"]
            for r in XLSX.eachrow(sheet)
-              # r is a `SheetRow`, values are read using column references
+              # r is a `SheetRow`. Values are read using column references
               rn = XLSX.row_number(r) # `SheetRow` row number
               v1 = r[1]    # will read value at column 1
               v2 = r["B"]  # will read value at column 2
@@ -224,14 +224,14 @@ v1=2, v2=second
 v1=3, v2=third
 ```
 
-You could also stream tabular data using `XLSX.eachtablerow(sheet)`, which is the underlying iterator in `gettable` method.
+You could also stream tabular data using `XLSX.eachtablerow(sheet)`, which is the underlying iterator in the `gettable` method.
 Check docstrings for `XLSX.eachtablerow` for more advanced options.
 
 ```julia
 julia> XLSX.openxlsx("myfile.xlsx", enable_cache=false) do f
            sheet = f["mysheet"]
            for r in XLSX.eachtablerow(sheet)
-               # r is a `TableRow`, values are read using column labels or numbers
+               # r is a `TableRow`. Values are read using column labels or numbers
                rn = XLSX.row_number(r) # `TableRow` row number
                v1 = r[1] # will read value at table column 1
                v2 = r[:HeaderB] # will read value at column labeled `:HeaderB`

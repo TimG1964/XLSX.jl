@@ -124,6 +124,50 @@ end
 add_node_formula!(io, f::CellFormula) = add_node_formula!(io, f.value)
 
 function add_node_formula!(io, f::Formula)
+    write(io, "\n        <f")
+    
+    isnothing(f.type) || isempty(f.type) || write(io, " t=\"", f.type, "\"")
+    isnothing(f.ref) || isempty(f.ref) || write(io, " ref=\"", f.ref, "\"")
+    
+    # Write unhandled attributes
+    if !isnothing(f.unhandled)
+        for (k, v) in f.unhandled
+            write(io, " ", k, "=\"", v, "\"")
+        end
+    end
+    
+    write(io, ">", XML.escape(f.formula), "</f>")
+end
+
+function add_node_formula!(io, f::FormulaReference)
+    write(io, "\n        <f t=\"shared\"")
+    
+    if !isnothing(f.unhandled)
+        for (k, v) in f.unhandled
+            write(io, " ", k, "=\"", v, "\"")
+        end
+    end
+    
+    write(io, " si=\"")
+    print(io, f.id)
+    write(io, "\"></f>")
+end
+
+function add_node_formula!(io, f::ReferencedFormula)
+    write(io, "\n        <f t=\"shared\" ref=\"", f.ref, "\"")
+    
+    if !isnothing(f.unhandled)
+        for (k, v) in f.unhandled
+            write(io, " ", k, "=\"", v, "\"")
+        end
+    end
+    
+    write(io, " si=\"")
+    print(io, f.id)
+    write(io, "\">", XML.escape(f.formula), "</f>")
+end
+#=
+function add_node_formula!(io, f::Formula)
     print(io, "\n        <f")
     if !isnothing(f.type) && f.type != ""
         print(io, " t=\""*f.type,"\"")
@@ -138,7 +182,6 @@ function add_node_formula!(io, f::Formula)
     end
     print(io, ">", XML.escape(f.formula), "</f>")
 end
-
 function add_node_formula!(io, f::FormulaReference)
     print(io, "\n        <f t=\"shared\"")
     if !isnothing(f.unhandled)
@@ -149,7 +192,6 @@ function add_node_formula!(io, f::FormulaReference)
     print(io," si=\"",string(f.id),"\">")
     print(io, "</f>")
 end
-
 function add_node_formula!(io, f::ReferencedFormula)
     print(io, "\n        <f t=\"shared\" ref=\"", f.ref, "\"")
     if !isnothing(f.unhandled)
@@ -160,7 +202,7 @@ function add_node_formula!(io, f::ReferencedFormula)
     print(io," si=\"",string(f.id),"\">")
     print(io, XML.escape(f.formula), "</f>")
 end
-
+=#
 function find_all_nodes(givenpath::String, doc::XML.Node)::Vector{XML.Node}
     XML.nodetype(doc) != XML.Document && throw(XLSXError("Something wrong here!"))
     found_nodes = Vector{XML.Node}()
@@ -366,6 +408,85 @@ function get_cache_rows(sheet::Worksheet)::Vector{UInt8}
     return length(all_rows) == 0 ? Vector{UInt8}() : reduce(vcat, all_rows)
 end
 
+function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String,String}})
+    pad2 = "    "      # 4 spaces
+    pad3 = "      "    # 6 spaces
+    pad4 = "        "  # 8 spaces
+
+    d, r, unhandled_attributes = cacherow
+    spans_str = string(column_number(d.start), ":", column_number(d.stop))
+
+    row_nr = row_number(r)
+    ordered_column_indexes = sort!(collect(keys(r.rowcells)))
+
+    row_node = IOBuffer()
+
+    # <row r="X" - combine writes
+    write(row_node, pad2, "<row r=\"", string(row_nr), "\"")
+
+    # spans="A:B"
+    if spans_str != ""
+        write(row_node, " spans=\"", spans_str, "\"")
+    end
+
+    # ht="..." customHeight="1"
+    if !isnothing(r.ht)
+        write(row_node, " ht=\"", string(r.ht), "\" customHeight=\"1\"")
+    end
+
+    # unhandled attributes - combine writes
+    for (attribute, value) in unhandled_attributes
+        write(row_node, " ", attribute, "=\"", value, "\"")
+    end
+
+    write(row_node, ">\n")
+
+    # cells
+    for c in ordered_column_indexes
+        cell = getcell(r, c)
+
+        write(row_node, pad3, "<c r=\"", cell.ref.name, "\"")
+
+        if cell.datatype != ""
+            write(row_node, " t=\"", cell.datatype, "\"")
+        end
+
+        if cell.style != ""
+            write(row_node, " s=\"", cell.style, "\"")
+        end
+
+        if cell.meta != ""
+            write(row_node, " cm=\"", cell.meta, "\"")
+        end
+
+        write(row_node, ">")
+
+        if !(cell.formula isa EmptyFormula) && isa(cell.formula, AbstractFormula)
+            add_node_formula!(row_node, cell.formula)
+        end
+
+        if cell.value != ""
+            write(row_node, "\n", pad4, "<v>", XML.escape(cell.value), "</v>")
+        end
+
+        write(row_node, "\n", pad3, "</c>\n")
+    end
+
+    write(row_node, pad2, "</row>\n")
+
+    return (row_nr, take!(row_node))
+end
+#=
+function abscell(c::CellRef)
+    col, row = split_cellname(c.name)
+    io = IOBuffer()
+    write(io, "\$")
+    write(io, col)
+    write(io, "\$")
+    print(io, row)
+    return String(take!(io))
+end
+
 function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String, String}})
     pad="  "
     d, r, unhandled_attributes = cacherow
@@ -426,7 +547,7 @@ function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String, Str
 
     return (row_nr, take!(row_node))
 end
-
+=#
 function abscell(c::CellRef)
     col, row = split_cellname(c.name)
     return "\$" * col * "\$" * string(row)
@@ -607,6 +728,7 @@ xlsx_encode(ws::Worksheet, val::Dates.Date) = ("", string(date_to_excel_value(va
 xlsx_encode(ws::Worksheet, val::Dates.DateTime) = ("", string(datetime_to_excel_value(val, isdate1904(get_xlsxfile(ws)))))
 xlsx_encode(::Worksheet, val::Dates.Time) = ("", string(time_to_excel_value(val)))
 
+Base.setindex!(ws::Worksheet, v, row::Integer, col::Integer) = setdata!(ws, CellRef(row,col), v)
 Base.setindex!(ws::Worksheet, v, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}) = setdata!(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))), v)
 Base.setindex!(ws::Worksheet, v::AbstractVector, r::Union{Integer,UnitRange{<:Integer}}, c::UnitRange{T}) where {T<:Integer} = setdata!(ws, r, c, v)
 Base.setindex!(ws::Worksheet, v::AbstractVector, r::UnitRange{T}, c::Union{Integer,UnitRange{<:Integer}}) where {T<:Integer} = setdata!(ws, r, c, v)
