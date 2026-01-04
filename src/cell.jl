@@ -41,6 +41,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
     XML.tag(c) == "c" || throw(XLSXError("`Cell` Expects a `c` (cell) XML node."))
 
     a = XML.attributes(c)
+    chn = XML.children(c)
     ref = CellRef(a["r"])
 
     # Get attributes with defaults (already optimal)
@@ -54,7 +55,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
     
     if t == "inlineStr"
         # Handle inlineStr case - find "is" element
-        for child in XML.eachchild(c)
+        for child in chn
             XML.tag(child) == "is" || continue
             
             uft = unformatted_text(child)
@@ -68,7 +69,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
                 
                 # Write children more efficiently
                 first = true
-                for grandchild in XML.eachchild(child)
+                for grandchild in XML.children(child)
                     if first
                         first = false
                     else
@@ -87,7 +88,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
         end
     else
         # Standard cell processing
-        for child in XML.eachchild(c)
+        for child in chn
             tag = XML.tag(child)
             if tag == "v"
                 ch = XML.children(child)
@@ -102,16 +103,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
     
     return Cell(ref, t, s, v, m, f)
 end
-#=
-function update_cell(c::Cell; datatype::Union{Nothing,String}=nothing, style::Union{Nothing,String}=nothing, value::Union{Nothing,String}=nothing, formula::Union{Nothing,AbstractFormula}=nothing)
-    return Cell(c.ref,
-        isnothing(datatype) ? c.datatype : datatype, 
-        isnothing(style) ? c.style : style, 
-        isnothing(value) ? c.value : value,
-        isnothing(formula) ? c.formula : formula
-    )
-end
-=#
+
 function parse_formula_from_element(c_child_element) :: AbstractFormula
 
     if XML.tag(c_child_element) != "f"
