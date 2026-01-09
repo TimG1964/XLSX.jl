@@ -1131,7 +1131,7 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
     wb=get_workbook(ws)
     index=parse(Int, cell.value)
     sst=get_sst(wb)
-    str_formatted=sst.formatted_strings[index+1]
+    str_formatted=sst.shared_strings[index+1]
 
     isnothing(findfirst("<r>", str_formatted)) && return nothing # no <r> elements to manage
 
@@ -1262,7 +1262,7 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
     indices = get_shared_string_index(sst, str_formatted) # see if new formatted string is already in the table
     if indices !== nothing # new formatted string is already in the table, so use that one.
         for idx in indices
-            if sst.formatted_strings[idx+1] == str_formatted
+            if sst.shared_strings[idx+1] == str_formatted
                 return string(idx)  # Found exact match
             end
         end

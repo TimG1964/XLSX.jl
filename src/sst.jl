@@ -3,8 +3,8 @@ SharedStringTable() = SharedStringTable(Vector{String}(), Dict{UInt64, Vector{In
 
 @inline get_sst(wb::Workbook) = wb.sst
 @inline get_sst(xl::XLSXFile) = get_sst(get_workbook(xl))
-@inline Base.length(sst::SharedStringTable) = length(sst.formatted_strings)
-@inline Base.isempty(sst::SharedStringTable) = isempty(sst.formatted_strings)
+@inline Base.length(sst::SharedStringTable) = length(sst.shared_strings)
+@inline Base.isempty(sst::SharedStringTable) = isempty(sst.shared_strings)
 
 # Checks if string is inside shared string table.
 # Returns `nothing` if it's not in the shared string table.
@@ -13,7 +13,7 @@ function get_shared_string_index(sst::SharedStringTable, str_formatted::String)#
     !sst.is_loaded && throw(XLSXError("Can't query shared string table because it's not loaded into memory."))
 
     #using a Dict is much more efficient than the findfirst approach especially on large datasets
-    k=hash_xml(str_formatted)
+    k=hash(str_formatted)
     if haskey(sst.index, k)
         return sst.index[k]
     else
@@ -22,7 +22,6 @@ function get_shared_string_index(sst::SharedStringTable, str_formatted::String)#
 
 end
 function create_new_sst(wb::Workbook, sst::SharedStringTable)
-#    xf=get_xlsxfile(wb)
     if !sst.is_loaded
         sst.is_loaded = true
 
@@ -42,21 +41,21 @@ function create_new_sst(wb::Workbook, sst::SharedStringTable)
     end
 end
 function add_to_sst!(ss::SharedStringTable, si_xml::String)::Int
-    xml_hash = hash_xml(si_xml)
+    xml_hash = hash(si_xml)
     
     # Check all indices with same hash
     indices = get(ss.index, xml_hash, nothing)
     if indices !== nothing
         for idx in indices
-            if ss.formatted_strings[idx+1] == si_xml
+            if ss.shared_strings[idx+1] == si_xml
                 return idx  # Found exact match
             end
         end
     end
     
     # No match found, add new entry
-    push!(ss.formatted_strings, si_xml)
-    new_idx = length(ss.formatted_strings)-1  # 0-based index
+    push!(ss.shared_strings, si_xml)
+    new_idx = length(ss.shared_strings)-1  # 0-based index
 
     if indices === nothing
         ss.index[xml_hash] = [new_idx]
@@ -72,13 +71,12 @@ function add_to_sst!(ss::SharedStringTable, si_xml::String)::Int
 end
 
 function add_formatted_string!(sst::SharedStringTable, str_formatted::String; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int
-#    normalized = normalize_xml(str_formatted)
     indices = get_shared_string_index(sst, str_formatted)
     local new_index::Int
     if indices !== nothing
         # it's already in the table
         for idx in indices
-            if sst.formatted_strings[idx+1] == str_formatted
+            if sst.shared_strings[idx+1] == str_formatted
                 return idx  # Found exact match
             end
         end
@@ -199,7 +197,6 @@ function load_sst_table!(wb::Workbook, chan::Channel, chunksize::Int, nthreads::
         empty!(sst_table.index)
         for sst in all_ssts
             add_formatted_string!(sst_table, sst[end].formatted)
-#            push!(sst_table.index[hash_xml(sst[end].formatted)]) = sst[begin]
         end
     
     end
@@ -306,7 +303,7 @@ end
 # `index` starts at 0.
 @inline function sst_unformatted_string(wb::Workbook, index::Int)::String
     sst_load!(wb)
-    uss = get_sst(wb).formatted_strings[index+1]
+    uss = get_sst(wb).shared_strings[index+1]
     return unformatted_text(parse(XML.LazyNode, uss))
 end
 
@@ -314,7 +311,7 @@ end
 # `index` starts at 0.
 @inline function sst_formatted_string(wb::Workbook, index::Int)
     sst_load!(wb)
-    return get_sst(wb).formatted_strings[index+1]
+    return get_sst(wb).shared_strings[index+1]
 end
 
 @inline sst_unformatted_string(xl::XLSXFile, index::Int) :: String = sst_unformatted_string(get_workbook(xl), index)
@@ -328,8 +325,8 @@ end
 # init the index table
 function init_sst_index(sst::SharedStringTable)
     empty!(sst.index)
-    for i in 1:length(sst.formatted_strings)
-        xmlhash = hash_xml(sst.formatted_strings[i])
+    for i in 1:length(sst.shared_strings)
+        xmlhash = hash(sst.shared_strings[i])
         indices = get(sst.index, xmlhash, nothing)
         if indices === nothing
             sst.index[xmlhash] = [i]

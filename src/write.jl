@@ -113,7 +113,7 @@ function generate_sst_xml_string(wb::Workbook)::String
 """
     )
 
-    for s in sst.formatted_strings
+    for s in sst.shared_strings
         print(buff, s)
     end
 

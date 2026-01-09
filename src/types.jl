@@ -322,7 +322,6 @@ end
 
 mutable struct WorksheetCacheIteratorState
     row_from_last_iteration::Int
-#    full_cache::Bool # is the cache full (true) or does it need filling (false)
 end
 
 mutable struct WorksheetCache{I<:SheetRowIterator} <: SheetRowIterator
@@ -373,21 +372,9 @@ struct SheetRowStreamIterator <: SheetRowIterator
 end
 
 #------------------------------------------------------------------------------ sharedStrings
-#function normalize_xml(xml_str::String)
-    # Remove whitespace between tags, normalize attribute order
-    # This ensures "<t>Hello</t>" matches "<t >Hello</t>"
-#    cleaned = replace(xml_str, r">\s+<" => "><")
-#    return strip(cleaned)
-#end
-function hash_xml(xml_str::String)
-    # Normalize whitespace between tags for consistent hashing
-    # normalized = normalize_xml(xml_str)
-    #return hash(strip(normalized))
-    return hash(xml_str)
-end
 mutable struct SharedStringTable
-    formatted_strings::Vector{String}
-    index::Dict{UInt64, Vector{Int64}} # for search optimisation
+    shared_strings::Vector{String}
+    index::Dict{UInt64, Vector{Int64}} # for search optimisation. Vector of indices to handle hash collisions.
     is_loaded::Bool
 end
 struct SstToken
@@ -477,7 +464,7 @@ struct SheetRow
     rowcells::Dict{Int, Cell} # column -> value
 end
 
-struct Index # based on DataFrames.jl
+struct Index # for TableRowIterator - based on DataFrames.jl
     lookup::Dict{Symbol, Int} # column label -> table column index
     column_labels::Vector{Symbol}
     column_map::Dict{Int, Int} # table column index (1-based) -> sheet column index (cellref based)
