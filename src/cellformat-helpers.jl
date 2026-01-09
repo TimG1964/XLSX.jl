@@ -1131,7 +1131,6 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
     wb=get_workbook(ws)
     index=parse(Int, cell.value)
     sst=get_sst(wb)
-    str_unformatted=sst.unformatted_strings[index+1]
     str_formatted=sst.formatted_strings[index+1]
 
     isnothing(findfirst("<r>", str_formatted)) && return nothing # no <r> elements to manage
@@ -1248,25 +1247,28 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
 =#
 
     # reconstruct updated str_formatted
-    new_r = String[]
-    push!(new_r, "<si>")
+    new_r = IOBuffer()
+    write(new_r, "<si>\n")
     for r in 1:length(all_r)
         if t[r] != ")___DeleteMe___(" # signals a merged <r> element to be skipped
-            push!(new_r, "  <r>")
-            r > inc_first && push!(new_r, XML.write(rPr_elements[r-inc_first];depth=3))
-            push!(new_r, "    <t" * (xml_space[r] ? " xml:space=\"preserve\"" : "") * ">" *t[r] * "</t>")
-            push!(new_r, "  </r>")
+            write(new_r, "  <r>\n")
+            r > inc_first && write(new_r, XML.write(rPr_elements[r-inc_first];depth=3) * "\n")
+            write(new_r, "    <t" * (xml_space[r] ? " xml:space=\"preserve\"" : "") * ">" *t[r] * "</t>\n")
+            write(new_r, "  </r>\n")
         end
     end
-    push!(new_r, "</si>")
-    str_formatted = join(new_r, "\n")
-
-    i = get_shared_string_index(sst, str_formatted) # see if new formatted string is already in the table
-    if i !== nothing # new formatted string is already in the table, so use that
-        return string(i)
+    write(new_r, "</si>")
+    str_formatted = String(take!(new_r))
+    indices = get_shared_string_index(sst, str_formatted) # see if new formatted string is already in the table
+    if indices !== nothing # new formatted string is already in the table, so use that one.
+        for idx in indices
+            if sst.formatted_strings[idx+1] == str_formatted
+                return string(idx)  # Found exact match
+            end
+        end
     end
 
-    new_index=add_shared_string!(sst, str_unformatted, str_formatted) # can't update existing sharded string in case it is used by another cell
+    new_index=add_formatted_string!(sst, str_formatted) # can't update existing sharded string in case it is used by another cell
 
     return string(new_index)
 

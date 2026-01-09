@@ -1,5 +1,5 @@
 
-SharedStringTable() = SharedStringTable(Vector{String}(), Vector{String}(), Dict{String, Int64}(), false)
+SharedStringTable() = SharedStringTable(Vector{String}(), Dict{UInt64, Vector{Int64}}(), false)
 
 @inline get_sst(wb::Workbook) = wb.sst
 @inline get_sst(xl::XLSXFile) = get_sst(get_workbook(xl))
@@ -9,12 +9,13 @@ SharedStringTable() = SharedStringTable(Vector{String}(), Vector{String}(), Dict
 # Checks if string is inside shared string table.
 # Returns `nothing` if it's not in the shared string table.
 # Returns the index of the string in the shared string table. The index is 0-based.
-function get_shared_string_index(sst::SharedStringTable, str_formatted::AbstractString) :: Union{Nothing, Int}
+function get_shared_string_index(sst::SharedStringTable, str_formatted::String)# :: Union{Nothing, Int}
     !sst.is_loaded && throw(XLSXError("Can't query shared string table because it's not loaded into memory."))
 
     #using a Dict is much more efficient than the findfirst approach especially on large datasets
-    if haskey(sst.index, str_formatted)
-        return sst.index[str_formatted] - 1
+    k=hash_xml(str_formatted)
+    if haskey(sst.index, k)
+        return sst.index[k]
     else
         return nothing
     end
@@ -40,39 +41,62 @@ function create_new_sst(wb::Workbook, sst::SharedStringTable)
         init_sst_index(sst)
     end
 end
+function add_to_sst!(ss::SharedStringTable, si_xml::String)::Int
+    xml_hash = hash_xml(si_xml)
+    
+    # Check all indices with same hash
+    indices = get(ss.index, xml_hash, nothing)
+    if indices !== nothing
+        for idx in indices
+            if ss.formatted_strings[idx+1] == si_xml
+                return idx  # Found exact match
+            end
+        end
+    end
+    
+    # No match found, add new entry
+    push!(ss.formatted_strings, si_xml)
+    new_idx = length(ss.formatted_strings)-1  # 0-based index
 
-function add_to_sst!(sst::SharedStringTable, str_unformatted::AbstractString, str_formatted::AbstractString) :: Int
-    push!(sst.unformatted_strings, str_unformatted)
-    push!(sst.formatted_strings, str_formatted)
-    sst.index[str_formatted] = length(sst.formatted_strings)
-    new_index = length(sst.formatted_strings) - 1 # 0-based
-    if new_index != get_shared_string_index(sst, str_formatted)
+    if indices === nothing
+        ss.index[xml_hash] = [new_idx]
+    else
+        push!(indices, new_idx)
+    end
+
+    if new_idx ∉ get_shared_string_index(ss, si_xml)
         throw(XLSXError("Inconsistent state after adding a string to the Shared String Table."))
     end
-    return new_index
+
+    return new_idx
 end
-function add_shared_string!(sst::SharedStringTable, str_unformatted::AbstractString, str_formatted::AbstractString; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int
-    i = get_shared_string_index(sst, str_formatted)
+
+function add_formatted_string!(sst::SharedStringTable, str_formatted::String; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int
+#    normalized = normalize_xml(str_formatted)
+    indices = get_shared_string_index(sst, str_formatted)
     local new_index::Int
-    if i !== nothing
+    if indices !== nothing
         # it's already in the table
-        return i
-    else
-        if isnothing(mylock)
-            new_index = add_to_sst!(sst, str_unformatted, str_formatted)
-        else
-            lock(mylock) do
-                new_index = add_to_sst!(sst, str_unformatted, str_formatted)
+        for idx in indices
+            if sst.formatted_strings[idx+1] == str_formatted
+                return idx  # Found exact match
             end
+        end
+    end
+    if isnothing(mylock)
+        new_index = add_to_sst!(sst, str_formatted)
+    else
+        lock(mylock) do
+            new_index = add_to_sst!(sst, str_formatted)
         end
     end
     return new_index
 end
 
 # Adds a string to shared string table. Returns the 0-based index of the shared string in the shared string table.
-function add_shared_string!(wb::Workbook, str_unformatted::AbstractString, str_formatted::AbstractString; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int
+function add_formatted_string!(wb::Workbook, str_formatted::String; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int
 #    !is_writable(get_xlsxfile(wb)) && throw(XLSXError("XLSXFile instance is not writable."))
-    if (isempty(str_unformatted) || isempty(str_formatted))
+    if isempty(str_formatted)
         throw(XLSXError("Can't add empty string to Shared String Table."))
     end
     sst = get_sst(wb)
@@ -89,17 +113,17 @@ function add_shared_string!(wb::Workbook, str_unformatted::AbstractString, str_f
         end
     end
     
-    return add_shared_string!(sst, str_unformatted, str_formatted; mylock)
+    return add_formatted_string!(sst, str_formatted; mylock)
 end
 
 # allow to write cells containing only whitespace characters or with leading or trailing whitespace.
 function add_shared_string!(wb::Workbook, str_unformatted::AbstractString) :: Int
-    if startswith(str_unformatted, " ") || endswith(str_unformatted, " ")
+    if startswith(str_unformatted, ' ') || endswith(str_unformatted, ' ') || contains(str_unformatted, '\n')
         str_formatted = string("<si><t xml:space=\"preserve\">", XML.escape(str_unformatted), "</t></si>")
     else
         str_formatted = string("<si><t>", XML.escape(str_unformatted), "</t></si>")
     end
-    return add_shared_string!(wb, str_unformatted, str_formatted)
+    return add_formatted_string!(wb, str_formatted)
 end
 
 function sst_load!(workbook::Workbook)
@@ -149,7 +173,7 @@ function process_sst(sst::SstToken)
 
     if XML.nodetype(el) != XML.Text
         XML.tag(el) != "si" && throw(XLSXError("Unsupported node $(XML.tag(el)) in sst table."))
-        sst = Sst(unformatted_text(el), XML.write(el), i)
+        sst = Sst(XML.write(el), i)
         return sst
 
     end
@@ -158,6 +182,7 @@ end
 
 function load_sst_table!(wb::Workbook, chan::Channel, chunksize::Int, nthreads::Int)
     sst_table = get_sst(wb)
+    sst_table.is_loaded=true
 
     sst_results = Channel{Vector{Sst}}(1 << 10)
     all_ssts = Vector{Tuple{Int,Sst}}()
@@ -173,9 +198,8 @@ function load_sst_table!(wb::Workbook, chan::Channel, chunksize::Int, nthreads::
     
         empty!(sst_table.index)
         for sst in all_ssts
-            push!(sst_table.unformatted_strings, sst[end].unformatted)
-            push!(sst_table.formatted_strings, sst[end].formatted)
-            sst_table.index[sst[end].formatted] = sst[begin]
+            add_formatted_string!(sst_table, sst[end].formatted)
+#            push!(sst_table.index[hash_xml(sst[end].formatted)]) = sst[begin]
         end
     
     end
@@ -204,9 +228,7 @@ function load_sst_table!(wb::Workbook, chan::Channel, chunksize::Int, nthreads::
     close(sst_results)
 
     wait(consumer)  # ensure consumer is done
-
-    sst_table.is_loaded=true
-    
+   
 end
 
 # Checks whether this workbook has a Shared String Table.
@@ -220,6 +242,38 @@ end
 # a join of all the strings found.
 function unformatted_text(el::XML.LazyNode) :: String
 
+    function gather_strings!(v::IOBuffer, e::XML.LazyNode)
+        tag = XML.tag(e)
+        children = XML.children(e)
+
+        if tag == "t"
+            n = length(children)
+
+            if n == 1
+                c = children[1]
+                write(v, XML.is_simple(c) ? XML.simple_value(c) : XML.value(c))
+
+            elseif n == 0
+                val = XML.value(e)
+                if !isnothing(val)
+                    write(v, XML.is_simple(e) ? XML.simple_value(e) : val)
+                end
+
+            else
+                throw(XLSXError("Unexpected number of children in <t>: $n. Expected 0 or 1."))
+            end
+        #end
+
+        # Skip recursion early
+        elseif tag != "rPh"
+            for ch in children
+                gather_strings!(v, ch)
+            end
+        end
+
+        return nothing
+    end
+    #=
     function gather_strings!(v::Vector{String}, e::XML.LazyNode)
         if XML.tag(e) == "t"
             c=XML.children(e)
@@ -241,18 +295,19 @@ function unformatted_text(el::XML.LazyNode) :: String
 
         nothing
     end
-
-    v_string = Vector{String}()
+    =#
+    v_string = IOBuffer()
     gather_strings!(v_string, el)
 
-    return XML.unescape(join(v_string))
+    return XML.unescape(String(take!(v_string)))
 end
 
 # Looks for a string inside the Shared Strings Table (sst).
 # `index` starts at 0.
-@inline function sst_unformatted_string(wb::Workbook, index::Int)
+@inline function sst_unformatted_string(wb::Workbook, index::Int)::String
     sst_load!(wb)
-    return get_sst(wb).unformatted_strings[index+1]
+    uss = get_sst(wb).formatted_strings[index+1]
+    return unformatted_text(parse(XML.LazyNode, uss))
 end
 
 # Looks for a formatted string inside the Shared Strings Table (sst).
@@ -265,12 +320,21 @@ end
 @inline sst_unformatted_string(xl::XLSXFile, index::Int) :: String = sst_unformatted_string(get_workbook(xl), index)
 @inline sst_unformatted_string(ws::Worksheet, index::Int) :: String = sst_unformatted_string(get_xlsxfile(ws), index)
 @inline sst_unformatted_string(target::Union{Workbook, XLSXFile, Worksheet}, index_str::String) :: String = sst_unformatted_string(target, parse(Int, index_str))
+#function sst_unformatted_string(target::Union{Workbook, XLSXFile, Worksheet}, index_str::String) :: String
+#    return sst_unformatted_string(target, parse(Int, index_str))
+#end
 
 
 # init the index table
 function init_sst_index(sst::SharedStringTable)
     empty!(sst.index)
     for i in 1:length(sst.formatted_strings)
-        sst.index[sst.formatted_strings[i]] = i
+        xmlhash = hash_xml(sst.formatted_strings[i])
+        indices = get(sst.index, xmlhash, nothing)
+        if indices === nothing
+            sst.index[xmlhash] = [i]
+        else
+            push!(indices, i)
+        end
     end
 end

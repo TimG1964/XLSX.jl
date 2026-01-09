@@ -373,18 +373,28 @@ struct SheetRowStreamIterator <: SheetRowIterator
 end
 
 #------------------------------------------------------------------------------ sharedStrings
+#function normalize_xml(xml_str::String)
+    # Remove whitespace between tags, normalize attribute order
+    # This ensures "<t>Hello</t>" matches "<t >Hello</t>"
+#    cleaned = replace(xml_str, r">\s+<" => "><")
+#    return strip(cleaned)
+#end
+function hash_xml(xml_str::String)
+    # Normalize whitespace between tags for consistent hashing
+    # normalized = normalize_xml(xml_str)
+    #return hash(strip(normalized))
+    return hash(xml_str)
+end
 mutable struct SharedStringTable
-    unformatted_strings::Vector{String}
     formatted_strings::Vector{String}
-    index::Dict{String, Int64} # for unformatted_strings search optimisation
-    is_loaded::Bool # for lazy-loading of sst XML file (implies that this struct must be mutable)
+    index::Dict{UInt64, Vector{Int64}} # for search optimisation
+    is_loaded::Bool
 end
 struct SstToken
     n::XML.LazyNode
     idx::Int
 end
 struct Sst
-    unformatted::String
     formatted::String
     idx::Int
 end

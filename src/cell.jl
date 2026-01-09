@@ -18,22 +18,6 @@ Base.hash(c::Cell) = hash(c.ref) + hash(c.datatype) + hash(c.style) + hash(c.val
 Base.:(==)(c1::EmptyCell, c2::EmptyCell) = c1.ref == c2.ref
 Base.hash(c::EmptyCell) = hash(c.ref) + 10
 
-#=
-function find_t_node_recursively(n::XML.LazyNode) :: Union{Nothing, XML.LazyNode}
-    if XML.tag(n) == "t"
-        return n
-    else
-        for child in XML.children(n)
-            result = find_t_node_recursively(child)
-            if result !== nothing
-                return result
-            end
-        end
-    end
-
-    return nothing
-end
-=#
 function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothing}=nothing) :: Union{Cell, EmptyCell}
     wb = get_workbook(ws)
 
@@ -82,7 +66,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
                 ft = String(take!(io))
                 
                 t = "s"
-                v = string(add_shared_string!(wb, uft, ft; mylock))
+                v = string(add_formatted_string!(wb, ft; mylock))
             end
             break  # Only process first "is" element
         end
