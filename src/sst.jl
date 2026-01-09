@@ -1,5 +1,5 @@
 
-SharedStringTable() = SharedStringTable(Vector{String}(), Dict{UInt64, Vector{Int64}}(), false)
+SharedStringTable() = SharedStringTable(Vector{String}(), Dict{UInt64, Vector{Int64}}(), false, hash)
 
 @inline get_sst(wb::Workbook) = wb.sst
 @inline get_sst(xl::XLSXFile) = get_sst(get_workbook(xl))
@@ -13,7 +13,7 @@ function get_shared_string_index(sst::SharedStringTable, str_formatted::String)#
     !sst.is_loaded && throw(XLSXError("Can't query shared string table because it's not loaded into memory."))
 
     #using a Dict is much more efficient than the findfirst approach especially on large datasets
-    k=hash(str_formatted)
+    k = sst.sst_hash(str_formatted)
     if haskey(sst.index, k)
         return sst.index[k]
     else
@@ -41,7 +41,7 @@ function create_new_sst(wb::Workbook, sst::SharedStringTable)
     end
 end
 function add_to_sst!(ss::SharedStringTable, si_xml::String)::Int
-    xml_hash = hash(si_xml)
+    xml_hash = ss.sst_hash(si_xml)
     
     # Check all indices with same hash
     indices = get(ss.index, xml_hash, nothing)
@@ -326,7 +326,7 @@ end
 function init_sst_index(sst::SharedStringTable)
     empty!(sst.index)
     for i in 1:length(sst.shared_strings)
-        xmlhash = hash(sst.shared_strings[i])
+        xmlhash = sst.sst_hash(sst.shared_strings[i])
         indices = get(sst.index, xmlhash, nothing)
         if indices === nothing
             sst.index[xmlhash] = [i]
