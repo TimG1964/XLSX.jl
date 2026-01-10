@@ -490,7 +490,7 @@ function process_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguousRange;
     if OK
         for r in ncrng.rng
             if r isa CellRef && getcell(ws, r) isa EmptyCell
-                single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(r.name). Set the value first."))
+                single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
                 continue
             end
             _ = f(ws, r; kw...)
@@ -509,7 +509,7 @@ function process_cellranges(f::Function, ws::Worksheet, rng::CellRange; kw...)::
     isInDim(ws, get_dimension(ws), rng)
     for cellref in rng
         if getcell(ws, cellref) isa EmptyCell
-            single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellref.name). Set the value first."))
+            single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(cellref)). Set the value first."))
             continue
         end
         _ = f(ws, cellref; kw...)
@@ -596,7 +596,7 @@ function process_veccolon(f::Function, ws::Worksheet, row, col; kw...)
         for b in col
             cellref = CellRef(a, b)
             if getcell(ws, cellref) isa EmptyCell
-                single && throw(XLSXError("Cannot set attribute for an `EmptyCell`: $(cellref.name). Set the value first."))
+                single && throw(XLSXError("Cannot set attribute for an `EmptyCell`: $(cellname(cellref)). Set the value first."))
                 continue
             end
             f(ws, cellref; kw...)
@@ -615,7 +615,7 @@ function process_vecint(f::Function, ws::Worksheet, row, col; kw...)
     for a in row, b in col
         cellref = CellRef(a, b)
         if getcell(ws, cellref) isa EmptyCell
-            single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellref.name). Set the value first."))
+            single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(cellref)). Set the value first."))
             continue
         end
         f(ws, cellref; kw...)
@@ -693,7 +693,7 @@ function process_uniform_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguo
                 if r isa CellRef
                     cell=getcell(ws, r)
                     if cell isa EmptyCell
-                        single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(r.name). Set the value first."))
+                        single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
                         continue
                     end
                     newid, first = process_uniform_core(f, ws, allXfNodes, r, atts, newid, first; kw...)
@@ -831,7 +831,7 @@ function process_uniform_ncranges(ws::Worksheet, ncrng::NonContiguousRange)
                 @assert r isa CellRef || r isa CellRange "Something wrong here"
                 if r isa CellRef
                     if getcell(ws, r) isa EmptyCell
-                        single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(r.name). Set the value first."))
+                        single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
                         continue
                     end
                     newid, first, firstFont = process_uniform_core(ws, r, newid, first, firstFont)
@@ -982,12 +982,12 @@ function process_uniform_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguo
             for r in ncrng.rng
                 @assert r isa CellRef || r isa CellRange "Something wrong here"
                 if r isa CellRef && getcell(ws, r) isa EmptyCell
-                    single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(r.name). Set the value first."))
+                    single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
                     continue
                 end
                 if r isa CellRef
                     if getcell(ws, r) isa EmptyCell
-                        single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(r.name). Set the value first."))
+                        single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
                         continue
                     end
                     newid, first, alignment_node = process_uniform_core(f, ws, allXfNodes, r, newid, first, alignment_node; kw...)

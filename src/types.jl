@@ -23,21 +23,23 @@ cn = XLSX.CellRef("AB1")
 println( XLSX.row_number(cn) ) # will print 1
 println( XLSX.column_number(cn) ) # will print 28
 println( string(cn) ) # will print out AB1
+println( cellname(cn) ) # will print out AB1
 
 cn = XLSX.CellRef(1, 28)
 println( XLSX.row_number(cn) ) # will print 1
 println( XLSX.column_number(cn) ) # will print 28
 println( string(cn) ) # will print out AB1
+println( cellname(cn) ) # will print out AB1
 
 cn = XLSX.ref"AB1"
 println( XLSX.row_number(cn) ) # will print 1
 println( XLSX.column_number(cn) ) # will print 28
 println( string(cn) ) # will print out AB1
+println( cellname(cn) ) # will print out AB1
 ```
 
 """
 struct CellRef
-    name::String
     row_number::Int32
     column_number::Int32
 end

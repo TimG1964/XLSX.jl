@@ -498,7 +498,7 @@ function process_dynamic_array_functions(xf::XLSXFile, cellref::CellRef, val::St
     iaf = is_array_formula(formula)
     if !isnothing(spill) && (spill || !spill && iaf) || isnothing(spill) && iaf
         t = "array"
-        ref = cellref.name*":"*cellref.name
+        ref = cellname(cellref)*":"*cellname(cellref)
         cm = "1"
         if !haskey(xf.files, "xl/metadata.xml") # add metadata.xml on first use of a dynamicArray formula
 #            xf.data["xl/metadata.xml"] = XML.Node(XML.Raw(read(joinpath(_relocatable_data_path(), "metadata.xml"))))

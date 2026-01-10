@@ -44,7 +44,7 @@ end
 @inline get_worksheet(itr::SheetRowIterator) = itr.sheet
 @inline row_number(state::SheetRowStreamIteratorState) = state.row
 
-Base.show(io::IO, state::SheetRowStreamIteratorState) = print(io, "SheetRowStreamIteratorState( itr = $(state.itr), itr_state = $(state.itr_state), row = $(state.row) )")
+#Base.show(io::IO, state::SheetRowStreamIteratorState) = print(io, "SheetRowStreamIteratorState( itr = $(state.itr), itr_state = $(state.itr_state), row = $(state.row) )")
 
 # Opens a file for streaming.
 @inline function open_internal_file_stream(xf::XLSXFile, filename::String) :: XML.LazyNode
@@ -126,7 +126,6 @@ function Base.iterate(itr::SheetRowStreamIterator, state::SheetRowStreamIterator
 
     # collect all cells in this row
     next_rownode, sst_count = get_rowcells!(rowcells, rownode, ws; mylock) # update rowcells in place
-    
     itr.sheet.sst_count += sst_count
 
     sheet_row = SheetRow(ws, current_row, current_row_ht, rowcells) # create the sheet_row

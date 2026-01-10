@@ -122,7 +122,7 @@ function setFont(sh::Worksheet, cellref::CellRef;
     cell = getcell(sh, cellref)
 
     if cell isa EmptyCell
-        throw(XLSXError("Cannot set attribute for an `EmptyCell`: $(cellref.name). Set the value first."))
+        throw(XLSXError("Cannot set attribute for an `EmptyCell`: $(cellname(cellref)). Set the value first."))
     end
 
     allXfNodes=find_all_nodes("/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":styleSheet/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":cellXfs/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":xf", styles_xmlroot(wb))
@@ -708,7 +708,7 @@ function setBorder(sh::Worksheet, cellref::CellRef;
     cell = getcell(sh, cellref)
 
     if cell isa EmptyCell
-        throw(XLSXError("Cannot set border for an `EmptyCell`: $(cellref.name). Set the value first."))
+        throw(XLSXError("Cannot set border for an `EmptyCell`: $(cellname(cellref)). Set the value first."))
     end
 
     allXfNodes=find_all_nodes("/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":styleSheet/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":cellXfs/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":xf", styles_xmlroot(wb))
@@ -1165,7 +1165,7 @@ function setFill(sh::Worksheet, cellref::CellRef;
     cell = getcell(sh, cellref)
 
     if cell isa EmptyCell
-        throw(XLSXError("Cannot set fill for an `EmptyCell`: $(cellref.name). Set the value first."))
+        throw(XLSXError("Cannot set fill for an `EmptyCell`: $(cellname(cellref)). Set the value first."))
     end
 
     allXfNodes=find_all_nodes("/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":styleSheet/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":cellXfs/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":xf", styles_xmlroot(wb))
@@ -1476,7 +1476,7 @@ function setAlignment(sh::Worksheet, cellref::CellRef;
     cell = getcell(sh, cellref)
 
     if cell isa EmptyCell
-        throw(XLSXError("Cannot set alignment for an `EmptyCell`: $(cellref.name). Set the value first."))
+        throw(XLSXError("Cannot set alignment for an `EmptyCell`: $(cellname(cellref)). Set the value first."))
     end
 
     allXfNodes=find_all_nodes("/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":styleSheet/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":cellXfs/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":xf", styles_xmlroot(wb))
@@ -1811,7 +1811,7 @@ function setFormat(sh::Worksheet, cellref::CellRef;
     cell = getcell(sh, cellref)
 
     if cell isa EmptyCell
-        throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellref.name). Set the value first."))
+        throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(cellref)). Set the value first."))
     end
 
     allXfNodes=find_all_nodes("/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":styleSheet/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":cellXfs/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":xf", styles_xmlroot(wb))

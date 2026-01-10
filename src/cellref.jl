@@ -2,10 +2,10 @@
 function CellRef(n::AbstractString)
     !is_valid_cellname(n) && throw(XLSXError("$n is not a valid CellRef."))
     column_name, row_number = split_cellname(n)
-    return CellRef(n, Int32(row_number), Int32(decode_column_number(column_name)))
+    return CellRef(Int32(row_number), Int32(decode_column_number(column_name)))
 end
 
-@inline CellRef(row::Integer, col::Integer) = CellRef(encode_column_number(col) * string(row))
+@inline CellRef(row::Integer, col::Integer) = CellRef(Int32(row), Int32(col))
 @inline CellPosition(ref::CellRef) = CellPosition(row_number(ref), column_number(ref))
 @inline row_number(p::CellPosition) = p.row
 @inline column_number(p::CellPosition) = p.column
@@ -56,11 +56,12 @@ function encode_column_number(column_number::Integer) :: String
     end
 end
 
-Base.string(c::CellRef) = c.name
+Base.string(c::CellRef) = string(encode_column_number(column_number(c))) * string(row_number(c))
 Base.show(io::IO, c::CellRef) = print(io, string(c))
-Base.:(==)(c1::CellRef, c2::CellRef) = c1.name == c2.name
-Base.hash(c::CellRef) = hash(c.name)
+Base.:(==)(c1::CellRef, c2::CellRef) = c1.row_number == c2.row_number && c1.column_number == c2.column_number
+Base.hash(c::CellRef) = hash(string(c))
 Base.isless(c1::CellRef, c2::CellRef) = Base.isless(string(c1), string(c2))
+cellname(c::CellRef) :: String = string(encode_column_number(column_number(c))) * string(row_number(c))
 
 Base.:(==)(rf1::ReferencedFormula, rf2::ReferencedFormula) = (
     rf1.formula == rf2.formula &&
@@ -538,10 +539,10 @@ function Base.length(r::NonContiguousRange)::Int # Number of cells in `r`, elimi
     allcells= Vector{String}()
     for rng in r.rng
         if rng isa CellRef
-            push!(allcells, rng.name)
+            push!(allcells, cellname(rng))
         else
             for cell in rng
-                push!(allcells, cell.name)
+                push!(allcells, cellname(cell))
             end
         end
     end

@@ -84,7 +84,6 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
             end
         end
     end
-    
     return Cell(ref, t, s, v, m, f)
 end
 

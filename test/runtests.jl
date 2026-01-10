@@ -236,7 +236,7 @@ end
 
     @testset "CellRef" begin
         ref = XLSX.CellRef(12, 2)
-        @test ref.name == "B12"
+        @test XLSX.cellname(ref) == "B12"
         show(IOBuffer(), ref)
     end
 
@@ -1678,6 +1678,7 @@ end
     end
 
     @testset "readtable empty rows" begin
+
         t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "EmptyRow", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true)
         test_data = Vector{Any}(undef, 2)
         test_data[1] = [1, 2, missing, missing, 3, 4, 5]

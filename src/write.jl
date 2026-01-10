@@ -445,7 +445,7 @@ function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String,Stri
     for c in ordered_column_indexes
         cell = getcell(r, c)
 
-        write(row_node, pad3, "<c r=\"", cell.ref.name, "\"")
+        write(row_node, pad3, "<c r=\"", string(cell.ref), "\"")
 
         if cell.datatype != ""
             write(row_node, " t=\"", cell.datatype, "\"")
@@ -549,8 +549,9 @@ function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String, Str
 end
 =#
 function abscell(c::CellRef)
-    col, row = split_cellname(c.name)
-    return "\$" * col * "\$" * string(row)
+    col = encode_column_number(column_number(c))
+    row = string(row_number(c))
+    return "\$" * col * "\$" * row
 end
 
 mkabs(c::SheetCellRef) = abscell(c.cellref)
