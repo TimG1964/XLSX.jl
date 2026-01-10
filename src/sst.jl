@@ -1,5 +1,5 @@
 
-SharedStringTable() = SharedStringTable(Vector{String}(), Dict{UInt64, Vector{Int64}}(), false, hash)
+SharedStringTable() = SharedStringTable(Vector{String}(), Dict{String, Int64}(), false)
 
 @inline get_sst(wb::Workbook) = wb.sst
 @inline get_sst(xl::XLSXFile) = get_sst(get_workbook(xl))
@@ -13,7 +13,7 @@ function get_shared_string_index(sst::SharedStringTable, str_formatted::String)#
     !sst.is_loaded && throw(XLSXError("Can't query shared string table because it's not loaded into memory."))
 
     #using a Dict is much more efficient than the findfirst approach especially on large datasets
-    k = sst.sst_hash(str_formatted)
+    k = str_formatted
     if haskey(sst.index, k)
         return sst.index[k]
     else
@@ -41,27 +41,18 @@ function create_new_sst(wb::Workbook, sst::SharedStringTable)
     end
 end
 function add_to_sst!(ss::SharedStringTable, si_xml::String)::Int
-    xml_hash = ss.sst_hash(si_xml)
     
     # Check all indices with same hash
-    indices = get(ss.index, xml_hash, nothing)
-    if indices !== nothing
-        for idx in indices
-            if ss.shared_strings[idx+1] == si_xml
-                return idx  # Found exact match
-            end
-        end
+    ind = get(ss.index, si_xml, nothing)
+    if ind !== nothing
+        return ind  # Found exact match
     end
     
     # No match found, add new entry
     push!(ss.shared_strings, si_xml)
     new_idx = length(ss.shared_strings)-1  # 0-based index
 
-    if indices === nothing
-        ss.index[xml_hash] = [new_idx]
-    else
-        push!(indices, new_idx)
-    end
+    ss.index[si_xml] = new_idx
 
     if new_idx ∉ get_shared_string_index(ss, si_xml)
         throw(XLSXError("Inconsistent state after adding a string to the Shared String Table."))
@@ -71,15 +62,11 @@ function add_to_sst!(ss::SharedStringTable, si_xml::String)::Int
 end
 
 function add_formatted_string!(sst::SharedStringTable, str_formatted::String; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int
-    indices = get_shared_string_index(sst, str_formatted)
+    ind = get_shared_string_index(sst, str_formatted)
     local new_index::Int
-    if indices !== nothing
+    if ind !== nothing
         # it's already in the table
-        for idx in indices
-            if sst.shared_strings[idx+1] == str_formatted
-                return idx  # Found exact match
-            end
-        end
+        return ind  # Found exact match
     end
     if isnothing(mylock)
         new_index = add_to_sst!(sst, str_formatted)
@@ -317,21 +304,16 @@ end
 @inline sst_unformatted_string(xl::XLSXFile, index::Int) :: String = sst_unformatted_string(get_workbook(xl), index)
 @inline sst_unformatted_string(ws::Worksheet, index::Int) :: String = sst_unformatted_string(get_xlsxfile(ws), index)
 @inline sst_unformatted_string(target::Union{Workbook, XLSXFile, Worksheet}, index_str::String) :: String = sst_unformatted_string(target, parse(Int, index_str))
-#function sst_unformatted_string(target::Union{Workbook, XLSXFile, Worksheet}, index_str::String) :: String
-#    return sst_unformatted_string(target, parse(Int, index_str))
-#end
-
 
 # init the index table
 function init_sst_index(sst::SharedStringTable)
     empty!(sst.index)
     for i in 1:length(sst.shared_strings)
-        xmlhash = sst.sst_hash(sst.shared_strings[i])
-        indices = get(sst.index, xmlhash, nothing)
-        if indices === nothing
-            sst.index[xmlhash] = [i]
+        ind = get(sst.index, sst.shared_strings[i], nothing)
+        if ind === nothing
+            sst.index[sst.shared_strings[i]] = i
         else
-            push!(indices, i)
+            sst.index[sst.shared_strings[i]] = ind
         end
     end
 end

@@ -374,9 +374,8 @@ end
 #------------------------------------------------------------------------------ sharedStrings
 mutable struct SharedStringTable
     shared_strings::Vector{String}
-    index::Dict{UInt64, Vector{Int64}} # for search optimisation. Vector of indices to handle hash collisions.
+    index::Dict{String, Int64} # for search optimisation. Tuple of indices to handle hash collisions.
     is_loaded::Bool
-    sst_hash::Function
 end
 struct SstToken
     n::XML.LazyNode

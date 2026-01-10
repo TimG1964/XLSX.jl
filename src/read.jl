@@ -700,10 +700,7 @@ function stream_files(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int, ch
                     # Identify usable xml files in XLSXFile
                     internal_xml_file_add!(xf, f)
                 end
-
-#                if xf.is_writable # Read files for processing and writing out later
-                    put!(out, f)
-#                end
+                put!(out, f)
             end
         end
     end
