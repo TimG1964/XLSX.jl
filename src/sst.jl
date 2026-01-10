@@ -225,39 +225,40 @@ end
 # It looks at all children of `el` for tag name `t` and returns
 # a join of all the strings found.
 function unformatted_text(el::XML.LazyNode) :: String
+    io = IOBuffer()
+    gather_strings!(io, el)
+    return XML.unescape(String(take!(io)))
+end
 
-    function gather_strings!(v::IOBuffer, e::XML.LazyNode)
-        tag = XML.tag(e)
+function gather_strings!(io::IOBuffer, e::XML.LazyNode)
+    tag = XML.tag(e)
+    
+    # Skip phonetic hints entirely
+    tag == "rPh" && return nothing
+    
+    if tag == "t"
         children = XML.children(e)
-
-        if tag == "t"
-            n = length(children)
-
-            if n == 1
-                c = children[1]
-                write(v, XML.is_simple(c) ? XML.simple_value(c) : XML.value(c))
-
-            elseif n == 0
-                val = XML.value(e)
-                if !isnothing(val)
-                    write(v, XML.is_simple(e) ? XML.simple_value(e) : val)
-                end
-
-            else
-                throw(XLSXError("Unexpected number of children in <t>: $n. Expected 0 or 1."))
-            end
-        #end
-
-        # Skip recursion early
-        elseif tag != "rPh"
-            for ch in children
-                gather_strings!(v, ch)
-            end
+        n = length(children)
+        
+        if n == 1
+            c = children[1]
+            write(io, XML.is_simple(c) ? XML.simple_value(c) : XML.value(c))
+        elseif n == 0
+            val = XML.value(e)
+            !isnothing(val) && write(io, XML.is_simple(e) ? XML.simple_value(e) : val)
+        else
+            throw(XLSXError("Unexpected number of children in <t>: $n. Expected 0 or 1."))
         end
-
-        return nothing
+    else
+        # Recurse into children for all other tags
+        for ch in XML.children(e)
+            gather_strings!(io, ch)
+        end
     end
-    #=
+    
+    return nothing
+end
+#=
     function gather_strings!(v::Vector{String}, e::XML.LazyNode)
         if XML.tag(e) == "t"
             c=XML.children(e)
@@ -279,12 +280,12 @@ function unformatted_text(el::XML.LazyNode) :: String
 
         nothing
     end
-    =#
     v_string = IOBuffer()
     gather_strings!(v_string, el)
 
     return XML.unescape(String(take!(v_string)))
 end
+=#
 
 # Looks for a string inside the Shared Strings Table (sst).
 # `index` starts at 0.
