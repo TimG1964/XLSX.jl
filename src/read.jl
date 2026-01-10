@@ -356,7 +356,7 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
     xf = XLSXFile(source, enable_cache, _write)
 
     #if enable_cache || (source isa IO)
-    if source isa IO # slower for a real file than using mmap
+    if source isa IO
         zip_io = ZipArchives.ZipReader(read(source))
     else
         zip_io = ZipArchives.ZipReader(FileArray(abspath(source))) # FileArray is marginally slower than Mmap
@@ -886,14 +886,14 @@ julia> XLSX.readdata("customXml.xlsx", "Mock-up", "Location") # `Location` is a 
 ```
 """
 function readdata(source::Union{AbstractString,IO}, sheet::Union{AbstractString,Int}, ref)
-    c = openxlsx(source, enable_cache=true) do xf
+    c = openxlsx(source, enable_cache=false) do xf
         getdata(getsheet(xf, sheet), ref)
     end
     return c
 end
 
 function readdata(source::Union{AbstractString,IO}, sheetref::AbstractString)
-    c = openxlsx(source, enable_cache=true) do xf
+    c = openxlsx(source, enable_cache=false) do xf
         getdata(xf, sheetref)
     end
     return c
@@ -964,7 +964,7 @@ end
 
 `enable_cache` is a boolean that determines whether cell data are loaded 
 into the worksheet cache on reading.
-The default behavior is `enable_cache=true`.
+The default behavior is `enable_cache=false`.
 
 `keep_empty_rows` determines whether rows where all column values are equal 
 to `missing` are kept (`true`) or dropped (`false`) from the resulting table. 
@@ -986,27 +986,27 @@ julia> df = DataFrame(XLSX.readtable("myfile.xlsx", "mysheet"))
 
 See also: [`XLSX.gettable`](@ref), [`XLSX.readto`](@ref).
 """
-function readtable(source::Union{AbstractString,IO}; first_row::Union{Nothing,Int}=nothing, column_labels=nothing, header::Bool=true, infer_eltypes::Bool=true, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Nothing,Function}=nothing, enable_cache::Bool=true, keep_empty_rows::Bool=false, normalizenames::Bool=false)
+function readtable(source::Union{AbstractString,IO}; first_row::Union{Nothing,Int}=nothing, column_labels=nothing, header::Bool=true, infer_eltypes::Bool=true, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Nothing,Function}=nothing, enable_cache::Bool=false, keep_empty_rows::Bool=false, normalizenames::Bool=false)
     c = openxlsx(source; enable_cache) do xf
         gettable(getsheet(xf, 1); first_row, column_labels, header, infer_eltypes, stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames)
     end
     return c
 end
-function readtable(source::Union{AbstractString,IO}, sheet::Union{AbstractString,Int}; first_row::Union{Nothing,Int}=nothing, column_labels=nothing, header::Bool=true, infer_eltypes::Bool=true, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Nothing,Function}=nothing, enable_cache::Bool=true, keep_empty_rows::Bool=false, normalizenames::Bool=false)
+function readtable(source::Union{AbstractString,IO}, sheet::Union{AbstractString,Int}; first_row::Union{Nothing,Int}=nothing, column_labels=nothing, header::Bool=true, infer_eltypes::Bool=true, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Nothing,Function}=nothing, enable_cache::Bool=false, keep_empty_rows::Bool=false, normalizenames::Bool=false)
     c = openxlsx(source; enable_cache) do xf
         gettable(getsheet(xf, sheet); first_row, column_labels, header, infer_eltypes, stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames)
     end
     return c
 end
 
-function readtable(source::Union{AbstractString,IO}, sheet::Union{AbstractString,Int}, columns::ColumnRange; first_row::Union{Nothing,Int}=nothing, column_labels=nothing, header::Bool=true, infer_eltypes::Bool=true, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Nothing,Function}=nothing, enable_cache::Bool=true, keep_empty_rows::Bool=false, normalizenames::Bool=false)
+function readtable(source::Union{AbstractString,IO}, sheet::Union{AbstractString,Int}, columns::ColumnRange; first_row::Union{Nothing,Int}=nothing, column_labels=nothing, header::Bool=true, infer_eltypes::Bool=true, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Nothing,Function}=nothing, enable_cache::Bool=false, keep_empty_rows::Bool=false, normalizenames::Bool=false)
     c = openxlsx(source; enable_cache) do xf
         gettable(getsheet(xf, sheet), columns; first_row, column_labels, header, infer_eltypes, stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames)
     end
     return c
 end
 
-function readtable(source::Union{AbstractString,IO}, sheet::Union{AbstractString,Int}, range::AbstractString; first_row::Union{Nothing,Int}=nothing, column_labels=nothing, header::Bool=true, infer_eltypes::Bool=true, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Nothing,Function}=nothing, enable_cache::Bool=true, keep_empty_rows::Bool=false, normalizenames::Bool=false)
+function readtable(source::Union{AbstractString,IO}, sheet::Union{AbstractString,Int}, range::AbstractString; first_row::Union{Nothing,Int}=nothing, column_labels=nothing, header::Bool=true, infer_eltypes::Bool=true, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Nothing,Function}=nothing, enable_cache::Bool=false, keep_empty_rows::Bool=false, normalizenames::Bool=false)
     if is_valid_column_range(range)
         range = ColumnRange(range)
     else
