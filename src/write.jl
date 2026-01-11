@@ -387,7 +387,7 @@ function get_cache_rows(sheet::Worksheet)::Vector{UInt8}
                 row_count=0
                 for row in rows
                     row_count += 1
-                    chunk[row_count] = process_cache_row(row)
+                    chunk[row_count] = process_cache_row(row, sheet)
                     if row_count == chunksize
                         put!(read_cache_rows, copy(chunk))
                         row_count=0
@@ -407,8 +407,22 @@ function get_cache_rows(sheet::Worksheet)::Vector{UInt8}
     all_rows=last.(sort(all_cache_rows, by=first))
     return length(all_rows) == 0 ? Vector{UInt8}() : reduce(vcat, all_rows)
 end
-
-function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String,String}})
+function encode(d::CellValueType)
+    if d == CT_STRING
+        return "s"
+    elseif d ∈ [CT_FLOAT, CT_INT, CT_DATE, CT_DATETIME, CT_TIME]
+        return "n"
+    elseif d == CT_BOOL
+        return "b"
+    elseif d == CT_ERROR
+        return "e"
+    elseif d == CT_EMPTY
+        return ""
+    else
+        throw(XLSXError("Unknown CellDatatype: $d"))
+    end
+end
+function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String,String}}, ws::Worksheet)
     pad2 = "    "      # 4 spaces
     pad3 = "      "    # 6 spaces
     pad4 = "        "  # 8 spaces
@@ -447,16 +461,16 @@ function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String,Stri
 
         write(row_node, pad3, "<c r=\"", string(cell.ref), "\"")
 
-        if cell.datatype != ""
-            write(row_node, " t=\"", cell.datatype, "\"")
+        if cell.datatype != CT_EMPTY
+            write(row_node, " t=\"", encode(cell.datatype), "\"")
         end
 
-        if cell.style != ""
-            write(row_node, " s=\"", cell.style, "\"")
+        if cell.style != UInt32(0)
+            write(row_node, " s=\"", string(cell.style), "\"")
         end
 
-        if cell.meta != ""
-            write(row_node, " cm=\"", cell.meta, "\"")
+        if cell.meta != UInt64(0)
+            write(row_node, " cm=\"", string(cell.meta-1), "\"")
         end
 
         write(row_node, ">")
@@ -465,9 +479,8 @@ function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String,Stri
             add_node_formula!(row_node, cell.formula)
         end
 
-        if cell.value != ""
-            write(row_node, "\n", pad4, "<v>", XML.escape(cell.value), "</v>")
-        end
+        v = getdata(ws, cell)
+        write(row_node, "\n", pad4, "<v>", ismissing(v) ? "" : string(v), "</v>")
 
         write(row_node, "\n", pad3, "</c>\n")
     end
@@ -713,22 +726,23 @@ end
 # Returns the datatype and value for `val` to be inserted into `ws`.
 function xlsx_encode(ws::Worksheet, val::AbstractString)
     if isempty(val)
-        return ("", "")
+        return (CT_EMPTY, UInt64(0))
     end
     sst_ind = add_shared_string!(get_workbook(ws), strip_illegal_chars(val))
 #    sst_ind = add_shared_string!(get_workbook(ws), val)
     ws.sst_count+=1
 
-    return ("s", string(sst_ind))
+    return (CT_STRING, UInt64(sst_ind))
 end
 
-xlsx_encode(::Worksheet, val::Missing) = ("", "")
-xlsx_encode(::Worksheet, val::Bool) = ("b", val ? "1" : "0")
-xlsx_encode(::Worksheet, val::Union{Int,Float64}) = ("", string(val))
-xlsx_encode(ws::Worksheet, val::Dates.Date) = ("", string(date_to_excel_value(val, isdate1904(get_xlsxfile(ws)))))
-xlsx_encode(ws::Worksheet, val::Dates.DateTime) = ("", string(datetime_to_excel_value(val, isdate1904(get_xlsxfile(ws)))))
-xlsx_encode(::Worksheet, val::Dates.Time) = ("", string(time_to_excel_value(val)))
-
+xlsx_encode(::Worksheet, val::Missing) = (CT_EMPTY, UInt64(0))
+xlsx_encode(::Worksheet, val::Bool) = (CT_BOOL, UInt64(val))
+xlsx_encode(::Worksheet, val::Float64) = (CT_FLOAT, reinterpret(UInt64, val))
+xlsx_encode(::Worksheet, val::Int) = (CT_INT, reinterpret(UInt64, Int64(val)))
+xlsx_encode(ws::Worksheet, val::Dates.Date) = (CT_DATE, reinterpret(UInt64, date_to_excel_value(val, isdate1904(get_xlsxfile(ws)))))
+xlsx_encode(ws::Worksheet, val::Dates.DateTime) = (CT_DATETIME, reinterpret(UInt64, datetime_to_excel_value(val, isdate1904(get_xlsxfile(ws)))))
+xlsx_encode(::Worksheet, val::Dates.Time) = (CT_TIME, reinterpret(UInt64, time_to_excel_value(val)))
+xlsx_encode(::Worksheet, val::Dates.Period) = (CT_FLOAT, reinterpret(UInt64, float(val)))
 Base.setindex!(ws::Worksheet, v, row::Integer, col::Integer) = setdata!(ws, CellRef(row,col), v)
 Base.setindex!(ws::Worksheet, v, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}) = setdata!(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))), v)
 Base.setindex!(ws::Worksheet, v::AbstractVector, r::Union{Integer,UnitRange{<:Integer}}, c::UnitRange{T}) where {T<:Integer} = setdata!(ws, r, c, v)
@@ -761,20 +775,20 @@ function setdata!(ws::Worksheet, ref::CellRef, val::CellFormula)
     v = ""
     t = ""
     m = ""
-    cell = Cell(ref, t, id(val.styleid), v, m, val.value)
+    cell = Cell(get_workbook(ws), ref, t, string(id(val.styleid)), v, m, val.value)
     setdata!(ws, cell)
 end
 function setdata!(ws::Worksheet, ref::CellRef, val::CellValue)
     t, v = xlsx_encode(ws, val.value)
-    m = ""
-    cell = Cell(ref, t, id(val.styleid), v, m, Formula())
+    m = UInt64(0)
+    cell = Cell(ref, v, id(val.styleid), m, t, Formula())
     setdata!(ws, cell)
 end
 
 # convert AbstractTypes to concrete
 setdata!(ws::Worksheet, ref::CellRef, val::AbstractString) = setdata!(ws, ref, CellValue(ws, convert(String, val)))
-setdata!(ws::Worksheet, ref::CellRef, val::Integer) = setdata!(ws, ref, convert(Int, val))
-setdata!(ws::Worksheet, ref::CellRef, val::Real) = setdata!(ws, ref, convert(Float64, val))
+#setdata!(ws::Worksheet, ref::CellRef, val::Integer) = setdata!(ws, ref, convert(Int64, val))
+#setdata!(ws::Worksheet, ref::CellRef, val::Real) = setdata!(ws, ref, convert(Float64, val))
 
 function setdata!(sheet::Worksheet, ref::CellRange, data::AbstractVector) # vector to row or column range
     rows = ref.start.row_number:ref.stop.row_number
@@ -831,7 +845,7 @@ function shift_excel_references(formula::String, offset::Tuple{Int32,Int32})
     return formula
 end
 
-function setdata!(ws::Worksheet, ref::CellRef, val::Union{AbstractFormula,CellValueType}) # use existing cell format if it exists
+function setdata!(ws::Worksheet, ref::CellRef, val::Union{AbstractFormula,CellConcreteType}) # use existing cell format if it exists
     c = getcell(ws, ref)
     if !(c isa EmptyCell) && c.formula isa ReferencedFormula
         rereference_formulae(ws, c)
@@ -840,35 +854,36 @@ function setdata!(ws::Worksheet, ref::CellRef, val::Union{AbstractFormula,CellVa
         if val isa AbstractFormula
             return setdata!(ws, ref, CellFormula(ws, val))
         else
+
             return setdata!(ws, ref, CellValue(ws, val))
         end
     else
-        existing_style = CellDataFormat(parse(Int, c.style))
+        existing_style = CellDataFormat(c.style)
         isa_dt = styles_is_datetime(ws.package.workbook, existing_style)
         if val isa Dates.Date
             if isa_dt == false
-                c.style = string(update_template_xf(ws, existing_style, ["numFmtId", "applyNumberFormat"], [string(DEFAULT_DATE_numFmtId), "1"]).id)
+                c.style = update_template_xf(ws, existing_style, ["numFmtId", "applyNumberFormat"], [string(DEFAULT_DATE_numFmtId), "1"]).id
             end
         elseif val isa Dates.Time
             if isa_dt == false
-                c.style = string(update_template_xf(ws, existing_style, ["numFmtId", "applyNumberFormat"], [string(DEFAULT_TIME_numFmtId), "1"]).id)
+                c.style = update_template_xf(ws, existing_style, ["numFmtId", "applyNumberFormat"], [string(DEFAULT_TIME_numFmtId), "1"]).id
             end
         elseif val isa Dates.DateTime
             if isa_dt == false
-                c.style = string(update_template_xf(ws, existing_style, ["numFmtId", "applyNumberFormat"], [string(DEFAULT_DATETIME_numFmtId), "1"]).id)
+                c.style = update_template_xf(ws, existing_style, ["numFmtId", "applyNumberFormat"], [string(DEFAULT_DATETIME_numFmtId), "1"]).id
             end
         elseif val isa Float64 || val isa Int
             if styles_is_float(ws.package.workbook, existing_style) == false && Int(existing_style.id) ∉ [0, 1]
-                c.style = string(update_template_xf(ws, existing_style, ["numFmtId"], [string(DEFAULT_NUMBER_numFmtId)]).id)
+                c.style = update_template_xf(ws, existing_style, ["numFmtId"], [string(DEFAULT_NUMBER_numFmtId)]).id
             end
         elseif val isa Bool # Now rerouted here rather than assigning an EmptyCellDataFormat.
             # Change any style to General (0) and retain other formatting.
-            c.style = string(update_template_xf(ws, existing_style, ["numFmtId"], [string(DEFAULT_BOOL_numFmtId)]).id)
+            c.style = update_template_xf(ws, existing_style, ["numFmtId"], [string(DEFAULT_BOOL_numFmtId)]).id
         end
         if val isa AbstractFormula
-            return setdata!(ws, ref, CellFormula(val, CellDataFormat(parse(Int, c.style))))
+            return setdata!(ws, ref, CellFormula(val, CellDataFormat(c.style)))
         else
-            return setdata!(ws, ref, CellValue(val, CellDataFormat(parse(Int, c.style))))
+            return setdata!(ws, ref, CellValue(val, CellDataFormat(c.style)))
         end
     end
 end

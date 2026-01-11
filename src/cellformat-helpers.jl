@@ -536,7 +536,7 @@ function process_get_cellref(f::Function, ws::Worksheet, cellref::CellRef; kw...
     if cell isa EmptyCell || cell.style == ""
         return nothing
     end
-    cell_style = styles_cell_xf(wb, parse(Int, cell.style))
+    cell_style = styles_cell_xf(wb, cell.style)
     return f(wb, cell_style; kw...)
 end
 function process_get_cellname(f::Function, ws::Worksheet, ref_or_rng::AbstractString; kw...)

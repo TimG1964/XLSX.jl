@@ -131,7 +131,7 @@ function setFont(sh::Worksheet, cellref::CellRef;
         cell.style = string(get_num_style_index(sh, allXfNodes, 0).id)
     end
 
-    cell_style = styles_cell_xf(allXfNodes, parse(Int, cell.style))
+    cell_style = styles_cell_xf(allXfNodes, cell.style)
 
     new_font_atts = Dict{String,Union{Dict{String,String},Nothing}}()
     cell_font = getFont(wb, cell_style)
@@ -193,7 +193,7 @@ function setFont(sh::Worksheet, cellref::CellRef;
 
     new_fontid = styles_add_cell_attribute(wb, font_node, "fonts")
 
-    newstyle = string(update_template_xf(sh, allXfNodes, CellDataFormat(parse(Int, cell.style)), ["fontId", "applyFont"], [string(new_fontid), "1"]).id)
+    newstyle = update_template_xf(sh, allXfNodes, CellDataFormat(cell.style), ["fontId", "applyFont"], [string(new_fontid), "1"]).id
     cell.style = newstyle
 
     if cell.datatype=="s" # shared strings and former inline strings may have complex font formatting to manage
@@ -772,7 +772,7 @@ function setBorder(sh::Worksheet, cellref::CellRef;
 
     new_borderid = styles_add_cell_attribute(wb, border_node, "borders")
 
-    newstyle = string(update_template_xf(sh, allXfNodes, CellDataFormat(parse(Int, cell.style)), ["borderId", "applyBorder"], [string(new_borderid), "1"]).id)
+    newstyle = update_template_xf(sh, allXfNodes, CellDataFormat(parse(Int, cell.style)), ["borderId", "applyBorder"], [string(new_borderid), "1"]).id
     cell.style = newstyle
     return new_borderid
 end
@@ -1221,7 +1221,7 @@ function setFill(sh::Worksheet, cellref::CellRef;
 
     new_fillid = styles_add_cell_attribute(wb, fill_node, "fills")
 
-    newstyle = string(update_template_xf(sh, allXfNodes, CellDataFormat(parse(Int, cell.style)), ["fillId", "applyFill"], [string(new_fillid), "1"]).id)
+    newstyle = update_template_xf(sh, allXfNodes, CellDataFormat(parse(Int, cell.style)), ["fillId", "applyFill"], [string(new_fillid), "1"]).id
     cell.style = newstyle
     return new_fillid
 end
@@ -1535,7 +1535,7 @@ function setAlignment(sh::Worksheet, cellref::CellRef;
 
     alignment_node = XML.Node(XML.Element, "alignment", atts, nothing, nothing)
 
-    newstyle = string(update_template_xf(sh, allXfNodes, CellDataFormat(parse(Int, cell.style)), alignment_node).id)
+    newstyle = update_template_xf(sh, allXfNodes, CellDataFormat(parse(Int, cell.style)), alignment_node).id
     cell.style = newstyle
 
     return parse(Int, newstyle)
@@ -1846,7 +1846,7 @@ function setFormat(sh::Worksheet, cellref::CellRef;
         atts = ["numFmtId", "applyNumberFormat"]
         vals = [string(new_formatid), "1"]
     end
-    newstyle = string(update_template_xf(sh, allXfNodes, CellDataFormat(parse(Int, cell.style)), atts, vals).id)
+    newstyle = update_template_xf(sh, allXfNodes, CellDataFormat(parse(Int, cell.style)), atts, vals).id
     cell.style = newstyle
 
     return new_formatid

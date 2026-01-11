@@ -50,7 +50,7 @@ struct EmptyCellDataFormat <: AbstractCellDataFormat end
 
 # Keeps track of formatting information.
 struct CellDataFormat <: AbstractCellDataFormat
-    id::UInt
+    id::UInt32
 end
 
 abstract type AbstractFormula end
@@ -164,6 +164,37 @@ end
 
 abstract type AbstractCell end
 
+@enum CellValueType::UInt8 begin
+    CT_EMPTY = 0
+    CT_STRING = 1
+    CT_FLOAT = 2
+    CT_INT = 3
+    CT_BOOL = 4
+    CT_DATE = 5
+    CT_TIME = 6
+    CT_DATETIME = 7
+    CT_ERROR = 8
+end
+@enum CellErrorType::UInt64 begin
+    XL_NULL = 1
+    XL_DIV0 = 2
+    XL_VALUE = 3
+    XL_REF = 4
+    XL_NAME = 5
+    XL_NUM = 6 
+    XL_NA = 7
+    XL_SPILL = 8
+    end
+mutable struct Cell <: AbstractCell
+    ref::CellRef
+    value::UInt64
+    style::UInt32
+    meta::UInt16
+    datatype::CellValueType
+    formula::AbstractFormula
+    #fidx::UInt32
+end
+#=
 mutable struct Cell <: AbstractCell
     ref::CellRef
     datatype::String
@@ -172,7 +203,7 @@ mutable struct Cell <: AbstractCell
     meta::String
     formula::AbstractFormula
 end
-
+=#
 struct EmptyCell <: AbstractCell
     ref::CellRef
 end
@@ -183,7 +214,7 @@ struct DxFormat <: AbstractCellDataFormat
 end
 
 """
-    CellValueType
+    CellConcreteType
 
 Concrete supported data-types.
 
@@ -191,11 +222,11 @@ Concrete supported data-types.
 Union{String, Missing, Float64, Int, Bool, Dates.Date, Dates.Time, Dates.DateTime}
 ```
 """
-const CellValueType = Union{String, Missing, Float64, Int, Bool, Dates.Date, Dates.Time, Dates.DateTime}
+const CellConcreteType = Union{String, Missing, Float64, Int, Bool, Dates.Date, Dates.Time, Dates.DateTime}
 
 # CellValue is a Julia type of a value read from a Spreadsheet.
 struct CellValue
-    value::CellValueType
+    value::CellConcreteType
     styleid::AbstractCellDataFormat
 end
 
@@ -387,7 +418,7 @@ struct Sst
     formatted::String
     idx::Int
 end
-const DefinedNameValueTypes = Union{SheetCellRef, SheetCellRange, NonContiguousRange, CellValueType}#Int, Float64, String, Missing}
+const DefinedNameValueTypes = Union{SheetCellRef, SheetCellRange, NonContiguousRange, CellConcreteType}#Int, Float64, String, Missing}
 const DefinedNameRangeTypes = Union{SheetCellRef, SheetCellRange, NonContiguousRange}
 
 struct DefinedNameValue

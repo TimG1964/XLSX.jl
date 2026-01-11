@@ -16,12 +16,12 @@ import Base: isempty
 function CellFormula(ws::Worksheet, val::AbstractFormula)
     CellFormula(val, default_cell_format(ws, val))
 end
-function CellValue(ws::Worksheet, val::CellValueType)
+function CellValue(ws::Worksheet, val::CellConcreteType)
     CellValue(val, default_cell_format(ws, val))
 end
 
-id(format::CellDataFormat) = string(format.id)
-id(::EmptyCellDataFormat) = ""
+id(format::CellDataFormat) = format.id
+id(::EmptyCellDataFormat) = UInt64(0)
 isempty(::CellDataFormat) = false
 isempty(::EmptyCellDataFormat) = true
 
@@ -38,7 +38,7 @@ const DEFAULT_BOOL_numFmtId = 0 # General - seems like an OK default for now
 
 # Returns the default `CellDataFormat` for a type
 default_cell_format(ws::Worksheet, ::AbstractFormula) = EmptyCellDataFormat()
-default_cell_format(ws::Worksheet, ::CellValueType) = EmptyCellDataFormat()
+default_cell_format(ws::Worksheet, ::CellConcreteType) = EmptyCellDataFormat()
 default_cell_format(ws::Worksheet, ::Dates.Date) = get_num_style_index(ws, DEFAULT_DATE_numFmtId)
 default_cell_format(ws::Worksheet, ::Dates.Time) = get_num_style_index(ws, DEFAULT_TIME_numFmtId)
 default_cell_format(ws::Worksheet, ::Dates.DateTime) = get_num_style_index(ws, DEFAULT_DATETIME_numFmtId)
@@ -96,12 +96,12 @@ end
 
 # Returns the xf XML node element for style `index`.
 # `index` is 0-based.
-function styles_cell_xf(wb::Workbook, index::Int)::XML.Node
+function styles_cell_xf(wb::Workbook, index::Integer)::XML.Node
     xroot = styles_xmlroot(wb)
     xf_elements = find_all_nodes("/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":styleSheet/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":cellXfs/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":xf", xroot)
     return xf_elements[index+1]
 end
-function styles_cell_xf(allXfNodes::Vector{XML.Node}, index::Int)::XML.Node
+function styles_cell_xf(allXfNodes::Vector{XML.Node}, index::Integer)::XML.Node
     return allXfNodes[index+1]
 end
 

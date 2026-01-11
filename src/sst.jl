@@ -102,13 +102,13 @@ function add_formatted_string!(wb::Workbook, str_formatted::String; mylock::Unio
 end
 
 # allow to write cells containing only whitespace characters or with leading or trailing whitespace.
-function add_shared_string!(wb::Workbook, str_unformatted::AbstractString) :: Int
+function add_shared_string!(wb::Workbook, str_unformatted::AbstractString; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int
     if startswith(str_unformatted, ' ') || endswith(str_unformatted, ' ') || contains(str_unformatted, '\n')
         str_formatted = string("<si><t xml:space=\"preserve\">", XML.escape(str_unformatted), "</t></si>")
     else
         str_formatted = string("<si><t>", XML.escape(str_unformatted), "</t></si>")
     end
-    return add_formatted_string!(wb, str_formatted)
+    return add_formatted_string!(wb, str_formatted; mylock)
 end
 
 function sst_load!(workbook::Workbook)
@@ -147,7 +147,7 @@ function stream_ssts(n::XML.LazyNode, chunksize::Int; channel_size::Int=1 << 10)
             n = XML.next(n)
         end
         if i>0 # handle last incomplete chunk
-            put!(out, ssts[1:i])
+            put!(out, copy(ssts[1:i]))
         end
     end
 end
@@ -203,7 +203,7 @@ function load_sst_table!(wb::Workbook, chan::Channel, chunksize::Int, nthreads::
                     end
                 end
                 if sst_count>0 # handle last incomplete chunk
-                    put!(sst_results, chunk[1:sst_count])
+                    put!(sst_results, copy(chunk[1:sst_count]))
                 end
             end
         end
@@ -212,7 +212,7 @@ function load_sst_table!(wb::Workbook, chan::Channel, chunksize::Int, nthreads::
     close(sst_results)
 
     wait(consumer)  # ensure consumer is done
-   
+
 end
 
 # Checks whether this workbook has a Shared String Table.

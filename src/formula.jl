@@ -211,6 +211,7 @@ function rereference_formulae(ws::Worksheet, cell::Cell)
 end
 
 function rereference_formulae(ws::Worksheet, oldcell::Cell, newrng::CellRange, newid::Int64)
+    wb=get_workbook(ws)
     oldform = oldcell.formula.formula
     oldunhandled = oldcell.formula.unhandled
     offset = cell_offset(oldcell.ref, newrng.start)
@@ -219,10 +220,12 @@ function rereference_formulae(ws::Worksheet, oldcell::Cell, newrng::CellRange, n
         newfr = getcell(ws, fr)
         if fr != newrng.start
             if newfr.formula isa FormulaReference && newfr.formula.id == oldcell.formula.id
-                setdata!(ws, Cell(fr, newfr.datatype, newfr.style, "", "", FormulaReference(newid, oldunhandled)))
+                t=encode(newfr.datatype)
+                setdata!(ws, Cell(wb, fr, t, string(newfr.style), "", "", FormulaReference(newid, oldunhandled)))
             end
         else
-            setdata!(ws, Cell(fr, oldcell.datatype, newfr.style, "", "", newform))
+            t=encode(oldcell.datatype)
+            setdata!(ws, Cell(wb, fr, t, string(newfr.style), "", "", newform))
         end
     end
     return nothing
@@ -767,7 +770,7 @@ function setFormula(ws::Worksheet, rng::CellRange; val::AbstractString, raw::Boo
         if cell isa EmptyCell || cell.style==""
             setdata!(ws, c, CellFormula(ws, newform))
         else
-            setdata!(ws, c, CellFormula(newform, CellDataFormat(parse(Int,cell.style))))
+            setdata!(ws, c, CellFormula(newform, CellDataFormat(cell.style)))
         end
     end
     return f
@@ -788,10 +791,10 @@ function setFormula(ws::Worksheet, cellref::CellRef; val::AbstractString, raw::B
     if c isa EmptyCell || c.style==""
         setdata!(ws, cellref, CellFormula(ws, Formula(f, t=="" ? nothing : t, ref=="" ? nothing : ref, nothing)))
     else
-        setdata!(ws, cellref, CellFormula(Formula(f, t=="" ? nothing : t, ref=="" ? nothing : ref, nothing), CellDataFormat(parse(Int,c.style))))
+        setdata!(ws, cellref, CellFormula(Formula(f, t=="" ? nothing : t, ref=="" ? nothing : ref, nothing), CellDataFormat(c.style)))
     end
     c=getcell(ws, cellref)
-    c.meta = cm
+    c.meta = cm=="" ? UInt16(0) : parse(UInt16, cm)+1
     return f
 end
 

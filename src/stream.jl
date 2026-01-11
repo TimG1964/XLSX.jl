@@ -323,7 +323,7 @@ function stream_rows(n::XML.LazyNode, chunksize::Int; channel_size::Int=1 << 10)
             n = XML.next(n)
         end
         if pos>0 # handle last incomplete chunk
-            put!(out, rows[1:pos])
+            put!(out, copy(rows[1:pos]))
         end
     end
 end

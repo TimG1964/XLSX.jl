@@ -763,7 +763,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
     close(read_files)
 
     wait(consumer)
-
+    wb.sst.is_loaded = true
 end
 
 function process_file(zip_io::ZipArchives.ZipReader, filename::String)
