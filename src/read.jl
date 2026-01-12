@@ -363,6 +363,7 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
 #       zip_io = ZipArchives.ZipReader(Mmap.mmap(abspath(source))) # but Mmap is unreliable : https://discourse.julialang.org/t/struggling-to-use-mmap-with-ziparchives/129839
     end
 
+
     load_files!(xf, zip_io; pass=1) # multi-threaded file load
 
     check_minimum_requirements(xf)
@@ -372,7 +373,8 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
     # need to remove calcChain.xml from [Content_Types].xml since file is never loaded
     remove_calcChain!(xf)
 
-    load_files!(xf, zip_io; pass=2) # multi-threaded file load
+    load_files!(xf, zip_io; pass=2) # Need to load sst before worksheets
+    load_files!(xf, zip_io; pass=3) # load worksheets last so inlineStrings go after existing ssts
 
     for sheet in get_workbook(xf).sheets
         if isnothing(sheet.dimension)
@@ -711,7 +713,7 @@ end
 # pass 2 - only read worksheets and sharedStrings
 function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
 
-    (pass < 1 || pass > 2) && throw(XLSXError("Unknown pass to read files."))
+    (pass < 1 || pass > 3) && throw(XLSXError("Unknown pass to read files."))
     wb=get_workbook(xf)
 
     read_files = Channel{ReadFile}(1 << 10)
@@ -725,7 +727,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
                 xf.files[file.name] = true # set file as read
             end
             if !isnothing(file.raw)
-                if xf.is_writable
+#                if xf.is_writable
                     if occursin("xl/sharedStrings.xml", file.name)
                         if has_sst(wb)
                             sst_load!(wb)
@@ -739,7 +741,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
                         end
                     end
                 end
-            end
+#            end
             if !isnothing(file.bin)
                 xf.binary_data[file.name] = file.bin
             end
@@ -752,7 +754,10 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
                if pass==1 && !occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", file)
                     readfile = process_file(zip_io, file) # Pass 1: process all files except sheets and sharedStrings
                     put!(read_files, readfile)
-                elseif pass==2 && occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", file)
+                elseif pass==2 && occursin(r"xl/sharedStrings\.xml", file)
+                    readfile = process_file(zip_io, file) # Pass 2: now process sheets and sharedStrings
+                    put!(read_files, readfile)
+                elseif pass==3 && occursin(r"xl/worksheets/sheet\d+\.xml", file)
                     readfile = process_file(zip_io, file) # Pass 2: now process sheets and sharedStrings
                     put!(read_files, readfile)
                 end
@@ -763,7 +768,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
     close(read_files)
 
     wait(consumer)
-    wb.sst.is_loaded = true
+
 end
 
 function process_file(zip_io::ZipArchives.ZipReader, filename::String)

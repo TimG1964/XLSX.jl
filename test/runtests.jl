@@ -5,8 +5,8 @@ using Test, Dates, XML
 import DataFrames, Random
 import Distributions as Dist
 import CSV
-
 data_directory = joinpath(dirname(pathof(XLSX)), "..", "data")
+
 @assert isdir(data_directory)
 
 @testset "read test files" begin

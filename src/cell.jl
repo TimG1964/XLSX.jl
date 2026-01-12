@@ -276,13 +276,11 @@ function process_tv(wb::Workbook, t::String, v::String, num_style::Int; mylock::
         # Shared String
         datatype = CT_STRING
         value = reinterpret(UInt64, parse(Int64, v))
-#        println("Added shared string: $(sst_unformatted_string(wb, parse(Int64, v))) at index $(reinterpret(Int64, value)))")
         
     elseif t == "str"
         # Plain String
         datatype = CT_STRING
         value = reinterpret(UInt64, Int64(add_shared_string!(wb, v; mylock)))
-        println("Added shared string: $v at index $(reinterpret(Int64, value)))")
         
     elseif t == "e"
         # Error
@@ -347,13 +345,11 @@ function process_tv(wb::Workbook, t::String, v::String, num_style::Int; mylock::
 end
 # Constructor with simple formula string for backward compatibility
 function Cell(wb::Workbook, ref::CellRef, t::String, s::String, v::String, m::String, f::AbstractFormula)
+    println("here")
     style::UInt32 = isempty(s) ? UInt32(0) : parse(UInt32, s)
     meta::UInt32 = isempty(m) ? UInt32(0) : parse(UInt32, m) + UInt32(1)
 
     num_style = isempty(s) ? 0 : parse(Int, s)
-    if v=="missing"
-        println("$(cellname(ref)) : t=$t,  v=$v")
-    end
     datatype, value = process_tv(wb, t, v, num_style)
 #=
     if t == "b"
@@ -462,10 +458,6 @@ function getdata(ws::Worksheet, cell::Cell)
 
     if cell.datatype == CT_STRING
         # use sst
-        println(typeof(cell.value))
-        println(cell.value)
-        println(reinterpret(Int64, cell.value))
-        println(Int64(cell.value))
         str = sst_unformatted_string(ws, reinterpret(Int64, cell.value))
         return str
 

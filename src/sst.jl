@@ -213,6 +213,8 @@ function load_sst_table!(wb::Workbook, chan::Channel, chunksize::Int, nthreads::
 
     wait(consumer)  # ensure consumer is done
 
+#   sst_table.is_loaded=true
+
 end
 
 # Checks whether this workbook has a Shared String Table.
