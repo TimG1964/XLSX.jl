@@ -40,9 +40,9 @@ function create_new_sst(wb::Workbook, sst::SharedStringTable)
         init_sst_index(sst)
     end
 end
-function add_to_sst!(ss::SharedStringTable, si_xml::String)::Int
+function add_to_sst!(ss::SharedStringTable, si_xml::String)::Int64
     
-    # Check all indices with same hash
+    # Check for match
     ind = get(ss.index, si_xml, nothing)
     if ind !== nothing
         return ind  # Found exact match
@@ -61,7 +61,7 @@ function add_to_sst!(ss::SharedStringTable, si_xml::String)::Int
     return new_idx
 end
 
-function add_formatted_string!(sst::SharedStringTable, str_formatted::String; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int
+function add_formatted_string!(sst::SharedStringTable, str_formatted::String; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int64
     ind = get_shared_string_index(sst, str_formatted)
     local new_index::Int
     if ind !== nothing
@@ -79,7 +79,7 @@ function add_formatted_string!(sst::SharedStringTable, str_formatted::String; my
 end
 
 # Adds a string to shared string table. Returns the 0-based index of the shared string in the shared string table.
-function add_formatted_string!(wb::Workbook, str_formatted::String; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int
+function add_formatted_string!(wb::Workbook, str_formatted::String; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int64
 #    !is_writable(get_xlsxfile(wb)) && throw(XLSXError("XLSXFile instance is not writable."))
     if isempty(str_formatted)
         throw(XLSXError("Can't add empty string to Shared String Table."))
@@ -104,9 +104,9 @@ end
 # allow to write cells containing only whitespace characters or with leading or trailing whitespace.
 function add_shared_string!(wb::Workbook, str_unformatted::AbstractString; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int
     if startswith(str_unformatted, ' ') || endswith(str_unformatted, ' ') || contains(str_unformatted, '\n')
-        str_formatted = string("<si><t xml:space=\"preserve\">", XML.escape(str_unformatted), "</t></si>")
+        str_formatted = string("<si>\n  <t xml:space=\"preserve\">", XML.escape(str_unformatted), "</t>\n</si>")
     else
-        str_formatted = string("<si><t>", XML.escape(str_unformatted), "</t></si>")
+        str_formatted = string("<si>\n  <t>", XML.escape(str_unformatted), "</t>\n</si>")
     end
     return add_formatted_string!(wb, str_formatted; mylock)
 end
@@ -260,34 +260,6 @@ function gather_strings!(io::IOBuffer, e::XML.LazyNode)
     
     return nothing
 end
-#=
-    function gather_strings!(v::Vector{String}, e::XML.LazyNode)
-        if XML.tag(e) == "t"
-            c=XML.children(e)
-            if length(c) == 1
-                push!(v, XML.is_simple(c[1]) ? XML.simple_value(c[1]) : XML.value(c[1]))
-            elseif length(c) == 0
-                push!(v, isnothing(XML.value(e)) ? "" : XML.is_simple(e) ? XML.simple_value(e) : XML.value(e))
-            else
-                throw(XLSXError("Unexpected number of children in <t> node: $(length(c)). Expected 0 or 1."))
-            end
-        end
-
-        if XML.tag(e) != "rPh"
-            for ch in XML.children(e)
-                # recursively gather strings from children
-                gather_strings!(v, ch)
-            end 
-        end
-
-        nothing
-    end
-    v_string = IOBuffer()
-    gather_strings!(v_string, el)
-
-    return XML.unescape(String(take!(v_string)))
-end
-=#
 
 # Looks for a string inside the Shared Strings Table (sst).
 # `index` starts at 0.
@@ -295,13 +267,6 @@ end
     sst_load!(wb)
     uss = get_sst(wb).shared_strings[index+1]
     return unformatted_text(parse(XML.LazyNode, uss))
-end
-
-# Looks for a formatted string inside the Shared Strings Table (sst).
-# `index` starts at 0.
-@inline function sst_formatted_string(wb::Workbook, index::Int)
-    sst_load!(wb)
-    return get_sst(wb).shared_strings[index+1]
 end
 
 @inline sst_unformatted_string(xl::XLSXFile, index::Int) :: String = sst_unformatted_string(get_workbook(xl), index)
@@ -314,9 +279,9 @@ function init_sst_index(sst::SharedStringTable)
     for i in 1:length(sst.shared_strings)
         ind = get(sst.index, sst.shared_strings[i], nothing)
         if ind === nothing
-            sst.index[sst.shared_strings[i]] = i
+            sst.index[sst.shared_strings[i]] = i-1
         else
-            sst.index[sst.shared_strings[i]] = ind
+            sst.index[sst.shared_strings[i]] = ind-1
         end
     end
 end

@@ -320,7 +320,7 @@ Base.getindex(r::TableRow, x) = getdata(r, x)
 function TableRow(table_row::Int, index::Index, sheet_row::SheetRow)
     ws = get_worksheet(sheet_row)
 
-    cell_values = Vector{CellValueType}()
+    cell_values = Vector{CellConcreteType}()
     for table_column_number in table_column_numbers(index)
         sheet_column = table_column_to_sheet_column_number(index, table_column_number)
         cell = getcell(sheet_row, sheet_column)
@@ -427,80 +427,6 @@ function Base.iterate(itr::TableRowIterator) # revised with help from Claude
     
     return table_row, newstate
 end
-#=
-function Base.iterate(itr::TableRowIterator)
-    next = iterate(itr.itr)
-    # go to the first_data_row
-    while next !== nothing
-        (sheet_row, sheet_row_iterator_state) = next
-        table_row_index = 1
-        if row_number(sheet_row) < itr.first_data_row # Not at first data row yet
-            next = iterate(itr.itr, sheet_row_iterator_state)
-        elseif row_number(sheet_row) == itr.first_data_row # first data row is not empty.
-            if is_empty_table_row(itr, sheet_row) # but it is empty in column range.
-                if itr.stop_in_empty_row
-                    return nothing # First data row is empty, so stop
-                elseif itr.keep_empty_rows
-                    # Postpone processing this sheetrow and process the empty rows
-                    col_count = length(sheet_column_numbers(itr.index))
-                    table_row = TableRow(table_row_index, itr.index, fill(missing, col_count))
-                    missing_rows = 0
-                    row_pending = nothing
-                    newstate = TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, missing_rows, row_pending)
-                    if itr.stop_in_row_function !== nothing && itr.stop_in_row_function(table_row)
-                        return nothing
-                    end
-                    return table_row, newstate
-                else
-                    # iterator returned a row but it is empty across selected columns
-                    # don't want to stop but don't want to keep empty rows. Just iterate again.
-                    next = iterate(itr.itr, sheet_row_iterator_state)
-                end
-            else
-                table_row = TableRow(table_row_index, itr.index, sheet_row)
-                newstate = TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, 0, nothing)
-                if itr.stop_in_row_function !== nothing && itr.stop_in_row_function(table_row)
-                    return nothing
-                end
-                return table_row, newstate
-            end
-        elseif row_number(sheet_row) > itr.first_data_row # the sheetrow iterator has skipped some leading empty rows.
-            if itr.stop_in_empty_row
-                return nothing # First data row is empty, so stop
-            elseif itr.keep_empty_rows
-                # Postpone processing this sheetrow and process the empty rows
-                col_count = length(sheet_column_numbers(itr.index))
-                table_row = TableRow(table_row_index, itr.index, fill(missing, col_count))
-                missing_rows = row_number(sheet_row) - itr.first_data_row - 1
-                row_pending = sheet_row
-                newstate = TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, missing_rows, row_pending)
-                if itr.stop_in_row_function !== nothing && itr.stop_in_row_function(table_row)
-                    return nothing
-                end
-                return table_row, newstate
-            else
-                if is_empty_table_row(itr, sheet_row)
-                    # iterator returned a row but it is empty across selected columns
-                    # don't want to stop but don't want to keep empty rows. Just iterate again.
-                    next = iterate(itr.itr, sheet_row_iterator_state)
-                else
-                    # don't keep empty rows
-                    table_row = TableRow(table_row_index, itr.index, sheet_row)
-                    newstate = TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, 0, nothing)
-                    if itr.stop_in_row_function !== nothing && itr.stop_in_row_function(table_row)
-                        return nothing
-                    end
-                    return table_row, newstate
-                end
-            end
-        else
-            println("unreachable reached!")
-        end
-    end
-    # no rows for this table
-    return nothing
-end
-=#
 
 function Base.iterate(itr::TableRowIterator, state::TableRowIteratorState) # revised with help from Claude
     table_row_index = state.table_row_index + 1
@@ -594,100 +520,6 @@ function Base.iterate(itr::TableRowIterator, state::TableRowIteratorState) # rev
     
     return table_row, newstate
 end
-#=
-function Base.iterate(itr::TableRowIterator, state::TableRowIteratorState)
-    table_row_index = state.table_row_index + 1
-    missing_rows = state.missing_rows
-    col_count = length(sheet_column_numbers(itr.index))
-    println("table441 :  state.row_pending $(state.row_pending)")
-    if missing_rows > 0 # sheetrow iterator has skipped some completely empty rows
-        if itr.stop_in_empty_row
-            # user asked to stop fetching table rows if we find an empty row
-            println("Shouldn't see this message") # handled below
-            return nothing
-        elseif itr.keep_empty_rows
-            # return a TableRow with missing values for the columns
-            table_row = TableRow(table_row_index, itr.index, fill(missing, col_count))
-            table_row_index += 1
-            missing_rows -= 1
-            return table_row, TableRowIteratorState(table_row_index, state.sheet_row_index, state.sheet_row_iterator_state, missing_rows, state.row_pending)
-        else
-            throw(XLSXError("Something wrong here"))
-        end
-    elseif isnothing(state.row_pending)
-        # Only iterate sheetrow if we've properly handled any entirely empty rows.
-        next = iterate(itr.itr, state.sheet_row_iterator_state) # iterate the SheetRowIterator
-        if next === nothing
-            return nothing
-        end
-        sheet_row, sheet_row_iterator_state = next
-    else
-        println("table463 : bringing forward pending row")
-        # bring forward the pending row
-        sheet_row_iterator_state = state.sheet_row_iterator_state
-        sheet_row = state.row_pending
-    end
-
-    #
-    # checks if we're done reading this table
-    #
-
-    # check skipping rows
-    # The XML can skip rows if there's no data in it,
-    # so this is why is_empty_table_row function below wouldn't catch this case
-    if itr.stop_in_empty_row && row_number(sheet_row) != itr.first_data_row && row_number(sheet_row) != (state.sheet_row_index + 1)
-        return nothing
-    end
-
-    if !isnothing(state.row_pending)
-        # bring forward pending row
-        table_row = TableRow(table_row_index, itr.index, state.row_pending)
-        newstate = TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, 0, nothing)
-    elseif !itr.stop_in_empty_row && itr.keep_empty_rows && row_number(sheet_row) != (state.sheet_row_index + 1)
-        # the sheetrow iterator has skipped some empty rows. Postpone processing this sheet row and process empty rows if keep_empty_rows is true
-        missing_rows = row_number(sheet_row) - state.sheet_row_index - 1
-        table_row = TableRow(table_row_index, itr.index, fill(missing, col_count))
-        missing_rows -= 1
-        row_pending = sheet_row
-        newstate = TableRowIteratorState(table_row_index, state.sheet_row_index, state.sheet_row_iterator_state, missing_rows, row_pending)
-    else
-        # normal case, no empty rows
-        table_row = TableRow(table_row_index, itr.index, sheet_row)
-        newstate = TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, 0, nothing)
-    end
-
-    if is_empty_table_row(itr, sheet_row) # rows are returned but specified columns are empty
-        if itr.stop_in_empty_row
-            # user asked to stop fetching table rows if we find an empty row
-            return nothing
-        elseif !itr.keep_empty_rows
-            # keep looking for a non-empty row
-            next = iterate(itr.itr, sheet_row_iterator_state)
-            while next !== nothing
-                sheet_row, sheet_row_iterator_state = next
-                if !is_empty_table_row(itr, sheet_row)
-                    break
-                end
-                next = iterate(itr.itr, sheet_row_iterator_state)
-            end
-
-            if next === nothing
-                # end of file
-                return nothing
-            end
-            table_row = TableRow(table_row_index, itr.index, sheet_row)
-            newstate = TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, 0, nothing)
-        end
-    end
-
-    if itr.stop_in_row_function !== nothing && itr.stop_in_row_function(table_row)
-        return nothing
-    end
-
-    return table_row, newstate
-
-end
-=#
 
 function infer_eltype(v::Vector{Any})
     local hasmissing::Bool = false

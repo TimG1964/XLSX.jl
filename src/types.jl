@@ -184,7 +184,7 @@ end
     XL_NUM = 6 
     XL_NA = 7
     XL_SPILL = 8
-    end
+end
 mutable struct Cell <: AbstractCell
     ref::CellRef
     value::UInt64
@@ -194,16 +194,7 @@ mutable struct Cell <: AbstractCell
     formula::AbstractFormula
     #fidx::UInt32
 end
-#=
-mutable struct Cell <: AbstractCell
-    ref::CellRef
-    datatype::String
-    style::String
-    value::String
-    meta::String
-    formula::AbstractFormula
-end
-=#
+
 struct EmptyCell <: AbstractCell
     ref::CellRef
 end
@@ -534,7 +525,7 @@ end
 struct TableRow
     row::Int # Index of the row in the table. This is not relative to the worksheet cell row.
     index::Index
-    cell_values::Vector{CellValueType}
+    cell_values::Vector{CellConcreteType}
 end
 
 struct TableRowIteratorState{S}

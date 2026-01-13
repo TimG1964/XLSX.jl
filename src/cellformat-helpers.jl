@@ -533,10 +533,10 @@ function process_get_cellref(f::Function, ws::Worksheet, cellref::CellRef; kw...
     if cellref ∉ d
         throw(XLSXError("Cell specified is outside sheet dimension \"$d\""))
     end
-    if cell isa EmptyCell || cell.style == ""
+    if cell isa EmptyCell || cell.style == UInt64(0)
         return nothing
     end
-    cell_style = styles_cell_xf(wb, cell.style)
+    cell_style = styles_cell_xf(wb, Int(cell.style))
     return f(wb, cell_style; kw...)
 end
 function process_get_cellname(f::Function, ws::Worksheet, ref_or_rng::AbstractString; kw...)
@@ -639,10 +639,10 @@ function process_uniform_core(f::Function, ws::Worksheet, allXfNodes::Vector{XML
         newid = f(ws, cellref; kw...)
         first = false
     else                               # Apply the same attribute to the rest of the cells in the range.
-        if cell.style == ""
-            cell.style = string(get_num_style_index(ws, allXfNodes, 0).id)
+        if cell.style == UInt64(0)
+            cell.style = get_num_style_index(ws, allXfNodes, 0).id
         end
-        cell.style = string(update_template_xf(ws, allXfNodes, CellDataFormat(parse(Int, cell.style)), atts, [string(newid), "1"]).id)
+        cell.style = update_template_xf(ws, allXfNodes, CellDataFormat(cell.style), atts, [string(newid), "1"]).id
     end
     return newid, first
 end
@@ -659,9 +659,9 @@ function process_uniform_attribute(f::Function, ws::Worksheet, rng::CellRange, a
             newid, first = process_uniform_core(f, ws, allXfNodes, cellref, atts, newid, first; kw...)
             if f==setFont
                 cell=getcell(ws, cellref)
-                if !(cell isa EmptyCell) && cell.datatype == "s"
+                if !(cell isa EmptyCell) && cell.datatype == CT_STRING
                     v=update_sharedString_font(ws, cell; kw...)
-                    cell.value = isnothing(v) ? cell.value : v
+                    cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
                 end
             end
         end
@@ -697,18 +697,18 @@ function process_uniform_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguo
                         continue
                     end
                     newid, first = process_uniform_core(f, ws, allXfNodes, r, atts, newid, first; kw...)
-                    if f==setFont && cell.datatype == "s"
+                    if f==setFont && cell.datatype == CT_STRING
                         v=update_sharedString_font(ws, cell; kw...)
-                        cell.value = isnothing(v) ? cell.value : v
+                        cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
                     end
                 else
                     for c in r
                         newid, first = process_uniform_core(f, ws, allXfNodes, c, atts, newid, first; kw...)
                         if f==setFont
                             cell=getcell(ws, c)
-                            if !(cell isa EmptyCell) &&!(cell isa EmptyCell) && cell.datatype == "s"
+                            if !(cell isa EmptyCell) &&!(cell isa EmptyCell) && cell.datatype == CT_STRING
                                 v=update_sharedString_font(ws, cell; kw...)
-                                cell.value = isnothing(v) ? cell.value : v
+                                cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
                             end
                         end
                     end
@@ -748,9 +748,9 @@ function process_uniform_veccolon(f::Function, ws::Worksheet, row, col, atts::Ve
                     continue
                 end
                 newid, first = process_uniform_core(f, ws, allXfNodes, cellref, atts, newid, first; kw...)
-                if f==setFont && cell.datatype == "s"
+                if f==setFont && cell.datatype == CT_STRING
                     v=update_sharedString_font(ws, cell; kw...)
-                    cell.value = isnothing(v) ? cell.value : v
+                    cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
                 end
             end
         end
@@ -774,9 +774,9 @@ function process_uniform_vecint(f::Function, ws::Worksheet, row, col, atts::Vect
                 continue
             end
             newid, first = process_uniform_core(f, ws, allXfNodes, cellref, atts, newid, first; kw...)
-            if f==setFont && cell.datatype == "s"
+            if f==setFont && cell.datatype == CT_STRING
                 v=update_sharedString_font(ws, cell; kw...)
-                cell.value = isnothing(v) ? cell.value : v
+                cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
             end
         end
         if first
@@ -795,17 +795,17 @@ function process_uniform_core(ws::Worksheet, cellref::CellRef, newid::Union{Int,
         return newid, first, firstFont
     end
     if first                           # Get the style of the first cell in the range.
-        if cell.style !== ""
-            newid = parse(Int, cell.style)
+        if cell.style !== UInt64(0)
+            newid = Int(cell.style)
         end
         firstFont=getFont(ws, cellref)
         first = false
     else                               # Apply the same style to the rest of the cells in the range.
-        cell.style = isnothing(newid) ? "" : string(newid)
+        cell.style = isnothing(newid) ? UInt64(0) : UInt64(newid)
     end
-    if cell.datatype == "s" && !isnothing(firstFont)
+    if cell.datatype == CT_STRING && !isnothing(firstFont)
         v=update_sharedString_font(ws, cell, firstFont)
-        cell.value= isnothing(v) ? cell.value : v
+        cell.value= isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
     end
 
     return newid, first, firstFont
@@ -932,10 +932,10 @@ function process_uniform_core(f::Function, ws::Worksheet, allXfNodes::Vector{XML
         alignment_node = XML.Node(XML.Element, "alignment", new_alignment, nothing, nothing)
         first = false
     else                               # Apply the same attribute to the rest of the cells in the range.
-        if cell.style == ""
-            cell.style = string(get_num_style_index(ws, allXfNodes, 0).id)
+        if cell.style == UInt64(0)
+            cell.style = get_num_style_index(ws, allXfNodes, 0).id
         end
-        cell.style = string(update_template_xf(ws, allXfNodes, CellDataFormat(parse(Int, cell.style)), alignment_node).id)
+        cell.style = update_template_xf(ws, allXfNodes, CellDataFormat(cell.style), alignment_node).id
     end
     return newid, first, alignment_node
 end
@@ -1088,7 +1088,7 @@ function get_color(s::String)::String
     end
     return c
 end
-function update_sharedString_font(ws::Worksheet, cell::Cell, firstFont::CellFont)
+function update_sharedString_font(ws::Worksheet, cell::Cell, firstFont::CellFont) :: Int64
     let bold=nothing, italic=nothing, under=nothing, strike=nothing, size=nothing, color=nothing, name=nothing
         for (k, v) in firstFont.font
             if k=="b"
@@ -1122,14 +1122,14 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
     size::Union{Nothing,Int}=nothing,
     color::Union{Nothing,String,Dict{String,String}}=nothing,
     name::Union{Nothing,String}=nothing
-)
+) :: Union{Nothing,Int64}
     # <rPr> elements in a sharedString override any font attributes in the cell Style.
     # If setFont is called, we need to replace any of the attributes it is setting in the <rPr> elements.
     # When this makes successive <rPr> elements identical, the <r> elements that contain them can be merged.
 
     # starting values
     wb=get_workbook(ws)
-    index=parse(Int, cell.value)
+    index=reinterpret(Int64,cell.value)
     sst=get_sst(wb)
     str_formatted=sst.shared_strings[index+1]
 
@@ -1259,17 +1259,18 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
     end
     write(new_r, "</si>")
     str_formatted = String(take!(new_r))
-    indices = get_shared_string_index(sst, str_formatted) # see if new formatted string is already in the table
-    if indices !== nothing # new formatted string is already in the table, so use that one.
-        for idx in indices
-            if sst.shared_strings[idx+1] == str_formatted
-                return string(idx)  # Found exact match
-            end
-        end
+
+    ind = get(sst.index, str_formatted, nothing)
+    if ind !== nothing
+        return ind  # Found exact match
     end
+#    ind = get_shared_string_index(sst, str_formatted) # see if new formatted string is already in the table
+#    if sst.shared_strings[ind] == str_formatted
+#        return ind  # Found exact match
+#    end
 
     new_index=add_formatted_string!(sst, str_formatted) # can't update existing sharded string in case it is used by another cell
 
-    return string(new_index)
+    return new_index
 
 end

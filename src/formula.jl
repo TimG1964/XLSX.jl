@@ -277,8 +277,8 @@ function update_formulas_missing_sheet!(wb::Workbook, name::String)
                         cell.formula.formula = replace(cell.formula.formula, pat => r)
                     end
                     if oldform != cell.formula.formula
-                        cell.datatype = "e"
-                        cell.value = "#REF!"
+                        cell.datatype = CT_ERROR
+                        cell.value = UInt64(XL_REF)
                     end
                 end
             end
@@ -798,17 +798,6 @@ function setFormula(ws::Worksheet, cellref::CellRef; val::AbstractString, raw::B
     return f
 end
 
-#=
-# Not required since the functionality is more generally offered by `getFormula`.
-function getCellHyperlink(ws::Worksheet, cellref::CellRef) # addresses #165
-    cellref ∉ get_dimension(ws) && throw(XLSXError("Cell $cellref is out of range for worksheet '$(ws.name)'"))
-    cell=getcell(ws, cellref)
-    f = getFormula(ws, cellref)
-    args = split_function_args(f; fname="hyperlink")
-    isempty(args) && return nothing # cell doesn't contain the `HYPERLINK` Excel function
-    return cell.ref, args[1], length(args)>1 ? args[2] : "" # CellRef, link_location, [friendly_name]
-end
-=#
 """
     getFormula(sh::Worksheet, cr::String; get_external_refs::Bool=false) -> Union{String,Nothing}
     getFormula(xf::XLSXFile, cr::String; get_external_refs::Bool=false) -> Union{String,Nothing}

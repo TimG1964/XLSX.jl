@@ -14,8 +14,6 @@
 
 Base.:(==)(c1::Cell, c2::Cell) = c1.ref == c2.ref && c1.datatype == c2.datatype && c1.style == c2.style && c1.value == c2.value && c1.meta == c2.meta && c1.formula == c2.formula
 Base.hash(c::Cell) = hash(c.ref) + hash(c.datatype) + hash(c.style) + hash(c.value) + hash(c.meta) + hash(c.formula)
-#Base.:(==)(c1::Cell, c2::Cell) = c1.ref == c2.ref && c1.datatype == c2.datatype && c1.style == c2.style && c1.value == c2.value && c1.meta == c2.meta && c1.formula == c2.formula
-#Base.hash(c::Cell) = hash(c.ref) + hash(c.datatype) + hash(c.style) + hash(c.value) + hash(c.meta) + hash(c.formula)
 
 Base.:(==)(c1::EmptyCell, c2::EmptyCell) = c1.ref == c2.ref
 Base.hash(c::EmptyCell) = hash(c.ref) + 10
@@ -23,21 +21,21 @@ Base.hash(c::EmptyCell) = hash(c.ref) + 10
 const RGX_INTEGER = r"^\-?[0-9]+$"
 function get_error_type(v::AbstractString)::UInt64
     if v == "#NULL!"
-        return UInt64(CellErrorType.XL_NULL)
+        return UInt64(XL_NULL)
     elseif v == "#DIV/0!"
-        return UInt64(CellErrorType.XL_DIV0)
+        return UInt64(XL_DIV0)
     elseif v == "#VALUE!"
-        return UInt64(CellErrorType.XL_VALUE)
+        return UInt64(XL_VALUE)
     elseif v == "#REF!"
-        return UInt64(CellErrorType.XL_REF)
+        return UInt64(XL_REF)
     elseif v == "#NAME?"
-        return UInt64(CellErrorType.XL_NAME)
+        return UInt64(XL_NAME)
     elseif v == "#NUM!"
-        return UInt64(CellErrorType.XL_NUM)
+        return UInt64(XL_NUM)
     elseif v == "#N/A"
-        return UInt64(CellErrorType.XL_NA)
+        return UInt64(XL_NA)
     elseif v == "#SPILL!"
-        return UInt64(CellErrorType.XL_SPILL)
+        return UInt64(XL_SPILL)
     else
         throw(XLSXError("Unknown error value: $v"))
     end
@@ -126,72 +124,6 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
                 
                 v = XML.unescape(XML.value(ch[1]))
                 datatype, value = process_tv(wb, t, v, num_style; mylock)
-#=
-                if t == "b"
-                    # Boolean - avoid branches
-                    datatype = CT_BOOL
-                    value = v == "1" ? UInt64(1) : (v == "0" ? UInt64(0) : throw(XLSXError("Unknown boolean value: $v")))
-                    
-                elseif t == "s"
-                    # Shared String
-                    datatype = CT_STRING
-                    value = reinterpret(UInt64, Int64(parse(Int, v)))
-                    
-                elseif t == "str"
-                    # Plain String
-                    datatype = CT_STRING
-                    value = reinterpret(UInt64, Int64(add_unformatted_string!(wb, v; mylock)))
-                    
-                elseif t == "e"
-                    # Error
-                    datatype = CT_ERROR
-                    value = get_error_type(v)
-                    
-                elseif t == "n" || t == ""
-                    # Number - check datetime/float style once
-                    if styles_is_datetime(ws, num_style)
-                        # dates & times
-                        has_decimal = occursin('.', v)
-                        if has_decimal || v == "0"
-                            time_value = parse(Float64, v)
-                            time_value < 0 && throw(XLSXError("Cannot have a datetime value < 0. Got $time_value"))
-                            value = reinterpret(UInt64, time_value)
-                            datatype = time_value <= 1.0 ? CT_TIME : CT_DATETIME
-                        else
-                            # Date
-                            time_value = parse(Int64, v)
-                            time_value < 0 && throw(XLSXError("Cannot have a datetime value < 0. Got $time_value"))
-                            value = reinterpret(UInt64, time_value)
-                            datatype = CT_DATE
-                        end
-                    elseif styles_is_float(ws, num_style)
-                        # float
-                        datatype = CT_FLOAT
-                        value = reinterpret(UInt64, parse(Float64, v))
-                    else
-                        # Check if integer using character-by-character scan
-                        is_int = true
-                        for i in 1:ncodeunits(v)
-                            c = codeunit(v, i)
-                            if !((c >= 0x30 && c <= 0x39) || (i == 1 && (c == 0x2d || c == 0x2b)))
-                                # Not 0-9, or not leading +/-
-                                is_int = false
-                                break
-                            end
-                        end
-                        
-                        if is_int && !isempty(v)
-                            datatype = CT_INT
-                            value = reinterpret(UInt64, parse(Int64, v))
-                        else
-                            datatype = CT_FLOAT
-                            value = reinterpret(UInt64, parse(Float64, v))
-                        end
-                    end
-                else
-                    throw(XLSXError("Cannot parse cell value: $v"))
-                end
-=#                
             elseif tag == "f"
                 f = parse_formula_from_element(child)
             end
@@ -259,13 +191,11 @@ function parse_formula_from_element(c_child_element)::AbstractFormula
             length(unhandled_attributes) > 0 ? unhandled_attributes : nothing)
     end
 end
-#function process_tv(wb::Workbook, t::String, v::String)
-#    num_style = isempty(s) ? 0 : parse(Int, s)
-#    return process_tv(wb::Workbook, t::String, v::String, num_style::Int)
-#end
+
 function process_tv(wb::Workbook, t::String, v::String, num_style::Int; mylock::Union{ReentrantLock,Nothing}=nothing)
     datatype::CellValueType = CT_EMPTY
     value::UInt64 = UInt64(0)
+    v == "" && (return datatype, value)
 
     if t == "b"
         # Boolean - avoid branches
@@ -281,7 +211,7 @@ function process_tv(wb::Workbook, t::String, v::String, num_style::Int; mylock::
         # Plain String
         datatype = CT_STRING
         value = reinterpret(UInt64, Int64(add_shared_string!(wb, v; mylock)))
-        
+
     elseif t == "e"
         # Error
         datatype = CT_ERROR
@@ -343,90 +273,24 @@ function process_tv(wb::Workbook, t::String, v::String, num_style::Int; mylock::
 
     return datatype, value
 end
-# Constructor with simple formula string for backward compatibility
+
+# Constructor with simple formula string for backward compatibility & tests
 function Cell(wb::Workbook, ref::CellRef, t::String, s::String, v::String, m::String, f::AbstractFormula)
-    println("here")
     style::UInt32 = isempty(s) ? UInt32(0) : parse(UInt32, s)
     meta::UInt32 = isempty(m) ? UInt32(0) : parse(UInt32, m) + UInt32(1)
 
     num_style = isempty(s) ? 0 : parse(Int, s)
     datatype, value = process_tv(wb, t, v, num_style)
-#=
-    if t == "b"
-        # Boolean - avoid branches
-        datatype = CT_BOOL
-        value = v == "1" ? UInt64(1) : (v == "0" ? UInt64(0) : throw(XLSXError("Unknown boolean value: $v")))
-        
-    elseif t == "s"
-        # Shared String
-        datatype = CT_STRING
-        value = reinterpret(UInt64, Int64(parse(Int, v)))
-        
-    elseif t == "str"
-        # Plain String
-        datatype = CT_STRING
-        value = reinterpret(UInt64, Int64(add_unformatted_string!(wb, v; mylock)))
-        
-    elseif t == "e"
-        # Error
-        datatype = CT_ERROR
-        value = get_error_type(v)
-        
-    elseif t == "n" || t == ""
-        # Number - check datetime/float style once
-        if styles_is_datetime(ws, num_style)
-            # dates & times
-            has_decimal = occursin('.', v)
-            if has_decimal || v == "0"
-                time_value = parse(Float64, v)
-                time_value < 0 && throw(XLSXError("Cannot have a datetime value < 0. Got $time_value"))
-                value = reinterpret(UInt64, time_value)
-                datatype = time_value <= 1.0 ? CT_TIME : CT_DATETIME
-            else
-                # Date
-                time_value = parse(Int64, v)
-                time_value < 0 && throw(XLSXError("Cannot have a datetime value < 0. Got $time_value"))
-                value = reinterpret(UInt64, time_value)
-                datatype = CT_DATE
-            end
-        elseif styles_is_float(ws, num_style)
-            # float
-            datatype = CT_FLOAT
-            value = reinterpret(UInt64, parse(Float64, v))
-        else
-            # Check if integer using character-by-character scan
-            is_int = true
-            for i in 1:ncodeunits(v)
-                c = codeunit(v, i)
-                if !((c >= 0x30 && c <= 0x39) || (i == 1 && (c == 0x2d || c == 0x2b)))
-                    # Not 0-9, or not leading +/-
-                    is_int = false
-                    break
-                end
-            end
-            
-            if is_int && !isempty(v)
-                datatype = CT_INT
-                value = reinterpret(UInt64, parse(Int64, v))
-            else
-                datatype = CT_FLOAT
-                value = reinterpret(UInt64, parse(Float64, v))
-            end
-        end
-    else
-        throw(XLSXError("Cannot parse cell value: $v"))
-    end
-=#
     return Cell(ref, value, style, meta, datatype, f)
 end
-function Cell(ref::CellRef, datatype::String, style::String, value::String, meta::String, formula::String)
-    println("What am I doing here?")
-    if formula == ""
-        return Cell(ref, datatype, style, value, meta, Formula())
-    else
-        return Cell(ref, datatype, style, value, meta, Formula(formula))
-    end
-end
+#function Cell(ref::CellRef, datatype::String, style::String, value::String, meta::String, formula::String)
+#    println("What am I doing here?")
+#    if formula == ""
+#        return Cell(ref, datatype, style, value, meta, Formula())
+#    else
+#        return Cell(ref, datatype, style, value, meta, Formula(formula))
+#    end
+#end
 
 @inline getdata(ws::Worksheet, empty::EmptyCell) = missing
 
@@ -666,7 +530,7 @@ function get_rowcells!(rowcells::Dict{Int,Cell}, row::XML.LazyNode, ws::Workshee
     while !isnothing(cellnode) && cellnode.depth > d
         if cellnode.tag == "c" # This is a cell
             cell = Cell(cellnode, ws; mylock) # construct an XLSX.Cell from an XML.LazyNode
-            sst_count += cell.datatype == "s" ? 1 : 0
+            sst_count += cell.datatype == CT_STRING ? 1 : 0
             rowcells[column_number(cell)] = cell
         end
         cellnode = XML.next(cellnode)

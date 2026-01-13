@@ -118,6 +118,7 @@ function generate_sst_xml_string(wb::Workbook)::String
     end
 
     print(buff, "</sst>")
+
     return String(take!(buff))
 end
 
@@ -166,43 +167,7 @@ function add_node_formula!(io, f::ReferencedFormula)
     print(io, f.id)
     write(io, "\">", XML.escape(f.formula), "</f>")
 end
-#=
-function add_node_formula!(io, f::Formula)
-    print(io, "\n        <f")
-    if !isnothing(f.type) && f.type != ""
-        print(io, " t=\""*f.type,"\"")
-    end
-    if !isnothing(f.ref) && f.ref != ""
-        print(io, " ref=\""*f.ref*"\"")
-    end
-    if !isnothing(f.unhandled)
-        for (k, v) in f.unhandled
-            print(io, " ", k, "=\"", v,"\"")
-        end
-    end
-    print(io, ">", XML.escape(f.formula), "</f>")
-end
-function add_node_formula!(io, f::FormulaReference)
-    print(io, "\n        <f t=\"shared\"")
-    if !isnothing(f.unhandled)
-        for (k, v) in f.unhandled
-            print(io, " ", k, "=\"", v,"\"")
-        end
-    end
-    print(io," si=\"",string(f.id),"\">")
-    print(io, "</f>")
-end
-function add_node_formula!(io, f::ReferencedFormula)
-    print(io, "\n        <f t=\"shared\" ref=\"", f.ref, "\"")
-    if !isnothing(f.unhandled)
-        for (k, v) in f.unhandled
-            print(io, " ", k, "=\"", v,"\"")
-        end
-    end
-    print(io," si=\"",string(f.id),"\">")
-    print(io, XML.escape(f.formula), "</f>")
-end
-=#
+
 function find_all_nodes(givenpath::String, doc::XML.Node)::Vector{XML.Node}
     XML.nodetype(doc) != XML.Document && throw(XLSXError("Something wrong here!"))
     found_nodes = Vector{XML.Node}()
@@ -422,6 +387,27 @@ function encode(d::CellValueType)
         throw(XLSXError("Unknown CellDatatype: $d"))
     end
 end
+function encode(d::CellErrorType)
+    if d == XL_NULL
+        return "#NULL!"
+    elseif d == XL_DIV0
+        return "#DIV/0!"
+    elseif d == XL_VALUE
+        return "#VALUE!"
+    elseif d == XL_REF
+        return "#REF!"
+    elseif d == XL_NAME
+        return "#NAME?"
+    elseif d == XL_NUM
+        return "#NUM!"
+    elseif d == XL_NA
+        return "#N/A"
+    elseif d == XL_SPILL
+        return "#SPILL!"
+    else
+        throw(XLSXError("Unknown CellErrorType: $d"))
+    end
+end
 function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String,String}}, ws::Worksheet)
     pad2 = "    "      # 4 spaces
     pad3 = "      "    # 6 spaces
@@ -459,6 +445,11 @@ function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String,Stri
     for c in ordered_column_indexes
         cell = getcell(r, c)
 
+        if cell isa EmptyCell
+            println("write485 - skipping empty cell at ", string(cell.ref))
+            continue
+        end
+
         write(row_node, pad3, "<c r=\"", string(cell.ref), "\"")
 
         if cell.datatype != CT_EMPTY
@@ -479,7 +470,17 @@ function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String,Stri
             add_node_formula!(row_node, cell.formula)
         end
 
-        v = getdata(ws, cell)
+        if cell.datatype ∈ [CT_FLOAT, CT_DATETIME, CT_TIME]
+            v = reinterpret(Float64, cell.value)
+        elseif cell.datatype ∈ [CT_STRING, CT_DATE, CT_INT, CT_BOOL]
+            v = reinterpret(Int64, cell.value)
+        elseif cell.datatype == CT_ERROR
+            v = encode(reinterpret(CellErrorType, cell.value))
+        elseif cell.datatype == CT_EMPTY
+            v = ""
+        else
+            v = getdata(ws, cell)
+        end
         write(row_node, "\n", pad4, "<v>", ismissing(v) ? "" : string(v), "</v>")
 
         write(row_node, "\n", pad3, "</c>\n")
@@ -489,78 +490,7 @@ function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String,Stri
 
     return (row_nr, take!(row_node))
 end
-#=
-function abscell(c::CellRef)
-    col, row = split_cellname(c.name)
-    io = IOBuffer()
-    write(io, "\$")
-    write(io, col)
-    write(io, "\$")
-    print(io, row)
-    return String(take!(io))
-end
 
-function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String, String}})
-    pad="  "
-    d, r, unhandled_attributes = cacherow
-    spans_str = string(column_number(d.start), ":", column_number(d.stop))
-
-    row_nr = row_number(r)
-    ordered_column_indexes = sort(collect(keys(r.rowcells)))
-
-    row_node=IOBuffer()
-
-    print(row_node, pad^2,"<row r=\"",string(row_nr), "\"")
-    if spans_str != ""
-        print(row_node, " spans=\"",spans_str, "\"")
-    end
-    if !isnothing(r.ht)
-        print(row_node, " ht=\"",string(r.ht),"\"")
-        print(row_node, " customHeight=\"1\"")
-    end
-
-    if !isempty(unhandled_attributes)
-        for (attribute, value) in unhandled_attributes
-            print(row_node, " ", attribute, "=\"", value, "\"")
-        end
-    end
-    print(row_node, ">\n")
-
-    # add cells to row
-    for c in ordered_column_indexes
-        cell = getcell(r, c)
-        print(row_node,pad^3,"<c r=\"",cell.ref.name,"\"")
-
-        if cell.datatype != ""
-            print(row_node," t=\"",cell.datatype,"\"")
-        end
-
-        if cell.style != ""
-            print(row_node," s=\"",cell.style,"\"")
-        end
-
-        if cell.meta != ""
-            print(row_node," cm=\"",cell.meta,"\"")
-        end
-        print(row_node, ">")
-        
-        if !(cell.formula isa EmptyFormula) && isa(cell.formula, AbstractFormula)
-            add_node_formula!(row_node, cell.formula)
-        end
-
-        if cell.value != ""
-            print(row_node,"\n",pad^4,"<v>",XML.escape(cell.value),"</v>")
-        end
-
-        print(row_node,"\n",pad^3,"</c>\n") # end of cell
-
-    end
-
-    print(row_node,pad^2,"</row>\n") # end of row
-
-    return (row_nr, take!(row_node))
-end
-=#
 function abscell(c::CellRef)
     col = encode_column_number(column_number(c))
     row = string(row_number(c))
@@ -692,11 +622,8 @@ function setdata!(ws::Worksheet, cell::Cell)
 
     nothing
 end
-
  
 # Issue #284
-# I think this issue went away when XML issue #48 was fixed - No it didn't! I still need to replace 0x12 characters at least.
-#
 # This set of characters works in my use case. I don't know:
 # - if the set is sufficient, or if other charachers may be needed in other use cases
 # - if all of these characters are necessary or if one or two coulld be dropped
@@ -787,8 +714,8 @@ end
 
 # convert AbstractTypes to concrete
 setdata!(ws::Worksheet, ref::CellRef, val::AbstractString) = setdata!(ws, ref, CellValue(ws, convert(String, val)))
-#setdata!(ws::Worksheet, ref::CellRef, val::Integer) = setdata!(ws, ref, convert(Int64, val))
-#setdata!(ws::Worksheet, ref::CellRef, val::Real) = setdata!(ws, ref, convert(Float64, val))
+setdata!(ws::Worksheet, ref::CellRef, val::Integer) = setdata!(ws, ref, convert(Int64, val))
+setdata!(ws::Worksheet, ref::CellRef, val::Real) = setdata!(ws, ref, convert(Float64, val))
 
 function setdata!(sheet::Worksheet, ref::CellRange, data::AbstractVector) # vector to row or column range
     rows = ref.start.row_number:ref.stop.row_number
@@ -956,13 +883,7 @@ function setdata!(ws::Worksheet, rng::ColumnRange, value)
 end
 function setdata!(ws::Worksheet, rng::NonContiguousRange, value)
     for r in rng.rng
-#        if r isa CellRef
-            setdata!(ws, r, value) # r may be a single Cell or a CellRange
-#        else
-#            for cell in r
-#                setdata!(ws, cell, value)
-#            end
-#        end
+        setdata!(ws, r, value) # r may be a single Cell or a CellRange
     end
 end
 setdata!(ws::Worksheet, ::Colon, ::Colon, v) = setdata!(ws::Worksheet, :, v)
@@ -999,7 +920,7 @@ setdata!(ws::Worksheet, rng::SheetCellRange, value) = do_sheet_names_match(ws, r
 setdata!(ws::Worksheet, rng::SheetColumnRange, value) = do_sheet_names_match(ws, rng) && setdata!(ws, rng.colrng, value)
 setdata!(ws::Worksheet, rng::SheetRowRange, value) = do_sheet_names_match(ws, rng) && setdata!(ws, rng.rowrng, value)
 setdata!(ws::Worksheet, row::Integer, col::Integer, data) = setdata!(ws, CellRef(row, col), data)
-setdata!(ws::Worksheet, ref::CellRef, value) = throw(XLSXError("Unsupported datatype $(typeof(value)) for writing data to Excel file. Supported data types are $(CellValueType) or $(CellValue)."))
+setdata!(ws::Worksheet, ref::CellRef, value) = throw(XLSXError("$value: Unsupported datatype $(typeof(value)) for writing data to Excel file. Supported data types are $(CellConcreteType) or $(CellValue)."))
 setdata!(ws::Worksheet, row::Integer, col::Integer, data::AbstractVector, dim::Integer) = setdata!(ws, CellRef(row, col), data, dim)
 function setdata!(ws::Worksheet, ref_str::AbstractString, value::AbstractVector, dim::Integer)
     if is_valid_cellrange(ref_str)
@@ -1433,13 +1354,6 @@ function insertsheet!(wb::Workbook, xdoc::XML.Node, new_cache::WorksheetCache, s
     push!(wb.sheets, ws)
 
     # update [Content_Types].xml (fix for issue #275)
-#    ctype_root = xmlroot(get_xlsxfile(wb), "[Content_Types].xml")[end]
-#    XML.tag(ctype_root) != "Types" && throw(XLSXError("Something wrong here!"))
-#    override_node = XML.Element("Override";
-#        PartName="/xl/worksheets/sheet" * string(sheetId) * ".xml",
-#        ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
-#    )
-#    push!(ctype_root, override_node)
     add_override!(get_xlsxfile(wb), "/xl/worksheets/sheet" * string(sheetId) * ".xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml")
 
     update_workbook_xml!(xf)

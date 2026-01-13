@@ -710,7 +710,8 @@ end
 
 # Read xml files in two passes
 # pass 1 - read all but worksheets and sharedStrings
-# pass 2 - only read worksheets and sharedStrings
+# pass 2 - only read sharedStrings (needed before worksheets)
+# pass 3 - only read worksheets
 function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
 
     (pass < 1 || pass > 3) && throw(XLSXError("Unknown pass to read files."))
@@ -727,7 +728,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
                 xf.files[file.name] = true # set file as read
             end
             if !isnothing(file.raw)
-#                if xf.is_writable
+                if xf.is_writable || pass==2
                     if occursin("xl/sharedStrings.xml", file.name)
                         if has_sst(wb)
                             sst_load!(wb)
@@ -741,7 +742,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
                         end
                     end
                 end
-#            end
+            end
             if !isnothing(file.bin)
                 xf.binary_data[file.name] = file.bin
             end
@@ -752,13 +753,13 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
         Threads.@spawn begin
             for file in files
                if pass==1 && !occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", file)
-                    readfile = process_file(zip_io, file) # Pass 1: process all files except sheets and sharedStrings
+                    readfile = process_file(zip_io, file) # Pass 1: process all files except worksheets and sharedStrings
                     put!(read_files, readfile)
                 elseif pass==2 && occursin(r"xl/sharedStrings\.xml", file)
-                    readfile = process_file(zip_io, file) # Pass 2: now process sheets and sharedStrings
+                    readfile = process_file(zip_io, file) # Pass 2: now process sharedStrings
                     put!(read_files, readfile)
                 elseif pass==3 && occursin(r"xl/worksheets/sheet\d+\.xml", file)
-                    readfile = process_file(zip_io, file) # Pass 2: now process sheets and sharedStrings
+                    readfile = process_file(zip_io, file) # Pass 2: now process worksheets
                     put!(read_files, readfile)
                 end
             end
