@@ -122,8 +122,10 @@ function generate_sst_xml_string(wb::Workbook)::String
     return String(take!(buff))
 end
 
+function add_node_formula!(io, ref::CellRef, ws::Worksheet)
+    return add_node_formula!(io, get_formula_from_cache(ws, ref))
+end
 add_node_formula!(io, f::CellFormula) = add_node_formula!(io, f.value)
-
 function add_node_formula!(io, f::Formula)
     write(io, "\n        <f")
     
@@ -446,7 +448,6 @@ function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String,Stri
         cell = getcell(r, c)
 
         if cell isa EmptyCell
-            println("write485 - skipping empty cell at ", string(cell.ref))
             continue
         end
 
@@ -466,8 +467,8 @@ function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String,Stri
 
         write(row_node, ">")
 
-        if !(cell.formula isa EmptyFormula) && isa(cell.formula, AbstractFormula)
-            add_node_formula!(row_node, cell.formula)
+        if cell.formula
+            add_node_formula!(row_node, cell.ref, ws)
         end
 
         if cell.datatype ∈ [CT_FLOAT, CT_DATETIME, CT_TIME]
@@ -487,8 +488,8 @@ function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String,Stri
     end
 
     write(row_node, pad2, "</row>\n")
-
-    return (row_nr, take!(row_node))
+    s=take!(row_node)
+    return (row_nr, s)
 end
 
 function abscell(c::CellRef)
@@ -702,13 +703,14 @@ function setdata!(ws::Worksheet, ref::CellRef, val::CellFormula)
     v = ""
     t = ""
     m = ""
-    cell = Cell(get_workbook(ws), ref, t, string(id(val.styleid)), v, m, val.value)
+    cell = Cell(get_workbook(ws), ref, t, string(id(val.styleid)), v, m, true)
+    add_formula_to_cache(ws, ref, val.value)
     setdata!(ws, cell)
 end
 function setdata!(ws::Worksheet, ref::CellRef, val::CellValue)
     t, v = xlsx_encode(ws, val.value)
     m = UInt64(0)
-    cell = Cell(ref, v, id(val.styleid), m, t, Formula())
+    cell = Cell(ref, v, id(val.styleid), m, t, false)
     setdata!(ws, cell)
 end
 
@@ -738,39 +740,6 @@ setdata!(ws::Worksheet, ref::CellRef, ::Nothing) = setdata!(ws, ref, CellValue(w
 setdata!(ws::Worksheet, row::Integer, col::Integer, val::CellValue) = setdata!(ws, CellRef(row, col), val)
 
 setdata!(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}, v) = setdata!(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))), v)
-
-# shift the relative cell references ina formula when shifting a ReferencedFormula
-function shift_excel_references(formula::String, offset::Tuple{Int32,Int32})
-    # Regex to match Excel-style cell references (e.g., A1, $A$1, A$1, $A1)
-    pattern = r"\$?[A-Z]{1,3}\$?[1-9][0-9]*"
-    row_shift, col_shift = offset
-
-    initial = [string(x.match) for x in eachmatch(pattern, formula)]
-    result = Vector{String}()
-
-    for ref in eachmatch(pattern, formula)
-        # Extract parts using regex
-        m = match(r"(\$?)([A-Z]{1,3})(\$?)([1-9][0-9]*)", ref.match)
-        col_abs, col_letters, row_abs, row_digits = m.captures
-
-        col_num = decode_column_number(col_letters)
-        row_num = parse(Int, row_digits)
-
-        # Apply shifts only if not absolute
-        new_col = col_abs == "\$" ? col_letters : encode_column_number(col_num + col_shift)
-        new_row = row_abs == "\$" ? row_digits : string(row_num + row_shift)
-
-        push!(result, col_abs * new_col * row_abs * new_row)
-    end
-
-    pairs = Dict(zip(initial, result))
-    if !isempty(pairs)
-        for (from, to) in pairs
-            formula = replace(formula, from => to)
-        end
-    end
-    return formula
-end
 
 function setdata!(ws::Worksheet, ref::CellRef, val::Union{AbstractFormula,CellConcreteType}) # use existing cell format if it exists
     c = getcell(ws, ref)
@@ -1123,6 +1092,8 @@ function renamesheet!(ws::Worksheet, name::AbstractString)
             break
         end
     end
+
+    update_formulas_renamed_sheet!(get_workbook(ws), ws.name, name)
 
     # updates the new name in the worksheet instance
     ws.name = name

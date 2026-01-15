@@ -23,7 +23,7 @@ const Workbook_elements = String[
 =#
     
 EmptyWorkbook() = Workbook(EmptyMSOfficePackage(), Vector{Worksheet}(), false,
-    Vector{Relationship}(), SharedStringTable(), Dict{Int,Bool}(), Dict{Int,Bool}(),
+    Vector{Relationship}(), Dict{SheetCellRef, AbstractFormula}(), SharedStringTable(), Dict{Int,Bool}(), Dict{Int,Bool}(),
     Dict{String,DefinedNameValueTypes}(), Dict{Tuple{Int,String},DefinedNameValueTypes}(), nothing)
 
 #=

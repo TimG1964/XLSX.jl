@@ -65,7 +65,7 @@ include("conditional-format-helpers.jl") # must load before conditional-formats.
 include("conditional-formats.jl")
 include("write.jl")
 include("fileArray.jl")
-#=
+
 PCT.@setup_workload begin
     # Putting some things in `@setup_workload` instead of `@compile_workload` can reduce the size of the
     # precompile file and potentially make loading faster.
@@ -89,5 +89,5 @@ PCT.@setup_workload begin
         writexlsx(t, f)
     end
 end
-=#
+
 end # module XLSX

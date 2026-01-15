@@ -1097,10 +1097,10 @@ end
 Read a transposed table from an Excel file, `source`, in which data are arranged in 
 rows rather than columns in a worksheet. For example:
 ```
-Category    "A", "B", "C", "D"
-variable 1  10,  20,  30,  40
-variable 2  15,  25,  35,  40
-variable 3  20,  30,  40,  50
+Category      "A", "B", "C", "D"
+"variable 1"  10,  20,  30,  40
+"variable 2"  15,  25,  35,  40
+"variable 3"  20,  30,  40,  50
 ```
 Returns data from a worksheet as a struct `XLSX.DataTable` which
 can be passed directly to any function that accepts `Tables.jl` data.

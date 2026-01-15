@@ -191,8 +191,8 @@ mutable struct Cell <: AbstractCell
     style::UInt32
     meta::UInt16
     datatype::CellValueType
-    formula::AbstractFormula
-    #fidx::UInt32
+#    formula::AbstractFormula
+    formula::Bool # has a formula in Workbook.formulas
 end
 
 struct EmptyCell <: AbstractCell
@@ -426,6 +426,7 @@ mutable struct Workbook
     sheets::Vector{Worksheet} # workbook -> sheets -> <sheet name="Sheet1" r:id="rId1" sheetId="1"/>. sheetId determines the index of the WorkSheet in this vector.
     date1904::Bool              # workbook -> workbookPr -> attribute date1904 = "1" or absent
     relationships::Vector{Relationship} # contains workbook level relationships
+    formulas::Dict{SheetCellRef, AbstractFormula} # eg SheetCellRef("mysheet!A1") => formula (not deduped)
     sst::SharedStringTable # shared string table
     buffer_styles_is_float::Dict{Int, Bool}      # cell style -> true if is float
     buffer_styles_is_datetime::Dict{Int, Bool}   # cell style -> true if is datetime

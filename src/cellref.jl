@@ -376,6 +376,13 @@ const RGX_SINGLE_ROW = r"^[1-9][0-9]*$"
     end
 end
 
+@inline function combine_sheet_range(s::Worksheet, rng::CellRange)
+    return string(s.name, "!", encode_column_number(rng.start.column_number), rng.start.row_number, ":", encode_column_number(rng.stop.column_number), rng.stop.row_number)
+end
+@inline function combine_sheet_ref(s::Worksheet, ref::CellRef)
+    return string(s.name, "!", encode_column_number(ref.column_number), ref.row_number)
+end
+
 function is_valid_column_range(r::AbstractString) :: Bool
     if occursin(RGX_SINGLE_COLUMN, r)
         return true
@@ -408,12 +415,20 @@ function is_valid_row_range(r::AbstractString) :: Bool
 end
 
 function RowRange(r::AbstractString)
+    if is_valid_cellrange(r)
+        cr=CellRange(r)
+        return RowRange(row_number(cr.start), row_number(cr.stop))
+    end
     !is_valid_row_range(r) && throw(XLSXError("Invalid row range: $r."))
     start_name, stop_name = split_sheet_range(r) 
     return RowRange(parse(Int, start_name), parse(Int, stop_name))
 end
 function ColumnRange(r::AbstractString)
-    !is_valid_column_range(r) && throw(XLSXError("Invalid column range: $r."))
+    if is_valid_cellrange(r)
+        cr=CellRange(r)
+        return ColumnRange(column_number(cr.start), column_number(cr.stop))
+    end
+        !is_valid_column_range(r) && throw(XLSXError("Invalid column range: $r."))
     start_name, stop_name = split_sheet_range(r)
     return ColumnRange(decode_column_number(start_name), decode_column_number(stop_name))
 end

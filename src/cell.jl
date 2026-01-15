@@ -82,7 +82,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
     style::UInt32 = isempty(s_str) ? UInt32(0) : parse(UInt32, s_str)
     value::UInt64 = UInt64(0)
     meta::UInt32 = isempty(m_str) ? UInt32(0) : parse(UInt32, m_str) + UInt32(1)
-    f::AbstractFormula = Formula()
+    formula::Bool = false
 
     if t == "inlineStr"
         # Handle inlineStr case - find "is" element
@@ -125,12 +125,15 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
                 v = XML.unescape(XML.value(ch[1]))
                 datatype, value = process_tv(wb, t, v, num_style; mylock)
             elseif tag == "f"
-                f = parse_formula_from_element(child)
+                if get_xlsxfile(wb).is_writable # only store formulas when XLSXFile is writable
+                    f = parse_formula_from_element(child)
+                    wb.formulas[SheetCellRef(combine_sheet_ref(ws, ref))] = f
+                end
+                formula = true
             end
         end
     end
-    
-    return Cell(ref, value, style, meta, datatype, f)
+    return Cell(ref, value, style, meta, datatype, formula)
 end
 
 function parse_formula_from_element(c_child_element)::AbstractFormula
@@ -275,12 +278,13 @@ function process_tv(wb::Workbook, t::String, v::String, num_style::Int; mylock::
 end
 
 # Constructor with simple formula string for backward compatibility & tests
-function Cell(wb::Workbook, ref::CellRef, t::String, s::String, v::String, m::String, f::AbstractFormula)
+function Cell(wb::Workbook, ref::CellRef, t::String, s::String, v::String, m::String, f::Bool)
     style::UInt32 = isempty(s) ? UInt32(0) : parse(UInt32, s)
     meta::UInt32 = isempty(m) ? UInt32(0) : parse(UInt32, m) + UInt32(1)
 
     num_style = isempty(s) ? 0 : parse(Int, s)
     datatype, value = process_tv(wb, t, v, num_style)
+
     return Cell(ref, value, style, meta, datatype, f)
 end
 #function Cell(ref::CellRef, datatype::String, style::String, value::String, meta::String, formula::String)
