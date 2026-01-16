@@ -36,12 +36,7 @@ export
     setConditionalFormat,
     setColumnWidth, setRowHeight,
     getMergedCells, isMergedCell, getMergedBaseCell, mergeCells
-
-#public
-#    CellRange, Cell, getcell, getcellrange,    
-#    getFormat, getFont, getBorder, getFill, getAlignment,
-#    getFormula
-    
+  
 const SPREADSHEET_NAMESPACE_XPATH_ARG = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 const EXCEL_MAX_COLS = 16_384     # total columns supported by Excel per sheet
 const EXCEL_MAX_ROWS = 1_048_576  # total rows supported by Excel per sheet (including headers)
