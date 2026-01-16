@@ -145,7 +145,7 @@ function parse_formula_from_element(c_child_element)::AbstractFormula
     if XML.is_simple(c_child_element)
         formula_string = XML.unescape(XML.simple_value(c_child_element))
     else
-        fs = [x for x in XML.eachchild(c_child_element) if XML.nodetype(x) == XML.Text]
+        fs = [x for x in XML.children(c_child_element) if XML.nodetype(x) == XML.Text]
         if length(fs) == 0
             formula_string = ""
         else

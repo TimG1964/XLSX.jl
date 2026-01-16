@@ -88,7 +88,7 @@ You can also use `XLSX.openxlsx` to read file contents as needed (see [Reading L
 This package uses the following concrete types when handling XLSX files.
 
 ```@docs
-XLSX.CellValueType
+XLSX.CellConcreteType
 ```
 
 - Abstract types of these concrete types are converted to the appropriate concrete type when writing.
