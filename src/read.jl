@@ -691,7 +691,7 @@ function skipNode(r::XML.Raw, skipnode::String) # separate rows or ssts to speed
     return take!(new), take!(skipped)
 end
 
-function stream_files(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int, channel_size::Int=1 << 10)
+function stream_files(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int, channel_size::Int=1 << 8)
     Channel{String}(channel_size) do out
         for f in ZipArchives.zip_names(zip_io)
 
@@ -717,7 +717,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
     (pass < 1 || pass > 3) && throw(XLSXError("Unknown pass to read files."))
     wb=get_workbook(xf)
 
-    read_files = Channel{ReadFile}(1 << 10)
+    read_files = Channel{ReadFile}(1 << 8)
     files = stream_files(xf, zip_io; pass)
 
     consumer = @async begin

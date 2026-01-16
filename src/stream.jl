@@ -306,7 +306,7 @@ end
 Base.length(r::WorksheetCache)=length(r.cells)
 
 #--------------------------------------------------------------------- Fill cache on first read (multi-threaded)
-function stream_rows(n::XML.LazyNode, chunksize::Int; channel_size::Int=1 << 10)
+function stream_rows(n::XML.LazyNode, chunksize::Int; channel_size::Int=1 << 8)
 
     rows = Vector{XML.LazyNode}(undef, chunksize)
     pos=0
@@ -370,7 +370,7 @@ function first_cache_fill!(ws::Worksheet, lznode::XML.LazyNode, nthreads::Int)
         throw(XLSXError("Expecting empty cache but cache not empty!"))
     end
 
-    sheet_rows = Channel{Vector{Tuple{Int, SheetRow, Dict{String,String}}}}(1 << 10)
+    sheet_rows = Channel{Vector{Tuple{Int, SheetRow, Dict{String,String}}}}(1 << 8)
 
     consumer = @async begin
         sst_total=0

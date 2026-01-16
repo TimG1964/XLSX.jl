@@ -456,8 +456,8 @@ function get_rowcells!(rowcells::Dict{Int,Cell}, row::XML.LazyNode, ws::Workshee
         sst_count=0
         d=row.depth
 
-        row_cellnodes = Channel{Vector{XML.LazyNode}}(1 << 10)
-        row_cells = Channel{Vector{XLSX.Cell}}(1 << 10)
+        row_cellnodes = Channel{Vector{XML.LazyNode}}(1 << 8)
+        row_cells = Channel{Vector{XLSX.Cell}}(1 << 8)
 
         # consumer task
         consumer = @async begin
