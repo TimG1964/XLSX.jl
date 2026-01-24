@@ -199,7 +199,8 @@ end
 # Note that a block of referencedFormulas can have a separate referencedFormula block set within it! 
 # 
 function rereference_formulae(ws::Worksheet, cell::Cell)
-    old_range = CellRange(cell.formula.ref)
+    wb = get_workbook(ws)
+    old_range = CellRange(get_formula_from_cache(ws, cell.ref).ref)
     ranges = CellRange[]
     if old_range.stop.column_number > old_range.start.column_number
         push!(ranges, CellRange(CellRef(old_range.start.row_number, old_range.start.column_number + 1), CellRef(old_range.start.row_number, old_range.stop.column_number)))
@@ -210,19 +211,23 @@ function rereference_formulae(ws::Worksheet, cell::Cell)
 
     for newrng in ranges
         if size(newrng) == (1, 1)
-            add_formula_to_cache(ws, newrng.stop, get_formula_from_cache(ws, cell.ref))
-            #            getcell(ws, newrng.stop).formula = Formula(cell.formula.formula)
-        else
+            f=get_formula_from_cache(ws, cell.ref)
+            f.ref=string(newrng)
+            add_formula_to_cache(ws, newrng.stop, f)
+         else
+            f = get_formula_from_cache(ws, cell.ref)
+            delete!(wb.formulas, SheetCellRef(ws.name, cell.ref))
+            cell.formula=false
             newid = new_ReferencedFormula_Id(ws)
-            rereference_formulae(ws, cell, newrng, newid)
+            rereference_formulae(ws, cell, f, newrng, newid)
         end
     end
 end
 
-function rereference_formulae(ws::Worksheet, oldcell::Cell, newrng::CellRange, newid::Int64)
+function rereference_formulae(ws::Worksheet, oldcell::Cell, f::AbstractFormula, newrng::CellRange, newid::Int64)
     wb = get_workbook(ws)
-    oldform = oldcell.formula.formula
-    oldunhandled = oldcell.formula.unhandled
+    oldform = f.formula
+    oldunhandled = f.unhandled
     offset = cell_offset(oldcell.ref, newrng.start)
     newform = ReferencedFormula(shift_excel_references(oldform, offset), newid, string(newrng), oldunhandled)
     for fr in newrng
@@ -230,16 +235,16 @@ function rereference_formulae(ws::Worksheet, oldcell::Cell, newrng::CellRange, n
         if fr != newrng.start
             if newfr.formula
                 formula = get_formula_from_cache(ws, fr)
-                if formula isa FormulaReference && newfr.formula.id == oldcell.formula.id
+                if formula isa FormulaReference && formula.id == f.id
                     t = encode(newfr.datatype)
                     add_formula_to_cache(ws, fr, FormulaReference(newid, oldunhandled))
-                    setdata!(ws, Cell(wb, fr, t, string(newfr.style), "", "", true))
+                    setdata!(ws, Cell(wb, fr, t, string(newfr.style), string(newfr.value), string(newfr.meta), true))
                 end
             end
         else
             t = encode(oldcell.datatype)
             add_formula_to_cache(ws, fr, newform)
-            setdata!(ws, Cell(wb, fr, t, string(newfr.style), "", "", true))
+            setdata!(ws, Cell(wb, fr, t, string(newfr.style), string(newfr.value), string(newfr.meta), true))
         end
     end
     return nothing
@@ -362,13 +367,13 @@ function update_formulas_renamed_sheet!(wb::Workbook, old_name::String, new_name
         # Calculate new reference if key needs updating
         new_ref = if needs_key_update
             new_ref_str = replace(ref_str, old_quoted => new_quoted)
-            SheetCellRef(new_ref_str)  # Adjust constructor as needed
+            SheetCellRef(new_ref_str)  
         else
             nothing
         end
         
         # Update formula values for non-FormulaReference types
-        if !(f isa FormulaReference)
+        if f isa ExplicitFormula
             needs_value_update = occursin(old_prefix, f.formula)
             
             if needs_value_update
@@ -912,7 +917,7 @@ function setFormula(ws::Worksheet, cellref::CellRef; val::AbstractString, raw::B
         setdata!(ws, cellref, CellFormula(Formula(f, t == "" ? nothing : t, ref == "" ? nothing : ref, nothing), CellDataFormat(c.style)))
     end
     c = getcell(ws, cellref)
-    c.meta = cm == "" ? UInt16(0) : parse(UInt16, cm) + 1
+    c.meta = cm == "" ? UInt16(0) : parse(UInt16, cm)
     return f
 end
 

@@ -41,21 +41,21 @@ function get_error_type(v::AbstractString)::UInt64
     end
 end
 function get_error_string(e::UInt64)::String
-    if e == UInt64(CellErrorType.XL_NULL)
+    if e == UInt64(XL_NULL)
         return "#NULL!"
-    elseif e == UInt64(CellErrorType.XL_DIV0)
+    elseif e == UInt64(XL_DIV0)
         return "#DIV/0!"
-    elseif e == UInt64(CellErrorType.XL_VALUE)
+    elseif e == UInt64(XL_VALUE)
         return "#VALUE!"
-    elseif e == UInt64(CellErrorType.XL_REF)
+    elseif e == UInt64(XL_REF)
         return "#REF!"
-    elseif e == UInt64(CellErrorType.XL_NAME)
+    elseif e == UInt64(XL_NAME)
         return "#NAME?"
-    elseif e == UInt64(CellErrorType.XL_NUM)
+    elseif e == UInt64(XL_NUM)
         return "#NUM!"
-    elseif e == UInt64(CellErrorType.XL_NA)
+    elseif e == UInt64(XL_NA)
         return "#N/A"
-    elseif e == UInt64(CellErrorType.XL_SPILL)
+    elseif e == UInt64(XL_SPILL) # Won't happen - #SPILL isn't an actual error. Returns #VALUE! instead.
         return "#SPILL!"
      else
         throw(XLSXError("Unknown error code: $e"))
@@ -81,7 +81,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
     datatype::CellValueType = CT_EMPTY
     style::UInt32 = isempty(s_str) ? UInt32(0) : parse(UInt32, s_str)
     value::UInt64 = UInt64(0)
-    meta::UInt32 = isempty(m_str) ? UInt32(0) : parse(UInt32, m_str) + UInt32(1)
+    meta::UInt32 = isempty(m_str) ? UInt32(0) : parse(UInt32, m_str)
     formula::Bool = false
 
     if t == "inlineStr"
@@ -280,21 +280,12 @@ end
 # Constructor with simple formula string for backward compatibility & tests
 function Cell(wb::Workbook, ref::CellRef, t::String, s::String, v::String, m::String, f::Bool)
     style::UInt32 = isempty(s) ? UInt32(0) : parse(UInt32, s)
-    meta::UInt32 = isempty(m) ? UInt32(0) : parse(UInt32, m) + UInt32(1)
-
+    meta::UInt32 = isempty(m) ? UInt32(0) : parse(UInt32, m)
     num_style = isempty(s) ? 0 : parse(Int, s)
     datatype, value = process_tv(wb, t, v, num_style)
 
     return Cell(ref, value, style, meta, datatype, f)
 end
-#function Cell(ref::CellRef, datatype::String, style::String, value::String, meta::String, formula::String)
-#    println("What am I doing here?")
-#    if formula == ""
-#        return Cell(ref, datatype, style, value, meta, Formula())
-#    else
-#        return Cell(ref, datatype, style, value, meta, Formula(formula))
-#    end
-#end
 
 @inline getdata(ws::Worksheet, empty::EmptyCell) = missing
 

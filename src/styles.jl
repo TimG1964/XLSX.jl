@@ -162,11 +162,11 @@ function styles_numFmt_formatCode(wb::Workbook, numFmtId::AbstractString)::Strin
     return XML.attributes(elements_found[1])["formatCode"]
 end
 
-styles_numFmt_formatCode(wb::Workbook, numFmtId::Int) = styles_numFmt_formatCode(wb, string(numFmtId))
+styles_numFmt_formatCode(wb::Workbook, numFmtId::Int)::String = styles_numFmt_formatCode(wb, string(numFmtId))
 
 const DATETIME_CODES = ["d", "m", "yy", "h", "s", "a/p", "am/pm"]
 
-function remove_formatting(code::AbstractString)
+function remove_formatting(code)
     # this regex should cover all the formatting cases found here(colors/conditionals/quotes/spacing):
     # https://support.office.com/en-us/article/create-or-delete-a-custom-number-format-78f2a361-936b-4c03-8772-09fab54be7f4
     ignoredformatting = r"""\[.{2,}?\]|&quot;.+?&quot;|_.|\\.|\*."""x # Had to add ? to "&quot;.+&quot;" to make it work. Don't understand what made this necessary!

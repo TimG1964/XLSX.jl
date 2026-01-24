@@ -306,25 +306,28 @@ end
 Base.length(r::WorksheetCache)=length(r.cells)
 
 #--------------------------------------------------------------------- Fill cache on first read (multi-threaded)
-function stream_rows(n::XML.LazyNode, chunksize::Int; channel_size::Int=1 << 8)
-
-    rows = Vector{XML.LazyNode}(undef, chunksize)
+function produce_rowchunks!(out, n, rows, chunksize)
     pos=0
+    while !isnothing(n)
+        if _is_tag(n.tag, "row")
+            pos += 1
+            rows[pos] = n
+        end
+        if pos >= chunksize
+            put!(out, copy(rows))
+            pos=0
+        end
+        n = XML.next(n)
+    end
+    if pos>0 # handle last incomplete chunk
+        put!(out, copy(@view rows[1:pos]))
+    end
+end
+
+function stream_rows(n::XML.LazyNode, chunksize::Int; channel_size::Int=1 << 8)
+    rows = Vector{XML.LazyNode}(undef, chunksize)
     Channel{Vector{XML.LazyNode}}(channel_size) do out
-        while !isnothing(n)
-            if n.tag == "row"
-                pos += 1
-                rows[pos] = n
-            end
-            if pos >= chunksize
-                put!(out, copy(rows))
-                pos=0
-            end
-            n = XML.next(n)
-        end
-        if pos>0 # handle last incomplete chunk
-            put!(out, copy(rows[1:pos]))
-        end
+        produce_rowchunks!(out, n, rows, chunksize)
     end
 end
 

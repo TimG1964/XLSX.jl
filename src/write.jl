@@ -462,7 +462,7 @@ function process_cache_row(cacherow::Tuple{CellRange, SheetRow, Dict{String,Stri
         end
 
         if cell.meta != UInt64(0)
-            write(row_node, " cm=\"", string(cell.meta-1), "\"")
+            write(row_node, " cm=\"", string(cell.meta), "\"")
         end
 
         write(row_node, ">")
@@ -670,7 +670,6 @@ xlsx_encode(::Worksheet, val::Int) = (CT_INT, reinterpret(UInt64, Int64(val)))
 xlsx_encode(ws::Worksheet, val::Dates.Date) = (CT_DATE, reinterpret(UInt64, date_to_excel_value(val, isdate1904(get_xlsxfile(ws)))))
 xlsx_encode(ws::Worksheet, val::Dates.DateTime) = (CT_DATETIME, reinterpret(UInt64, datetime_to_excel_value(val, isdate1904(get_xlsxfile(ws)))))
 xlsx_encode(::Worksheet, val::Dates.Time) = (CT_TIME, reinterpret(UInt64, time_to_excel_value(val)))
-xlsx_encode(::Worksheet, val::Dates.Period) = (CT_FLOAT, reinterpret(UInt64, float(val)))
 Base.setindex!(ws::Worksheet, v, row::Integer, col::Integer) = setdata!(ws, CellRef(row,col), v)
 Base.setindex!(ws::Worksheet, v, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}) = setdata!(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))), v)
 Base.setindex!(ws::Worksheet, v::AbstractVector, r::Union{Integer,UnitRange{<:Integer}}, c::UnitRange{T}) where {T<:Integer} = setdata!(ws, r, c, v)
@@ -697,7 +696,7 @@ end
 
 function setdata!(ws::Worksheet, ref::CellRef, val::CellFormula)
     c = getcell(ws, ref)
-    if !(c isa EmptyCell) && c.formula isa ReferencedFormula
+    if !(c isa EmptyCell) && c.formula && get_formula_from_cache(ws, ref) isa ReferencedFormula
         rereference_formulae(ws, c)
     end
     v = ""
@@ -743,7 +742,7 @@ setdata!(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Int
 
 function setdata!(ws::Worksheet, ref::CellRef, val::Union{AbstractFormula,CellConcreteType}) # use existing cell format if it exists
     c = getcell(ws, ref)
-    if !(c isa EmptyCell) && c.formula isa ReferencedFormula
+    if !(c isa EmptyCell) && c.formula && get_formula_from_cache(ws, ref) isa ReferencedFormula
         rereference_formulae(ws, c)
     end
     if c isa EmptyCell || c.style == ""

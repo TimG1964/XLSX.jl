@@ -54,13 +54,14 @@ struct CellDataFormat <: AbstractCellDataFormat
 end
 
 abstract type AbstractFormula end
+abstract type ExplicitFormula <: AbstractFormula end
 
 struct EmptyFormula <: AbstractFormula end
 
 """
 A default formula simply storing the formula string.
 """
-mutable struct Formula <: AbstractFormula
+mutable struct Formula <: ExplicitFormula
     formula::String
     type::Union{String,Nothing} # usually nothing but has value "array" for dynamic array functions.
     ref::Union{String,Nothing} # usually nothing but refers to the "spill" range for dynamic array functions.
@@ -85,7 +86,7 @@ end
 """
 Formula that is defined once and referenced in all cells given by the cell range given in `ref` and using the same `id`.
 """
-mutable struct ReferencedFormula <: AbstractFormula
+mutable struct ReferencedFormula <: ExplicitFormula
     formula::String
     id::Int
     ref::String # actually a CellRange, but defined later --> change if at some point we want to actively change formulae
@@ -183,7 +184,7 @@ end
     XL_NAME = 5
     XL_NUM = 6 
     XL_NA = 7
-    XL_SPILL = 8
+    XL_SPILL = 8 # Turns out #SPILL is not an official error. These will return #VALUE errors
 end
 mutable struct Cell <: AbstractCell
     ref::CellRef
@@ -191,7 +192,6 @@ mutable struct Cell <: AbstractCell
     style::UInt32
     meta::UInt16
     datatype::CellValueType
-#    formula::AbstractFormula
     formula::Bool # has a formula in Workbook.formulas
 end
 

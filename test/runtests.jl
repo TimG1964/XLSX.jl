@@ -694,8 +694,9 @@ end
         s["A2"] = 3
         @test XLSX.getcell(s, "A2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false)
         @test XLSX.getcell(s, "A3") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A3"), "", "", "25", "", true)
-        @test XLSX.get_formula_from_cache(s, XLSX.CellRef("A3")) == XLSX.FormulaReference(0, nothing)
-
+        @test XLSX.get_formula_from_cache(s, XLSX.CellRef("A3")) == XLSX.ReferencedFormula("SUM(O3:S3)", 0, "A3:A10", nothing)
+        @test XLSX.get_formula_from_cache(s, XLSX.CellRef("A4")) == XLSX.FormulaReference(0, nothing)
+        
         s2 = f[2]
         @test XLSX.getcell(s2, "A1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A1"), "", "", "54", "", true)
         @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A1")) == XLSX.Formula("SECOND(NOW())", nothing, nothing, Dict("ca" => "1"))
@@ -707,15 +708,15 @@ end
         @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3")).unhandled == Dict("ca" => "1")
         @test XLSX.getcell(s2, "A3").formula == true
         @test XLSX.getcell(s2, "A3") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A3"), "", "", "54", "", true)
-        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3")) == XLSX.FormulaReference(1, Dict("ca" => "1"))
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3")) == XLSX.ReferencedFormula("SECOND(NOW())", 1, "A3:A5", Dict("ca" => "1"))
         @test XLSX.getcell(s2, "B1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "54", "", true)
         @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B1")) == XLSX.ReferencedFormula("SECOND(NOW())", 0, "B1:C5", Dict("ca" => "1"))
         s2["B1"] = 3
         @test XLSX.getcell(s2, "B1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false)
         @test XLSX.getcell(s2, "B2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "54", "", true)
-        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B2")) == XLSX.FormulaReference(0, Dict("ca" => "1"))
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B2")) == XLSX.ReferencedFormula("SECOND(NOW())", 2, "B2:C5", Dict("ca" => "1"))
         @test XLSX.getcell(s2, "C1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C1"), "", "", "54", "", true)
-        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("C1")) == XLSX.FormulaReference(0, Dict("ca" => "1"))
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("C1")) == XLSX.ReferencedFormula("SECOND(NOW())", 0, "C1:C1", Dict("ca" => "1"))
 
         XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
         f2 = XLSX.openxlsx("mytest.xlsx", mode="rw")
@@ -723,19 +724,19 @@ end
         s = f2[1]
         @test XLSX.getcell(s, "A2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false)
         @test XLSX.getcell(s, "A3") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A3"), "", "", "25", "", true)
-        @test XLSX.get_formula_from_cache(s, XLSX.CellRef("A3")) == XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(s, XLSX.CellRef("A3")) == XLSX.ReferencedFormula("SUM(O3:S3)", 0, "A3:A10", nothing)
 
         s2 = f[2]
         @test XLSX.getcell(s2, "A2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false)
         @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3")).id == 1
         @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3")).unhandled == Dict("ca" => "1")
         @test XLSX.getcell(s2, "A3") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A3"), "", "", "54", "", true)
-        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3")) == XLSX.FormulaReference(1, Dict("ca" => "1"))
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3")) == XLSX.ReferencedFormula("SECOND(NOW())", 1, "A3:A5", Dict("ca" => "1"))
         @test XLSX.getcell(s2, "B1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false)
         @test XLSX.getcell(s2, "B2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "54", "", true)
-        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B2")) == XLSX.FormulaReference(0, Dict("ca" => "1"))
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B2")) == XLSX.ReferencedFormula("SECOND(NOW())", 2, "B2:C5", Dict("ca" => "1"))
         @test XLSX.getcell(s2, "C1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C1"), "", "", "54", "", true)
-        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("C1")) == XLSX.FormulaReference(0, Dict("ca" => "1"))
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("C1")) == XLSX.ReferencedFormula("SECOND(NOW())", 0, "C1:C1", Dict("ca" => "1"))
 
     end
 end
@@ -1026,6 +1027,20 @@ end
     @test ismissing(XLSX.getdata(error_sheet, emptycell))
     @test XLSX.row_number(emptycell) == 1
     @test XLSX.column_number(emptycell) == 2
+end
+
+@testset "Error Values" begin
+    f = XLSX.openxlsx(joinpath(data_directory, "Errors.xlsx"), mode="r")
+    s=f[1]
+    @test Int64(XLSX.getcell(s, "A1").value) == 1
+    @test Int64(XLSX.getcell(s, "B1").value) == 2
+    @test Int64(XLSX.getcell(s, "C1").value) == 3
+    @test Int64(XLSX.getcell(s, "D1").value) == 4
+    @test Int64(XLSX.getcell(s, "E1").value) == 5
+    @test Int64(XLSX.getcell(s, "F1").value) == 6
+    @test Int64(XLSX.getcell(s, "G1").value) == 7
+    @test Int64(XLSX.getcell(s, "H1").value) == 3
+
 end
 
 @testset "No Dimension" begin

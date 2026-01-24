@@ -128,27 +128,31 @@ function sst_load!(workbook::Workbook)
         throw(XLSXError("Shared Strings Table not found for this workbook."))
     end
 end
+@inline _is_tag(n::String, tag::String) = n == tag
+@inline _is_tag(n::Nothing, tag::String) = false
+function produce_sstchunks(out, n, ssts, chunksize)
+    i=0
+    while !isnothing(n)
+        if _is_tag(n.tag, "si")
+            i += 1
+            ssts[i] = SstToken(n, i)
+        end
+        if i >= chunksize
+            put!(out, copy(ssts))
+            i=0
+        end
+        n = XML.next(n)
+    end
+    if i>0 # handle last incomplete chunk
+        put!(out, copy(ssts[1:i]))
+    end
+    return out
+end
 function stream_ssts(n::XML.LazyNode, chunksize::Int; channel_size::Int=1 << 8)
     n = XML.next(n)
     ssts = Vector{SstToken}(undef, chunksize)
-    i=0
-    idx=0
     Channel{Vector{SstToken}}(channel_size) do out
-        while !isnothing(n)
-            if n.tag == "si"
-                i += 1
-                idx += 1
-                ssts[i] = SstToken(n, idx)
-            end
-            if i >= chunksize
-                put!(out, copy(ssts))
-                i=0
-            end
-            n = XML.next(n)
-        end
-        if i>0 # handle last incomplete chunk
-            put!(out, copy(ssts[1:i]))
-        end
+        produce_sstchunks(out, n, ssts, chunksize)
     end
 end
 
