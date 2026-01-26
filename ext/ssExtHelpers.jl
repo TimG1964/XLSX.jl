@@ -150,3 +150,13 @@ function resolve_color(c)
         return nothing
     end
 end
+
+function safe_prev(str, i)
+    i < firstindex(str) && return firstindex(str)
+    return isvalid(str, i) ? i : prevind(str, i)
+end
+
+function safe_next(str, i)
+    i > lastindex(str) && return lastindex(str)
+    return isvalid(str, i) ? i : nextind(str, i)
+end
