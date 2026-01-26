@@ -231,11 +231,15 @@ function face_to_excel_atts(face)
     # foreground → Excel color
     if face.foreground !== nothing
         c= ss_unwrap(face.foreground)
-         fg=resolve_color(c)
+        fg=resolve_color(c)
+        println(fg)
         if fg isa RGB
             # c is an actual RGB(r,g,b) object
             d[:color] = rgb_to_argb(fg)
-        elseif fg isa Symbol
+        elseif fg isa Symbol || fg isa String
+            #treat as a color from Colors.jl
+            d[:color] = XLSX.get_color(fg)
+        else
             println("unreachable reached")
             error()
 

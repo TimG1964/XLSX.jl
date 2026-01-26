@@ -1069,6 +1069,7 @@ function process_uniform_vecint(f::Function, ws::Worksheet, row, col; kw...)
 end
 
 # Check if a string is a valid named color in Colors.jl and convert to "FFRRGGBB" if it is.
+get_colorant(color_symb::Symbol) = get_colorant(String(color_symb))
 function get_colorant(color_string::String)
     try
         c = Colors.parse(Colors.Colorant, color_string)
@@ -1078,10 +1079,12 @@ function get_colorant(color_string::String)
         return nothing
     end
 end
-function get_color(s::String)::String
-    if occursin(r"^[0-9A-F]{8}$", s) # is a valid 8 digit hexadecimal color
-        return s
+get_color(s::Symbol)::String = get_color(String(s))
+function get_color(str::String)::String
+    if occursin(r"^[0-9A-F]{8}$", str) # is a valid 8 digit hexadecimal color
+        return str
     end
+    s = replace(lowercase(str), "grey" => "gray")
     c = get_colorant(s)
     if isnothing(c)
         throw(XLSXError("Invalid color specified: $s. Either give a valid color name (from Colors.jl) or an 8-digit rgb color in the form FFRRGGBB"))

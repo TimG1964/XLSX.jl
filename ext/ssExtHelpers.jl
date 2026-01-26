@@ -100,16 +100,20 @@ function ssUnderlineToRtf(spec::ssUnderlineSpec)
 end
 
 function resolve_color(c)
- 
+
     # 1. Already an RGB color
     if c isa RGB
         return c
 
-    # 2. unwrap SimpleColor
+    # 2. NamedTuple(r, g, b)
+    elseif c isa NamedTuple
+        return RGB(c.r/255, c.g/255, c.b/255)
+
+    # 3. unwrap SimpleColor
     elseif c isa SimpleColor
         return resolve_color(c.value)
 
-    # 3. Create RGB from a string (is this possible?)
+    # 4. Create RGB from a string (is this possible?)
     elseif c isa String
         println(c)
         hex = replace(c, "#" => "")
@@ -119,12 +123,16 @@ function resolve_color(c)
         return RGB(r, g, b)
 
     elseif c isa Symbol
-        # 4. ANSI / bright color mapping
+        # 5. ANSI / bright color mapping
         if haskey(ANSI_RGB, c)
             return ANSI_RGB[c]
         end
 
-         # 5. If it's a semantic face, unwrap once
+        # 6. Look for a color from Colors.jl
+        rgb = XLSX.get_colorant(c)
+        isnothing(rgb) || return rgb
+
+         # 7. If it's a semantic face, unwrap once
        if haskey(FACE_TABLE, c)
             fg = FACE_TABLE[c].foreground
             # If the face points to itself, stop
@@ -134,8 +142,9 @@ function resolve_color(c)
             return resolve_color(fg)
         end
 
-        # 6. fallback: treat as named color
-        return c
+        # 8. uh-oh!
+        println("Unreachable reached!")
+        error()
 
     else
         return nothing
