@@ -409,6 +409,37 @@ struct Sst
     formatted::String
     idx::Int
 end
+
+const ValidRichTextAttributes = [:bold, :italic, :under, :strike, :vertAlign, :color, :size, :name]
+ # Rich text formatting in sharedStrings
+struct RichTextRun
+    text::String
+    atts::Union{Nothing, Dict{Symbol,Any}}
+    
+    function RichTextRun(text::String, pairs=nothing)
+        isempty(text) && throw(XLSXError("Cannot create a RichTextRun with no text."))
+        if isnothing(pairs)
+            new(text, nothing)
+        else
+            atts=Dict(pairs)
+            for x in keys(atts)
+                in(x, ValidRichTextAttributes) || throw(XLSXError("Unknown Rich Text Attribute: ':$x'. Valid attributes are :bold, :italic, :under, :strike, :vertAlign, :color, :size, :name."))
+            end
+            new(text, atts)
+        end
+    end
+
+end
+struct RichTextString
+    text::String
+    runs::Vector{RichTextRun}
+
+    function RichTextString(text::String, runs::Vector{RichTextRun })
+        (isempty(text) || isempty(runs)) && throw(XLSXError("Cannot create an empty RichTextString"))
+        new(text, runs)
+    end
+end
+
 const DefinedNameValueTypes = Union{SheetCellRef, SheetCellRange, NonContiguousRange, CellConcreteType}#Int, Float64, String, Missing}
 const DefinedNameRangeTypes = Union{SheetCellRef, SheetCellRange, NonContiguousRange}
 

@@ -166,6 +166,8 @@ function build_reference_index(ws::Worksheet)
     return refs
 end
 
+formula(f::ReferencedFormula)::Formula = Formula(f.formula, nothing, f.ref, f.unhandled) 
+
 function get_referenced_formula(ws::Worksheet, cellref::CellRef; refs::Union{Nothing,Dict{Int,ReferencedFormula}}=nothing)
     # find the actual formula a cell's FormulaReference refers to
     if isnothing(refs)
@@ -186,11 +188,11 @@ function get_referenced_formula(ws::Worksheet, cellref::CellRef; refs::Union{Not
     end
 end
 
-# If overwriting a cell containing a referencedFormula, need to re-reference all referring cells.
-# The referencedFormula will be in the top left cell of the referenced block. Need to rereference 
+# If overwriting a cell containing a ReferencedFormula, need to re-reference all referring cells.
+# The ReferencedFormula will be in the top left cell of the referenced block. Need to re-reference 
 # the rest of the block on this top row (without the first, overwritten cell) and then the rest of 
 # the block without this top row. Need to do this as two new, separate rectangular blocks with the 
-# referencedFormula in the first cell of each and the other cells set to formulaReferences.
+# ReferencedFormula in the first cell of each and the other cells set to FormulaReferences.
 # 
 # overwritten newRF1    FR1       FR1       FR1
 # newRF2      FR2       FR2       FR2       FR2
@@ -210,11 +212,11 @@ function rereference_formulae(ws::Worksheet, cell::Cell)
     end
 
     for newrng in ranges
-        if size(newrng) == (1, 1)
+        if size(newrng) == (1, 1) # replace with simple formula for single cell
             f=get_formula_from_cache(ws, cell.ref)
-            f.ref=string(newrng)
-            add_formula_to_cache(ws, newrng.stop, f)
-         else
+            f.ref=string(newrng.stop)
+            add_formula_to_cache(ws, newrng.stop, formula(f)) 
+         else # update reference and re-index all referring formulas
             f = get_formula_from_cache(ws, cell.ref)
             delete!(wb.formulas, SheetCellRef(ws.name, cell.ref))
             cell.formula=false

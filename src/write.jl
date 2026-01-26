@@ -953,6 +953,24 @@ function setdata!(sheet::Worksheet, rng::CellRange, matrix::Array{T,2}) where {T
     setdata!(sheet, rng.start, matrix)
 end
 
+function setdata!(sheet::Worksheet, ref::CellRef, rts::RichTextString)
+    isempty(rts.text) && throw(XLSXError("Cannot set a cell value to an empty RichTextString."))
+    c=getcell(sheet, ref)
+    if c isa EmptyCell
+        sheet[ref]=""
+        c=getcell(sheet, ref)
+    end
+    if length(rts.runs) > 1 # add RichTextString as a rich sharedString
+        c.value = add_formatted_string!(get_workbook(sheet), richTextStringtoXML(rts))
+        c.datatype = CT_STRING
+        return sheet[ref]
+    else # add single run as a normal cell value with a cell level font style
+        sheet[ref] = rts.text
+        setFont(sheet, ref; pairs(rts.runs[1].atts)...)
+    end     
+#    println(c)
+end
+
 # Given an anchor cell at (anchor_row, anchor_col).
 # Returns a CellRef at:
 # - (anchor_row + offset, anchol_col) if dim = 1 (operates on rows)

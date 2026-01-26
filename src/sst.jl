@@ -103,7 +103,7 @@ end
 
 # allow to write cells containing only whitespace characters or with leading or trailing whitespace.
 function add_shared_string!(wb::Workbook, str_unformatted::AbstractString; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int
-    if startswith(str_unformatted, ' ') || endswith(str_unformatted, ' ') || contains(str_unformatted, '\n')
+    if startswith(str_unformatted, ' ') || endswith(str_unformatted, ' ') || contains(str_unformatted, '\n')  || contains(str_unformatted, "  ")
         str_formatted = string("<si>\n  <t xml:space=\"preserve\">", XML.escape(str_unformatted), "</t>\n</si>")
     else
         str_formatted = string("<si>\n  <t>", XML.escape(str_unformatted), "</t>\n</si>")
@@ -288,4 +288,131 @@ function init_sst_index(sst::SharedStringTable)
             sst.index[sst.shared_strings[i]] = ind-1
         end
     end
+end
+
+#=
+This is the required order of attributes in the xml:
+- <rFont> — Font name
+- <charset> — Character set # Not required/used here
+- <family> — Font family # Not required/used here
+- <b> — Bold
+- <i> — Italic
+- <strike> — Strikethrough
+- <outline>
+- <shadow>
+- <condense>
+- <extend>
+- <color> — Color
+- <sz> — Font size
+- <u> — Underline
+- <vertAlign> — Superscript/subscript
+- <scheme> — Font scheme (major/minor) # Not required/used here
+=#
+
+ """
+    richTextRunToXML(run::RichTextRun) -> String
+
+Convert an RichTextRun to XML format for Excel shared strings.
+Each rich text shared string may have multiple runs to allow 
+heterogeneous formatting within a single cell.
+"""
+function richTextRunToXML!(io::IO, run::RichTextRun)
+    write(io, "<r>")
+
+    atts=run.atts
+
+    if !isnothing(atts)
+
+        # Build rPr (run properties) if any formatting is specified
+        props = IOBuffer()
+    
+        if haskey(atts, :name)
+            write(props, "<rFont val=\"$(run[:name])\"/>")
+        end
+    
+        if haskey(atts, :bold) && atts[:bold] == true
+            write(props, "<b/>")
+        end
+    
+        if haskey(atts, :italic) && atts[:italic] == true
+            write(props, "<i/>")
+        end
+    
+        if haskey(atts, :strike) && ratts[:strike] == true
+            write(props, "<strike/>")
+        end
+    
+        if haskey(atts, :color)
+            write(props, "<color rgb=\"$(get_color(atts[:color]))\"/>")
+        end
+    
+        if haskey(atts, :size)
+            write(props, "<sz val=\"$(atts[:size])\"/>")
+        end
+    
+        if haskey(atts, :under) && atts[:under] == true
+            write(props, "<u/>")
+        end
+    
+        if haskey(atts, :vertAlign)
+            write(props, "<vertAlign val=\"$(atts[:vertAlign])\"/>")
+        end
+    
+    # emit rPr if needed
+        if position(props) > 0
+            write(io, "<rPr>", String(take!(props)), "</rPr>")
+        end
+
+end
+
+    # whitespace rules
+    needs_preserve =
+        startswith(run.text, " ") ||
+        endswith(run.text, " ") ||
+        contains(run.text, '\n') ||
+        contains(run.text, "  ")
+
+    escaped = XML.escape(run.text)
+
+    if needs_preserve
+        write(io, "<t xml:space=\"preserve\">", escaped, "</t>")
+    else
+        write(io, "<t>", escaped, "</t>")
+    end
+
+    write(io, "</r>")
+
+    return nothing
+#    return String(take!(io))
+end
+
+function richTextStringtoXML(rts::RichTextString)
+    xml = IOBuffer()
+    write(xml, "<si>")
+    for r in rts.runs
+        richTextRunToXML!(xml, r)
+    end
+    write(xml, "</si>")
+    return String(take!(xml))
+end
+function richTextString(runs::Vector{RichTextRun})
+    isempty(runs) && throw(XLSXError("Cannot create a RichTextString with no RichTextRuns"))
+    t = join([x.text for x in runs])
+    return RichTextString(t, runs)
+end
+
+function ssToRuns(args...)
+
+    error("""
+    The use of styled strings requires the StyledStrings.jl package.
+    
+    Please install and load it with:
+        using Pkg
+        Pkg.add("StyledStrings")
+        using StyledStrings
+    
+    Then retry your XLSX call with your styled string.
+
+    Alternatively, use the XLSX type RichTextString directly,
+    """)
 end

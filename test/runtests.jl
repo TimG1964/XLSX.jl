@@ -714,9 +714,9 @@ end
         s2["B1"] = 3
         @test XLSX.getcell(s2, "B1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false)
         @test XLSX.getcell(s2, "B2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "54", "", true)
-        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B2")) == XLSX.ReferencedFormula("SECOND(NOW())", 2, "B2:C5", Dict("ca" => "1"))
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B2")) == XLSX.ReferencedFormula("SECOND(NOW())", 0, "B2:C5", Dict("ca" => "1"))
         @test XLSX.getcell(s2, "C1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C1"), "", "", "54", "", true)
-        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("C1")) == XLSX.ReferencedFormula("SECOND(NOW())", 0, "C1:C1", Dict("ca" => "1"))
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("C1")) == XLSX.Formula("SECOND(NOW())", nothing, "C1", Dict("ca" => "1"))
 
         XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
         f2 = XLSX.openxlsx("mytest.xlsx", mode="rw")
@@ -734,9 +734,9 @@ end
         @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3")) == XLSX.ReferencedFormula("SECOND(NOW())", 1, "A3:A5", Dict("ca" => "1"))
         @test XLSX.getcell(s2, "B1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false)
         @test XLSX.getcell(s2, "B2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "54", "", true)
-        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B2")) == XLSX.ReferencedFormula("SECOND(NOW())", 2, "B2:C5", Dict("ca" => "1"))
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B2")) == XLSX.ReferencedFormula("SECOND(NOW())", 0, "B2:C5", Dict("ca" => "1"))
         @test XLSX.getcell(s2, "C1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C1"), "", "", "54", "", true)
-        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("C1")) == XLSX.ReferencedFormula("SECOND(NOW())", 0, "C1:C1", Dict("ca" => "1"))
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("C1")) ==XLSX.Formula("SECOND(NOW())", nothing, "C1", Dict("ca" => "1"))
 
     end
 end
