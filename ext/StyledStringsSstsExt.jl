@@ -21,7 +21,7 @@ include("ssExtHelpers.jl")
 setdata!(sheet::Worksheet, ref::CellRef, ss::AnnotatedString{T}) where T = setdata!(sheet::Worksheet, ref::CellRef,richTextString(ssToRuns(ss)))
 function ssToRuns(ss::AnnotatedString{T}) where T
     anns = annotations(ss)
-    bounds = compute_bounds(ss,string, anns, length(ss.string))
+    bounds = compute_bounds(ss.string, anns, length(ss.string))
     segments = compute_segments(ss.string, bounds)
 
     runs = RichTextRun[]
