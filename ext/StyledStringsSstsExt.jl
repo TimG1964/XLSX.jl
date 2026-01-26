@@ -21,7 +21,7 @@ include("ssExtHelpers.jl")
 setdata!(sheet::Worksheet, ref::CellRef, ss::AnnotatedString{T}) where T = setdata!(sheet::Worksheet, ref::CellRef,richTextString(ssToRuns(ss)))
 function ssToRuns(ss::AnnotatedString{T}) where T
     anns = annotations(ss)
-    bounds = compute_bounds(ss.string, anns, length(ss.string))
+    bounds = compute_bounds(ss.string, anns)
     segments = compute_segments(ss.string, bounds)
 
     runs = RichTextRun[]
@@ -52,31 +52,28 @@ function ssToRuns(ss::AnnotatedString{T}) where T
 
     return runs
 end
-function compute_bounds(str::String, anns, textlen::Int)
+function compute_bounds(str, anns)
     pts = Int[]
-    push!(pts, firstindex(str))                 # instead of 0
-    push!(pts, safe_prev(str, textlen))         # ensure valid end index
+    push!(pts, firstindex(str))
+    push!(pts, lastindex(str) + 1)  # half-open end
 
     for ann in anns
         r = ann.region
-        push!(pts, safe_prev(str, first(r) - 1))
-        push!(pts, safe_prev(str, last(r)))
+        push!(pts, first(r))
+        push!(pts, nextind(str, last(r)))
     end
 
-    bounds = filter(x -> firstindex(str) ≤ x ≤ lastindex(str), pts)
-    bounds = unique(bounds)
-    bounds = sort(bounds)
-    return bounds
+    return sort(unique(pts))
 end
+
 function compute_segments(str::String, bounds::Vector{Int})
     segs = UnitRange{Int}[]
     for i in 1:length(bounds)-1
-        a = nextind(str, bounds[i])      # safe start index
-        b = prevind(str, bounds[i+1])    # safe end index
-        if a ≤ b
-            push!(segs, a:b)
-        end
+        a = bounds[i]
+        b = prevind(str, bounds[i+1])
+        push!(segs, a:b)
     end
+
     return segs
 end
 
