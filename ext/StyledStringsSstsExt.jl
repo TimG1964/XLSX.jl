@@ -66,17 +66,18 @@ function compute_bounds(anns, textlen::Int)
     # clamp to valid range, dedupe, sort
     return sort(unique(filter(x -> 0 ≤ x ≤ textlen, pts)))
 end
-function compute_segments(bounds::Vector{Int})
+function compute_segments(str::String, bounds::Vector{Int})
     segs = UnitRange{Int}[]
     for i in 1:length(bounds)-1
-        a = bounds[i] + 1
-        b = bounds[i+1]
+        a = nextind(str, bounds[i])      # safe start index
+        b = prevind(str, bounds[i+1])    # safe end index
         if a ≤ b
             push!(segs, a:b)
         end
     end
     return segs
 end
+
 function face_from_annotation(val)
 
     # Already a Face
