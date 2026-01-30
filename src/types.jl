@@ -212,6 +212,15 @@ Concrete supported data-types.
 ```julia
 Union{String, Missing, Float64, Int, Bool, Dates.Date, Dates.Time, Dates.DateTime}
 ```
+
+!!! note
+
+    In julia, the values `Inf`, `-Inf` and `NaN` are of type `Float64`. However, there is 
+    no way to represent these values as numbers in Excel. Instead, on read, these specific 
+    values are eagerly converted to string representation (`"Inf"`, `"-Inf"` and `"NaN"`). 
+    They are represented as strings in the XLSXFile and are written out as such to any saved 
+    `.xlsx` file.
+
 """
 const CellConcreteType = Union{String, Missing, Float64, Int, Bool, Dates.Date, Dates.Time, Dates.DateTime}
 
