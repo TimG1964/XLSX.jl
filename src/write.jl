@@ -706,7 +706,17 @@ function setdata!(ws::Worksheet, ref::CellRef, val::CellFormula)
     add_formula_to_cache(ws, ref, val.value)
     setdata!(ws, cell)
 end
+function setdata!(ws::Worksheet, ref::CellRef, val::CellValue, convert_to_string::Bool)
+    # Convert Float64 values NaN, Inf and -Inf to strings. Excel can's handle them as floats
+    # Addresses #179 & #342
+    @assert convert_to_string == true "Converting values other than NaN, -Inf, Inf is not permitted"
+    val = CellValue(string(val.value), val.styleid)
+    setdata!(ws, ref, val)
+end
 function setdata!(ws::Worksheet, ref::CellRef, val::CellValue)
+    if val.value isa Float64 && (isnan(val.value) || isinf(val.value))
+        return setdata!(ws, ref, val, true)
+    end
     t, v = xlsx_encode(ws, val.value)
     m = UInt64(0)
     cell = Cell(ref, v, id(val.styleid), m, t, false)
@@ -749,7 +759,6 @@ function setdata!(ws::Worksheet, ref::CellRef, val::Union{AbstractFormula,CellCo
         if val isa AbstractFormula
             return setdata!(ws, ref, CellFormula(ws, val))
         else
-
             return setdata!(ws, ref, CellValue(ws, val))
         end
     else

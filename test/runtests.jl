@@ -2404,6 +2404,40 @@ end
         @test f[1]["E1:E4"] == Any["XLSX.CellRef"; "A1"; "B2"; "CCC34000";;]
     end
 
+    @testset "NaN and Inf" begin # Issues #342 and #179
+        col_names = ["Integers", "Strings", "Floats", "Booleans", "Dates", "Times", "DateTimes"]
+        data = Vector{Any}(undef, 7)
+        data[1] = [1, 2, missing, 4]
+        data[2] = ["Hey", "You", "Out", "There"]
+        data[3] = [-Inf, Inf, missing, NaN]
+        data[4] = [true, false, missing, true]
+        data[5] = [Date(2018, 2, 1), Date(2018, 3, 1), Date(2018, 5, 20), Date(2018, 6, 2)]
+        data[6] = [Dates.Time(19, 10), Dates.Time(19, 20), Dates.Time(19, 30), Dates.Time(19, 40)]
+        data[7] = [Dates.DateTime(2018, 5, 20, 19, 10), Dates.DateTime(2018, 5, 20, 19, 20), Dates.DateTime(2018, 5, 20, 19, 30), Dates.DateTime(2018, 5, 20, 19, 40)]
+        table = NamedTuple{Tuple(Symbol(x) for x in col_names)}(Tuple(data))
+
+        f=XLSX.newxlsx()
+        s=f[1]
+        XLSX.writetable!(s, table)
+        @test s["C2"] == "-Inf"
+        @test s["C3"] == "Inf"
+        @test ismissing(s["C4"])
+        @test s["C5"] == "NaN"
+
+        XLSX.writetable("mytest.xlsx", data, col_names; overwrite=true)
+
+        f2=XLSX.readxlsx("mytest.xlsx")
+        s2=f2[1]
+        @test s2["C2"] == "-Inf"
+        @test s2["C3"] == "Inf"
+        @test ismissing(s2["C4"])
+        @test s2["C5"] == "NaN"
+
+        df=XLSX.readto("mytest.xlsx", DataFrames.DataFrame)
+        @test all(isequal.(df.Floats, ["-Inf", "Inf", missing, "NaN"]))
+
+    end
+
     # delete files created by this testset
     delete_files = ["output_table.xlsx", "output_tables.xlsx", "mytest.xlsx"]
     for f in delete_files
