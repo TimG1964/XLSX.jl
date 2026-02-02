@@ -425,7 +425,7 @@ struct RichTextRun
     text::String
     atts::Union{Nothing, Dict{Symbol,Any}}
     
-    function RichTextRun(text::String, pairs=nothing)
+    function RichTextRun(text::String, pairs::Union{Nothing,Vector{Pair{Symbol,Any}}}=nothing)
         isempty(text) && throw(XLSXError("Cannot create a RichTextRun with no text."))
         if isnothing(pairs)
             new(text, nothing)

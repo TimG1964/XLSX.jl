@@ -41,7 +41,7 @@ function resolve_height(height, base_size_pt)
     elseif height isa Float64
         return base_size_pt * height
     else
-        error("Unexpected height type: $(typeof(height))")
+        throw(XLSX.XLSXError("Unexpected height type: $(typeof(height))"))
     end
 end
 
@@ -73,11 +73,11 @@ function normalize_ssUnderline(u)
         elseif color === nothing
             return ssUnderlineSpec(nothing, style)
         else
-            error("Invalid underline tuple: $u")
+            throw(XLSX.XLSXError("Invalid underline tuple: $u"))
         end
 
     else
-        error("Unknown underline type: $(typeof(u))")
+        throw(XLSX.XLSXError("Unknown underline type: $(typeof(u))"))
     end
 end
 function ssUnderlineToRtf(spec::ssUnderlineSpec)
@@ -115,7 +115,6 @@ function resolve_color(c)
 
     # 4. Create RGB from a string (is this possible?)
     elseif c isa String
-        println(c)
         hex = replace(c, "#" => "")
         r = parse(Int, hex[1:2], base=16) / 255
         g = parse(Int, hex[3:4], base=16) / 255
@@ -143,8 +142,7 @@ function resolve_color(c)
         end
 
         # 8. uh-oh!
-        println("Unreachable reached!")
-        error()
+        throw(XLSX.XLSXError("Cannot resolve given color $c."))
 
     else
         return nothing

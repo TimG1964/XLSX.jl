@@ -977,7 +977,6 @@ function setdata!(sheet::Worksheet, ref::CellRef, rts::RichTextString)
         sheet[ref] = rts.text
         setFont(sheet, ref; pairs(rts.runs[1].atts)...)
     end     
-#    println(c)
 end
 
 # Given an anchor cell at (anchor_row, anchor_col).

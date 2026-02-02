@@ -117,7 +117,6 @@ function face_from_annotation(val)
         end
 
     elseif val isa Pair
-        println(val)
         key, v = val
         f = Face()
 
@@ -232,7 +231,6 @@ function face_to_excel_atts(face)
     if face.foreground !== nothing
         c= ss_unwrap(face.foreground)
         fg=resolve_color(c)
-        println(fg)
         if fg isa RGB
             # c is an actual RGB(r,g,b) object
             d[:color] = rgb_to_argb(fg)
@@ -240,15 +238,12 @@ function face_to_excel_atts(face)
             #treat as a color from Colors.jl
             d[:color] = XLSX.get_color(fg)
         else
-            println("unreachable reached")
-            error()
-
+            throw(XLSX.XLSXError("Cannot parse given face color $c"))
         end
     end
 
 #=
     # background (Excel doesn't support background in sharedStrings)
-    # but you may want to record it anyway
     if face.background !== nothing
         d[:background] = ss_unwrap(face.background)
     end
@@ -301,7 +296,7 @@ function face_to_excel_atts(face)
     end
 =#
 
-    return d
+    return collect(d)
 end
 
 end # module

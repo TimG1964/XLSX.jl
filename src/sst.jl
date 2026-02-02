@@ -327,7 +327,7 @@ function richTextRunToXML!(io::IO, run::RichTextRun)
         props = IOBuffer()
     
         if haskey(atts, :name)
-            write(props, "<rFont val=\"$(run[:name])\"/>")
+            write(props, "<rFont val=\"$(atts[:name])\"/>")
         end
     
         if haskey(atts, :bold) && atts[:bold] == true

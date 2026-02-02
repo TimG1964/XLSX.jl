@@ -308,6 +308,70 @@ This is referred to here as rich text formatting.
 
 These rich text formats are stored separately from the cell Style and over-ride any Style-based formatting.
 
+### Creating a rich text cell value
+
+It is possible to create a rich text value in cell in two ways: using an `XLSX.RichTextString` or using a `StyledString` from StyledStrings.jl. If the latter, `StyledString`s are translated to `RichTextStrings` before being written to cells.
+
+#### Using RichTextStrings
+
+A rich text string includes formatting that changes for different parts of the string. Each section is described as a `RichTextRun`, and multiple `RichTextRuns` together form a `RichTextString`. A `RichTextRun` can describe any or all of the following font attributes: `:bold`, `:italic`, `:under`, `:strike`, `:vertAlign`, `:color`, `:size`, `:name`. These attributes have the same effect as described in [`XLSX.setFont`]@ref, but, unlike `setFont`, these attributes do not apply to the whole cell, they only apply to the current rich text run.
+
+Thus,
+
+```
+ulia> f=newxlsx()
+XLSXFile("blank.xlsx") containing 1 Worksheet
+            sheetname size          range
+-------------------------------------------------
+               Sheet1 1x1           A1:A1
+
+julia> s=f[1]
+1×1 Worksheet: ["Sheet1"](A1:A1)
+
+julia> rtf1=XLSX.RichTextRun("Hello", [:color => "red", :size => "24"])
+XLSX.RichTextRun("Hello", Dict{Symbol, Any}(:color => "red", :size => "24"))
+
+julia> rtf2=XLSX.RichTextRun(" Kitty", [:color => "blue", :size => "12", :name => "Palatino"])
+XLSX.RichTextRun(" Kitty", Dict{Symbol, Any}(:color => "blue", :name => "Palatino", :size => "12"))
+
+julia> s["A1"] = XLSX.RichTextString([rtf1, rtf2])
+XLSX.RichTextString("Hello Kitty", XLSX.RichTextRun[XLSX.RichTextRun("Hello", Dict{Symbol, Any}(:color => "red", :size => "24")), XLSX.RichTextRun(" Kitty", Dict{Symbol, Any}(:color => "blue", :name => "Palatino", :size => "12"))])
+```
+![image|320x500](../images/richTextString.png)
+
+A `RichTextString` with only a single run will be converted to a simple text string with font attributes set through `setFont`.
+
+#### Using StyledStrings
+
+A package extension provides support for `AnnotatedStrings` from StyledStrings.jl when that package is being used in the current environment. For example:
+```
+julia> f=newxlsx()
+XLSXFile("blank.xlsx") containing 1 Worksheet
+            sheetname size          range
+-------------------------------------------------
+               Sheet1 1x1           A1:A1
+
+julia> s=f[1]
+1×1 Worksheet: ["Sheet1"](A1:A1)
+
+julia> s["A1"] = styled"{yellow:hello} {blue:there}"
+"hello there"
+
+julia> s["A2"] = styled"The {bold:{italic:quick} {(foreground=#cd853f):brown} fox} jumped over the {(foreground=#FFC000):lazy} dog"
+"The quick brown fox jumped over the lazy dog"
+
+julia> writexlsx("mytest.xlsx", f, overwrite=true)
+"C:\\Users\\tim\\OneDrive\\Documents\\Julia\\XLSX\\mytest.xlsx"
+
+julia> s["A2"] = styled"The {bold:{italic:quick {(foreground=#cd853f):brown} fox} jumped over the {(foreground=#FFC000):lazy} dog}"
+"The quick brown fox jumped over the lazy dog"
+
+```
+
+![image|320x500](../images/styledString.png)
+
+### Updating a rich text cell value
+
 The `setFont`, `setUniformFont` and `setUniformStyle` functions operate at the cell level and cannot appply 
 formatting at a substring level. Instead, using any of these functions will remove from a cell's rich text format 
 any attributes that these functions are themselves applying or updating to the whole cell, but will leave the remaining 
@@ -371,6 +435,8 @@ julia> writetable!(s, gettable(s, "A:F"; header=false); write_columnnames=false)
 ![image|320x500](../images/complexNone.png)
 
 An `XLSXFile` must be opened in write mode for rich text formatting to be editable, otherwise an error is thrown.
+
+There is no way to edit the individula runs of a rich text value. To make changes to individual runs beyond what `setFont` can achieve, it is neseccary to write a new rich text value.
 
 ## Setting column width and row height
 

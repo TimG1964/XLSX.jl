@@ -1109,7 +1109,6 @@ function update_sharedString_font(ws::Worksheet, cell::Cell, firstFont::CellFont
             elseif k=="name"
                 name = v === nothing ? nothing : v["val"]
             else
-                println(k)
                 throw(XLSXError("Something wrong here!"))
             end
         end
