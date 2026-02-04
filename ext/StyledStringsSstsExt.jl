@@ -100,8 +100,6 @@ function face_from_annotation(val)
 
     # Symbol: could be a semantic face OR a color name
     elseif val isa Symbol
-        println(val)
-        println(haskey(FACES, val))
         if haskey(FACES, val)
             # semantic face like :warning, :error, :info
             return FACES[val]
@@ -267,7 +265,6 @@ function face_to_excel_atts(face)
 
     if face.font !== nothing
         f = ss_unwrap(face.font)
-        println(f)
         if f isa String && haskey(FONT_FAMILY_MAP, f)
             d[:name] = FONT_FAMILY_MAP[f]
 
