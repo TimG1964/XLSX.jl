@@ -338,7 +338,7 @@ function richTextRunToXML!(io::IO, run::RichTextRun)
             write(props, "<i/>")
         end
     
-        if haskey(atts, :strike) && ratts[:strike] == true
+        if haskey(atts, :strike) && atts[:strike] == true
             write(props, "<strike/>")
         end
     

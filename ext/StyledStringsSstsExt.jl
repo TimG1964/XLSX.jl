@@ -52,15 +52,22 @@ function ssToRuns(ss::AnnotatedString{T}) where T
 
     return runs
 end
+
 function compute_bounds(str, anns)
     pts = Int[]
+    li = lastindex(str)
     push!(pts, firstindex(str))
-    push!(pts, lastindex(str) + 1)  # half-open end
+    push!(pts, li + ncodeunits(str[li]))  # half-open end
 
+    li = lastindex(str)
     for ann in anns
         r = ann.region
         push!(pts, first(r))
-        push!(pts, nextind(str, last(r)))
+        if last(r) == li
+            push!(pts, li+ncodeunits(str[li]))
+        else
+            push!(pts, nextind(str, last(r)))
+        end
     end
 
     return sort(unique(pts))
@@ -93,6 +100,8 @@ function face_from_annotation(val)
 
     # Symbol: could be a semantic face OR a color name
     elseif val isa Symbol
+        println(val)
+        println(haskey(FACES, val))
         if haskey(FACES, val)
             # semantic face like :warning, :error, :info
             return FACES[val]
@@ -102,6 +111,9 @@ function face_from_annotation(val)
 
         elseif val === :error
             return Face(fgcolor = :error)
+
+        elseif val === :light
+            return Face(weight = :light)
 
         elseif val === :italic
             return Face(slant = :italic)
@@ -255,8 +267,9 @@ function face_to_excel_atts(face)
 
     if face.font !== nothing
         f = ss_unwrap(face.font)
-        if f isa Symbol
-            d[:name] = get(FONT_FAMILY_MAP, f, String(f))
+        println(f)
+        if f isa String && haskey(FONT_FAMILY_MAP, f)
+            d[:name] = FONT_FAMILY_MAP[f]
 
         else
             d[:name] = String(f)

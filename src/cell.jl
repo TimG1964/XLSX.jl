@@ -40,6 +40,9 @@ function get_error_type(v::AbstractString)::UInt64
         throw(XLSXError("Unknown error value: $v"))
     end
 end
+
+#=
+# Only needed if ever cells containing error return something other than missing!
 function get_error_string(e::UInt64)::String
     if e == UInt64(XL_NULL)
         return "#NULL!"
@@ -61,6 +64,7 @@ function get_error_string(e::UInt64)::String
         throw(XLSXError("Unknown error code: $e"))
     end
 end
+=#
 
 function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothing}=nothing)::Union{Cell,EmptyCell}
     wb = get_workbook(ws)
@@ -367,14 +371,14 @@ function _celldata_datetime(v::AbstractString, _is_date_1904::Bool)# :: Union{Da
 
         if time_value <= 1
             # Time
-            return excel_value_to_time(time_value), CellValueType.CT_TIME
+            return excel_value_to_time(time_value), CT_TIME
         else
             # DateTime
-            return excel_value_to_datetime(time_value, _is_date_1904), CellValueType.CT_DATETIME
+            return excel_value_to_datetime(time_value, _is_date_1904), CT_DATETIME
         end
     else
         # Date
-        return excel_value_to_date(parse(Int, v), _is_date_1904), CellValueType.CT_CT_DATE
+        return excel_value_to_date(parse(Int, v), _is_date_1904), CT_DATE
     end
 end
 

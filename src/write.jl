@@ -206,6 +206,7 @@ function get_node_paths!(xpaths::Vector{xpath}, node::XML.Node, default_ns, path
     return nothing
 end
 
+
 # Remove all children with tag given by att[2] from a parent XML node with a tag given by att[1].
 function unlink(node::XML.Node, att::Tuple{String,String})
     new_node = XML.Element(first(att))
@@ -223,6 +224,7 @@ function unlink(node::XML.Node, att::Tuple{String,String})
     return new_node
 end
 
+# Remove all children with tag given by att[2] from a parent XML node with a tag given by att[1].
 function get_idces(doc::XML.Node, t, b)
     i = 1
     j = 1

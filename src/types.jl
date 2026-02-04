@@ -420,7 +420,51 @@ struct Sst
 end
 
 const ValidRichTextAttributes = [:bold, :italic, :under, :strike, :vertAlign, :color, :size, :name]
- # Rich text formatting in sharedStrings
+
+"""
+    RichTextRun(text::String, pairs::Union{Nothing,Vector{Pair{Symbol,Any}}}=nothing)     -> RichTextRun
+    RichTextRun(text::String)                                                             -> RichTextRun
+
+Create an instance of a RichTextRun, representing a formatted substring element (run) to form part 
+of a RichTextString.Each RichTextRun defines none, one or several font attributes to apply to its text.
+
+- `text` specifies the text of the run's substring element.
+- `pairs` is a vector of formatting attributes to apply to `text` (default = `nothing`).
+
+Valid attributes that can be defined in `pairs` are:
+- :bold - set `bold => true` for this run to be emboldened.
+- :italic - set `italic => true` for this run to be italicised.
+- :under - set `under => true` to underline this run.
+- :strike - set `:strike => true` to apply strikethrough to this run.
+- :vertAlign - whether this run is `subscript` or `superscript` (eg `:vertAling => "superscript"`).
+- :color - the color of this run (eg `:color => "red"`).
+- :size - the size of the font to be used (eg `:size => 12`).
+- :name - the name of the font to be used (e.g. `:name => "Arial"`).
+
+Omit `pairs` to specify a run without formatting.
+
+See also [`XLSX.RichTextString`]@ref.
+
+# Examples
+```julia
+julia> rt1 = XLSX.RichTextRun("Water is H")
+XLSX.RichTextRun("Water is H", nothing)
+
+julia> rt2 = XLSX.RichTextRun("2", [:vertAlign => "subscript"])
+XLSX.RichTextRun("2", Dict{Symbol, Any}(:vertAlign => "subscript"))
+
+julia> rt3 = XLSX.RichTextRun("O!")
+XLSX.RichTextRun("O!", nothing)
+
+julia> rt = XLSX.RichTextString(rt1, rt2, rt3)
+XLSX.RichTextString("Water is H2O!", XLSX.RichTextRun[XLSX.RichTextRun("Water is H", nothing), XLSX.RichTextRun("2", Dict{Symbol, Any}(:vertAlign => "subscript")), XLSX.RichTextRun("O!", nothing)])
+
+julia> s["A1"] = rt
+XLSX.RichTextString("Water is H2O!", XLSX.RichTextRun[XLSX.RichTextRun("Water is H", nothing), XLSX.RichTextRun("2", Dict{Symbol, Any}(:vertAlign => "subscript")), XLSX.RichTextRun("O!", nothing)])
+
+```
+![image|320x500](../images/H2O.png)
+"""
 struct RichTextRun
     text::String
     atts::Union{Nothing, Dict{Symbol,Any}}
@@ -439,6 +483,23 @@ struct RichTextRun
     end
 
 end
+"""
+    RichTextString(runs::RichTextRun...) -> RichTextString
+
+Create an instance of a RichTextString from a set of RichTextRuns. A RichTextString supports rich text 
+formatting within a single cell and is made up of multiple substrings (runs), each with different font 
+attributes. The text in the cell is the simple concatenation of the text of each run but Excel will display 
+each run with its own distince font formatting within the cell. See also [`XLSX.RichTextRun`]@ref.
+
+If a `RichTextString` containing only one run is assigned to a cell, the text will be assigned as plain 
+text and the formatting attributes will be implemented on the whole cell using [`XLSX.setFont`]@ref.
+
+# Examples
+```julia
+julia> rt = XLSX.RichTextString(rtf1, rtf2, rtf3, rtf4) # Create a RichTextString for four separate RichTextRuns.
+
+```
+"""
 struct RichTextString
     text::String
     runs::Vector{RichTextRun}

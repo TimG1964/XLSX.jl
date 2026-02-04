@@ -16,13 +16,14 @@ Alternatively, specify the row and column using any combination of
 Integer, UnitRange, Vector{Integer} or `:`.
 
 Font attributes are specified using keyword arguments:
-- `bold::Bool = nothing`    : set to `true` to make the font bold.
-- `italic::Bool = nothing`  : set to `true` to make the font italic.
-- `under::String = nothing` : set to `single`, `double` or `none`.
-- `strike::Bool = nothing`  : set to `true` to strike through the font.
-- `size::Int = nothing`     : set the font size (0 < size < 410).
-- `color::String = nothing` : set the font color.
-- `name::String = nothing`  : set the font name.
+- `bold::Bool = nothing`        : set to `true` to make the font bold.
+- `italic::Bool = nothing`      : set to `true` to make the font italic.
+- `under::String = nothing`     : set to `single`, `double` or `none`.
+- `strike::Bool = nothing`      : set to `true` to strike through the font.
+- `size::Int = nothing`         : set the font size (0 < size < 410).
+- `color::String = nothing`     : set the font color.
+- `name::String = nothing`      : set the font name.
+- `vertAlign::String = nothing` : set to `superscript`, `subscript` or `baseline`.
 
 Only the attributes specified will be changed. If an attribute is not specified, the current
 value will be retained. These are the only attributes supported currently.
@@ -111,7 +112,8 @@ function setFont(sh::Worksheet, cellref::CellRef;
     strike::Union{Nothing,Bool}=nothing,
     size::Union{Nothing,Int}=nothing,
     color::Union{Nothing,String}=nothing,
-    name::Union{Nothing,String}=nothing
+    name::Union{Nothing,String}=nothing,
+    vertAlign::Union{Nothing,String}=nothing
 )::Int
 
     if get_xlsxfile(sh).is_writable == false
@@ -182,6 +184,12 @@ function setFont(sh::Worksheet, cellref::CellRef;
                 new_font_atts["name"] = old_font_atts["name"]
             elseif !isnothing(name)
                 new_font_atts["name"] = Dict("val" => name)
+            end
+        elseif a == "vertAlign"
+            if isnothing(vertAlign) && haskey(old_font_atts, "vertAlign")
+                new_font_atts["vertAlign"] = old_font_atts["vertAlign"]
+            elseif !isnothing(vertAlign)
+                new_font_atts["vertAlign"] = Dict("val" => vertAlign)
             end
         elseif a == "scheme" # drop this attribute
         elseif haskey(old_font_atts, a)
@@ -2087,13 +2095,6 @@ function setColumnWidth(ws::Worksheet, rng::CellRange; width::Union{Nothing,Real
         k, l = get_idces(sheetdoc, "worksheet", "sheetData")
         len = length(sheetdoc[k])
         i != k && throw(XLSXError("Some problem here!"))
-#        push!(sheetdoc[k], sheetdoc[k][end])
-#        if l < len
-#            for pos = len-1:-1:l
-#                sheetdoc[k][pos+1] = sheetdoc[k][pos]
-#            end
-#        end
-#        sheetdoc[k][l] = XML.Element("Cols")
         insert!(sheetdoc[k].children, l, XML.Element("Cols"))
         j = l
     end
@@ -2632,13 +2633,6 @@ function mergeCells(ws::Worksheet, cr::CellRange)
         len = length(sheetdoc[k])
         i != k && throw(XLSXError("Some problem here!"))
         if l != len
-#            push!(sheetdoc[k], sheetdoc[k][end])
-#            if l + 1 < len
-#                for pos = len-1:-1:l+1
-#                    sheetdoc[k][pos+1] = sheetdoc[k][pos]
-#                end
-#            end
-#            sheetdoc[k][l+1] = XML.Element("mergeCells")
             insert!(sheetdoc[k].children, l+1, XML.Element("mergeCells"))
         else
             push!(sheetdoc[k], XML.Element("mergeCells"))
@@ -2679,11 +2673,21 @@ function mergeCells(ws::Worksheet, cr::CellRange)
     return 0 # meaningless return value. Int required to comply with reference decoding structure.
 end
 
-function RichTextString(runs::Vector{RichTextRun })
-    isempty(runs) && throw(XLSXError("Cannot create an empty RichTextString"))
+function RichTextString(runs::RichTextRun...)
+    vruns = collect(runs)
+    isempty(vruns) && throw(XLSXError("Cannot create an empty RichTextString"))
     t=IOBuffer()
-    for r in runs
+    for r in vruns
         write(t, r.text)
     end
-    return RichTextString(String(take!(t)), runs)
+    return RichTextString(String(take!(t)), vruns)
+end
+
+function RichTextRun(text::String, pairs::Vector{Pair{Symbol,String}})
+    isempty(text) && throw(XLSXError("Cannot create a RichTextRun with no text."))
+    atts=Dict{Symbol,Any}(pairs)
+    for x in keys(atts)
+        in(x, ValidRichTextAttributes) || throw(XLSXError("Unknown Rich Text Attribute: ':$x'. Valid attributes are :bold, :italic, :under, :strike, :vertAlign, :color, :size, :name."))
+    end
+    return RichTextRun(text, collect(atts))
 end

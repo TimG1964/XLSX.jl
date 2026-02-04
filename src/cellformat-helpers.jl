@@ -1,5 +1,5 @@
 
-const font_tags = ["b", "i", "u", "strike", "outline", "shadow", "condense", "extend", "sz", "color", "name", "scheme"]
+const font_tags = ["b", "i", "u", "strike", "outline", "shadow", "condense", "extend", "sz", "color", "name", "vertAlign", "scheme"]
 const border_tags = ["left", "right", "top", "bottom", "diagonal"]
 const fill_tags = ["patternFill"]
 const builtinFormats = Dict(

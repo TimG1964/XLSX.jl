@@ -6,6 +6,7 @@ const ANSI_RGB = Dict(
     :bright_magenta => RGB(0xbf/255, 0x60/255, 0xca/255),
     :bright_cyan    => RGB(0x26/255, 0xc6/255, 0xda/255),
     :bright_white   => RGB(0xf6/255, 0xf5/255, 0xf4/255),
+    :bright_black   => RGB(0x80/255, 0x80/255, 0x80/255),
     :red            => RGB(0xa5/255, 0x1c/255, 0x2c/255),
     :yellow         => RGB(0xe5/255, 0xa5/255, 0x09/255),
     :green          => RGB(0x25/255, 0xa2/255, 0x68/255),
@@ -18,14 +19,14 @@ const ANSI_RGB = Dict(
 const FACE_TABLE = StyledStrings.FACES.current[]
 
 # Debug!
-function dump_face(f::StyledStrings.Face)
-    println("Face(")
-    for name in fieldnames(StyledStrings.Face)
-        val = getfield(f, name)
-        println("  $name = $val")
-    end
-    println(")")
-end
+#function dump_face(f::StyledStrings.Face)
+#    println("Face(")
+#    for name in fieldnames(StyledStrings.Face)
+#        val = getfield(f, name)
+#        println("  $name = $val")
+#    end
+#    println(")")
+#end
 
 ss_unwrap(x) = hasproperty(x, :value) ? getproperty(x, :value) : x
 
@@ -35,14 +36,16 @@ hex(x) = uppercase(string(x, base=16, pad=2))
 
 function resolve_height(height, base_size_pt)
     if height === nothing
-        return base_size_pt
+        h = base_size_pt
     elseif height isa Int
-        return height / 10        # deci-pt → pt
+        h = height / 10        # deci-pt → pt
     elseif height isa Float64
-        return base_size_pt * height
+        h= base_size_pt * height
     else
         throw(XLSX.XLSXError("Unexpected height type: $(typeof(height))"))
     end
+    return h
+#    return string(h)
 end
 
 function normalize_ssUnderline(u)
@@ -128,7 +131,7 @@ function resolve_color(c)
         end
 
         # 6. Look for a color from Colors.jl
-        rgb = XLSX.get_colorant(c)
+        rgb = XLSX.get_color(c)
         isnothing(rgb) || return rgb
 
          # 7. If it's a semantic face, unwrap once
@@ -149,6 +152,7 @@ function resolve_color(c)
     end
 end
 
+#= Unnecessary?
 function safe_prev(str, i)
     i < firstindex(str) && return firstindex(str)
     return isvalid(str, i) ? i : prevind(str, i)
@@ -158,3 +162,4 @@ function safe_next(str, i)
     i > lastindex(str) && return lastindex(str)
     return isvalid(str, i) ? i : nextind(str, i)
 end
+=#
