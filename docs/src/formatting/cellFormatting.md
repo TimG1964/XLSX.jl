@@ -314,7 +314,7 @@ It is possible to create a rich text value in a cell in two ways: using an `XLSX
 
 #### Using RichTextStrings
 
-A rich text string includes formatting that changes for different substring elements of the string. Each substring element is described as a `RichTextRun`, and multiple `RichTextRuns` together form a `RichTextString`. A `RichTextRun` can describe any or all of the following font attributes: `:bold`, `:italic`, `:under`, `:strike`, `:vertAlign`, `:color`, `:size`, `:name`. These attributes (except `:vertAlign`) have the same effect as described in [`XLSX.setFont`]@ref, but, unlike `setFont`, these attributes do not apply to the whole cell, they only apply to the current rich text run substring. Use `:vertAlign` in any RichTextRun to create a `"superscript"` or a `"subscript"` run.
+A rich text string includes formatting that changes for different substring elements of the string. Each substring element is described as a `RichTextRun`, and multiple `RichTextRuns` together form a `RichTextString`. A `RichTextRun` can describe any or all of the following font attributes: `:bold`, `:italic`, `:under`, `:strike`, `:vertAlign`, `:color`, `:size`, `:name`. These attributes have the same effect as described in [`XLSX.setFont`](@ref), but, unlike `setFont`, they do not apply to the whole cell, they only apply to the current rich text run substring.
 
 Thus,
 
@@ -341,12 +341,23 @@ XLSX.RichTextString("Helloo Kitty", XLSX.RichTextRun[XLSX.RichTextRun("Hello", D
 
 A `RichTextString` with only a single run will be converted to a simple text string with font attributes set through `setFont`.
 
-For more information, refer to [`XLSX.RichTextRun`]@ref.
+For more information, refer to [`XLSX.RichTextRun`](@ref).
 
 #### Using StyledStrings
 
 An XLSX.jl package extension provides support for `AnnotatedStrings` from StyledStrings.jl when that package is being used in the current environment. For example:
 ```
+julia> using StyledStrings, XLSX
+
+julia> f = newxlsx()
+XLSXFile("blank.xlsx") containing 1 Worksheet
+            sheetname size          range
+-------------------------------------------------
+               Sheet1 1x1           A1:A1
+
+julia> s = f[1]
+1×1 Worksheet: ["Sheet1"](A1:A1) 
+
 julia> s["A1"] = styled"{yellow:hello} {blue:there}"
 "hello there"
 
@@ -425,7 +436,7 @@ julia> writetable!(s, gettable(s, "A:F"; header=false); write_columnnames=false)
 
 An `XLSXFile` must be opened in write mode for rich text formatting to be editable, otherwise an error is thrown.
 
-There is no way in XLSX.jl to edit the individul runs of a rich text value. To make changes to individual runs beyond what `setFont` can achieve, it is neseccary to write a new rich text value.
+There is no way in XLSX.jl to edit the individual runs of a rich text value. To make changes to individual runs beyond what `setFont` can achieve, it is neseccary to overwrite the cell with a new rich text value.
 
 ## Setting column width and row height
 

@@ -395,13 +395,14 @@ function richTextStringtoXML(rts::RichTextString)
     write(xml, "</si>")
     return String(take!(xml))
 end
-function richTextString(runs::Vector{RichTextRun})
+function RichTextString(runs::Vector{RichTextRun})
     isempty(runs) && throw(XLSXError("Cannot create a RichTextString with no RichTextRuns"))
     t = join([x.text for x in runs])
     return RichTextString(t, runs)
 end
 
-function ssToRuns(args...)
+
+function _ssToRuns(args...)
 
     error("""
     The use of styled strings requires the StyledStrings.jl package.

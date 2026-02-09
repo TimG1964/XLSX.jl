@@ -2673,15 +2673,7 @@ function mergeCells(ws::Worksheet, cr::CellRange)
     return 0 # meaningless return value. Int required to comply with reference decoding structure.
 end
 
-function RichTextString(runs::RichTextRun...)
-    vruns = collect(runs)
-    isempty(vruns) && throw(XLSXError("Cannot create an empty RichTextString"))
-    t=IOBuffer()
-    for r in vruns
-        write(t, r.text)
-    end
-    return RichTextString(String(take!(t)), vruns)
-end
+RichTextString(runs::RichTextRun...) = RichTextString(collect(runs))
 
 function RichTextRun(text::String, pairs::Vector{Pair{Symbol,String}})
     isempty(text) && throw(XLSXError("Cannot create a RichTextRun with no text."))

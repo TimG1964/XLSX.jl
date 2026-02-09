@@ -13,7 +13,7 @@ XLSX.eachtablerow
 ## Cell data
 
 ```@docs
-XLSX.CellConcreteType
+#XLSX.CellConcreteType
 XLSX.readdata
 XLSX.getdata
 XLSX.getcell

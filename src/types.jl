@@ -426,24 +426,24 @@ const ValidRichTextAttributes = [:bold, :italic, :under, :strike, :vertAlign, :c
     RichTextRun(text::String)                                                             -> RichTextRun
 
 Create an instance of a RichTextRun, representing a formatted substring element (run) to form part 
-of a RichTextString.Each RichTextRun defines none, one or several font attributes to apply to its text.
+of a RichTextString. Each RichTextRun defines none, one or several font attributes to apply to its text.
 
 - `text` specifies the text of the run's substring element.
 - `pairs` is a vector of formatting attributes to apply to `text` (default = `nothing`).
 
 Valid attributes that can be defined in `pairs` are:
-- :bold - set `bold => true` for this run to be emboldened.
-- :italic - set `italic => true` for this run to be italicised.
-- :under - set `under => true` to underline this run.
-- :strike - set `:strike => true` to apply strikethrough to this run.
-- :vertAlign - whether this run is `subscript` or `superscript` (eg `:vertAling => "superscript"`).
+- :bold - set `bold => true` for this run to be emboldened. Omit otherwise.
+- :italic - set `italic => true` for this run to be italicised. Omit otherwise.
+- :under - set `under => true` to underline this run. Omit otherwise.
+- :strike - set `:strike => true` to apply strikethrough to this run. Omit otherwise.
+- :vertAlign - whether this run is `subscript` or `superscript` (eg `:vertAling => "superscript"`). Omit otherwise.
 - :color - the color of this run (eg `:color => "red"`).
 - :size - the size of the font to be used (eg `:size => 12`).
 - :name - the name of the font to be used (e.g. `:name => "Arial"`).
 
 Omit `pairs` to specify a run without formatting.
 
-See also [`XLSX.RichTextString`]@ref.
+See also [`XLSX.RichTextString`](@ref).
 
 # Examples
 ```julia
@@ -483,20 +483,24 @@ struct RichTextRun
     end
 
 end
+
 """
-    RichTextString(runs::RichTextRun...) -> RichTextString
+    RichTextString(runs::RichTextRun...)      -> RichTextString
+    RichTextString(runs::Vector{RichTextRun}) -> RichTextString
 
 Create an instance of a RichTextString from a set of RichTextRuns. A RichTextString supports rich text 
 formatting within a single cell and is made up of multiple substrings (runs), each with different font 
 attributes. The text in the cell is the simple concatenation of the text of each run but Excel will display 
-each run with its own distince font formatting within the cell. See also [`XLSX.RichTextRun`]@ref.
+each run with its own distinct font formatting within the cell. See also [`XLSX.RichTextRun`](@ref).
 
 If a `RichTextString` containing only one run is assigned to a cell, the text will be assigned as plain 
-text and the formatting attributes will be implemented on the whole cell using [`XLSX.setFont`]@ref.
+text and the formatting attributes will be implemented on the whole cell using [`XLSX.setFont`](@ref).
 
 # Examples
 ```julia
-julia> rt = XLSX.RichTextString(rtf1, rtf2, rtf3, rtf4) # Create a RichTextString for four separate RichTextRuns.
+julia> rt = XLSX.RichTextString(rtf1, rtf2, rtf3, rtf4) # Create a RichTextString from four separate RichTextRuns.
+
+julia> rt = XLSX.RichTextString([rtf1, rtf2, rtf3, rtf4]) # Create a RichTextString from a vector of four RichTextRuns.
 
 ```
 """
