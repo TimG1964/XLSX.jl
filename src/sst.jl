@@ -400,20 +400,3 @@ function RichTextString(runs::Vector{RichTextRun})
     t = join([x.text for x in runs])
     return RichTextString(t, runs)
 end
-
-
-function _ssToRuns(args...)
-
-    error("""
-    The use of styled strings requires the StyledStrings.jl package.
-    
-    Please install and load it with:
-        using Pkg
-        Pkg.add("StyledStrings")
-        using StyledStrings
-    
-    Then retry your XLSX call with your styled string.
-
-    Alternatively, use the XLSX type RichTextString directly,
-    """)
-end

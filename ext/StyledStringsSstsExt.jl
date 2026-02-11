@@ -4,10 +4,10 @@ using XLSX
 using StyledStrings
 
 # Import from StyledStrings
-import StyledStrings: getface, Face, FACES, SimpleColor, HTML_BASIC_COLORS
+import StyledStrings: load_customisations!, getface, Face, FACES, SimpleColor, HTML_BASIC_COLORS
 
 # Import from XLSX
-import XLSX: setdata!, _ssToRuns, RichTextString, RichTextRun
+import XLSX: setdata!, RichTextString, RichTextRun
 
 # Colors.jl is already a dependency of XLSX
 #import Colors: RGB
@@ -16,15 +16,25 @@ import XLSX: setdata!, _ssToRuns, RichTextString, RichTextRun
 setdata!(sheet::Worksheet, ref::CellRef, ss::AnnotatedString{T}) where T = setdata!(sheet, ref, RichTextString(_ssToRuns(ss)))
 
 
-
 """
-    _ssToRuns(s::Union{<:AnnotatedString, SubString{<:AnnotatedString}})
+    _ssToRuns(s::Union{<:AnnotatedString{>:Face}, SubString{<:AnnotatedString{>:Face}}}) -> Vector{XLSX.RichTextRun}
+    _ssToRuns(s::Union{<:AnnotatedString, SubString{<:AnnotatedString}})                 -> Vector{XLSX.RichTextRun}
 
 Converts a `StyledString` to a vector of `RichTextRun`s.
 """
-function _ssToRuns(s::Union{<:AnnotatedString, SubString{<:AnnotatedString}})
+function _ssToRuns end
+
+@static if VERSION >= v"1.14-"
+    const _SS_ARG = Union{<:AnnotatedString{>:Face}, SubString{<:AnnotatedString{>:Face}}}
+else
+    const _SS_ARG = Union{<:AnnotatedString, SubString{<:AnnotatedString}}
+end
+
+function _ssToRuns(s::_SS_ARG)
 
     runs = RichTextRun[]
+
+    StyledStrings.load_customisations!()
 
     for (str, styles) in Base.eachregion(s)
         face = StyledStrings.getface(styles)
@@ -65,7 +75,7 @@ end
 
 Creates a dictionary of Excel font attributes from a StyledString `face`.
 
-Returns a Dict of attribute => value.
+Returns a Dict of (attribute => value).
 """
 function _ss_style(face::StyledStrings.Face)
     d = Dict{Symbol, Any}()

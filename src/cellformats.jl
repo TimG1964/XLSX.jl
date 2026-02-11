@@ -2673,6 +2673,17 @@ function mergeCells(ws::Worksheet, cr::CellRange)
     return 0 # meaningless return value. Int required to comply with reference decoding structure.
 end
 
+
+Base.:(==)(rts1::RichTextString, rts2::RichTextString) = rts1.text == rts2.text && length(rts1.runs) == length(rts2.runs) && all(==(true), rts1.runs .== rts2.runs)
+Base.hash(rts::RichTextString) = sum(hash.(rts.runs))
+Base.length(rts::RichTextString) = length(rts.text)
+Base.show(io::IO, rts::RichTextString) = print(io, rts.text)
+
+Base.:(==)(run1::RichTextRun, run2::RichTextRun) = run1.text == run2.text && run1.atts == run2.atts
+Base.hash(run::RichTextRun) = hash(run.text) + hash(run.atts)
+Base.length(run::RichTextRun) = length(run.text)
+Base.show(io::IO, run::RichTextRun) = print(io, run.text)
+
 RichTextString(runs::RichTextRun...) = RichTextString(collect(runs))
 
 function RichTextRun(text::String, pairs::Vector{Pair{Symbol,String}})

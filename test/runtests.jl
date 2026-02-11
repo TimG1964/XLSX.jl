@@ -6717,7 +6717,6 @@ end
         @test XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, "A6").value)+1] == "<si>\n  <t>this is orange text</t>\n</si>"
         @test XLSX.getFont(s, "A6").font == Dict("name" => Dict("val" => "Calibri"), "sz" => Dict("val" => "12"), "color" => Dict("rgb" => "FFFF7700"))
         @test XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, "A7").value)+1] == "<si><r><rPr><b/><i/><sz val=\"12\"/><u/></rPr><t xml:space=\"preserve\">deleted </t></r><r><rPr><b/><i/><strike/><sz val=\"12\"/><u/></rPr><t xml:space=\"preserve\">and more </t></r><r><rPr><b/><i/><strike/><sz val=\"30\"/><u/></rPr><t>too</t></r><r><rPr><b/><i/><sz val=\"12\"/><u/></rPr><t>, aswell</t></r><r><rPr><sz val=\"12\"/></rPr><t>. And now unbolded!</t></r></si>"
-        XLSX.writexlsx("myrtf.xlsx", f, overwrite=true)
     end
 
     @testset "RichTextString" begin

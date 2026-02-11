@@ -367,7 +367,7 @@ julia> s["A2"] = styled"The {bold:{italic:quick {(foreground=#cd853f):brown} fox
 
 ![image|320x500](../images/styledString.png)
 
-For more information on the use of styled strings, refer to the documentation for the StyledStrings.jl package.
+For more information on the use of styled strings, refer to the documentation for the [StyledStrings.jl](https://github.com/JuliaLang/StyledStrings.jl) package.
 
 ### Updating a rich text cell value
 
