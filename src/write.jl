@@ -335,6 +335,39 @@ end
 
 function get_cache_rows(sheet::Worksheet)::Vector{UInt8}
     chunksize = 1000
+    read_cache_rows = Channel{Vector{Tuple{Int64,Vector{UInt8}}}}(1 << 8)
+    all_cache_rows = Vector{Tuple{Int64,Vector{UInt8}}}()
+   
+    consumer = @async begin
+        for rows in read_cache_rows
+            for row in rows
+                push!(all_cache_rows, row)
+            end
+        end
+    end
+   
+    cache_rows = stream_cache_rows(sheet, chunksize)
+   
+    @sync for _ in 1:Threads.nthreads()
+        Threads.@spawn begin
+            for rows in cache_rows
+                # rows is already a chunk - just process it
+                processed = [process_cache_row(row, sheet) for row in rows]
+                put!(read_cache_rows, processed)
+            end
+        end
+    end
+   
+    close(read_cache_rows)
+    wait(consumer)
+   
+    all_rows = last.(sort(all_cache_rows, by=first))
+    return length(all_rows) == 0 ? Vector{UInt8}() : reduce(vcat, all_rows)
+end
+
+#=
+function get_cache_rows(sheet::Worksheet)::Vector{UInt8}
+    chunksize = 1000
 
     read_cache_rows = Channel{Vector{Tuple{Int64,Vector{UInt8}}}}(1 << 8)
     all_cache_rows = Vector{Tuple{Int64,Vector{UInt8}}}()
@@ -376,6 +409,8 @@ function get_cache_rows(sheet::Worksheet)::Vector{UInt8}
     all_rows=last.(sort(all_cache_rows, by=first))
     return length(all_rows) == 0 ? Vector{UInt8}() : reduce(vcat, all_rows)
 end
+=#
+
 function encode(d::CellValueType)
     if d == CT_STRING
         return "s"

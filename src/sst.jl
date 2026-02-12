@@ -119,7 +119,7 @@ function sst_load!(workbook::Workbook)
         relationship_type = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings"
         if has_relationship_by_type(workbook, relationship_type)
             sst_chan = stream_ssts(open_internal_file_stream(get_xlsxfile(workbook), "xl/sharedStrings.xml")[end], chunksize)
-            load_sst_table!(workbook, sst_chan, chunksize, Threads.nthreads())
+            load_sst_table!(workbook, sst_chan, Threads.nthreads())
             init_sst_index(sst)
             
             return
@@ -169,6 +169,41 @@ function process_sst(sst::SstToken)
 
 end
 
+ function load_sst_table!(wb::Workbook, chan::Channel, nthreads::Int)
+    sst_table = get_sst(wb)
+    sst_table.is_loaded = true
+    sst_results = Channel{Vector{Sst}}(1 << 8)
+    all_ssts = Vector{Tuple{Int,Sst}}()
+   
+    consumer = @async begin
+        for ssts in sst_results        
+            for sst in ssts
+                push!(all_ssts, (sst.idx, sst))
+            end
+        end    
+        sort!(all_ssts, by = x -> x[1])
+   
+        empty!(sst_table.index)
+        for sst in all_ssts
+            add_formatted_string!(sst_table, sst[end].formatted)
+        end
+    end
+   
+    # Producer tasks
+    @sync for _ in 1:nthreads
+        Threads.@spawn begin
+            for ssts in chan
+                # ssts is already a chunk - just process it
+                processed = [process_sst(tok) for tok in ssts]
+                put!(sst_results, processed)
+            end
+        end
+    end
+   
+    close(sst_results)
+    wait(consumer)
+end
+#=
 function load_sst_table!(wb::Workbook, chan::Channel, chunksize::Int, nthreads::Int)
     sst_table = get_sst(wb)
     sst_table.is_loaded=true
@@ -220,7 +255,7 @@ function load_sst_table!(wb::Workbook, chan::Channel, chunksize::Int, nthreads::
 #   sst_table.is_loaded=true
 
 end
-
+=#
 # Checks whether this workbook has a Shared String Table.
 function has_sst(workbook::Workbook) :: Bool
     relationship_type = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings"

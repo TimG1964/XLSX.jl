@@ -357,6 +357,55 @@ function process_row(row::XML.LazyNode, handled_attributes::Set{String}, ws::Wor
 end
 
 function first_cache_fill!(ws::Worksheet, lznode::XML.LazyNode, nthreads::Int)
+    chunksize = 1000
+    handled_attributes = Set{String}(["r", "spans", "ht", "customHeight"])
+    unhandled_attributes = Dict{Int,Dict{String,String}}()
+   
+    if ws.cache === nothing
+        ws.cache = WorksheetCache(ws)
+    else
+        throw(XLSXError("Expecting empty cache but cache not empty!"))
+    end
+   
+    sheet_rows = Channel{Vector{Tuple{Int, SheetRow, Dict{String,String}}}}(1 << 8)
+   
+    consumer = @async begin
+        sst_total = 0
+        for rows in sheet_rows
+            for (row_sst_count, sheet_row, unatt) in rows
+                if !isempty(unatt)
+                    unhandled_attributes[row_number(sheet_row)] = unatt
+                end
+                push_sheetrow!(ws.cache, sheet_row)
+                sst_total += row_sst_count
+            end
+        end
+        ws.sst_count = sst_total
+        ws.unhandled_attributes = isempty(unhandled_attributes) ? nothing : unhandled_attributes
+    end
+   
+    streamed_rows = stream_rows(lznode, chunksize)
+    mylock = ReentrantLock()
+   
+    @sync for _ in 1:nthreads
+        Threads.@spawn begin
+            for rows in streamed_rows
+                # rows is already a chunk - just process it
+                processed = [process_row(row, handled_attributes, ws, mylock) for row in rows]
+                put!(sheet_rows, processed)
+            end
+        end
+    end
+   
+    close(sheet_rows)
+
+    wait(consumer)
+
+    ws.cache.is_full = true
+end
+
+#=
+function first_cache_fill!(ws::Worksheet, lznode::XML.LazyNode, nthreads::Int)
     chunksize=1000
 
     handled_attributes = Set{String}([
@@ -419,6 +468,7 @@ function first_cache_fill!(ws::Worksheet, lznode::XML.LazyNode, nthreads::Int)
 
     ws.cache.is_full=true
 end
+=#
 
 # Materialise specific rows from a worksheet.xml file into SheetRows
 # (faster than using eachrow which materialises every row).

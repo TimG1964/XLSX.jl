@@ -715,6 +715,73 @@ end
 function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
 
     (pass < 1 || pass > 3) && throw(XLSXError("Unknown pass to read files."))
+    wb = get_workbook(xf)
+
+    read_files = Channel{ReadFile}(1 << 8)
+    all_files = stream_files(xf, zip_io; pass)
+   
+    # Filter files based on pass BEFORE parallel processing
+    filtered_files = Channel{String}(1 << 8) do out
+        for file in all_files
+            should_process = if pass == 1
+                !occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", file)
+            elseif pass == 2
+                occursin(r"xl/sharedStrings\.xml", file)
+            else  # pass == 3
+                occursin(r"xl/worksheets/sheet\d+\.xml", file)
+            end
+           
+            if should_process
+                put!(out, file)
+            end
+        end
+    end
+
+    consumer = @async begin
+        for file in read_files
+            if !isnothing(file.node)
+                xf.data[file.name] = file.node
+                xf.files[file.name] = true
+            end
+            if !isnothing(file.raw)
+                if xf.is_writable || pass==2
+                    if occursin("xl/sharedStrings.xml", file.name)
+                        if has_sst(wb)
+                            sst_load!(wb)
+                        end
+                    elseif xf.use_cache_for_sheet_data && !occursin("xl/sharedStrings.xml", file.name)
+                        rid = get_relationship_id_by_target(wb, file.name)
+                        for sheet in wb.sheets
+                            if sheet.relationship_id == rid
+                                first_cache_fill!(sheet, XML.LazyNode(file.raw), Threads.nthreads())
+                            end
+                        end
+                    end
+                end
+            end
+            if !isnothing(file.bin)
+                xf.binary_data[file.name] = file.bin
+            end
+        end
+    end
+
+    # Now workers only process relevant files
+    @sync for _ in 1:Threads.nthreads()
+        Threads.@spawn begin
+            for file in filtered_files
+                readfile = process_file(zip_io, file)
+                put!(read_files, readfile)
+            end
+        end
+    end
+   
+    close(read_files)
+    wait(consumer)
+end
+#=
+function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
+
+    (pass < 1 || pass > 3) && throw(XLSXError("Unknown pass to read files."))
     wb=get_workbook(xf)
 
     read_files = Channel{ReadFile}(1 << 8)
@@ -771,7 +838,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
     wait(consumer)
 
 end
-
+=#
 function process_file(zip_io::ZipArchives.ZipReader, filename::String)
 
         node=nothing
