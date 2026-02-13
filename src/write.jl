@@ -1006,14 +1006,17 @@ function setdata!(sheet::Worksheet, ref::CellRef, rts::RichTextString)
         sheet[ref]=""
         c=getcell(sheet, ref)
     end
+
     if length(rts.runs) > 1 # add RichTextString as a rich sharedString
+        sheet.sst_count += 1
         c.value = add_formatted_string!(get_workbook(sheet), richTextStringtoXML(rts))
         c.datatype = CT_STRING
-        return sheet[ref]
     else # add single run as a normal cell value with a cell level font style
         sheet[ref] = rts.text
         setFont(sheet, ref; pairs(rts.runs[1].atts)...)
     end     
+
+    return sheet[ref]
 end
 
 # Given an anchor cell at (anchor_row, anchor_col).
