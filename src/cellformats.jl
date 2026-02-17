@@ -206,7 +206,7 @@ function setFont(sh::Worksheet, cellref::CellRef;
 
     if cell.datatype == CT_STRING # shared strings and former inline strings may have complex font formatting to manage
         v=update_sharedString_font(sh, cell; bold, italic, under, strike, size, color, name)
-        cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v))
+        cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
     end
 
     return new_fontid
