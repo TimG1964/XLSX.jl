@@ -87,7 +87,7 @@ using XLSX
         if !isnothing(face.font)
             # monospace is default so allow Excel's default here, too.
             if face.font != "monospace"
-                #Otherwise jus pass through font name verbatim and without validation.
+                # Otherwise just pass through font name verbatim and without validation.
                 d[:name] = face.font
             end
         end

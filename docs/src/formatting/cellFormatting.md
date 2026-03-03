@@ -320,28 +320,42 @@ Thus,
 
 ```
 julia> rtf1=XLSX.RichTextRun("Hello", [:color => "red", :size => 24])
-XLSX.RichTextRun("Hello", Dict{Symbol, Any}(:color => "red", :size => 24))
+RichTextRun ("Hello"  [:color => "red", :size => 24])
 
 julia> rtf2=XLSX.RichTextRun("o", [:color => "green", :size => 24, :vertAlign => "superscript"])
-XLSX.RichTextRun("o", Dict{Symbol, Any}(:color => "green", :size => 24, :vertAlign => "superscript"))
+RichTextRun ("o"  [:color => "green", :size => 24, :vertAlign => "superscript"])
 
 julia> rtf3=XLSX.RichTextRun(" Kitt", [:color => "blue", :size => 14])
-XLSX.RichTextRun(" Kitt", Dict{Symbol, Any}(:color => "blue", :size => 14))
+RichTextRun (" Kitt"  [:color => "blue", :size => 14])
 
 julia> rtf4=XLSX.RichTextRun("y", [:color => "green", :size => 14, :vertAlign => "subscript"])
-XLSX.RichTextRun("y", Dict{Symbol, Any}(:color => "green", :size => 14, :vertAlign => "subscript"))
+RichTextRun ("y"  [:color => "green", :size => 14, :vertAlign => "subscript"])
 
 julia> rt = XLSX.RichTextString(rtf1, rtf2, rtf3, rtf4)
-XLSX.RichTextString("Helloo Kitty", XLSX.RichTextRun[XLSX.RichTextRun("Hello", Dict{Symbol, Any}(:color => "red", :size => 24)), XLSX.RichTextRun("o", Dict{Symbol, Any}(:color => "green", :size => 24, :vertAlign => "superscript")), XLSX.RichTextRun(" Kitt", Dict{Symbol, Any}(:color => "blue", :size => 14)), XLSX.RichTextRun("y", Dict{Symbol, Any}(:color => "green", :size => 14, :vertAlign => "subscript"))])
+RichTextString: "Helloo Kitty"
+ containing 4 runs:
+ Run text                 Run attributes
+ -------------------------------------------------------------------------------------------
+ "Hello"                  [:color => "red", :size => 24]
+ "o"                      [:color => "green", :size => 24, :vertAlign => "superscript"]
+ " Kitt"                  [:color => "blue", :size => 14]
+ "y"                      [:color => "green", :size => 14, :vertAlign => "subscript"]
 
 julia> s["A1"] = rt
-XLSX.RichTextString("Helloo Kitty", XLSX.RichTextRun[XLSX.RichTextRun("Hello", Dict{Symbol, Any}(:color => "red", :size => 24)), XLSX.RichTextRun("o", Dict{Symbol, Any}(:color => "green", :size => 24, :vertAlign => "superscript")), XLSX.RichTextRun(" Kitt", Dict{Symbol, Any}(:color => "blue", :size => 14)), XLSX.RichTextRun("y", Dict{Symbol, Any}(:color => "green", :size => 14, :vertAlign => "subscript"))])
+RichTextString: "Helloo Kitty"
+ containing 4 runs:
+ Run text                 Run attributes
+ -------------------------------------------------------------------------------------------
+ "Hello"                  [:color => "red", :size => 24]
+ "o"                      [:color => "green", :size => 24, :vertAlign => "superscript"]
+ " Kitt"                  [:color => "blue", :size => 14]
+ "y"                      [:color => "green", :size => 14, :vertAlign => "subscript"]       
 ```
 ![image|320x500](../images/richTextString.png)
 
 A `RichTextString` with only a single run will be converted to a simple text string with font attributes set through `setFont`.
 
-For more information, refer to [`XLSX.RichTextRun`](@ref).
+For more information, refer to [`XLSX.RichTextString`](@ref).
 
 #### Using StyledStrings
 
@@ -363,6 +377,30 @@ julia> s["A1"] = styled"{yellow:hello} {blue:there}"
 
 julia> s["A2"] = styled"The {bold:{italic:quick {(foreground=#cd853f):brown} fox} jumps over the {(foreground=#FFC000):lazy} dog}"
 "The quick brown fox jumps over the lazy dog"
+
+julia> XLSX.getRichTextString(s, "A1")
+RichTextString: "hello there"
+ containing 3 runs:
+ Run text                 Run attributes
+ -------------------------------------------------------------------------------------------
+ "hello"                  [:color => "FFE5A509", :size => 12.0]
+ " "                      [:size => 12.0]
+ "there"                  [:color => "FF195EB3", :size => 12.0]
+
+
+julia> XLSX.getRichTextString(s, "A2")
+RichTextString: "The quick brown fox jumps over the lazy dog"
+ containing 7 runs:
+ Run text                 Run attributes
+ -------------------------------------------------------------------------------------------
+ "The "                   [:size => 12.0]
+ "quick "                 [:bold => true, :italic => true, :size => 12.0]
+ "brown"                  [:bold => true, :color => "FFCD853F", :italic => true, :size => …]
+ " fox"                   [:bold => true, :italic => true, :size => 12.0]
+ " jumps over the "       [:bold => true, :size => 12.0]
+ "lazy"                   [:bold => true, :color => "FFFFC000", :size => 12.0]
+ " dog"                   [:bold => true, :size => 12.0]
+
 ```
 
 ![image|320x500](../images/styledString.png)
@@ -371,9 +409,9 @@ For more information on the use of styled strings, refer to the documentation fo
 
 ### Updating a rich text cell value
 
-The `setFont`, `setUniformFont` and `setUniformStyle` functions operate at the cell level and cannot appply 
+The `setFont`, `setUniformFont` and `setUniformStyle` functions operate at the cell level and cannot apply 
 formatting at a substring level. Instead, using any of these functions will remove from a cell's rich text format 
-any attributes that these functions are themselves applying or updating to the whole cell, but will leave the remaining 
+any attributes that these functions are themselves applying or updating on the whole cell, but will leave the remaining 
 rich text format attributes in place.
 
 For example, to remove the underlining in column B from the "Hello Kitty" example, above:
@@ -436,7 +474,7 @@ julia> writetable!(s, gettable(s, "A:F"; header=false); write_columnnames=false)
 
 An `XLSXFile` must be opened in write mode for rich text formatting to be editable, otherwise an error is thrown.
 
-There is no way in XLSX.jl to edit the individual runs of a rich text value. To make changes to individual runs beyond what `setFont` can achieve, it is neseccary to overwrite the cell with a new rich text value.
+There is no way in XLSX.jl to edit the individual runs of a rich text value. To make changes to individual runs beyond what `setFont` can achieve, it is neseccary to overwrite the cell with a new `RichTextString` or `AnnotatedString`.
 
 ## Setting column width and row height
 

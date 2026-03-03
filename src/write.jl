@@ -666,6 +666,7 @@ end
 # - if the set is sufficient, or if other charachers may be needed in other use cases
 # - if all of these characters are necessary or if one or two coulld be dropped
 # - What the optimum replacement character should be.
+#=
 const ILLEGAL_CHARS = [
     Char(0x00) => "",
     Char(0x01) => "",
@@ -686,7 +687,23 @@ function strip_illegal_chars(x::String) # Issue #284
     end
     return result
 end
-
+=#
+function strip_illegal_chars(s::String; strip_discouraged::Bool=true)
+    # remove XML 1.0 illegal C0 controls and U+0000
+    s = replace(s, r"[\x00-\x08\x0B\x0C\x0E-\x1F]" => "")
+    # remove BMP non-characters U+FFFE U+FFFF
+    s = replace(s, "\uFFFE" => "", "\uFFFF" => "")
+    # optionally remove U+FDD0..U+FDEF and plane-ending non-characters
+    if strip_discouraged
+        s = replace(s, r"[\uFDD0-\uFDEF]" => "")
+        for cp in (0x1FFFE:0x10000:0x10FFFF)
+            # remove both XFFFE and XFFFF for each plane
+            s = replace(s, Char(cp) => "")
+            s = replace(s, Char(cp+1) => "")
+        end
+    end
+    return s
+end
 
 # Returns the datatype and value for `val` to be inserted into `ws`.
 function xlsx_encode(ws::Worksheet, val::AbstractString)

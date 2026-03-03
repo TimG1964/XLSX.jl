@@ -457,3 +457,326 @@ function RichTextString(runs::Vector{RichTextRun})
     t = join([x.text for x in runs])
     return RichTextString(t, runs)
 end
+
+#Base.show(io::IO, rts::RichTextString) = Base.show(io, rts.text)
+Base.:(==)(rts1::RichTextString, rts2::RichTextString) = rts1.text == rts2.text && length(rts1.runs) == length(rts2.runs) && all(==(true), rts1.runs .== rts2.runs)
+Base.hash(rts::RichTextString) = sum(hash.(rts.runs))
+Base.length(rts::RichTextString) = length(rts.text)
+#Base.show(io::IO, rts::RichTextString) = print(io, rts.text)
+Base.iterate(rts::RichTextString, i::Integer=firstindex(rts.text)) = Base.iterate(rts.text, i)
+Base.ncodeunits(rts::RichTextString) = ncodeunits(rts.text)
+Base.codeunit(rts::RichTextString) = codeunit(rts.text)
+Base.codeunit(rts::RichTextString, i::Integer) = codeunit(rts.text, i)
+Base.String(rts::RichTextString) = rts.text
+Base.isvalid(rts::RichTextString, i::Integer) = isvalid(rts.text, i)
+
+function Base.show(io::IO, rts::RichTextString)
+    maxlen_txt = 22
+    maxlen_atts = 64
+
+    print(io, "RichTextString: \"$(rts.text)\" \n containing $(length(rts.runs)) runs:\n")
+    @printf(io, " %-24s %-14s\n", "Run text", "Run attributes")
+    println(io, " "*"-"^(24 + 1 + 66))
+    for run in rts.runs
+
+        if isnothing(run.atts)
+            s=" "
+        else
+            # Convert pairs to "key=value"
+            parts = (":"*string(k) * " => " * sprint(show, v) for (k,v) in run.atts)
+
+            s = join(parts, ", ")
+
+            # Truncate if too long
+            if length(s) > maxlen_atts
+                s = s[1:prevind(s, maxlen_atts)] * "…"
+            end
+        end
+
+        t = if length(run.text) > maxlen_txt
+            run.text[1:prevind(run.text, maxlen_txt)] * "…"
+        else
+            run.text
+        end
+
+        @printf(io, " %-24s %-66s\n", "\""*t*"\"", "["*s*"]")
+    end
+end
+
+# Concatenate two RichTextStrings into a single RichTextString
+function Base.:*(s1::RichTextString, s2::RichTextString)::RichTextString
+    RichTextString(s1.text * s2.text, vcat(s1.runs, s2.runs))
+end
+
+# Take a substring from a RichTextString as another RichTextString
+Base.getindex(rts::RichTextString, i::Int) = getindex(rts, i:i)
+function Base.getindex(rts::RichTextString, r::UnitRange{Int})::RichTextString
+    substr = rts.text[r]
+
+    new_runs = RichTextRun[]
+    global_char_pos = 1
+
+    for run in rts.runs
+        run_text = run.text
+        run_chars = length(run_text)
+        run_range = global_char_pos:(global_char_pos + run_chars - 1)
+
+        overlap_start = max(first(r), first(run_range))
+        overlap_end   = min(last(r), last(run_range))
+
+        if overlap_start <= overlap_end
+            # Convert global character indices to local character indices
+            local_start = overlap_start - global_char_pos + 1
+            local_end   = overlap_end   - global_char_pos + 1
+
+            # Slice using character indexing
+            sliced_text = first(run_text, local_end)[local_start:end]
+
+            push!(new_runs, RichTextRun(sliced_text, run.atts))
+        end
+
+        global_char_pos += run_chars
+    end
+
+    return RichTextString(substr, new_runs)
+end
+#=
+function Base.getindex(rts::RichTextString, r::UnitRange{Int})::RichTextString
+
+    substr = rts.text[r]
+    
+    # Find runs that overlap with the requested range
+    new_runs = RichTextRun[]
+    pos = 1
+    for run in rts.runs
+        run_end = pos + ncodeunits(run.text) - 1
+        run_range = pos:run_end
+        
+        # Check for overlap
+        overlap_start = max(first(r), first(run_range))
+        overlap_end = min(last(r), last(run_range))
+        
+        if overlap_start <= overlap_end
+            # Slice the run's text to the overlapping portion
+            local_start = overlap_start - pos + 1
+            local_end = overlap_end - pos + 1
+            sliced_text = run.text[local_start:local_end]
+            push!(new_runs, RichTextRun(sliced_text, run.atts))
+        end
+        
+        pos = run_end + 1
+    end
+    
+    return RichTextString(substr, new_runs)
+end
+=#
+function Base.:(==)(run1::RichTextRun, run2::RichTextRun)
+    run1.text == run2.text || return false
+    for (k, v) in run1.atts
+        haskey(run2.atts, k) || return false
+        if k == :color
+            get_color(v) == get_color(run2.atts[k]) || return false
+        else
+            v == run2.atts[k] || return false
+        end
+    end
+    return true
+end
+Base.hash(run::RichTextRun) = hash(run.text) + hash(run.atts)
+Base.length(run::RichTextRun) = length(run.text)
+function Base.show(io::IO, run::RichTextRun)
+    maxlen_txt = 22
+    maxlen_atts = 66
+
+    # Convert pairs to "key=value"
+    if isnothing(run.atts)
+        s = " "
+    else
+        parts = (":"*string(k) * " => " * sprint(show, v) for (k,v) in run.atts)
+        s = join(parts, ", ")
+
+        # Truncate if too long
+        if length(s) > maxlen_atts
+            s = s[1:prevind(s, maxlen_atts)] * "…"
+        end
+    end
+
+    t = if length(run.text) > maxlen_txt
+        run.text[1:prevind(run.text, maxlen_txt)] * "…"
+    else
+        run.text
+    end
+
+    print(io,"RichTextRun (","\""*t*"\"  [", s,"])")
+end
+
+RichTextString(runs::RichTextRun...) = RichTextString(collect(runs))
+
+XLSX.RichTextRun(text::String, atts::Dict{Symbol, Any}) = RichTextRun(text, collect(pairs(atts)))
+function RichTextRun(text::String, pairs::Vector{Pair{Symbol,String}})
+    isempty(text) && throw(XLSXError("Cannot create a RichTextRun with no text."))
+    atts=Dict{Symbol,Any}(pairs)
+    for x in keys(atts)
+        in(x, ValidRichTextAttributes) || throw(XLSXError("Unknown Rich Text Attribute: ':$x'. Valid attributes are :bold, :italic, :under, :strike, :vertAlign, :color, :size, :name."))
+    end
+    return RichTextRun(text, collect(atts))
+end
+
+"""
+    getRichTextString(ws::Worksheet, cr::String)                 -> Union{RichTextString, Nothing}
+    getRichTextString(xl::XLSXFile, sheetcell::String)           -> Union{RichTextString, Nothing}
+    getRichTextString(ws::Worksheet, row::Integer, col::Integer) -> Union{RichTextString, Nothing}
+
+Create a RichTextString object from a cell value.
+
+If the cell value is not a string, return nothing.
+
+If the cell contains simple text with no rich text formatting, return nothing.
+
+# Examples
+```julia
+
+julia> rtf1=XLSX.RichTextRun("Hello", [:vertAlign => "subscript"])
+RichTextRun ("Hello"  [:vertAlign => "subscript"] )
+
+julia> rtf2=XLSX.RichTextRun(" Kitty ", [:color => "green", :size => 14, :bold => true, :under => true])
+RichTextRun (" Kitty "  [:color => "green", :bold => true, :size => 14, :under => true] )
+
+julia> rtf3=XLSX.RichTextRun("Hello", [:color => "green", :size => 14, :under => true])
+RichTextRun ("Hello"  [:color => "green", :size => 14, :under => true] )
+
+julia> r = XLSX.RichTextString(rtf1, rtf2, rtf3)
+RichTextString: "Hello Kitty Hello" 
+ containing 3 runs:
+ Run text                 Run attributes
+ -------------------------------------------------------------------------------------------
+ "Hello"                  [:vertAlign => "subscript"]
+ " Kitty "                [:color => "green", :bold => true, :size => 14, :under => true]
+ "Hello"                  [:color => "green", :size => 14, :under => true]
+
+julia> f = newxlsx()
+XLSXFile("blank.xlsx") containing 1 Worksheet
+            sheetname size          range
+-------------------------------------------------
+               Sheet1 1x1           A1:A1
+
+
+julia> s=f[1]
+1×1 Worksheet: ["Sheet1"](A1:A1)
+
+julia> s["A1"] = r
+RichTextString: "Hello Kitty Hello" 
+ containing 3 runs:
+ Run text                 Run attributes
+ -------------------------------------------------------------------------------------------
+ "Hello"                  [:vertAlign => "subscript"]
+ " Kitty "                [:color => "green", :bold => true, :size => 14, :under => true]
+ "Hello"                  [:color => "green", :size => 14, :under => true]
+
+julia> s["A2"] = styled"The {bold:{italic:quick {(foreground=#cd853f):brown} fox} jumps over the {(foreground=#FFC000):lazy} dog}"
+"The quick brown fox jumps over the lazy dog"
+
+julia> XLSX.getRichTextString(s, "A2")
+RichTextString: "The quick brown fox jumps over the lazy dog" 
+ containing 7 runs:
+ Run text                 Run attributes
+ -------------------------------------------------------------------------------------------
+ "The "                   [:size => 12.0]
+ "quick "                 [:bold => true, :italic => true, :size => 12.0]
+ "brown"                  [:bold => true, :color => "FFCD853F", :italic => true, :size => …]
+ " fox"                   [:bold => true, :italic => true, :size => 12.0]
+ " jumps over the "       [:bold => true, :size => 12.0]
+ "lazy"                   [:bold => true, :color => "FFFFC000", :size => 12.0]
+ " dog"                   [:bold => true, :size => 12.0]
+
+julia> a = XLSX.getRichTextString(s, "A1")
+RichTextString: "Hello Kitty Hello" 
+ containing 3 runs:
+ Run text                 Run attributes
+ -------------------------------------------------------------------------------------------
+ "Hello"                  [:vertAlign => "subscript"]
+ " Kitty "                [:bold => true, :color => "FF008000", :size => 14.0, :under => t…]
+ "Hello"                  [:color => "FF008000", :size => 14.0, :under => true]
+```
+
+When they are written to a cell, named colors are converted to RGB values for Excel. However, 
+two RichTextStrings will be considered equal regardless of this representation so long as the 
+colors are identical. So:
+
+```julia
+julia> a == r
+true
+```
+
+"""
+getRichTextString(ws::Worksheet, cr::String) = process_get_cellname(getRichTextString, ws, cr)
+getRichTextString(xl::XLSXFile, sheetcell::String) = process_get_sheetcell(getRichTextString, xl, sheetcell)
+getRichTextString(ws::Worksheet, row::Integer, col::Integer) = getRichTextString(ws, CellRef(row, col))
+function getRichTextString(s::Worksheet, c::CellRef)::Union{RichTextString, Nothing}
+    cell = getcell(s, c)
+    cell.datatype == CT_STRING || return nothing
+    sst_load!(get_workbook(s))
+    uss = get_sst(get_workbook(s)).shared_strings[reinterpret(Int64, cell.value)+1]
+    return getRichTextString(uss)
+end
+
+# Create a RichTextString from a shared string with multiple runs (or nothing if a simple text)
+function getRichTextString(xml_string::String)::Union{RichTextString, Nothing}
+    doc = parse(XML.Node, xml_string)
+    si = doc[end]
+    
+    # Check for rich text runs <r> elements
+    runs = [child for child in XML.children(si) if XML.tag(child) == "r"]
+    
+    # No rich text runs — plain string, return nothing
+    isempty(runs) && return nothing
+    
+    rts_runs = RichTextRun[]
+    
+    for run in runs
+        children = XML.children(run)
+        
+        t_node = findfirst(c -> XML.tag(c) == "t", children)
+        isnothing(t_node) && continue
+
+        text = XML.is_simple(children[t_node]) ? XML.simple_value(children[t_node]) : XML.value(children[t_node][1])
+        isempty(text) && continue
+        
+        rpr = findfirst(c -> XML.tag(c) == "rPr", children)
+        atts = if isnothing(rpr)
+            nothing
+        else
+            rpr_node = children[rpr]
+            rpr_children = XML.children(rpr_node)
+            pairs = Pair{Symbol, Any}[]
+            
+            any(c -> XML.tag(c) == "b",      rpr_children) && push!(pairs, :bold      => true)
+            any(c -> XML.tag(c) == "i",      rpr_children) && push!(pairs, :italic    => true)
+            any(c -> XML.tag(c) == "strike", rpr_children) && push!(pairs, :strike    => true)
+            any(c -> XML.tag(c) == "u",      rpr_children) && push!(pairs, :under     => true)
+            
+            sz_node = findfirst(c -> XML.tag(c) == "sz", rpr_children)
+            !isnothing(sz_node) && push!(pairs, :size => parse(Float64, XML.attributes(rpr_children[sz_node])["val"]))
+            
+            color_node = findfirst(c -> XML.tag(c) == "color", rpr_children)
+            if !isnothing(color_node)
+                atts_dict = XML.attributes(rpr_children[color_node])
+                haskey(atts_dict, "rgb") && push!(pairs, :color => atts_dict["rgb"])
+            end
+            
+            font_node = findfirst(c -> XML.tag(c) == "rFont", rpr_children)
+            !isnothing(font_node) && push!(pairs, :name => XML.attributes(rpr_children[font_node])["val"])
+            
+            va_node = findfirst(c -> XML.tag(c) == "vertAlign", rpr_children)
+            !isnothing(va_node) && push!(pairs, :vertAlign => XML.attributes(rpr_children[va_node])["val"])
+            
+            isempty(pairs) ? nothing : pairs
+        end
+        
+        push!(rts_runs, RichTextRun(text, atts))
+    end
+    
+    isempty(rts_runs) && return nothing
+    full_text = join(r.text for r in rts_runs)
+    return RichTextString(full_text, rts_runs)
+end

@@ -546,7 +546,8 @@ function process_get_cellname(f::Function, ws::Worksheet, ref_or_rng::AbstractSt
         if is_defined_name_value_a_constant(v)
             throw(XLSXError("Can only assign attributes to cells but `$(ref_or_rng)` is a constant: $(ref_or_rng)=$v."))
         elseif is_defined_name_value_a_reference(v)
-            new_att = f(get_xlsxfile(wb), replace(string(v), "'" => ""); kw...)
+            new_att = f(get_xlsxfile(wb), unquoteit(string(v)); kw...)
+#            new_att = f(get_xlsxfile(wb), replace(string(v), "'" => ""); kw...)
         else
             throw(XLSXError("Unexpected defined name value: $v."))
         end

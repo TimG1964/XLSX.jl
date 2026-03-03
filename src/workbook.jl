@@ -174,7 +174,7 @@ function getdata(xl::XLSXFile, s::AbstractString)
         return getdata(xl, NonContiguousRange(s))
     end
 
-    throw(XLSXError("`$s` is not a valid sheetname, definedName or cell/range reference."))
+    throw(XLSXError("`$s` is not a valid sheetname, workbook definedName or cell/range reference."))
 end
 
 function getcell(xl::XLSXFile, ref::SheetCellRef)
@@ -335,8 +335,26 @@ function addDefName(ws::Worksheet, name::AbstractString, value::DefinedNameValue
     wb.worksheet_names[(ws.sheetId, name)] = DefinedNameValue(value, abs)
 end
 
-quoteit(x::AbstractString) = occursin(r"[^\w]|\s", x) ? "'$x'" : x
-unquoteit(x::AbstractString) = replace(x, "'" => "")
+function quoteit(x::AbstractString)
+    if occursin(r"[^\w]|\s", x)
+        escaped = replace(x, "'" => "''")
+        return "'$escaped'"
+    else
+        return x
+    end
+end
+
+
+function unquoteit(x::AbstractString)
+    if startswith(x, "'") && endswith(x, "'") && ncodeunits(x) >= 2
+        inner = x[2:prevind(x, end)] # First character always ASCII - "'".
+        return replace(inner, "''" => "'")
+    else
+        return x
+    end
+end
+#quoteit(x::AbstractString) = occursin(r"[^\w]|\s", x) ? "'$x'" : x
+#unquoteit(x::AbstractString) = replace(x, "'" => "")
 
 """
     addDefinedName(xf::XLSXFile,  name::AbstractString, value::Union{Int, Float64, String}; absolute=true)

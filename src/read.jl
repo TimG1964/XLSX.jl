@@ -528,23 +528,33 @@ function parse_workbook!(xf::XLSXFile)
 
                     local defined_value::DefinedNameValueTypes
                     if is_valid_non_contiguous_range(defined_value_string)
-                        defined_value = NonContiguousRange(unquoteit(defined_value_string))
+                        el = split(defined_value_string, ',')
+                        rng = String[]
+                        for rf in el
+                            sp = split(rf, '!')
+                            push!(rng, (unquoteit(sp[1])*"!"*sp[2]))
+                        end
+                        defined_value = NonContiguousRange(join(rng, ','))
                         isabs = Vector{Bool}(undef, length(defined_value.rng))
                         for (i, d) in enumerate(split(defined_value_string, ","))
                             isabs[i] = is_valid_fixed_sheet_cellname(d) || is_valid_fixed_sheet_cellrange(d)
                         end
                         length(isabs) != length(defined_value.rng) && throw(XLSXError("Error parsing absolute references in non-contiguous range."))
                     elseif is_valid_fixed_sheet_cellname(defined_value_string)
-                        defined_value = SheetCellRef(unquoteit(defined_value_string))
+                        sp = split(defined_value_string, '!')
+                        defined_value = SheetCellRef(unquoteit(sp[1])*"!"*sp[2])
                         isabs = true
                     elseif is_valid_sheet_cellname(defined_value_string)
-                        defined_value = SheetCellRef(unquoteit(defined_value_string))
+                        sp = split(defined_value_string, '!')
+                        defined_value = SheetCellRef(unquoteit(sp[1])*"!"*sp[2])
                         isabs = false
                     elseif is_valid_fixed_sheet_cellrange(defined_value_string)
-                        defined_value = SheetCellRange(unquoteit(defined_value_string))
+                        sp = split(defined_value_string, '!')
+                        defined_value = SheetCellRange(unquoteit(sp[1])*"!"*sp[2])
                         isabs = true
                     elseif is_valid_sheet_cellrange(defined_value_string)
-                        defined_value = SheetCellRange(unquoteit(defined_value_string))
+                        sp = split(defined_value_string, '!')
+                        defined_value = SheetCellRange(unquoteit(sp[1])*"!"*sp[2])
                         isabs = false
                     elseif occursin(r"^\".*\"$", defined_value_string) # is enclosed by quotes
                         defined_value = defined_value_string[nextind(defined_value_string, begin):prevind(defined_value_string, end)] # remove enclosing quotes

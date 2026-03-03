@@ -940,6 +940,33 @@ end
     @test_throws XLSX.XLSXError XLSX.addDefinedName(s, "Sheet1!A1:A3", "Sheet1!B2:B3")
     @test_throws XLSX.XLSXError XLSX.addDefinedName(s, "Sheet1!A1,Sheet!A3", 42)
 
+    f=XLSX.newxlsx()
+    XLSX.addsheet!(f, "Tim's Sheet")
+    XLSX.addsheet!(f, "Ano'ther She'et")
+    f[2]["A1"] = "tim"
+    f[3]["A1"] = "another"
+    XLSX.addDefinedName(f, "mine", "Tim's Sheet!A1")
+    XLSX.addDefinedName(f, "yours", "Ano'ther She'et!A1")
+    @test f["mine"] == "tim"
+    @test f["yours"] == "another"
+    @test string(XLSX.get_defined_name_value(XLSX.get_workbook(f), "mine")) == "'Tim''s Sheet'!A1"
+    @test string(XLSX.get_defined_name_value(XLSX.get_workbook(f), "yours")) == "'Ano''ther She''et'!A1"
+
+    XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
+
+    ff = XLSX.openxlsx("mytest.xlsx", mode="rw")
+
+    @test XLSX.hassheet(f, "Tim's Sheet")
+    @test XLSX.hassheet(f, "Ano'ther She'et")
+    @test f[2]["A1"] == "tim"
+    @test f[3]["A1"] == "another"
+    @test f["mine"] == "tim"
+    @test f["yours"] == "another"
+    @test string(XLSX.get_defined_name_value(XLSX.get_workbook(ff), "mine")) == "'Tim''s Sheet'!A1"
+    @test string(XLSX.get_defined_name_value(XLSX.get_workbook(ff), "yours")) == "'Ano''ther She''et'!A1"
+
+    isfile("mytest.xlsx") && rm("mytest.xlsx")
+
 end
 
 @testset "Book1.xlsx" begin
@@ -6729,13 +6756,20 @@ end
         rtf2=XLSX.RichTextRun(" Kitty ", [:color => "green", :size => 14, :bold => true, :under => true])
         rtf3=XLSX.RichTextRun("Hello", [:color => "green", :size => 14, :under => true])
         s["A1"] = XLSX.RichTextString(rtf1, rtf2, rtf3)
+        @test XLSX.getRichTextString(s, "A1").runs[1].atts == Dict(:vertAlign => "subscript")
+        @test XLSX.getRichTextString(s, "A1") == XLSX.RichTextString(rtf1, rtf2, rtf3)
 
-        rtf1=XLSX.RichTextRun("Hell", [:color => "red", :size => 18, :name => "Times New Roman"])
-        rtf2=XLSX.RichTextRun("o", [:color => "green", :size => 24, :vertAlign => "superscript", :name => "Arial"])
-        rtf3=XLSX.RichTextRun(" Kitt", [:color => "blue", :size => 12, :name => "Consolas"])
-        rtf4=XLSX.RichTextRun("y", [:color => "green", :size => 14, :vertAlign => "subscript"])
-        s["A2"] = XLSX.RichTextString(rtf1, rtf2, rtf3, rtf4)
+        rtf4=XLSX.RichTextRun("Hell", [:color => "red", :size => 18, :name => "Times New Roman"])
+        rtf5=XLSX.RichTextRun("o", [:color => "green", :size => 24, :vertAlign => "superscript", :name => "Arial"])
+        rtf6=XLSX.RichTextRun(" Kitt", [:color => "blue", :size => 12, :name => "Consolas"])
+        rtf7=XLSX.RichTextRun("y", [:color => "green", :size => 14, :vertAlign => "subscript"])
+        s["A2"] = XLSX.RichTextString(rtf4, rtf5, rtf6, rtf7)
+        @test XLSX.getRichTextString(s, "A2").runs[1].atts == Dict(:color => XLSX.get_color("red"), :size => 18, :name => "Times New Roman")
+        @test XLSX.getRichTextString(s, "A2") == XLSX.RichTextString(rtf4, rtf5, rtf6, rtf7)
 
+        @test XLSX.getRichTextString(s, "A1")*XLSX.getRichTextString(s, "A2") == XLSX.RichTextString(rtf1, rtf2, rtf3, rtf4, rtf5, rtf6, rtf7)
+        @test string((XLSX.getRichTextString(s, "A1")*XLSX.getRichTextString(s, "A2"))[8:24]) == "itty HelloHello K"
+        @test length((XLSX.getRichTextString(s, "A1")*XLSX.getRichTextString(s, "A2"))[8:24]) == 17
         rtf1=XLSX.RichTextRun("single run", [:color => "green", :size => 14, :vertAlign => "subscript"])
         s["A3"] = XLSX.RichTextString(rtf1)
 
@@ -6746,6 +6780,22 @@ end
         @test XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, "A2").value)+1] == "<si><r><rPr><rFont val=\"Times New Roman\"/><color rgb=\"FFFF0000\"/><sz val=\"18\"/></rPr><t>Hell</t></r><r><rPr><rFont val=\"Arial\"/><color rgb=\"FF008000\"/><sz val=\"24\"/><vertAlign val=\"superscript\"/></rPr><t>o</t></r><r><rPr><rFont val=\"Consolas\"/><color rgb=\"FF0000FF\"/><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> Kitt</t></r><r><rPr><color rgb=\"FF008000\"/><sz val=\"14\"/><vertAlign val=\"subscript\"/></rPr><t>y</t></r></si>"
         @test XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, "A3").value)+1] == "<si>\n  <t>single run</t>\n</si>"
         @test XLSX.getFont(s, "A3").font == Dict("name" => Dict("val" => "Calibri"), "sz" => Dict("val" => "14"), "color" => Dict("rgb" => "FF008000"), "vertAlign" => Dict("val" => "subscript"))
+
+        rts_expected_result = "RichTextString: \"Hello Kitty\" \n" *
+                              " containing 4 runs:\n" *
+                              " Run text                 Run attributes\n" *
+                              " -------------------------------------------------------------------------------------------\n" *
+                              " \"Hell\"                   [:color => \"FFFF0000\", :name => \"Times New Roman\", :size => 18.0] \n" *
+                              " \"o\"                      [:color => \"FF008000\", :name => \"Arial\", :size => 24.0, :vertAli…]\n" *
+                              " \" Kitt\"                  [:color => \"FF0000FF\", :name => \"Consolas\", :size => 12.0]        \n" *
+                              " \"y\"                      [:color => \"FF008000\", :size => 14.0, :vertAlign => \"subscript\"]  \n"
+        rtr_expected_result = "RichTextRun (\"Hell\"  [:color => \"FFFF0000\", :name => \"Times New Roman\", :size => 18.0])"
+        io1 = IOBuffer()
+        io2 = IOBuffer()
+        show(io1, XLSX.getRichTextString(s, "A2"))
+        @test String(take!(io1)) == rts_expected_result
+        show(io1, XLSX.getRichTextString(s, "A2").runs[1])
+        @test String(take!(io1)) == rtr_expected_result
     end
 end
 

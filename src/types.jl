@@ -432,14 +432,14 @@ of a RichTextString. Each RichTextRun defines none, one or several font attribut
 - `pairs` is a vector of formatting attributes to apply to `text` (default = `nothing`).
 
 Valid attributes that can be defined in `pairs` are:
-- :bold - set `bold => true` for this run to be emboldened. Omit otherwise.
-- :italic - set `italic => true` for this run to be italicised. Omit otherwise.
-- :under - set `under => true` to underline this run. Omit otherwise.
-- :strike - set `:strike => true` to apply strikethrough to this run. Omit otherwise.
-- :vertAlign - whether this run is `subscript` or `superscript` (eg `:vertAling => "superscript"`). Omit otherwise.
-- :color - the color of this run (eg `:color => "red"`).
-- :size - the size of the font to be used (eg `:size => 12`).
-- :name - the name of the font to be used (e.g. `:name => "Arial"`).
+- `:bold` - set `:bold => true` for this run to be emboldened. Omit otherwise.
+- `:italic` - set `:italic => true` for this run to be italicised. Omit otherwise.
+- `:under` - set `:under => true` to underline this run. Omit otherwise.
+- `:strike` - set `:strike => true` to apply strikethrough to this run. Omit otherwise.
+- `:vertAlign` - whether this run is `subscript` or `superscript` (eg `:vertAling => "superscript"`). Omit otherwise.
+- `:color` - the color of this run (eg `:color => "red"`).
+- `:size` - the size of the font to be used (eg `:size => 12`).
+- `:name` - the name of the font to be used (e.g. `:name => "Arial"`).
 
 Omit `pairs` to specify a run without formatting.
 
@@ -448,19 +448,31 @@ See also [`XLSX.RichTextString`](@ref).
 # Examples
 ```julia
 julia> rt1 = XLSX.RichTextRun("Water is H")
-XLSX.RichTextRun("Water is H", nothing)
+RichTextRun ("Water is H"  [ ])
 
 julia> rt2 = XLSX.RichTextRun("2", [:vertAlign => "subscript"])
-XLSX.RichTextRun("2", Dict{Symbol, Any}(:vertAlign => "subscript"))
+RichTextRun ("2"  [:vertAlign => "subscript"])
 
 julia> rt3 = XLSX.RichTextRun("O!")
-XLSX.RichTextRun("O!", nothing)
+RichTextRun ("O!"  [ ])
 
 julia> rt = XLSX.RichTextString(rt1, rt2, rt3)
-XLSX.RichTextString("Water is H2O!", XLSX.RichTextRun[XLSX.RichTextRun("Water is H", nothing), XLSX.RichTextRun("2", Dict{Symbol, Any}(:vertAlign => "subscript")), XLSX.RichTextRun("O!", nothing)])
+RichTextString: "Water is H2O!" 
+ containing 3 runs:
+ Run text                 Run attributes
+ -------------------------------------------------------------------------------------------
+ "Water is H"             [ ]
+ "2"                      [:vertAlign => "subscript"]
+ "O!"                     [ ]
 
 julia> s["A1"] = rt
-XLSX.RichTextString("Water is H2O!", XLSX.RichTextRun[XLSX.RichTextRun("Water is H", nothing), XLSX.RichTextRun("2", Dict{Symbol, Any}(:vertAlign => "subscript")), XLSX.RichTextRun("O!", nothing)])
+RichTextString: "Water is H2O!" 
+ containing 3 runs:
+ Run text                 Run attributes
+ -------------------------------------------------------------------------------------------
+ "Water is H"             [ ]
+ "2"                      [:vertAlign => "subscript"]
+ "O!"                     [ ]
 
 ```
 ![image|320x500](../images/H2O.png)
@@ -504,7 +516,7 @@ julia> rt = XLSX.RichTextString([rtf1, rtf2, rtf3, rtf4]) # Create a RichTextStr
 
 ```
 """
-struct RichTextString
+struct RichTextString <: AbstractString
     text::String
     runs::Vector{RichTextRun}
 
