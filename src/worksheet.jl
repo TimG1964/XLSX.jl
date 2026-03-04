@@ -4,7 +4,7 @@ function Worksheet(xf::XLSXFile, sheet_element::XML.Node)
     a = XML.attributes(sheet_element)
     sheetId = parse(Int, a["sheetId"])
     relationship_id = a["r:id"]
-    name = XML.unescape(a["name"])
+    name = XLSX.unescape(a["name"])
     is_hidden = haskey(a, "state") && a["state"] in ["hidden", "veryHidden"]
 #    dim = read_worksheet_dimension(xf, relationship_id, name)
 
@@ -442,9 +442,9 @@ julia> ncr = "B3,A1,C2" # non-contiguous range, "out of order".
 
 julia>  XLSX.getcellrange(f[1], ncr)
 3-element Vector{Matrix{XLSX.AbstractCell}}:
- [XLSX.Cell(B3, "", "", "5", XLSX.Formula("", nothing));;]
- [XLSX.Cell(A1, "", "", "2", XLSX.Formula("", nothing));;]
- [XLSX.Cell(C2, "", "", "5", XLSX.Formula("", nothing));;]
+ [XLSX.Cell(B3, 0x0000000000000018, 0x00000000, 0x0000, XLSX.CT_INT, false);;]
+ [XLSX.Cell(A1, 0x0000000000000018, 0x00000000, 0x0000, XLSX.CT_INT, false);;]
+ [XLSX.Cell(C2, 0x0000000000000018, 0x00000000, 0x0000, XLSX.CT_INT, false);;]
 
 ```
 

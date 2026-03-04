@@ -126,7 +126,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
                 ch = XML.children(child)
                 isempty(ch) && continue
                 
-                v = XML.unescape(XML.value(ch[1]))
+                v = XLSX.unescape(XML.value(ch[1]))
                 datatype, value = process_tv(wb, t, v, num_style; mylock)
             elseif tag == "f"
                 if get_xlsxfile(wb).is_writable # only store formulas when XLSXFile is writable
@@ -147,13 +147,13 @@ function parse_formula_from_element(c_child_element)::AbstractFormula
     end
 
     if XML.is_simple(c_child_element)
-        formula_string = XML.unescape(XML.simple_value(c_child_element))
+        formula_string = XLSX.unescape(XML.simple_value(c_child_element))
     else
         fs = [x for x in XML.children(c_child_element) if XML.nodetype(x) == XML.Text]
         if length(fs) == 0
             formula_string = ""
         else
-            formula_string = XML.unescape(XML.value(fs[1]))
+            formula_string = XLSX.unescape(XML.value(fs[1]))
         end
     end
 

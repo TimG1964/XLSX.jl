@@ -788,67 +788,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
     close(read_files)
     wait(consumer)
 end
-#=
-function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
 
-    (pass < 1 || pass > 3) && throw(XLSXError("Unknown pass to read files."))
-    wb=get_workbook(xf)
-
-    read_files = Channel{ReadFile}(1 << 8)
-    files = stream_files(xf, zip_io; pass)
-
-    consumer = @async begin
-
-        for file in read_files
-            if !isnothing(file.node)
-                xf.data[file.name] = file.node
-                xf.files[file.name] = true # set file as read
-            end
-            if !isnothing(file.raw)
-                if xf.is_writable || pass==2
-                    if occursin("xl/sharedStrings.xml", file.name)
-                        if has_sst(wb)
-                            sst_load!(wb)
-                        end
-                    elseif xf.use_cache_for_sheet_data && !occursin("xl/sharedStrings.xml", file.name)
-                        rid=get_relationship_id_by_target(wb, file.name)
-                        for sheet in wb.sheets
-                            if sheet.relationship_id == rid
-                                first_cache_fill!(sheet, XML.LazyNode(file.raw), Threads.nthreads())
-                            end
-                        end
-                    end
-                end
-            end
-            if !isnothing(file.bin)
-                xf.binary_data[file.name] = file.bin
-            end
-        end
-    end
-
-    @sync for _ in 1:Threads.nthreads()
-        Threads.@spawn begin
-            for file in files
-               if pass==1 && !occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", file)
-                    readfile = process_file(zip_io, file) # Pass 1: process all files except worksheets and sharedStrings
-                    put!(read_files, readfile)
-                elseif pass==2 && occursin(r"xl/sharedStrings\.xml", file)
-                    readfile = process_file(zip_io, file) # Pass 2: now process sharedStrings
-                    put!(read_files, readfile)
-                elseif pass==3 && occursin(r"xl/worksheets/sheet\d+\.xml", file)
-                    readfile = process_file(zip_io, file) # Pass 2: now process worksheets
-                    put!(read_files, readfile)
-                end
-            end
-        end
-    end
-    
-    close(read_files)
-
-    wait(consumer)
-
-end
-=#
 function process_file(zip_io::ZipArchives.ZipReader, filename::String)
 
         node=nothing
@@ -1265,3 +1205,18 @@ function readtransposedtable(filename::AbstractString; first_column=nothing, col
     return gettransposedtable(xf[1], "$(dim.start.row_number):$(dim.stop.row_number)"; first_column, column_labels, header, normalizenames)
 end
 
+const escape_chars = ['&' => "&amp;", '<' => "&lt;", '>' => "&gt;", '"' => "&quot;", '\'' => "&apos;"]
+function escape(x::AbstractString)
+    result = x
+    for (char, entity) in escape_chars
+        result = replace(result, char => entity)
+    end
+    return result
+end
+function unescape(x::AbstractString)
+    result = x
+    for (char, entity) in reverse(escape_chars)
+        result = replace(result, entity => char)
+    end
+    return result
+end

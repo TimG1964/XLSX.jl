@@ -254,22 +254,6 @@ end
 
 @inline get_defined_name_value(wb::Workbook, name::AbstractString)::DefinedNameValueTypes = wb.workbook_names[name].value
 
-#=
-function get_defined_names(f::XLSXFile, type::Symbol)
-    wb=get_workbook(f)
-    if type == :Workbook
-        names=keys(wb.workbook_names)
-        vals = values(wb.workbook_names)
-        list1 = ["\"Workbook\" $k =>  $(v.value)" for (k, v) in collect(zip(names, vals))]
-    elseif type == :Worksheet 
-        names=keys(wb.worksheet_names)
-        vals = values(wb.worksheet_names)
-        list2 = ["$(wb.sheets[k[1]].name) $(k[2]) =>  $(v.value)" for (k, v) in collect(zip(names, vals))]
-        return list2
-    end
-end
-=#
-
 function get_defined_name_value(ws::Worksheet, name::AbstractString)::DefinedNameValueTypes
     wb = get_workbook(ws)
     sheetId = ws.sheetId
@@ -344,7 +328,6 @@ function quoteit(x::AbstractString)
     end
 end
 
-
 function unquoteit(x::AbstractString)
     if startswith(x, "'") && endswith(x, "'") && ncodeunits(x) >= 2
         inner = x[2:prevind(x, end)] # First character always ASCII - "'".
@@ -353,8 +336,6 @@ function unquoteit(x::AbstractString)
         return x
     end
 end
-#quoteit(x::AbstractString) = occursin(r"[^\w]|\s", x) ? "'$x'" : x
-#unquoteit(x::AbstractString) = replace(x, "'" => "")
 
 """
     addDefinedName(xf::XLSXFile,  name::AbstractString, value::Union{Int, Float64, String}; absolute=true)

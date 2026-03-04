@@ -139,7 +139,7 @@ function add_node_formula!(io, f::Formula)
         end
     end
     
-    write(io, ">", XML.escape(f.formula), "</f>")
+    write(io, ">", XLSX.escape(f.formula), "</f>")
 end
 
 function add_node_formula!(io, f::FormulaReference)
@@ -167,7 +167,7 @@ function add_node_formula!(io, f::ReferencedFormula)
     
     write(io, " si=\"")
     print(io, f.id)
-    write(io, "\">", XML.escape(f.formula), "</f>")
+    write(io, "\">", XLSX.escape(f.formula), "</f>")
 end
 
 function find_all_nodes(givenpath::String, doc::XML.Node)::Vector{XML.Node}
@@ -365,52 +365,6 @@ function get_cache_rows(sheet::Worksheet)::Vector{UInt8}
     return length(all_rows) == 0 ? Vector{UInt8}() : reduce(vcat, all_rows)
 end
 
-#=
-function get_cache_rows(sheet::Worksheet)::Vector{UInt8}
-    chunksize = 1000
-
-    read_cache_rows = Channel{Vector{Tuple{Int64,Vector{UInt8}}}}(1 << 8)
-    all_cache_rows = Vector{Tuple{Int64,Vector{UInt8}}}()
-
-    consumer = @async begin
-        for rows in read_cache_rows
-            for row in rows
-                push!(all_cache_rows, row)
-            end
-        end
-    end
-
-    cache_rows = stream_cache_rows(sheet, chunksize)
-
-    @sync for _ in 1:Threads.nthreads()
-        Threads.@spawn begin
-            chunk = Vector{Tuple{Int64,Vector{UInt8}}}(undef, chunksize)
-            for rows in cache_rows
-                row_count=0
-                for row in rows
-                    row_count += 1
-                    chunk[row_count] = process_cache_row(row, sheet)
-                    if row_count == chunksize
-                        put!(read_cache_rows, copy(chunk))
-                        row_count=0
-                    end
-                end
-                if row_count>0 # handle last incomplete chunk
-                    put!(read_cache_rows, chunk[1:row_count])
-                end
-            end
-        end
-    end
-
-    close(read_cache_rows) # after all workers finish
-
-    wait(consumer) # ensure consumer is done
-
-    all_rows=last.(sort(all_cache_rows, by=first))
-    return length(all_rows) == 0 ? Vector{UInt8}() : reduce(vcat, all_rows)
-end
-=#
-
 function encode(d::CellValueType)
     if d == CT_STRING
         return "s"
@@ -605,7 +559,7 @@ function update_workbook_xml!(xl::XLSXFile) # Need to update <sheets> and <defin
     unlink(doc[i][j], ("sheets", "sheet"))
     sheets_element = XML.Element("sheets")
     for s in wb.sheets
-        sheet_element = XML.Element("sheet"; name=XML.escape(s.name))
+        sheet_element = XML.Element("sheet"; name=XLSX.escape(s.name))
         sheet_element["sheetId"] = s.sheetId
         sheet_element["r:id"] = s.relationship_id
         push!(sheets_element, sheet_element)
@@ -662,32 +616,6 @@ function setdata!(ws::Worksheet, cell::Cell)
 end
  
 # Issue #284
-# This set of characters works in my use case. I don't know:
-# - if the set is sufficient, or if other charachers may be needed in other use cases
-# - if all of these characters are necessary or if one or two coulld be dropped
-# - What the optimum replacement character should be.
-#=
-const ILLEGAL_CHARS = [
-    Char(0x00) => "",
-    Char(0x01) => "",
-    Char(0x02) => "",
-    Char(0x03) => "",
-    Char(0x04) => "",
-    Char(0x05) => "",
-    Char(0x06) => "",
-    Char(0x07) => "",
-    Char(0x08) => "",
-    Char(0x12) => "",
-    Char(0x16) => ""
-]
-function strip_illegal_chars(x::String) # Issue #284
-    result = x
-    for (pat, r) in ILLEGAL_CHARS
-        result = replace(result, pat => r)
-    end
-    return result
-end
-=#
 function strip_illegal_chars(s::String; strip_discouraged::Bool=true)
     # remove XML 1.0 illegal C0 controls and U+0000
     s = replace(s, r"[\x00-\x08\x0B\x0C\x0E-\x1F]" => "")
@@ -1428,26 +1356,7 @@ end
 function renumber_files!(xf::XLSXFile, rId::String)
     wb = get_workbook(xf)
     id = parse(Int64, rId[4:end])
-    #= UNNECESSARY!
-        for s in wb.sheets
-            r=parse(Int64, s.relationship_id[4:end])
-            if r > id
-                newId=string(r-1)
-                oldId=string(r)
-    #            s.relationship_id = "rId"*newId
-                new_filename = "xl/worksheets/sheet" * newId * ".xml"
-                old_filename = "xl/worksheets/sheet" * oldId * ".xml"
-                if haskey(xf.files, old_filename)
-                    xf.files[new_filename]=xf.files[old_filename]
-                    delete!(xf.files, old_filename)
-                end
-                if haskey(xf.data, old_filename)
-                    xf.data[new_filename]=xf.data[old_filename]
-                    delete!(xf.data, old_filename)
-                end
-            end
-        end
-    =#
+
     # update active tab
     wbdoc = xmlroot(xf, "xl/workbook.xml")
     i, j = get_idces(wbdoc, "workbook", "bookViews")

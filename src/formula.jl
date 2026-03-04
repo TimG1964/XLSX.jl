@@ -849,11 +849,6 @@ function setFormula(ws::Worksheet, rng::CellRange; val::AbstractString, raw::Boo
     end
 
     is_array = is_array_formula(val)
-    #    is_array=false
-    #    for k in keys(EXCEL_FUNCTION_PREFIX) # Identify formulas containing dynamic array functions
-    #        r = Regex(k, "i")
-    #        is_array |= occursin(r, val)
-    #    end
 
     is_sheetcell = occursin(RGX_FORMULA_SHEET_CELL, val)
 

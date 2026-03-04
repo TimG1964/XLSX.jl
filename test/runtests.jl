@@ -6468,8 +6468,8 @@ end
 
 @testset "escape" begin
 
-    @test XML.escape("hello&world<'") == "hello&amp;world&lt;&apos;"
-    @test XML.unescape("hello&amp;world&lt;&apos;") == "hello&world<'"
+    @test XLSX.escape("hello&world<'") == "hello&amp;world&lt;&apos;"
+    @test XLSX.unescape("hello&amp;world&lt;&apos;") == "hello&world<'"
 
     esc_filename = "output_table_escape_test.xlsx"
     isfile(esc_filename) && rm(esc_filename)
@@ -6486,21 +6486,55 @@ end
     dtable = XLSX.readtable(esc_filename, esc_sheetname)
     r1_data, r1_col_names = dtable.data, dtable.column_labels
     check_test_data(r1_data, esc_data)
+    println("6489 - OK")
     @test r1_col_names[4] == Symbol(esc_col_names[4])
     @test r1_col_names[3] == Symbol(esc_col_names[3])
     @test r1_col_names[2] == Symbol(esc_col_names[2])
     @test r1_col_names[1] == Symbol(esc_col_names[1])
-    rm(esc_filename)
+    isfile(esc_filename) && rm(esc_filename)
 
     # compare to the backup version: escape.xlsx
     dtable = XLSX.readtable(joinpath(data_directory, "escape.xlsx"), esc_sheetname)
-    r2_data, r2_col_names = [[x isa String ? XML.unescape(x) : x for x in y] for y in dtable.data], dtable.column_labels
+#    r2_data, r2_col_names = [[x isa String ? XLSX.unescape(x) : x for x in y] for y in dtable.data], dtable.column_labels
+    r2_data, r2_col_names = dtable.data, dtable.column_labels
     check_test_data(r2_data, esc_data)
     check_test_data(r2_data, r1_data)
     @test string(r2_col_names[4]) == esc_col_names[4]
     @test string(r2_col_names[3]) == esc_col_names[3]
     @test string(r2_col_names[2]) == esc_col_names[2]
     @test string(r2_col_names[1]) == esc_col_names[1]
+
+    esc_col_names = ["&; &amp; &quot; &lt; &gt; &apos; ", "I❤Julia", "\"<'&O-O&'>\"", "<&>"]
+    esc_sheetname = string( esc_col_names[1],esc_col_names[2],esc_col_names[3],esc_col_names[4])[1:30] # There is a hard limit in Excel
+    esc_data = Vector{Any}(undef, 4)
+    esc_data[1] = ["11&amp;&",    "12&quot;&",    "13&lt;&",    "14&gt;&",    "15&apos;&"    ]
+    esc_data[2] = ["21&&amp;&&",  "22&&quot;&&",  "23&&lt;&&",  "24&&gt;&&",  "25&&apos;&&"  ]
+    esc_data[3] = ["31&&&amp;&&&","32&&&quot;&&&","33&&&lt;&&&","34&&&gt;&&&","35&&&apos;&&&"]
+    esc_data[4] = ["41& &; &&",   "42\" \"; \"\"","43< <; <<",  "44> >; >>",  "45' '; ''"    ]
+println("writing")
+    XLSX.writetable(esc_filename, esc_data, esc_col_names, overwrite=true, sheetname=esc_sheetname)
+
+println("reading")
+    dtable = XLSX.readtable(esc_filename, esc_sheetname)
+    r3_data, r3_col_names = dtable.data, dtable.column_labels
+
+    check_test_data(r3_data, esc_data)
+    @test r3_col_names[4] == Symbol( esc_col_names[4] )
+    @test r3_col_names[3] == Symbol( esc_col_names[3] )
+    @test r3_col_names[2] == Symbol( esc_col_names[2] )
+    @test r3_col_names[1] == Symbol( esc_col_names[1] )
+    isfile(esc_filename) && rm(esc_filename)
+
+    # compare to the backup version: escape2.xlsx
+    dtable = XLSX.readtable(joinpath(data_directory, "escape2.xlsx"), esc_sheetname)
+    r4_data, r4_col_names = dtable.data, dtable.column_labels
+    check_test_data(r4_data, esc_data)
+    check_test_data(r4_data, r3_data)
+    @test r4_col_names[4] == Symbol( esc_col_names[4] )
+    @test r4_col_names[3] == Symbol( esc_col_names[3] )
+    @test r4_col_names[2] == Symbol( esc_col_names[2] )
+    @test r4_col_names[1] == Symbol( esc_col_names[1] )
+
 end
 
 # issue #67

@@ -187,11 +187,11 @@ end
     XL_SPILL = 8 # Turns out #SPILL is not an official error. These will return #VALUE errors
 end
 mutable struct Cell <: AbstractCell
-    ref::CellRef
-    value::UInt64
+    ref::CellRef 
+    value::UInt64 # Needs to be `reinterpret`ed according to the `Cell.datatype`
     style::UInt32
     meta::UInt16
-    datatype::CellValueType
+    datatype::CellValueType # ENUM determines how `Cell.value` needs to be `reinterpret`ed
     formula::Bool # has a formula in Workbook.formulas
 end
 

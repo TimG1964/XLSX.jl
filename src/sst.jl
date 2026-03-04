@@ -104,9 +104,9 @@ end
 # allow to write cells containing only whitespace characters or with leading or trailing whitespace.
 function add_shared_string!(wb::Workbook, str_unformatted::AbstractString; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int
     if startswith(str_unformatted, ' ') || endswith(str_unformatted, ' ') || contains(str_unformatted, '\n')  || contains(str_unformatted, "  ")
-        str_formatted = string("<si>\n  <t xml:space=\"preserve\">", XML.escape(str_unformatted), "</t>\n</si>")
+        str_formatted = string("<si>\n  <t xml:space=\"preserve\">", XLSX.escape(str_unformatted), "</t>\n</si>")
     else
-        str_formatted = string("<si>\n  <t>", XML.escape(str_unformatted), "</t>\n</si>")
+        str_formatted = string("<si>\n  <t>", XLSX.escape(str_unformatted), "</t>\n</si>")
     end
     return add_formatted_string!(wb, str_formatted; mylock)
 end
@@ -150,26 +150,7 @@ end
         put!(out, copy(ssts[1:i]))
     end
 end
-#=
-function produce_sstchunks(out, n, ssts, chunksize)
-    i=0
-    while !isnothing(n)
-        if _is_tag(n.tag, "si")
-            i += 1
-            ssts[i] = SstToken(n, i)
-        end
-        if i >= chunksize
-            put!(out, copy(ssts))
-            i=0
-        end
-        n = XML.next(n)
-    end
-    if i>0 # handle last incomplete chunk
-        put!(out, copy(ssts[1:i]))
-    end
-    return out
-end
-=#
+
 function stream_ssts(n::XML.LazyNode, chunksize::Int; channel_size::Int=1 << 8)
     n = XML.next(n)
     ssts = Vector{SstToken}(undef, chunksize)
@@ -225,59 +206,7 @@ end
     close(sst_results)
     wait(consumer)
 end
-#=
-function load_sst_table!(wb::Workbook, chan::Channel, chunksize::Int, nthreads::Int)
-    sst_table = get_sst(wb)
-    sst_table.is_loaded=true
 
-    sst_results = Channel{Vector{Sst}}(1 << 8)
-    all_ssts = Vector{Tuple{Int,Sst}}()
-
-    consumer = @async begin
-        for ssts in sst_results        
-            for sst in ssts
-                push!(all_ssts, (sst.idx, sst))
-            end
-        end    
-
-        sort!(all_ssts, by = x -> x[1])
-    
-        empty!(sst_table.index)
-        for sst in all_ssts
-            add_formatted_string!(sst_table, sst[end].formatted)
-        end
-    
-    end
-
-    # Producer tasks
-    @sync for _ in 1:nthreads
-        Threads.@spawn begin
-            for ssts in chan
-                chunk = Vector{Sst}(undef, chunksize)
-                sst_count=0
-                for tok in ssts
-                    sst_count += 1
-                    chunk[sst_count] = process_sst(tok)
-                    if sst_count == chunksize
-                        put!(sst_results, copy(chunk))
-                        sst_count=0
-                    end
-                end
-                if sst_count>0 # handle last incomplete chunk
-                    put!(sst_results, copy(chunk[1:sst_count]))
-                end
-            end
-        end
-    end
-    
-    close(sst_results)
-
-    wait(consumer)  # ensure consumer is done
-
-#   sst_table.is_loaded=true
-
-end
-=#
 # Checks whether this workbook has a Shared String Table.
 function has_sst(workbook::Workbook) :: Bool
     relationship_type = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings"
@@ -290,7 +219,8 @@ end
 function unformatted_text(el::XML.LazyNode) :: String
     io = IOBuffer()
     gather_strings!(io, el)
-    return XML.unescape(String(take!(io)))
+    s = XLSX.unescape(String(take!(io)))
+    return s
 end
 
 function gather_strings!(io::IOBuffer, e::XML.LazyNode)
@@ -420,7 +350,7 @@ function richTextRunToXML!(io::IO, run::RichTextRun)
             write(io, "<rPr>", String(take!(props)), "</rPr>")
         end
 
-end
+    end
 
     # whitespace rules
     needs_preserve =
@@ -429,7 +359,7 @@ end
         contains(run.text, '\n') ||
         contains(run.text, "  ")
 
-    escaped = XML.escape(run.text)
+    escaped = XLSX.escape(run.text)
 
     if needs_preserve
         write(io, "<t xml:space=\"preserve\">", escaped, "</t>")
@@ -440,7 +370,6 @@ end
     write(io, "</r>")
 
     return nothing
-#    return String(take!(io))
 end
 
 function richTextStringtoXML(rts::RichTextString)
@@ -458,11 +387,9 @@ function RichTextString(runs::Vector{RichTextRun})
     return RichTextString(t, runs)
 end
 
-#Base.show(io::IO, rts::RichTextString) = Base.show(io, rts.text)
 Base.:(==)(rts1::RichTextString, rts2::RichTextString) = rts1.text == rts2.text && length(rts1.runs) == length(rts2.runs) && all(==(true), rts1.runs .== rts2.runs)
-Base.hash(rts::RichTextString) = sum(hash.(rts.runs))
+Base.hash(rts::RichTextString, h::UInt) = hash(rts.runs, hash(rts.text, h))
 Base.length(rts::RichTextString) = length(rts.text)
-#Base.show(io::IO, rts::RichTextString) = print(io, rts.text)
 Base.iterate(rts::RichTextString, i::Integer=firstindex(rts.text)) = Base.iterate(rts.text, i)
 Base.ncodeunits(rts::RichTextString) = ncodeunits(rts.text)
 Base.codeunit(rts::RichTextString) = codeunit(rts.text)
@@ -540,49 +467,51 @@ function Base.getindex(rts::RichTextString, r::UnitRange{Int})::RichTextString
 
     return RichTextString(substr, new_runs)
 end
-#=
-function Base.getindex(rts::RichTextString, r::UnitRange{Int})::RichTextString
 
-    substr = rts.text[r]
-    
-    # Find runs that overlap with the requested range
-    new_runs = RichTextRun[]
-    pos = 1
-    for run in rts.runs
-        run_end = pos + ncodeunits(run.text) - 1
-        run_range = pos:run_end
-        
-        # Check for overlap
-        overlap_start = max(first(r), first(run_range))
-        overlap_end = min(last(r), last(run_range))
-        
-        if overlap_start <= overlap_end
-            # Slice the run's text to the overlapping portion
-            local_start = overlap_start - pos + 1
-            local_end = overlap_end - pos + 1
-            sliced_text = run.text[local_start:local_end]
-            push!(new_runs, RichTextRun(sliced_text, run.atts))
-        end
-        
-        pos = run_end + 1
-    end
-    
-    return RichTextString(substr, new_runs)
-end
-=#
-function Base.:(==)(run1::RichTextRun, run2::RichTextRun)
-    run1.text == run2.text || return false
-    for (k, v) in run1.atts
-        haskey(run2.atts, k) || return false
-        if k == :color
-            get_color(v) == get_color(run2.atts[k]) || return false
+function Base.:(==)(r1::RichTextRun, r2::RichTextRun)
+    r1.text == r2.text || return false
+
+    # Handle Nothing vs Dict
+    a1 = r1.atts
+    a2 = r2.atts
+    a1 === a2 && return true
+    (a1 === nothing || a2 === nothing) && return false
+
+    # Same keys?
+    keys(a1) == keys(a2) || return false
+
+    # Compare values with special color handling
+    for k in keys(a1)
+        v1 = a1[k]
+        v2 = a2[k]
+        if k === :color
+            get_color(v1) == get_color(v2) || return false
         else
-            v == run2.atts[k] || return false
+            v1 == v2 || return false
         end
     end
+
     return true
 end
-Base.hash(run::RichTextRun) = hash(run.text) + hash(run.atts)
+function Base.hash(r::RichTextRun, h::UInt)
+    # Hash the run text first
+    h = hash(r.text, h)
+
+    # No attributes
+    if r.atts === nothing
+        return hash(nothing, h)
+    end
+
+    # Normalize attributes for hashing
+    # (color values canonicalized via get_color)
+    normalized = Dict{Symbol,Any}()
+    for (k, v) in r.atts
+        normalized[k] = (k === :color ? get_color(v) : v)
+    end
+
+    # Hash the normalized attribute dict
+    return hash(normalized, h)
+end
 Base.length(run::RichTextRun) = length(run.text)
 function Base.show(io::IO, run::RichTextRun)
     maxlen_txt = 22

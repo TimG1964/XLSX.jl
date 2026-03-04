@@ -1456,10 +1456,10 @@ function setCfCellIs(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}=())
         cfx["stopIfTrue"] = "1"
     end
     cfx["operator"] = operator
-    push!(cfx, XML.Element("formula", XML.Text(XML.escape(value))))
+    push!(cfx, XML.Element("formula", XML.Text(XLSX.escape(value))))
     if !isnothing(value2) && operator ∈ ["between", "notBetween"]
 
-        push!(cfx, XML.Element("formula", XML.Text(XML.escape(value2))))
+        push!(cfx, XML.Element("formula", XML.Text(XLSX.escape(value2))))
     end
 
     update_worksheet_cfx!(allcfs, cfx, ws, rng)
@@ -1549,7 +1549,7 @@ function setCfContainsText(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,An
     end
     cfx["operator"] = operator
     cfx["text"] = value
-    push!(cfx, XML.Element("formula", XML.Text(XML.escape(formula))))
+    push!(cfx, XML.Element("formula", XML.Text(XLSX.escape(formula))))
 
     update_worksheet_cfx!(allcfs, cfx, ws, rng)
 
@@ -1801,7 +1801,7 @@ function setCfTimePeriod(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}
     end
     cfx["timePeriod"] = operator
 
-    push!(cfx, XML.Element("formula", XML.Text(XML.escape(formula))))
+    push!(cfx, XML.Element("formula", XML.Text(XLSX.escape(formula))))
 
     update_worksheet_cfx!(allcfs, cfx, ws, rng)
 
@@ -1880,7 +1880,7 @@ function setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::CellRange; allkws::D
     if !isnothing(stopIfTrue) && stopIfTrue == "true"
         cfx["stopIfTrue"] = "1"
     end
-    formula != "" && push!(cfx, XML.Element("formula", XML.Text(XML.escape(formula))))
+    formula != "" && push!(cfx, XML.Element("formula", XML.Text(XLSX.escape(formula))))
 
     update_worksheet_cfx!(allcfs, cfx, ws, rng)
 
@@ -1947,7 +1947,7 @@ function setCfFormula(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}=()
         cfx["stopIfTrue"] = "1"
     end
 
-    push!(cfx, XML.Element("formula", XML.Text("(" * XML.escape(uppercase_unquoted(formula)) * ")")))
+    push!(cfx, XML.Element("formula", XML.Text("(" * XLSX.escape(uppercase_unquoted(formula)) * ")")))
 
     update_worksheet_cfx!(allcfs, cfx, ws, rng)
 
@@ -2036,7 +2036,7 @@ function setCfColorScale(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}
                         do_sheet_names_match(ws, SheetCellRef(val))
                         val = string(SheetCellRef(val).cellref)
                     end
-                    val = XML.escape(uppercase_unquoted(val))
+                    val = XLSX.escape(uppercase_unquoted(val))
                 end
             end
 
@@ -2162,7 +2162,7 @@ function setCfIconSet(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}=()
                     do_sheet_names_match(ws, SheetCellRef(val))
                     val = string(SheetCellRef(val).cellref)
                 end
-                val = XML.escape(uppercase_unquoted(val))
+                val = XLSX.escape(uppercase_unquoted(val))
             end
         end
         if !haskey(iconsets, iconset)
@@ -2381,7 +2381,7 @@ function setCfDataBar(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}=()
                     do_sheet_names_match(ws, SheetCellRef(val))
                     val = string(SheetCellRef(val).cellref)
                 end
-                val = XML.escape(uppercase_unquoted(val))
+                val = XLSX.escape(uppercase_unquoted(val))
             end
         end
         if !haskey(databars, databar)

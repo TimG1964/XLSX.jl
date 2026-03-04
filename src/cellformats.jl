@@ -1683,7 +1683,7 @@ function getFormat(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellFormat
             end
             atts=Dict{String,String}()
             for (k, v) in XML.attributes(current_format)
-                push!(atts, k => XML.unescape(v))
+                push!(atts, k => XLSX.unescape(v))
             end
             format_atts[XML.tag(current_format)] = atts
         else

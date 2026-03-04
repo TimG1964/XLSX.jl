@@ -109,14 +109,8 @@ julia> s[:]
  1   missing   missing   missing   missing   missing   missing   missing   missing   missing
 
 # formulae are there for when the saved file is opened in Excel.
-julia> XLSX.getcell(s, "B2")
-XLSX.Cell(B2, "", "", "", XLSX.ReferencedFormula("=A2+B1", 0, "B2:J10", nothing))
-
 julia> XLSX.getFormula(s, "B2")
 "=A2+B1"
-
-julia> XLSX.getcell(s, "J10")
-XLSX.Cell(J10, "", "", "", XLSX.FormulaReference(0, nothing))
 
 julia> XLSX.getFormula(s, "J10")
 "=I10+J9"
@@ -143,12 +137,6 @@ julia> setFormula(s, "B1", "=A1")
 
 julia> setFormula(s, "B2:B4", "=B1+A2") # creates a running total
 "=B1+A2"
-
-julia> XLSX.getcell(s, "B2")
-XLSX.Cell(B2, "", "", "", "", XLSX.ReferencedFormula("=B1+A2", 0, "B2:B4", nothing)) # this is the reference cell. It has index 0.
-
-julia> XLSX.getcell(s, "B4")
-XLSX.Cell(B4, "", "", "", "", XLSX.FormulaReference(0, nothing)) # this refers to the reference cell with index 0
 
 julia> XLSX.getFormula(s, "B2")
 "=B1+A2"
@@ -333,10 +321,11 @@ named cell range, should it be necessary to use the `raw` keyword option describ
     3
 
     julia> setFormula(f[1], "B1", "=max(A1:A3") # missing closing parenthesis in the formula
-    ""
+    "=max(A1:A3"
 
-    julia> XLSX.getcell(f[1], "B1")
-    XLSX.Cell(B1, "", "", "", "", XLSX.Formula("=max(A1:A3", "", "", nothing))
+    julia> XLSX.getFormula(f[1], "B1")
+    "=max(A1:A3"
+
 
     julia> writexlsx("mytest.xlsx", f, overwrite=true)
     "C:\\Users\\...\\Julia\\XLSX\\mytest.xlsx"

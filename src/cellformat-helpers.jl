@@ -258,7 +258,7 @@ function get_new_formatId(wb::Workbook, format::String)::Int
 
             format_node = XML.Element("numFmt";
                 numFmtId=string(existing_elements_count + PREDEFINED_NUMFMT_COUNT),
-                formatCode=XML.escape(format)
+                formatCode=XLSX.escape(format)
             )
 
             return styles_add_cell_attribute(wb, format_node, "numFmts") + PREDEFINED_NUMFMT_COUNT

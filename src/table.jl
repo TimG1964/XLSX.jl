@@ -54,7 +54,7 @@ end
 function _colname_prefix_string(sheet::Worksheet, cell::Cell)
     d = getdata(sheet, cell)
     if d isa String
-        return XML.unescape(d)
+        return d
     else
         return string(d)
     end
