@@ -38,7 +38,9 @@ The iterator element is a SheetRow.
 
 # strip off namespace prefix of nodename
 function nodename(x::XML.LazyNode)
-    split(XML.tag(x), ':')[end]
+    t = XML.tag(x)
+    i = findlast(==(':'), t)
+    return isnothing(i) ? t : t[i+1:end]
 end
 
 @inline get_worksheet(itr::SheetRowIterator) = itr.sheet
@@ -198,20 +200,18 @@ function Base.iterate(ws_cache::WorksheetCache, state::Union{Nothing, WorksheetC
         return SheetRow(get_worksheet(ws_cache), current_row_number, current_row_ht, sheet_row_cells), state
 
     end
-
 end
-
 
 function find_row(itr::SheetRowIterator, row::Int) :: SheetRow
     ws=get_worksheet(itr)
 
     # if cache is in use, look-up row direct rather than iterating
     if !isnothing(ws.cache) && is_cache_enabled(ws)
-        if haskey(ws.cache.cells, row)
-            c =  ws.cache.cells[row]
+        if (c = get(ws.cache.cells, row, nothing)) !== nothing
             ht = ws.cache.row_ht[row]
             return SheetRow(ws, row, ht, c)
         end
+
         throw(XLSXError("Row $row not found."))
 
     # If can't use cache then lazily iterate sheetrows
@@ -338,19 +338,13 @@ function process_row(row::XML.LazyNode, handled_attributes::Set{String}, ws::Wor
     if !isnothing(atts)
         current_row_ht = haskey(atts, "ht") ? parse(Float64, atts["ht"]) : nothing
         row_num = haskey(atts, "r") ? parse(Int, atts["r"]) : nothing
+        row_num === nothing && throw(XLSXError("Row without 'r' attribute encountered in worksheet $(ws.name)."))
         unhandled_attributes = Dict(filter(attr -> !in(first(attr), handled_attributes), atts))
     end
 
     # Process cells
     rowcells = Dict{Int,Cell}()
     _, sst_count = get_rowcells!(rowcells, row, ws; mylock)
-
-#=
-    # Verify row consistency
-    if any([row_number(c) != row_num for c in values(rowcells)])
-        @warn "Row number mismatch in row $row_num."
-    end
-=#
 
     return sst_count, SheetRow(ws, row_num, current_row_ht, rowcells), unhandled_attributes
 
@@ -416,7 +410,6 @@ function match_rows(ws::Worksheet, rows_to_match::Vector{Int})::Vector{SheetRow}
     target_file = get_relationship_target_by_id("xl", get_workbook(ws), ws.relationship_id)
     lznode = open_internal_file_stream(get_xlsxfile(ws), target_file)
 
-#    nextrow=parse(XML.LazyNode, "")
     n = XML.next(lznode)
     mylock=ReentrantLock()
     while !isnothing(n)
@@ -425,19 +418,13 @@ function match_rows(ws::Worksheet, rows_to_match::Vector{Int})::Vector{SheetRow}
             if !isnothing(atts)
                 row_num = haskey(atts, "r") ? parse(Int, atts["r"]) : nothing
             end
+            row_num === nothing && throw(XLSXError("Row without 'r' attribute encountered in worksheet $(ws.name)."))
             if !isnothing(row_num) && row_num == rows_to_match[i] # process matching rows into SheetRows
                 current_row_ht = haskey(atts, "ht") ? parse(Float64, atts["ht"]) : nothing
 
                 # Process cells
                 rowcells = Dict{Int,Cell}()
                 n, _ = get_rowcells!(rowcells, n, ws; mylock)
-
-#=
-                # Verify row consistency
-                if any([row_number(c) != row_num for c in values(rowcells)])
-                    @warn "Row number mismatch in row $row_num."
-                end
-=#
 
                 sheetrow = SheetRow(ws, row_num, current_row_ht, rowcells)
                 push!(matched_rows, sheetrow)

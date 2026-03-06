@@ -55,7 +55,7 @@ include("workbook.jl")
 include("worksheet.jl")
 include("cell.jl")
 include("styles.jl")
-include("cellformat-helpers.jl")
+include("cellformat-helpers.jl") # must load before cellformats.jl
 include("cellformats.jl")
 include("conditional-format-helpers.jl") # must load before conditional-formats.jl
 include("conditional-formats.jl")

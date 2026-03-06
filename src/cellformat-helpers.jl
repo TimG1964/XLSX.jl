@@ -80,6 +80,34 @@ const RGX_FMT = Regex(
     ], "|")
 )
 
+const VALID_FILL_PATTERNS = (
+    "none", "solid", "mediumGray", "darkGray", "lightGray",
+    "darkHorizontal", "darkVertical", "darkDown", "darkUp", "darkGrid", "darkTrellis",
+    "lightHorizontal", "lightVertical", "lightDown", "lightUp", "lightGrid", "lightTrellis",
+    "gray125", "gray0625"
+)
+
+const VALID_BORDER_STYLES = (
+    "none", "thin", "medium", "dashed", "dotted", "thick", "double", "hair",
+    "mediumDashed", "dashDot", "mediumDashDot", "dashDotDot", "mediumDashDotDot", "slantDashDot"
+)
+const VALID_DIAGONAL_DIRECTIONS = ("up", "down", "both")
+
+# Shared kwarg type alias for border sides
+const BorderKw = Union{Nothing,Vector{Pair{String,String}}}
+
+const VALID_HORIZONTAL_ALIGNMENTS = ("left", "center", "right", "fill", "justify", "centerContinuous", "distributed")
+const VALID_VERTICAL_ALIGNMENTS   = ("top", "center", "bottom", "justify", "distributed")
+
+const BUILTIN_NUMFMT_RANGES = (0:22, 37:40, 45:49)
+
+# Reverse lookup: format code string -> built-in numFmtId integer.
+# Avoids linear scan of builtinFormats on every setFormat call.
+const BUILTIN_FORMAT_CODES = Dict{String,Int}(v => parse(Int, k) for (k, v) in builtinFormats)
+
+# Excel adds this padding to any user-specified column width
+const EXCEL_COLUMN_WIDTH_PADDING = 0.7109375
+
 #
 # -- A bunch of helper functions ...
 #
@@ -193,6 +221,25 @@ function isInDim(ws::Worksheet, dim::CellRange, row, col)
     return true
 end
 
+_xpath(parts...) = join(["/$SPREADSHEET_NAMESPACE_XPATH_ARG:$p" for p in parts], "")
+
+# Merges a boolean/flag font tag (e.g. "b", "i", "strike").
+# Returns nothing (present, no attributes) if kept/set, or missing to omit.
+function _merge_flag_tag(tag::String, new_val::Union{Nothing,Bool}, old_atts::Dict)
+    (isnothing(new_val) ? haskey(old_atts, tag) : new_val) ? nothing : missing
+end
+
+# Merges a single-value font tag (e.g. "sz", "name", "vertAlign").
+# Returns Dict("val" => ...) if set, preserves old value, or missing to omit.
+function _merge_val_tag(tag::String, new_val, old_atts::Dict)
+    isnothing(new_val) ? get(old_atts, tag, missing) : Dict("val" => string(new_val))
+end
+
+# Merges a dict-valued tag (e.g. "color") using a provided constructor for new values.
+# Returns a Dict of attributes if set/preserved, or missing to omit.
+function _merge_dict_tag(tag::String, new_val, old_atts::Dict, build_fn::Function)
+    isnothing(new_val) ? get(old_atts, tag, missing) : build_fn(new_val)
+end
 
 """
     is_valid_format(fmt::AbstractString) -> Bool
@@ -234,7 +281,100 @@ function is_valid_format(fmt::AbstractString) # From Claude
     return true
 end
 
+# Parses a patternFill XML node into a flat dict of fill attributes.
+# patternType is stored directly, fg/bg color attributes are prefixed with "fg"/"bg".
+function _parse_pattern_fill(pattern::XML.Node)::Dict{String,String}
+    atts = Dict{String,String}()
+    a = XML.attributes(pattern)
+    if !isnothing(a)
+        for (k, v) in a
+            atts[k] = v  # e.g. "patternType" => "solid"
+        end
+    end
+    for subc in XML.children(pattern)
+        XML.nodetype(subc) == XML.Element || continue
+        tag_prefix = first(XML.tag(subc), 2)  # "fg" or "bg"
+        sub_atts = XML.attributes(subc)
+        if isnothing(sub_atts) || isempty(sub_atts)
+            throw(XLSXError("Expected attributes on fill sub-element <$(XML.tag(subc))>, found none."))
+        end
+        for (k, v) in sub_atts
+            atts[tag_prefix * k] = v  # e.g. "fgrgb" => "FFFF0000"
+        end
+    end
+    return atts
+end
 
+# Dispatch boilerplate
+# Merges a single alignment attribute into atts.
+# Preserves the old value if new_val is nothing, otherwise applies convert_fn to new_val.
+function _merge_alignment_att(
+    atts::AbstractDict, xml_key::String, new_val,
+    old_atts::Dict{String,String}, convert_fn=string
+)
+    if isnothing(new_val)
+        haskey(old_atts, xml_key) && (atts[xml_key] = old_atts[xml_key])
+    else
+        atts[xml_key] = convert_fn(new_val)
+    end
+end
+
+# Coerces a Vector{Pair{String,String}} kwarg to Dict{String,String}, or returns nothing.
+_to_border_dict(v) = isnothing(v) ? nothing : Dict{String,String}(p for p in v)
+
+# Validates that `outside` is not combined with any other border kwargs.
+function _check_outside_conflict(outside, left, right, top, bottom, diagonal, allsides)
+    !isnothing(outside) && !all(isnothing, [left, right, top, bottom, diagonal, allsides]) &&
+        throw(XLSXError("Keyword `outside` is incompatible with any other keywords."))
+end
+
+# Merges new and old attributes for a single border side.
+# Handles style, color, and (for diagonal) direction.
+function _merge_border_side(
+    side::String,
+    new_val::Union{Nothing,Dict{String,String}},
+    old_atts::Union{Nothing,Dict{String,Union{Dict{String,String},Nothing}}}
+)::Dict{String,String}
+
+    result = Dict{String,String}()
+    old_side = (!isnothing(old_atts) && haskey(old_atts, side)) ? old_atts[side] : nothing
+
+    # If no new value, preserve old side entirely
+    isnothing(new_val) && return isnothing(old_side) ? result : old_side
+
+    # Style: use new if provided, else inherit from old
+    if haskey(new_val, "style")
+        new_val["style"] ∈ VALID_BORDER_STYLES ||
+            throw(XLSXError("Invalid border style: $(new_val["style"]). Must be one of: $(join(VALID_BORDER_STYLES, ", "))."))
+        result["style"] = new_val["style"]
+    elseif !isnothing(old_side) && haskey(old_side, "style")
+        result["style"] = old_side["style"]
+    end
+
+    # Color: use new if provided, else inherit all non-style keys from old
+    if haskey(new_val, "color")
+        result["rgb"] = get_color(new_val["color"])
+    elseif !isnothing(old_side)
+        for (k, v) in old_side
+            k != "style" && (result[k] = v)
+        end
+    end
+
+    # Diagonal direction: use new if provided, else inherit, else default to "both"
+    if side == "diagonal"
+        if haskey(new_val, "direction")
+            new_val["direction"] ∈ VALID_DIAGONAL_DIRECTIONS ||
+                throw(XLSXError("Invalid diagonal direction: $(new_val["direction"]). Must be one of: $(join(VALID_DIAGONAL_DIRECTIONS, ", "))."))
+            result["direction"] = new_val["direction"]
+        elseif !isnothing(old_side) && haskey(old_side, "direction")
+            result["direction"] = old_side["direction"]
+        else
+            result["direction"] = "both"
+        end
+    end
+
+    return result
+end
 
 function get_new_formatId(wb::Workbook, format::String)::Int
     if haskey(builtinFormatNames, uppercasefirst(format)) # User specified a format by name

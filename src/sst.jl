@@ -9,17 +9,11 @@ SharedStringTable() = SharedStringTable(Vector{String}(), Dict{String, Int64}(),
 # Checks if string is inside shared string table.
 # Returns `nothing` if it's not in the shared string table.
 # Returns the index of the string in the shared string table. The index is 0-based.
-function get_shared_string_index(sst::SharedStringTable, str_formatted::String)# :: Union{Nothing, Int}
+function get_shared_string_index(sst::SharedStringTable, str::String)# :: Union{Nothing, Int}
     !sst.is_loaded && throw(XLSXError("Can't query shared string table because it's not loaded into memory."))
 
     #using a Dict is much more efficient than the findfirst approach especially on large datasets
-    k = str_formatted
-    if haskey(sst.index, k)
-        return sst.index[k]
-    else
-        return nothing
-    end
-
+    return get(sst.index, str, nothing)
 end
 function create_new_sst(wb::Workbook, sst::SharedStringTable)
     if !sst.is_loaded
@@ -49,33 +43,26 @@ function add_to_sst!(ss::SharedStringTable, si_xml::String)::Int64
     end
     
     # No match found, add new entry
+    new_idx = length(ss.shared_strings)  # 0-based index
     push!(ss.shared_strings, si_xml)
-    new_idx = length(ss.shared_strings)-1  # 0-based index
 
     ss.index[si_xml] = new_idx
 
-    if new_idx ∉ get_shared_string_index(ss, si_xml)
-        throw(XLSXError("Inconsistent state after adding a string to the Shared String Table."))
-    end
+#    if new_idx ∉ get_shared_string_index(ss, si_xml)
+#        throw(XLSXError("Inconsistent state after adding a string to the Shared String Table."))
+#    end
 
     return new_idx
 end
 
-function add_formatted_string!(sst::SharedStringTable, str_formatted::String; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int64
-    ind = get_shared_string_index(sst, str_formatted)
-    local new_index::Int
-    if ind !== nothing
-        # it's already in the table
-        return ind  # Found exact match
-    end
+function add_formatted_string!(sst::SharedStringTable, str::String; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int64
     if isnothing(mylock)
-        new_index = add_to_sst!(sst, str_formatted)
+        return add_to_sst!(sst, str)
     else
         lock(mylock) do
-            new_index = add_to_sst!(sst, str_formatted)
+            return add_to_sst!(sst, str)
         end
     end
-    return new_index
 end
 
 # Adds a string to shared string table. Returns the 0-based index of the shared string in the shared string table.
@@ -103,11 +90,15 @@ end
 
 # allow to write cells containing only whitespace characters or with leading or trailing whitespace.
 function add_shared_string!(wb::Workbook, str_unformatted::AbstractString; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int
-    if startswith(str_unformatted, ' ') || endswith(str_unformatted, ' ') || contains(str_unformatted, '\n')  || contains(str_unformatted, "  ")
-        str_formatted = string("<si>\n  <t xml:space=\"preserve\">", XLSX.escape(str_unformatted), "</t>\n</si>")
-    else
-        str_formatted = string("<si>\n  <t>", XLSX.escape(str_unformatted), "</t>\n</si>")
+    needs_preserve = startswith(str_unformatted, ' ') || endswith(str_unformatted, ' ') || contains(str_unformatted, '\n')  || contains(str_unformatted, "  ")
+    escaped = XLSX.escape(str_unformatted)
+    io = IOBuffer()
+    write(io, "<si>\n  <t")
+    if needs_preserve
+        write(io, " xml:space=\"preserve\"")
     end
+    write(io, ">", escaped, "</t>\n</si>")
+    str_formatted = String(take!(io))
     return add_formatted_string!(wb, str_formatted; mylock)
 end
 
@@ -186,10 +177,14 @@ end
         end    
         sort!(all_ssts, by = x -> x[1])
    
+        empty!(sst_table.shared_strings)
         empty!(sst_table.index)
-        for sst in all_ssts
-            add_formatted_string!(sst_table, sst[end].formatted)
+
+        for (i, sst) in all_ssts
+            push!(sst_table.shared_strings, sst.formatted)
+            sst_table.index[sst.formatted] = i - 1   # 0-based
         end
+
     end
    
     # Producer tasks
@@ -244,7 +239,8 @@ function gather_strings!(io::IOBuffer, e::XML.LazyNode)
         end
     else
         # Recurse into children for all other tags
-        for ch in XML.children(e)
+        children = XML.children(e)
+        for ch in children
             gather_strings!(io, ch)
         end
     end
@@ -268,12 +264,7 @@ end
 function init_sst_index(sst::SharedStringTable)
     empty!(sst.index)
     for i in 1:length(sst.shared_strings)
-        ind = get(sst.index, sst.shared_strings[i], nothing)
-        if ind === nothing
-            sst.index[sst.shared_strings[i]] = i-1
-        else
-            sst.index[sst.shared_strings[i]] = ind-1
-        end
+       sst.index[sst.shared_strings[i]] = i - 1
     end
 end
 
@@ -306,53 +297,43 @@ heterogeneous formatting within a single cell.
 function richTextRunToXML!(io::IO, run::RichTextRun)
     write(io, "<r>")
 
-    atts=run.atts
-
+    atts = run.atts
     if !isnothing(atts)
-
-        # Build rPr (run properties) if any formatting is specified
         props = IOBuffer()
-    
-        if haskey(atts, :name)
-            write(props, "<rFont val=\"$(atts[:name])\"/>")
+
+        if (v = get(atts, :name, nothing)) !== nothing
+            write(props, "<rFont val=\"", v, "\"/>")
         end
-    
-        if haskey(atts, :bold) && atts[:bold] == true
+        if get(atts, :bold, false) === true
             write(props, "<b/>")
         end
-    
-        if haskey(atts, :italic) && atts[:italic] == true
+        if get(atts, :italic, false) === true
             write(props, "<i/>")
         end
-    
-        if haskey(atts, :strike) && atts[:strike] == true
+        if get(atts, :strike, false) === true
             write(props, "<strike/>")
         end
-    
-        if haskey(atts, :color)
-            write(props, "<color rgb=\"$(get_color(atts[:color]))\"/>")
+        if (v = get(atts, :color, nothing)) !== nothing
+            write(props, "<color rgb=\"", get_color(v), "\"/>")
         end
-    
-        if haskey(atts, :size)
-            write(props, "<sz val=\"$(atts[:size])\"/>")
+        if (v = get(atts, :size, nothing)) !== nothing
+            write(props, "<sz val=\"", string(v), "\"/>") # size read as a float, output rounded to nearest half point.
+#            write(props, "<sz val=\"", v, "\"/>")
         end
-    
-        if haskey(atts, :under) && atts[:under] == true
+        if get(atts, :under, false) === true
             write(props, "<u/>")
         end
-    
-        if haskey(atts, :vertAlign)
-            write(props, "<vertAlign val=\"$(atts[:vertAlign])\"/>")
-        end
-    
-    # emit rPr if needed
-        if position(props) > 0
-            write(io, "<rPr>", String(take!(props)), "</rPr>")
+        if (v = get(atts, :vertAlign, nothing)) !== nothing
+            write(props, "<vertAlign val=\"", v, "\"/>")
         end
 
+        if position(props) > 0
+            write(io, "<rPr>")
+            write(io, take!(props))
+            write(io, "</rPr>")
+        end
     end
 
-    # whitespace rules
     needs_preserve =
         startswith(run.text, " ") ||
         endswith(run.text, " ") ||
@@ -368,7 +349,6 @@ function richTextRunToXML!(io::IO, run::RichTextRun)
     end
 
     write(io, "</r>")
-
     return nothing
 end
 
@@ -383,7 +363,7 @@ function richTextStringtoXML(rts::RichTextString)
 end
 function RichTextString(runs::Vector{RichTextRun})
     isempty(runs) && throw(XLSXError("Cannot create a RichTextString with no RichTextRuns"))
-    t = join([x.text for x in runs])
+    t = join((x.text for x in runs))
     return RichTextString(t, runs)
 end
 
@@ -457,7 +437,7 @@ function Base.getindex(rts::RichTextString, r::UnitRange{Int})::RichTextString
             local_end   = overlap_end   - global_char_pos + 1
 
             # Slice using character indexing
-            sliced_text = first(run_text, local_end)[local_start:end]
+            sliced_text = run_text[local_start:local_end]
 
             push!(new_runs, RichTextRun(sliced_text, run.atts))
         end
@@ -496,21 +476,20 @@ end
 function Base.hash(r::RichTextRun, h::UInt)
     # Hash the run text first
     h = hash(r.text, h)
+    atts = r.atts
 
     # No attributes
-    if r.atts === nothing
-        return hash(nothing, h)
+    if atts === nothing
+        return hash(0xdebdceef, h)  # any constant
     end
 
-    # Normalize attributes for hashing
+    # Order‑insensitive hash over attributes
     # (color values canonicalized via get_color)
-    normalized = Dict{Symbol,Any}()
-    for (k, v) in r.atts
-        normalized[k] = (k === :color ? get_color(v) : v)
+    for (k, v) in atts
+        v′ = (k === :color ? get_color(v) : v)
+        h = hash((k, v′), h)
     end
-
-    # Hash the normalized attribute dict
-    return hash(normalized, h)
+    return h
 end
 Base.length(run::RichTextRun) = length(run.text)
 function Base.show(io::IO, run::RichTextRun)
@@ -541,14 +520,14 @@ end
 
 RichTextString(runs::RichTextRun...) = RichTextString(collect(runs))
 
-XLSX.RichTextRun(text::String, atts::Dict{Symbol, Any}) = RichTextRun(text, collect(pairs(atts)))
+RichTextRun(text::String, atts::Dict{Symbol, Any}) = RichTextRun(text, collect(pairs(atts)))
 function RichTextRun(text::String, pairs::Vector{Pair{Symbol,String}})
     isempty(text) && throw(XLSXError("Cannot create a RichTextRun with no text."))
-    atts=Dict{Symbol,Any}(pairs)
-    for x in keys(atts)
-        in(x, ValidRichTextAttributes) || throw(XLSXError("Unknown Rich Text Attribute: ':$x'. Valid attributes are :bold, :italic, :under, :strike, :vertAlign, :color, :size, :name."))
+    for (k, _) in pairs
+        in(k, ValidRichTextAttributes) || throw(XLSXError("Unknown Rich Text Attribute: ':$x'. Valid attributes are :bold, :italic, :under, :strike, :vertAlign, :color, :size, :name."))
     end
-    return RichTextRun(text, collect(atts))
+    atts=Dict{Symbol, Any}(pairs)
+    return RichTextRun(text, atts)
 end
 
 """
