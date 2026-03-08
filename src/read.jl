@@ -694,7 +694,7 @@ function skipNode(r::XML.Raw, skipnode::String) # separate rows or ssts to speed
     end
     if skipnode == "sheetData"  # close parents for <row> or <sst> elements in the excerpted data
         write(skipped, "</sheetData>")
-        write(skipped, "</workshet>")
+        write(skipped, "</worksheet>")
     elseif skipnode == "sst"
         write(skipped, "</sst>")
     end
