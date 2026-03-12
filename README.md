@@ -8,14 +8,14 @@
 [![stable][docs-stable-img]][docs-stable-url]
 
 [license-img]: http://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square
-[ci-img]: https://github.com/felipenoris/XLSX.jl/workflows/CI/badge.svg
-[ci-url]: https://github.com/felipenoris/XLSX.jl/actions?query=workflow%3ACI
-[codecov-img]: https://img.shields.io/codecov/c/github/felipenoris/XLSX.jl/master.svg?label=codecov&style=flat-square
-[codecov-url]: http://codecov.io/github/felipenoris/XLSX.jl?branch=master
+[ci-img]: https://github.com/juliadata/XLSX.jl/workflows/CI/badge.svg
+[ci-url]: https://github.com/juliadata/XLSX.jl/actions?query=workflow%3ACI
+[codecov-img]: https://img.shields.io/codecov/c/github/juliadata/XLSX.jl/master.svg?label=codecov&style=flat-square
+[codecov-url]: http://codecov.io/github/juliadata/XLSX.jl?branch=master
 [docs-dev-img]: https://img.shields.io/badge/docs-dev-blue.svg?style=flat-square
-[docs-dev-url]: https://felipenoris.github.io/XLSX.jl/dev
+[docs-dev-url]: https://juliadata.github.io/XLSX.jl/dev
 [docs-stable-img]: https://img.shields.io/badge/docs-stable-blue.svg?style=flat-square
-[docs-stable-url]: https://felipenoris.github.io/XLSX.jl/stable
+[docs-stable-url]: https://juliadata.github.io/XLSX.jl/stable
 
 Excel file reader/writer for the Julia language.
 
@@ -51,24 +51,24 @@ julia> Pkg.add("XLSX")
 ## Source Code
 
 The source code for this package is hosted at
-[https://github.com/felipenoris/XLSX.jl](https://github.com/felipenoris/XLSX.jl).
+[https://github.com/juliadata/XLSX.jl](https://github.com/juliadata/XLSX.jl).
 
 ## License
 
 The source code for the package **XLSX.jl** is licensed under
-the [MIT License](https://raw.githubusercontent.com/felipenoris/XLSX.jl/master/LICENSE).
+the [MIT License](https://raw.githubusercontent.com/juliadata/XLSX.jl/master/LICENSE).
 
 ## Getting Help
 
 If you're having any trouble, have any questions about this package
 or want to ask for a new feature,
-just open a new [issue](https://github.com/felipenoris/XLSX.jl/issues).
+just open a new [issue](https://github.com/juliadata/XLSX.jl/issues).
 
 ## Contributing
 
 Contributions are always welcome!
 
-To contribute, fork the project on [GitHub](https://github.com/felipenoris/XLSX.jl)
+To contribute, fork the project on [GitHub](https://github.com/juliadata/XLSX.jl)
 and send a Pull Request.
 
 ## References

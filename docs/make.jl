@@ -25,6 +25,6 @@ makedocs(
 )
 
 deploydocs(
-    repo = "github.com/felipenoris/XLSX.jl.git",
+    repo = "github.com/juliahub/XLSX.jl.git",
     target = "build",
 )
