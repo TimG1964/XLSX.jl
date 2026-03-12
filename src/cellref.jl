@@ -2,10 +2,10 @@
 function CellRef(n::AbstractString)
     !is_valid_cellname(n) && throw(XLSXError("$n is not a valid CellRef."))
     column_name, row_number = split_cellname(n)
-    return CellRef(n, row_number, decode_column_number(column_name))
+    return CellRef(Int32(row_number), Int32(decode_column_number(column_name)))
 end
 
-@inline CellRef(row::Int, col::Int) = CellRef(encode_column_number(col) * string(row))
+@inline CellRef(row::Integer, col::Integer) = CellRef(Int32(row), Int32(col))
 @inline CellPosition(ref::CellRef) = CellPosition(row_number(ref), column_number(ref))
 @inline row_number(p::CellPosition) = p.row
 @inline column_number(p::CellPosition) = p.column
@@ -29,7 +29,7 @@ function decode_column_number(column_name::AbstractString) :: Int
 end
 
 # Converts column number to a column name. See also XLSX.decode_column_number.
-function encode_column_number(column_number::Int) :: String
+function encode_column_number(column_number::Integer) :: String
     if column_number <= 0 && column_number > EXCEL_MAX_COLS
         throw(XLSXError("Column number should be in the range from 1 to $EXCEL_MAX_COLS."))
     end
@@ -56,11 +56,12 @@ function encode_column_number(column_number::Int) :: String
     end
 end
 
-Base.string(c::CellRef) = c.name
+Base.string(c::CellRef) = string(encode_column_number(column_number(c))) * string(row_number(c))
 Base.show(io::IO, c::CellRef) = print(io, string(c))
-Base.:(==)(c1::CellRef, c2::CellRef) = c1.name == c2.name
-Base.hash(c::CellRef) = hash(c.name)
+Base.:(==)(c1::CellRef, c2::CellRef) = c1.row_number == c2.row_number && c1.column_number == c2.column_number
+Base.hash(c::CellRef) = hash(string(c))
 Base.isless(c1::CellRef, c2::CellRef) = Base.isless(string(c1), string(c2))
+cellname(c::CellRef) :: String = string(encode_column_number(column_number(c))) * string(row_number(c))
 
 Base.:(==)(rf1::ReferencedFormula, rf2::ReferencedFormula) = (
     rf1.formula == rf2.formula &&
@@ -76,6 +77,8 @@ Base.:(==)(rf1::FormulaReference, rf2::FormulaReference) = (
 
 Base.:(==)(rf1::Formula, rf2::Formula) = (
     rf1.formula == rf2.formula &&
+    rf1.type == rf2.type &&
+    rf1.ref == rf2.ref &&
     rf1.unhandled == rf2.unhandled
 )
 
@@ -330,15 +333,21 @@ end
 
 Base.string(cr::ColumnRange) = encode_column_number(cr.start)*":"*encode_column_number(cr.stop)
 Base.show(io::IO, cr::ColumnRange) = print(io, string(cr))
-Base.:(==)(cr1::ColumnRange, cr2::ColumnRange) = cr1.start == cr2.start && cr2.stop == cr2.stop
+Base.:(==)(cr1::ColumnRange, cr2::ColumnRange) = cr1.start == cr2.start && cr1.stop == cr2.stop
 Base.hash(cr::ColumnRange) = hash(cr.start) + hash(cr.stop)
 Base.in(column_number::Integer, rng::ColumnRange) = rng.start <= column_number && column_number <= rng.stop
 
 Base.string(cr::RowRange) = string(cr.start)*":"*string(cr.stop)
 Base.show(io::IO, cr::RowRange) = print(io, string(cr))
-Base.:(==)(cr1::RowRange, cr2::RowRange) = cr1.start == cr2.start && cr2.stop == cr2.stop
+Base.:(==)(cr1::RowRange, cr2::RowRange) = cr1.start == cr2.start && cr1.stop == cr2.stop
 Base.hash(cr::RowRange) = hash(cr.start) + hash(cr.stop)
 Base.in(row_number::Integer, rng::RowRange) = rng.start <= row_number && row_number <= rng.stop
+
+function cell_offset(from::CellRef, to::CellRef) # return tuple (row_offset, column_offset) between `from` and `to` cells
+    offset = (to.row_number - from.row_number, to.column_number - from.column_number)
+    (first(offset)>=0 && last(offset) >=0) || throw(XLSXError("The 'to' cell cannot be above or to the left of the 'from' cell."))
+    return offset
+end
 
 function relative_column_position(column_number::Integer, rng::ColumnRange)
     column_number ∉ rng && throw(XLSXError("Column $column_number is outside range $rng."))
@@ -365,6 +374,13 @@ const RGX_SINGLE_ROW = r"^[1-9][0-9]*$"
         s = split(n, ":")
         return s[1], s[2]
     end
+end
+
+@inline function combine_sheet_range(s::Worksheet, rng::CellRange)
+    return string(s.name, "!", encode_column_number(rng.start.column_number), rng.start.row_number, ":", encode_column_number(rng.stop.column_number), rng.stop.row_number)
+end
+@inline function combine_sheet_ref(s::Worksheet, ref::CellRef)
+    return string(s.name, "!", encode_column_number(ref.column_number), ref.row_number)
 end
 
 function is_valid_column_range(r::AbstractString) :: Bool
@@ -399,12 +415,20 @@ function is_valid_row_range(r::AbstractString) :: Bool
 end
 
 function RowRange(r::AbstractString)
+    if is_valid_cellrange(r)
+        cr=CellRange(r)
+        return RowRange(row_number(cr.start), row_number(cr.stop))
+    end
     !is_valid_row_range(r) && throw(XLSXError("Invalid row range: $r."))
     start_name, stop_name = split_sheet_range(r) 
     return RowRange(parse(Int, start_name), parse(Int, stop_name))
 end
 function ColumnRange(r::AbstractString)
-    !is_valid_column_range(r) && throw(XLSXError("Invalid column range: $r."))
+    if is_valid_cellrange(r)
+        cr=CellRange(r)
+        return ColumnRange(column_number(cr.start), column_number(cr.stop))
+    end
+        !is_valid_column_range(r) && throw(XLSXError("Invalid column range: $r."))
     start_name, stop_name = split_sheet_range(r)
     return ColumnRange(decode_column_number(start_name), decode_column_number(stop_name))
 end
@@ -464,27 +488,27 @@ end
 
 Base.string(cr::SheetCellRef) = string(quoteit(cr.sheet), "!", cr.cellref)
 Base.show(io::IO, cr::SheetCellRef) = print(io, string(cr))
-Base.:(==)(cr1::SheetCellRef, cr2::SheetCellRef) = cr1.sheet == cr2.sheet && cr2.cellref == cr2.cellref
+Base.:(==)(cr1::SheetCellRef, cr2::SheetCellRef) = cr1.sheet == cr2.sheet && cr1.cellref == cr2.cellref
 Base.hash(cr::SheetCellRef) = hash(cr.sheet) + hash(cr.cellref)
 
 Base.string(cr::SheetCellRange) = string(quoteit(cr.sheet), "!", cr.rng)
 Base.show(io::IO, cr::SheetCellRange) = print(io, string(cr))
-Base.:(==)(cr1::SheetCellRange, cr2::SheetCellRange) = cr1.sheet == cr2.sheet && cr2.rng == cr2.rng
+Base.:(==)(cr1::SheetCellRange, cr2::SheetCellRange) = cr1.sheet == cr2.sheet && cr1.rng == cr2.rng
 Base.hash(cr::SheetCellRange) = hash(cr.sheet) + hash(cr.rng)
 
 Base.string(cr::SheetColumnRange) = string(quoteit(cr.sheet), "!", cr.colrng)
 Base.show(io::IO, cr::SheetColumnRange) = print(io, string(cr))
-Base.:(==)(cr1::SheetColumnRange, cr2::SheetColumnRange) = cr1.sheet == cr2.sheet && cr2.colrng == cr2.colrng
+Base.:(==)(cr1::SheetColumnRange, cr2::SheetColumnRange) = cr1.sheet == cr2.sheet && cr1.colrng == cr2.colrng
 Base.hash(cr::SheetColumnRange) = hash(cr.sheet) + hash(cr.colrng)
 
 Base.string(cr::SheetRowRange) = string(quoteit(cr.sheet), "!", cr.rowrng)
 Base.show(io::IO, cr::SheetRowRange) = print(io, string(cr))
-Base.:(==)(cr1::SheetRowRange, cr2::SheetRowRange) = cr1.sheet == cr2.sheet && cr2.rowrng == cr2.rowrng
+Base.:(==)(cr1::SheetRowRange, cr2::SheetRowRange) = cr1.sheet == cr2.sheet && cr1.rowrng == cr2.rowrng
 Base.hash(cr::SheetRowRange) = hash(cr.sheet) + hash(cr.colrng)
 
 Base.string(cr::NonContiguousRange) = join([string(quoteit(cr.sheet), "!", x) for x in cr.rng],",")
 Base.show(io::IO, cr::NonContiguousRange) = print(io, string(cr))
-Base.:(==)(cr1::NonContiguousRange, cr2::NonContiguousRange) = cr1.sheet == cr2.sheet && cr2.rng == cr2.rng
+Base.:(==)(cr1::NonContiguousRange, cr2::NonContiguousRange) = cr1.sheet == cr2.sheet && cr1.rng == cr2.rng
 Base.hash(cr::NonContiguousRange) = hash(cr.sheet) + hash(cr.rng)
 
 function Base.in(ref::SheetCellRef, ncrng::NonContiguousRange) :: Bool
@@ -530,10 +554,10 @@ function Base.length(r::NonContiguousRange)::Int # Number of cells in `r`, elimi
     allcells= Vector{String}()
     for rng in r.rng
         if rng isa CellRef
-            push!(allcells, rng.name)
+            push!(allcells, cellname(rng))
         else
             for cell in rng
-                push!(allcells, cell.name)
+                push!(allcells, cellname(cell))
             end
         end
     end

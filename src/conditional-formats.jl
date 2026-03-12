@@ -1,4 +1,3 @@
-#const needsValue2::Vector{String} = ["between", "notBetween"]
 const highlights::Dict{String,Dict{String,Dict{String,String}}} = Dict(
     "redfilltext" => Dict(
         "font" => Dict("color" => "FF9C0006"),
@@ -441,6 +440,7 @@ const allIcons::Dict{String,Tuple{String,String}} = Dict(
     "51" => ("5Boxes", "3"),
     "52" => ("5Boxes", "4")
 )
+
 const timeperiods::Dict{String,String} = Dict(
     "last7Days" => "AND(TODAY()-FLOOR(__CR__,1)<=6,FLOOR(__CR__,1)<=TODAY())",
     "yesterday" => "FLOOR(__CR__,1)=TODAY()-1",
@@ -453,7 +453,6 @@ const timeperiods::Dict{String,String} = Dict(
     "thisMonth" => "AND(MONTH(__CR__)=MONTH(TODAY()),YEAR(__CR__)=YEAR(TODAY()))",
     "nextMonth" => "AND(MONTH(__CR__)=MONTH(EDATE(TODAY(),0+1)),YEAR(__CR__)=YEAR(EDATE(TODAY(),0+1)))"
 )
-
 
 """
     getConditionalFormats(ws::Worksheet)
@@ -551,7 +550,7 @@ Valid keywords are:
 - `operator`   : Defines the comparison to make.
 - `value`      : defines the first value to compare against. This can be a cell reference (e.g. `"A1"`) or a number.
 - `value2`     : defines the second value to compare against. This can be a cell reference (e.g. `"A1"`) or a number.
-- `stopIfTrue` : Stops evaluating the conditional formats for this cell if this one is true.
+- `stopIfTrue` : Stops evaluating further conditional formats in any cell if this one is true.
 - `dxStyle`    : Used optionally to select one of the built-in Excel formats to apply
 - `format`     : defines the numFmt to apply if opting for a custom format.
 - `font`       : defines the font to apply if opting for a custom format.
@@ -657,7 +656,7 @@ The available keywords are:
 
 - `operator`   : Defines the comparison to make.
 - `value`      : Gives the for comparison or a cell reference (e.g. `"A1"`).
-- `stopIfTrue` : Stops evaluating the conditional formats if this one is true.
+- `stopIfTrue` : Stops evaluating further conditional formats in any cell if this one is true.
 - `dxStyle`    : Used optionally to select one of the built-in Excel formats to apply.
 - `format`     : defines the numFmt to apply if opting for a custom format.
 - `font`       : defines the font to apply if opting for a custom format.
@@ -740,7 +739,7 @@ average value for the range.
 The available keywords are:
 
 - `operator`   : Defines the comparison to make.
-- `stopIfTrue` : Stops evaluating the conditional formats if this one is true.
+- `stopIfTrue` : Stops evaluating further conditional formats in any cell if this one is true.
 - `dxStyle`    : Used optionally to select one of the built-in Excel formats to apply.
 - `format`     : defines the numFmt to apply if opting for a custom format.
 - `font`       : defines the font to apply if opting for a custom format.
@@ -873,7 +872,7 @@ a specific text string. The default is `containsText`.
 Valid keywords are:
 
 - `value`      : Gives the literal text to match or provides a cell reference (e.g. `"A1"`).
-- `stopIfTrue` : Stops evaluating the conditional formats if this one is true.
+- `stopIfTrue` : Stops evaluating further conditional formats in any cell if this one is true.
 - `dxStyle`    : Used optionally to select one of the built-in Excel formats to apply.
 - `format`     : defines the numFmt to apply if opting for a custom format.
 - `font`       : defines the font to apply if opting for a custom format.
@@ -928,7 +927,7 @@ When cells contain dates, this conditional format can be used to highlight cells
 The available keywords are:
 
 - `operator`   : Defines the comparison to make.
-- `stopIfTrue` : Stops evaluating the conditional formats if this one is true.
+- `stopIfTrue` : Stops evaluating further conditional formats in any cell if this one is true.
 - `dxStyle`    : Used optionally to select one of the built-in Excel formats to apply
 - `format`     : defines the numFmt to apply if opting for a custom format.
 - `font`       : defines the font to apply if opting for a custom format.
@@ -994,7 +993,7 @@ These conditional formatting options highlight cells that contain or don't conta
 are blank (default) or not blank, are unique in the range or are duplicates within the range. 
 The available keywords are: 
 
-- `stopIfTrue` : Stops evaluating the conditional formats if this one is true.
+- `stopIfTrue` : Stops evaluating further conditional formats in any cell if this one is true.
 - `dxStyle`    : Used optionally to select one of the built-in Excel formats to apply
 - `format`     : defines the numFmt to apply if opting for a custom format.
 - `font`       : defines the font to apply if opting for a custom format.
@@ -1039,7 +1038,7 @@ Set a conditional format when an expression evaluated in each cell is `true`.
 The available keywords are:
 
 - `formula`    : Specifies the formula to use. This must be a valid Excel formula.
-- `stopIfTrue` : Stops evaluating the conditional formats if this one is true.
+- `stopIfTrue` : Stops evaluating further conditional formats in any cell if this one is true.
 - `dxStyle`    : Used optionally to select one of the built-in Excel formats to apply
 - `format`     : defines the numFmt to apply if opting for a custom format.
 - `font`       : defines the font to apply if opting for a custom format.
@@ -1457,10 +1456,10 @@ function setCfCellIs(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}=())
         cfx["stopIfTrue"] = "1"
     end
     cfx["operator"] = operator
-    push!(cfx, XML.Element("formula", XML.Text(XML.escape(value))))
+    push!(cfx, XML.Element("formula", XML.Text(XLSX.escape(value))))
     if !isnothing(value2) && operator ∈ ["between", "notBetween"]
 
-        push!(cfx, XML.Element("formula", XML.Text(XML.escape(value2))))
+        push!(cfx, XML.Element("formula", XML.Text(XLSX.escape(value2))))
     end
 
     update_worksheet_cfx!(allcfs, cfx, ws, rng)
@@ -1550,7 +1549,7 @@ function setCfContainsText(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,An
     end
     cfx["operator"] = operator
     cfx["text"] = value
-    push!(cfx, XML.Element("formula", XML.Text(XML.escape(formula))))
+    push!(cfx, XML.Element("formula", XML.Text(XLSX.escape(formula))))
 
     update_worksheet_cfx!(allcfs, cfx, ws, rng)
 
@@ -1779,32 +1778,15 @@ function setCfTimePeriod(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}
 
     !issubset(rng, get_dimension(ws)) && throw(XLSXError("Range `$rng` goes outside worksheet dimension."))
 
-    allcfs = allCfs(ws)                    # get all conditional format blocks
+    allcfs = allCfs(ws)                # get all conditional format blocks
     old_cf = getConditionalFormats(ws) # extract conditional format info
 
-    if operator == "yesterday"
-        formula = "FLOOR(__CR__,1)=TODAY()-1"
-    elseif operator == "today"
-        formula = "FLOOR(__CR__,1)=TODAY()"
-    elseif operator == "tomorrow"
-        formula = "FLOOR(__CR__,1)=TODAY()+1"
-    elseif operator == "last7Days"
-        formula = "AND(TODAY()-FLOOR(__CR__,1)<=6,FLOOR(__CR__,1)<=TODAY())"
-    elseif operator == "lastWeek"
-        formula = "AND(TODAY()-ROUNDDOWN(__CR__,0)>=(WEEKDAY(TODAY())),TODAY()-ROUNDDOWN(__CR__,0)<(WEEKDAY(TODAY())+7))"
-    elseif operator == "thisWeek"
-        formula = "AND(TODAY()-ROUNDDOWN(__CR__,0)<=WEEKDAY(TODAY())-1,ROUNDDOWN(__CR__,0)-TODAY()<=7-WEEKDAY(TODAY()))"
-    elseif operator == "nextWeek"
-        formula = "AND(ROUNDDOWN(__CR__,0)-TODAY()>(7-WEEKDAY(TODAY())),ROUNDDOWN(__CR__,0)-TODAY()<(15-WEEKDAY(TODAY())))"
-    elseif operator == "lastMonth"
-        formula = "AND(MONTH(__CR__)=MONTH(EDATE(TODAY(),0-1)),YEAR(__CR__)=YEAR(EDATE(TODAY(),0-1)))"
-    elseif operator == "thisMonth"
-        formula = "AND(MONTH(__CR__)=MONTH(TODAY()),YEAR(__CR__)=YEAR(TODAY()))"
-    elseif operator == "nextMonth"
-        formula = "AND(MONTH(__CR__)=MONTH(EDATE(TODAY(),0+1)),YEAR(__CR__)=YEAR(EDATE(TODAY(),0+1)))"
+    if haskey(timeperiods, operator)
+        formula = timeperiods[operator]
     else
         throw(XLSXError("Invalid operator: $operator. Valid options are: `yesterday`, `today`, `tomorrow`, `last7Days`, `lastWeek`, `thisWeek`, `nextWeek`, `lastMonth`, `thisMonth`, `nextMonth`."))
     end
+
     formula = replace(formula, "__CR__" => string(first(rng)))
 
     wb = get_workbook(ws)
@@ -1819,7 +1801,7 @@ function setCfTimePeriod(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}
     end
     cfx["timePeriod"] = operator
 
-    push!(cfx, XML.Element("formula", XML.Text(XML.escape(formula))))
+    push!(cfx, XML.Element("formula", XML.Text(XLSX.escape(formula))))
 
     update_worksheet_cfx!(allcfs, cfx, ws, rng)
 
@@ -1871,7 +1853,7 @@ function setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::CellRange; allkws::D
 
     !issubset(rng, get_dimension(ws)) && throw(XLSXError("Range `$rng` goes outside worksheet dimension."))
 
-    allcfs = allCfs(ws)                    # get all conditional format blocks
+    allcfs = allCfs(ws)                # get all conditional format blocks
     old_cf = getConditionalFormats(ws) # extract conditional format info
     if operator == "containsBlanks"
         formula = "LEN(TRIM(__CR__))=0"
@@ -1898,7 +1880,7 @@ function setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::CellRange; allkws::D
     if !isnothing(stopIfTrue) && stopIfTrue == "true"
         cfx["stopIfTrue"] = "1"
     end
-    formula != "" && push!(cfx, XML.Element("formula", XML.Text(XML.escape(formula))))
+    formula != "" && push!(cfx, XML.Element("formula", XML.Text(XLSX.escape(formula))))
 
     update_worksheet_cfx!(allcfs, cfx, ws, rng)
 
@@ -1965,7 +1947,7 @@ function setCfFormula(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}=()
         cfx["stopIfTrue"] = "1"
     end
 
-    push!(cfx, XML.Element("formula", XML.Text("(" * XML.escape(uppercase_unquoted(formula)) * ")")))
+    push!(cfx, XML.Element("formula", XML.Text("(" * XLSX.escape(uppercase_unquoted(formula)) * ")")))
 
     update_worksheet_cfx!(allcfs, cfx, ws, rng)
 
@@ -2026,7 +2008,7 @@ function setCfColorScale(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}
 
     !issubset(rng, get_dimension(ws)) && throw(XLSXError("Range `$rng` goes outside worksheet dimension ($(get_dimension(ws)))."))
 
-    allcfs = allCfs(ws)                    # get all conditional format blocks
+    allcfs = allCfs(ws)                # get all conditional format blocks
     old_cf = getConditionalFormats(ws) # extract conditional format info
 
     let new_pr, new_cf
@@ -2054,7 +2036,7 @@ function setCfColorScale(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}
                         do_sheet_names_match(ws, SheetCellRef(val))
                         val = string(SheetCellRef(val).cellref)
                     end
-                    val = XML.escape(uppercase_unquoted(val))
+                    val = XLSX.escape(uppercase_unquoted(val))
                 end
             end
 
@@ -2180,7 +2162,7 @@ function setCfIconSet(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}=()
                     do_sheet_names_match(ws, SheetCellRef(val))
                     val = string(SheetCellRef(val).cellref)
                 end
-                val = XML.escape(uppercase_unquoted(val))
+                val = XLSX.escape(uppercase_unquoted(val))
             end
         end
         if !haskey(iconsets, iconset)
@@ -2399,7 +2381,7 @@ function setCfDataBar(ws::Worksheet, rng::CellRange; allkws::Dict{Symbol,Any}=()
                     do_sheet_names_match(ws, SheetCellRef(val))
                     val = string(SheetCellRef(val).cellref)
                 end
-                val = XML.escape(uppercase_unquoted(val))
+                val = XLSX.escape(uppercase_unquoted(val))
             end
         end
         if !haskey(databars, databar)

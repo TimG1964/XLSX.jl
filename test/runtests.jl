@@ -4,84 +4,12 @@ import Tables
 using Test, Dates, XML
 import DataFrames, Random
 import Distributions as Dist
+import CSV
+using StyledStrings
 
-const SPREADSHEET_NAMESPACE_XPATH_ARG = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-struct xpath
-    node::XML.Node
-    path::String
-
-    function xpath(node::XML.Node, path::String)
-        new(node, path)
-    end
-end
-
-function get_namespaces(r::XML.Node)::Dict{String,String}
-    nss = Dict{String,String}()
-    for (key, value) in XML.attributes(r)
-        if startswith(key, "xmlns")
-            prefix = split(key, ':')
-            if length(prefix) == 1
-                nss[""] = value  # Default namespace
-            else
-                nss[prefix[2]] = value
-            end
-        end
-    end
-    return nss
-end
-
-function get_default_namespace(r::XML.Node)::String
-    nss = get_namespaces(r)
-
-    # in case that only one namespace is defined, assume that it is the default one
-    # even if it has a prefix
-    length(nss) == 1 && return first(values(nss))
-
-    # otherwise, look for the default namespace (without prefix)
-    for (prefix, ns) in nss
-        if prefix == ""
-            return ns
-        end
-    end
-
-    error("No default namespace found.")
-end
-function find_all_nodes(givenpath::String, doc::XML.Node)::Vector{XML.Node}
-    @assert XML.nodetype(doc) == XML.Document
-    found_nodes = Vector{XML.Node}()
-    for xp in get_node_paths(doc)
-        if xp.path == givenpath
-            push!(found_nodes, xp.node)
-        end
-    end
-    return found_nodes
-end
-function get_node_paths(node::XML.Node)
-    @assert XML.nodetype(node) == XML.Document
-    default_ns = get_default_namespace(node[end])
-    xpaths = Vector{xpath}()
-    get_node_paths!(xpaths, node, default_ns, "")
-    return xpaths
-end
-
-function get_node_paths!(xpaths::Vector{xpath}, node::XML.Node, default_ns, path)
-    for c in XML.children(node)
-        if XML.nodetype(c) ∉ [XML.Declaration, XML.Comment, XML.Text]
-            node_tag = XML.tag(c)
-            if !occursin(":", node_tag)
-                node_tag = default_ns * ":" * node_tag
-            end
-            npath = path * "/" * node_tag
-            push!(xpaths, xpath(c, npath))
-            if length(XML.children(c)) > 0
-                get_node_paths!(xpaths, c, default_ns, npath)
-            end
-        end
-    end
-    return nothing
-end
 
 data_directory = joinpath(dirname(pathof(XLSX)), "..", "data")
+
 @assert isdir(data_directory)
 
 @testset "read test files" begin
@@ -134,6 +62,17 @@ data_directory = joinpath(dirname(pathof(XLSX)), "..", "data")
 
     end
 
+    @testset "Read password protected file error" begin
+        @test_throws XLSX.XLSXError XLSX.readxlsx(joinpath(data_directory, "password.xlsx")) # password for this file is simply "password"
+        try
+            XLSX.readxlsx(joinpath(data_directory, "password.xlsx"))
+            @test false # didn't throw exception
+        catch e
+            @test occursin("This package does not support password protected files", "$e")
+        end
+
+    end
+
     @testset "Read invalid XLSX error" begin
         @test_throws XLSX.XLSXError XLSX.readxlsx(joinpath(data_directory, "sheet_template.xml"))
         try
@@ -158,26 +97,43 @@ data_directory = joinpath(dirname(pathof(XLSX)), "..", "data")
 
     @testset "write-only mode" begin
         XLSX.openxlsx("mytest.xlsx", mode="w") do f
-            f[1]["A1"]=1
+            f[1]["A1"] = 1
             @test f.source == "mytest.xlsx"
         end
         ef = XLSX.readxlsx("mytest.xlsx")
         @test ef["Sheet1"]["A1"] == 1
-        f=XLSX.openxlsx("mytest2.xlsx", mode="w")
+        f = XLSX.openxlsx("mytest2.xlsx", mode="w")
         @test f.source == "mytest2.xlsx"
-        f[1]["A1"]=1
+        f[1]["A1"] = 1
         XLSX.writexlsx("mytest3.xlsx", f, overwrite=true)
         ef = XLSX.readxlsx("mytest3.xlsx")
         @test ef["Sheet1"]["A1"] == 1
-        f=XLSX.newxlsx()
+        f = XLSX.newxlsx()
         @test f.source == "blank.xlsx"
-        f[1]["A1"]=1
+        f[1]["A1"] = 1
         XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
         ef = XLSX.readxlsx("mytest.xlsx")
         @test ef["Sheet1"]["A1"] == 1
         for f in ["mytest.xlsx", "mytest2.xlsx", "mytest3.xlsx"]
             isfile(f) && rm(f)
         end
+    end
+
+    @testset "Fix timestamp" begin
+        t = Dates.now(Dates.UTC) - Dates.Second(1)
+        xf = XLSX.newxlsx()
+        f = "docProps/core.xml"
+        date_format = Dates.dateformat"yyyy-mm-ddTHH:MM:SSZ"
+        i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:created") # i, j should always be found unless the `blank.xlsx` file is updated
+        @test t < DateTime(XML.value(xf.data[f][i][j][1]), date_format)
+        i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:modified")
+        @test t < DateTime(XML.value(xf.data[f][i][j][1]), date_format)
+
+        xf = XLSX.newxlsx(; update_timestamp=false) # do not update timestamp
+        i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:created") # i, j should always be found unless the `blank.xlsx` file is updated
+        @test XML.value(xf.data[f][i][j][1]) == "2018-05-22T02:41:32Z"
+        i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:modified")
+        @test XML.value(xf.data[f][i][j][1]) == "2018-05-22T02:42:04Z"
     end
 
 end
@@ -283,7 +239,7 @@ end
 
     @testset "CellRef" begin
         ref = XLSX.CellRef(12, 2)
-        @test ref.name == "B12"
+        @test XLSX.cellname(ref) == "B12"
         show(IOBuffer(), ref)
     end
 
@@ -390,7 +346,7 @@ end
     @test sheet1["B5"] == Date(2018, 3, 21)
     @test sheet1["B8"] == "palavra1"
 
-    @test XLSX.getcell(sheet1, "B2") == XLSX.Cell(XLSX.CellRef("B2"), "s", "", "0", "")
+    @test XLSX.getcell(sheet1, "B2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "s", "", "0", "", false)
     XLSX.getcell(sheet1, "B:C")
     XLSX.getcell(sheet1, "1:2")
     XLSX.getcell(sheet1, 1:2, 1:2)
@@ -411,11 +367,11 @@ end
     c = XLSX.getcell(sheet1, "B2")
     show(IOBuffer(), c)
     dct = Dict("a" => c)
-    @test dct["a"] == XLSX.Cell(XLSX.CellRef("B2"), "s", "", "0", "")
+    @test dct["a"] == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "s", "", "0", "", false)
 
     # equality and hash
-    @test XLSX.Cell(XLSX.CellRef("B2"), "s", "", "0", "") == XLSX.Cell(XLSX.CellRef("B2"), "s", "", "0", "")
-    @test hash(dct["a"]) == hash(XLSX.Cell(XLSX.CellRef("B2"), "s", "", "0", ""))
+    @test XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "s", "", "0", "", false) == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "s", "", "0", "", false)
+    @test hash(dct["a"]) == hash(XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "s", "", "0", "", false))
 
     sheet2 = f[2]
     sheet2_data = [1 2 3; 4 5 6; 7 8 9]
@@ -454,6 +410,18 @@ end
     @test s[1:2:3, 1] == Any[1, 1]
     s["A1,B2,C3"] = "non-contiguous"
     @test s["Sheet1!A1,Sheet1!B2,Sheet1!C3"] == [["non-contiguous";;], ["non-contiguous";;], ["non-contiguous";;]]
+
+    f = XLSX.newxlsx()
+    s = f[1]
+    s["A1:A3"] = "Hello world"
+    s["A2:C2"] = 42:44
+    s[[1, 3], 2:3] = true
+    @test s["A1:C3"] == Any["Hello world" true true; 42 43 44; "Hello world" true true]
+    s["A2:C2"] = 44:2:48
+    @test s[[1, 2, 3], 1:3] == Any["Hello world" true true; 44 46 48; "Hello world" true true]
+    s["A2:C2"] = [98, 99, 100]
+    s["A3:C3"] = ["goodbye World", "goodbye World", "goodbye World"]
+    @test s[[1, 2, 3], 1:3] == Any["Hello world" true true; 98 99 100; "goodbye World" "goodbye World" "goodbye World"]
 
     f = XLSX.newxlsx()
     s = f[1]
@@ -511,53 +479,269 @@ end
 
 end
 
-@testset "ReferencedFormulae" begin
+@testset "formulas" begin
 
-    f=XLSX.openxlsx(joinpath(data_directory, "reftest.xlsx"), mode="rw")
+    @testset "simple formulas" begin
+        f = XLSX.newxlsx("mySheet")
+        for i = 1:10
+            f[1][i, 1] = i
+        end
+        f[1]["B1:B10"] = 10
+        XLSX.setFormula(f[1], "C1:C10", "=A1+B1")
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("C1")) == XLSX.ReferencedFormula("=A1+B1", 0, "C1:C10", nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("C2")) == XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("C10")) == XLSX.FormulaReference(0, nothing)
+        XLSX.setFormula(f[1], 11, 1:3, "sum(A1:A10)")
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("C11")) == XLSX.FormulaReference(1, nothing)
+        XLSX.setFormula(f[1], 11, 4, "=sum(A1:C10)")
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("D11")) == XLSX.Formula("=sum(A1:C10)", nothing, nothing, nothing)
+        XLSX.setFormula(f, "mySheet!A11:C11", "=A10/\$D11")
+        XLSX.writexlsx("formulas.xlsx", f, overwrite=true)
 
-    s=f[1]
-    @test XLSX.getcell(s, "A2") == XLSX.Cell(XLSX.CellRef("A2"), "", "", "20", XLSX.ReferencedFormula("SUM(O2:S2)", 0, "A2:A10", nothing))
-    @test XLSX.getcell(s, "A3") == XLSX.Cell(XLSX.CellRef("A3"), "", "", "25", XLSX.FormulaReference(0, nothing))
-    s["A2"]=3
-    @test XLSX.getcell(s, "A2") == XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", XLSX.Formula("", nothing))
-    @test XLSX.getcell(s, "A3") == XLSX.Cell(XLSX.CellRef("A3"), "", "", "20", XLSX.ReferencedFormula("SUM(O3:S3)", 0, "A3:A10", nothing))
+        f = XLSX.openxlsx("formulas.xlsx", mode="rw")
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("C1")) == XLSX.ReferencedFormula("=A1+B1", 0, "C1:C10", nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("C2")) == XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("C10")) == XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("A11")) == XLSX.ReferencedFormula("=A10/\$D11", 1, "A11:C11", nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("C11")) == XLSX.FormulaReference(1, nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("D11")) == XLSX.Formula("=sum(A1:C10)", nothing, nothing, nothing)
+        isfile("formulas.xlsx") && rm("formulas.xlsx")
 
-    s2=f[2]
-    @test XLSX.getcell(s2, "A1") == XLSX.Cell(XLSX.CellRef("A1"), "", "", "54", XLSX.Formula("SECOND(NOW())", Dict("ca" => "1")))
-    @test XLSX.getcell(s2, "A2") == XLSX.Cell(XLSX.CellRef("A2"), "", "", "54", XLSX.ReferencedFormula("SECOND(NOW())", 1, "A2:A5", Dict("ca" => "1")))
-    s2["A2"]=3
-    @test XLSX.getcell(s2, "A2") == XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", XLSX.Formula("", nothing))
-    @test XLSX.getcell(s2, "A3").formula.formula == "SECOND(NOW())"
-    @test XLSX.getcell(s2, "A3").formula.id == 1
-    @test XLSX.getcell(s2, "A3").formula.ref == "A3:A5"
-    @test XLSX.getcell(s2, "A3").formula.unhandled == Dict("ca" => "1")
-    @test XLSX.getcell(s2, "A3").formula == XLSX.ReferencedFormula("SECOND(NOW())", 1, "A3:A5", Dict("ca" => "1"))
-    @test XLSX.getcell(s2, "A3") == XLSX.Cell(XLSX.CellRef("A3"), "", "", "54", XLSX.ReferencedFormula("SECOND(NOW())", 1, "A3:A5", Dict("ca" => "1")))
-    @test XLSX.getcell(s2, "B1") == XLSX.Cell(XLSX.CellRef("B1"), "", "", "54", XLSX.ReferencedFormula("SECOND(NOW())", 0, "B1:C5", Dict("ca" => "1")))
-    s2["B1"]=3
-    @test XLSX.getcell(s2, "B1") == XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", XLSX.Formula("", nothing))
-    @test XLSX.getcell(s2, "B2") == XLSX.Cell(XLSX.CellRef("B2"), "", "", "54", XLSX.ReferencedFormula("SECOND(NOW())", 2, "B2:B5", Dict("ca" => "1")))
-    @test XLSX.getcell(s2, "C1") == XLSX.Cell(XLSX.CellRef("C1"), "", "", "54", XLSX.ReferencedFormula("SECOND(NOW())", 0, "C1:C5", Dict("ca" => "1")))
+        f = XLSX.newxlsx("mySheet")
+        s = f["mySheet"]
+        s[1:12, 1] = [x for x in 1:12]
+        s["B1:L12"] = ""
+        XLSX.setFormula(s, "B:L", "=\$A1+A1")
+        XLSX.addsheet!(f, "moreFormulas")
+        XLSX.addsheet!(f, "empty")
+        s1 = f["moreFormulas"]
+        s2 = f["empty"]
+        s1[1:12, 1:12] = ""
+        s2[1:12, 1:12] = ""
+        XLSX.setFormula(s1, 1, :, "=max(mySheet!A1:A12)")
+        XLSX.setFormula(s1, "2", "=min(\$A1:A1)")
+        XLSX.setFormula(s2, :, :, "=mySheet!A\$1+mySheet!A1")
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("B1")) == XLSX.ReferencedFormula("=\$A1+A1", 0, "B1:L12", nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("B2")) == XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("L10")) == XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(f[2], XLSX.CellRef("A1")) == XLSX.Formula("=max(mySheet!A1:A12)", nothing, nothing, nothing)
+        @test XLSX.get_formula_from_cache(f[2], XLSX.CellRef("G1")) == XLSX.Formula("=max(mySheet!G1:G12)", nothing, nothing, nothing)
+        @test XLSX.get_formula_from_cache(f[2], XLSX.CellRef("L1")) == XLSX.Formula("=max(mySheet!L1:L12)", nothing, nothing, nothing)
+        @test XLSX.get_formula_from_cache(f[2], XLSX.CellRef("A2")) == XLSX.ReferencedFormula("=min(\$A1:A1)", 0, "A2:L2", nothing)
+        @test XLSX.get_formula_from_cache(f[2], XLSX.CellRef("L2")) == XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(f[3], XLSX.CellRef("A1")) == XLSX.Formula("=mySheet!A\$1+mySheet!A1", nothing, nothing, nothing)
+        @test XLSX.get_formula_from_cache(f[3], XLSX.CellRef("F6")) == XLSX.Formula("=mySheet!F\$1+mySheet!F6", nothing, nothing, nothing)
+        @test XLSX.get_formula_from_cache(f[3], XLSX.CellRef("L12")) == XLSX.Formula("=mySheet!L\$1+mySheet!L12", nothing, nothing, nothing)
+        XLSX.writexlsx("formulas.xlsx", f, overwrite=true)
 
-    XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
-    f2=XLSX.openxlsx("mytest.xlsx", mode="rw")
+        f = XLSX.openxlsx("formulas.xlsx", mode="rw")
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("B1")) == XLSX.ReferencedFormula("=\$A1+A1", 0, "B1:L12", nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("B2")) == XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("L10")) == XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(f[2], XLSX.CellRef("A1")) == XLSX.Formula("=max(mySheet!A1:A12)", nothing, nothing, nothing)
+        @test XLSX.get_formula_from_cache(f[2], XLSX.CellRef("G1")) == XLSX.Formula("=max(mySheet!G1:G12)", nothing, nothing, nothing)
+        @test XLSX.get_formula_from_cache(f[2], XLSX.CellRef("L1")) == XLSX.Formula("=max(mySheet!L1:L12)", nothing, nothing, nothing)
+        @test XLSX.get_formula_from_cache(f[2], XLSX.CellRef("A2")) == XLSX.ReferencedFormula("=min(\$A1:A1)", 0, "A2:L2", nothing)
+        @test XLSX.get_formula_from_cache(f[2], XLSX.CellRef("L2")) == XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(f[3], XLSX.CellRef("A1")) == XLSX.Formula("=mySheet!A\$1+mySheet!A1", nothing, nothing, nothing)
+        @test XLSX.get_formula_from_cache(f[3], XLSX.CellRef("F6")) == XLSX.Formula("=mySheet!F\$1+mySheet!F6", nothing, nothing, nothing)
+        @test XLSX.get_formula_from_cache(f[3], XLSX.CellRef("L12")) == XLSX.Formula("=mySheet!L\$1+mySheet!L12", nothing, nothing, nothing)
+        isfile("formulas.xlsx") && rm("formulas.xlsx")
 
-    s=f2[1]
-    @test XLSX.getcell(s, "A2") == XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", XLSX.Formula("", nothing))
-    @test XLSX.getcell(s, "A3") == XLSX.Cell(XLSX.CellRef("A3"), "", "", "20", XLSX.ReferencedFormula("SUM(O3:S3)", 0, "A3:A10", nothing))
+        f = XLSX.newxlsx("mySheet")
+        s = f[1]
+        s[1:10, 1:10] = rand(10, 10)
+        XLSX.setFont(s, :; color="red")
+        XLSX.setFormula(s, "mySheet!B2:J2", "=\$A\$2+A2")
+        XLSX.setFormula(s, "mySheet!3:4", "=\$A1+B1")
+        XLSX.setFormula(s, "mySheet!F:G", "=E\$1+E1")
+        XLSX.setFormula(s, "J10", "=A1+10")
+        @test XLSX.get_formula_from_cache(s, XLSX.CellRef("D2")) == XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(s, XLSX.CellRef("D4")) == XLSX.FormulaReference(1, nothing)
+        @test XLSX.get_formula_from_cache(s, XLSX.CellRef("G4")) == XLSX.FormulaReference(2, nothing)
+        @test XLSX.get_formula_from_cache(s, XLSX.CellRef("J10")) == XLSX.Formula("=A1+10", nothing, nothing, nothing)
+        XLSX.setFormula(s, :, 10, "=\$A\$1+5")
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("J1")) == XLSX.ReferencedFormula("=\$A\$1+5", 3, "J1:J10", nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("J2")) == XLSX.FormulaReference(3, nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("J8")) == XLSX.FormulaReference(3, nothing)
+        XLSX.setFormula(s, 10, :, "=\$A\$1+6")
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("A10")) == XLSX.ReferencedFormula("=\$A\$1+6", 4, "A10:J10", nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("B10")) == XLSX.FormulaReference(4, nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("G10")) == XLSX.FormulaReference(4, nothing)
+    end
+    @testset "dynamic array" begin
+        f = XLSX.openxlsx(joinpath(data_directory, "Unique.xlsx"), mode="rw")
+        @test XLSX.getcell(f[1], "C1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C1"), "", "", "1", "1", true)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("C1")) == XLSX.Formula("_xlfn.UNIQUE(A1:A9)", "array", "C1:C3", nothing)
+        s = f[1]
+        XLSX.setFormula(s, "B1", "=A1")
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("B1")) == XLSX.Formula("=A1", nothing, nothing, nothing)
+        XLSX.setFormula(s, "B2:B10", "=A2+B1")
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("B2")) == XLSX.ReferencedFormula("=A2+B1", 0, "B2:B10", nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("B5")) == XLSX.FormulaReference(0, nothing)
+        XLSX.setFormula(s, "D1", "=sort(B1:B10,,-1)")
+        @test XLSX.getcell(f[1], "D1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("D1"), "", "", "", "1", true)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("D1")) == XLSX.Formula("=_xlfn.SORT(B1:B10,,-1)", "array", "D1:D1", nothing)
+        XLSX.writexlsx("formulas.xlsx", f, overwrite=true)
 
-    s2=f[2]
-    @test XLSX.getcell(s2, "A2") == XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", XLSX.Formula("", nothing))
-    @test XLSX.getcell(s2, "A3").formula.formula == "SECOND(NOW())"
-    @test XLSX.getcell(s2, "A3").formula.id == 1
-    @test XLSX.getcell(s2, "A3").formula.ref == "A3:A5"
-    @test XLSX.getcell(s2, "A3").formula.unhandled == Dict("ca" => "1")
-    @test XLSX.getcell(s2, "A3").formula == XLSX.ReferencedFormula("SECOND(NOW())", 1, "A3:A5", Dict("ca" => "1"))
-    @test XLSX.getcell(s2, "A3") == XLSX.Cell(XLSX.CellRef("A3"), "", "", "54", XLSX.ReferencedFormula("SECOND(NOW())", 1, "A3:A5", Dict("ca" => "1")))
-    @test XLSX.getcell(s2, "B1") == XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", XLSX.Formula("", nothing))
-    @test XLSX.getcell(s2, "B2") == XLSX.Cell(XLSX.CellRef("B2"), "", "", "54", XLSX.ReferencedFormula("SECOND(NOW())", 2, "B2:B5", Dict("ca" => "1")))
-    @test XLSX.getcell(s2, "C1") == XLSX.Cell(XLSX.CellRef("C1"), "", "", "54", XLSX.ReferencedFormula("SECOND(NOW())", 0, "C1:C5", Dict("ca" => "1")))
+        f = XLSX.opentemplate("formulas.xlsx")
+        @test XLSX.getcell(f[1], "C1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C1"), "", "", "1", "1", true)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("C1")) == XLSX.Formula("_xlfn.UNIQUE(A1:A9)", "array", "C1:C3", nothing)
+        s = f[1]
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("B1")) == XLSX.Formula("=A1", nothing, nothing, nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("B2")) == XLSX.ReferencedFormula("=A2+B1", 0, "B2:B10", nothing)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("B5")) == XLSX.FormulaReference(0, nothing)
+        @test XLSX.getcell(f[1], "D1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("D1"), "", "", "", "1", true)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("D1")) == XLSX.Formula("=_xlfn.SORT(B1:B10,,-1)", "array", "D1:D1", nothing)
+        isfile("formulas.xlsx") && rm("formulas.xlsx")
 
+        f = XLSX.newxlsx("mySheet")
+        s = f[1]
+        s[1:5, 1] = [x for x in 3:3:15]
+        s[1:5, 2] = ""
+        XLSX.setFormula(s, "mySheet!B1", "=sort(A1:A5, , -1)")
+        @test XLSX.getcell(f[1], "B1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "", "1", true)
+        @test XLSX.get_formula_from_cache(f[1], XLSX.CellRef("B1")) == XLSX.Formula("=_xlfn.SORT(A1:A5, , -1)", "array", "B1:B1", nothing)
+        XLSX.setFormula(s, "C1", "=if(A1:A5>30, \"High\", \"Low\")")
+        XLSX.setFormula(s, "D1", "=OFFSET(A2:A5, -1, 0)")
+        XLSX.setFormula(s, "E1", "=CHOOSE(1,A1:A2,A3:A4)")
+        s["F1:F2"] = [2; 4]
+        XLSX.setFormula(s, "G1", "=INDEX(A1:A5,F1:F2)")
+        @test XLSX.getFormula(s, "C1") == "=if(A1:A5>30, \"High\", \"Low\")"
+        @test XLSX.getFormula(s, "D1") == "=OFFSET(A2:A5, -1, 0)"
+        @test XLSX.getFormula(s, "E1") == "=CHOOSE(1,A1:A2,A3:A4)"
+        @test XLSX.getFormula(s, "G1") == "=INDEX(A1:A5,F1:F2)"
+    end
+    @testset "getFormula" begin
+        f = XLSX.newxlsx()
+        s = f[1]
+        s[1:10, 1] = 10:10:100
+        s[1:6, 7] = 1:6
+        XLSX.setFormula(s, "B1", "=A1")
+        XLSX.setFormula(s, "B2:B10", "=A2+B1")
+        XLSX.setFormula(f, "Sheet1!C1", "=B1:B10")
+        XLSX.setFormula(s, "D1", "=INT(B1:B10/100)+1")
+        XLSX.setFormula(s, "E1", "=groupby(D1#,B1:B10,sum)")
+        XLSX.setFormula(s, "H1", "=frequency(D1#,G1:G6)")
+        @test XLSX.get_referenced_formula(s, XLSX.CellRef("B4")) == "=A4+B3"
+        @test XLSX.getFormula(s, "B1") == "=A1"
+        @test XLSX.getFormula(s, 2, 2) == "=A2+B1"
+        @test XLSX.getFormula(f, "Sheet1!B10") == "=A10+B9"
+        @test XLSX.getFormula(s, "D1") == "=INT(B1:B10/100)+1"
+        @test XLSX.getFormula(s, "E1") == "=_xlfn.GROUPBY(_xlfn.ANCHORARRAY(D1),B1:B10,_xleta.sum)"
+        @test XLSX.getFormula(s, "H1") == "=frequency(_xlfn.ANCHORARRAY(D1),G1:G6)"
+    end
+
+    @testset "spillranges" begin
+        SPILL_REF_TESTS = [
+            # Basic spill references
+            ("=G1#", "=ANCHORARRAY(G1)", "basic_cell"),
+            ("=Sheet1!A1#", "=ANCHORARRAY(Sheet1!A1)", "basic_sheet"),
+            ("='My Sheet'!B2#", "=ANCHORARRAY('My Sheet'!B2)", "quoted_sheet"),
+            ("=Table1[Column]#", "=ANCHORARRAY(Table1[Column])", "structured_ref"),
+
+            # Spill references inside functions
+            ("=VLOOKUP(M1,G1#,3,FALSE)", "=VLOOKUP(M1,ANCHORARRAY(G1),3,FALSE)", "vlookup"),
+            ("=SUM(Table1[Column]#)", "=SUM(ANCHORARRAY(Table1[Column]))", "sum_structured"),
+            ("=IF(G1#>0, G1#, 0)", "=IF(ANCHORARRAY(G1)>0, ANCHORARRAY(G1), 0)", "if_branch"),
+            ("=INDEX(Table1[Column]#, 2)", "=INDEX(ANCHORARRAY(Table1[Column]), 2)", "index_structured"),
+            ("=FILTER(G1#, G1#>0)", "=FILTER(ANCHORARRAY(G1), ANCHORARRAY(G1)>0)", "filter"),
+
+            # Multiple spill references
+            ("=G1#+H1#", "=ANCHORARRAY(G1)+ANCHORARRAY(H1)", "add_two"),
+            ("=SUM(G1#,H1#)", "=SUM(ANCHORARRAY(G1),ANCHORARRAY(H1))", "sum_two"),
+            ("=IF(G1#>H1#, G1#, H1#)", "=IF(ANCHORARRAY(G1)>ANCHORARRAY(H1), ANCHORARRAY(G1), ANCHORARRAY(H1))", "if_compare"),
+            ("=VLOOKUP(M1,G1#,3,FALSE)+VLOOKUP(M2,H1#,2,FALSE)", "=VLOOKUP(M1,ANCHORARRAY(G1),3,FALSE)+VLOOKUP(M2,ANCHORARRAY(H1),2,FALSE)", "vlookup_double"),
+
+            # Sheet and workbook prefixes
+            ("='Sales Data'!Table1[Revenue]#", "=ANCHORARRAY('Sales Data'!Table1[Revenue])", "sheet_structured"),
+            ("='[Book1.xlsx]Sheet1'!A1#", "=ANCHORARRAY('[Book1.xlsx]Sheet1'!A1)", "book_sheet"),
+            ("=Sheet1!\$B\$2#", "=ANCHORARRAY(Sheet1!\$B\$2)", "absolute_sheet"),
+            ("=Table1[[#All],[Column]]#", "=ANCHORARRAY(Table1[[#All],[Column]])", "multi_structured"),
+            ("='Table 1'[[#All],[Column]]#", "=ANCHORARRAY('Table 1'[[#All],[Column]])", "quoted_structured"),
+            ("='My Table'[[#Headers],[Column1],[Column2]]#", "=ANCHORARRAY('My Table'[[#Headers],[Column1],[Column2]])", "quoted_multi_structured"),
+
+            # Non-spill references (should remain unchanged)
+            ("=G1", "=G1", "plain_cell"),
+            ("=Sheet1!A1", "=Sheet1!A1", "plain_sheet"),
+            ("=Table1[Column]", "=Table1[Column]", "plain_structured"),
+            ("=VLOOKUP(M1,G1,3,FALSE)", "=VLOOKUP(M1,G1,3,FALSE)", "vlookup_plain"),
+            ("=SUM(A1:A10)", "=SUM(A1:A10)", "sum_range")
+        ]
+        for (input, expected, label) in SPILL_REF_TESTS
+            output = XLSX.anchor_spill_refs(input)
+            @test output == expected
+        end
+    end
+    @testset "external references" begin
+        f = XLSX.openxlsx(joinpath(data_directory, "linked-1.xlsx"), mode="rw")
+        s = f[1]
+        @test XLSX.getFormula(s, "A1") == "=[1]Sheet1!\$A\$1"
+        @test occursin("linked-2.xlsx]", XLSX.getFormula(s, "A1"; get_external_refs=true))
+        f = XLSX.openxlsx(joinpath(data_directory, "linked-2.xlsx"), mode="rw")
+        s = f[1]
+        @test XLSX.getFormula(s, "B1") == "=[1]Sheet1!\$B\$1"
+        @test occursin("linked-1.xlsx]", XLSX.getFormula(s, "B1"; get_external_refs=true))
+    end
+
+    @testset "ReferencedFormulae" begin
+
+        f = XLSX.openxlsx(joinpath(data_directory, "reftest.xlsx"), mode="rw")
+
+        s = f[1]
+        wb = XLSX.get_workbook(s)
+        @test XLSX.getcell(s, "A2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "20", "", true)
+        @test XLSX.get_formula_from_cache(s, XLSX.CellRef("A2")) == XLSX.ReferencedFormula("SUM(O2:S2)", 0, "A2:A10", nothing)
+        @test XLSX.getcell(s, "A3") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A3"), "", "", "25", "", true)
+        @test XLSX.get_formula_from_cache(s, XLSX.CellRef("A3")) == XLSX.FormulaReference(0, nothing)
+        s["A2"] = 3
+        @test XLSX.getcell(s, "A2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false)
+        @test XLSX.getcell(s, "A3") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A3"), "", "", "25", "", true)
+        @test XLSX.get_formula_from_cache(s, XLSX.CellRef("A3")) == XLSX.ReferencedFormula("SUM(O3:S3)", 0, "A3:A10", nothing)
+        @test XLSX.get_formula_from_cache(s, XLSX.CellRef("A4")) == XLSX.FormulaReference(0, nothing)
+        
+        s2 = f[2]
+        @test XLSX.getcell(s2, "A1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A1"), "", "", "54", "", true)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A1")) == XLSX.Formula("SECOND(NOW())", nothing, nothing, Dict("ca" => "1"))
+        @test XLSX.getcell(s2, "A2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "54", "", true)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A2")) == XLSX.ReferencedFormula("SECOND(NOW())", 1, "A2:A5", Dict("ca" => "1"))
+        s2["A2"] = 3
+        @test XLSX.getcell(s2, "A2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3")).id == 1
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3")).unhandled == Dict("ca" => "1")
+        @test XLSX.getcell(s2, "A3").formula == true
+        @test XLSX.getcell(s2, "A3") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A3"), "", "", "54", "", true)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3")) == XLSX.ReferencedFormula("SECOND(NOW())", 1, "A3:A5", Dict("ca" => "1"))
+        @test XLSX.getcell(s2, "B1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "54", "", true)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B1")) == XLSX.ReferencedFormula("SECOND(NOW())", 0, "B1:C5", Dict("ca" => "1"))
+        s2["B1"] = 3
+        @test XLSX.getcell(s2, "B1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false)
+        @test XLSX.getcell(s2, "B2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "54", "", true)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B2")) == XLSX.ReferencedFormula("SECOND(NOW())", 0, "B2:C5", Dict("ca" => "1"))
+        @test XLSX.getcell(s2, "C1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C1"), "", "", "54", "", true)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("C1")) == XLSX.Formula("SECOND(NOW())", nothing, "C1", Dict("ca" => "1"))
+
+        XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
+        f2 = XLSX.openxlsx("mytest.xlsx", mode="rw")
+
+        s = f2[1]
+        @test XLSX.getcell(s, "A2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false)
+        @test XLSX.getcell(s, "A3") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A3"), "", "", "25", "", true)
+        @test XLSX.get_formula_from_cache(s, XLSX.CellRef("A3")) == XLSX.ReferencedFormula("SUM(O3:S3)", 0, "A3:A10", nothing)
+
+        s2 = f[2]
+        @test XLSX.getcell(s2, "A2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3")).id == 1
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3")).unhandled == Dict("ca" => "1")
+        @test XLSX.getcell(s2, "A3") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A3"), "", "", "54", "", true)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3")) == XLSX.ReferencedFormula("SECOND(NOW())", 1, "A3:A5", Dict("ca" => "1"))
+        @test XLSX.getcell(s2, "B1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false)
+        @test XLSX.getcell(s2, "B2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "54", "", true)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B2")) == XLSX.ReferencedFormula("SECOND(NOW())", 0, "B2:C5", Dict("ca" => "1"))
+        @test XLSX.getcell(s2, "C1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C1"), "", "", "54", "", true)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("C1")) ==XLSX.Formula("SECOND(NOW())", nothing, "C1", Dict("ca" => "1"))
+
+    end
 end
 
 @testset "getcell" begin
@@ -568,43 +752,43 @@ end
             s[i, j] = i + j
         end
     end
-    @test XLSX.getcell(s, "A1") == XLSX.Cell(XLSX.CellRef("A1"), "", "", "2", "")
-    @test XLSX.getcell(s, "Sheet1!A1") == XLSX.Cell(XLSX.CellRef("A1"), "", "", "2", "")
-    @test XLSX.getcell(f, "Sheet1!A1") == XLSX.Cell(XLSX.CellRef("A1"), "", "", "2", "")
-    @test XLSX.getcell(s, XLSX.SheetCellRef("Sheet1!A1")) == XLSX.Cell(XLSX.CellRef("A1"), "", "", "2", "")
-    @test XLSX.getcell(f, XLSX.SheetCellRef("Sheet1!A1")) == XLSX.Cell(XLSX.CellRef("A1"), "", "", "2", "")
-    @test XLSX.getcell(s, "B1:B3") == [XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", ""); XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", ""); XLSX.Cell(XLSX.CellRef("B3"), "", "", "5", "");;]
-    @test XLSX.getcell(s, "Sheet1!B1:B3") == [XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", ""); XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", ""); XLSX.Cell(XLSX.CellRef("B3"), "", "", "5", "");;]
-    @test XLSX.getcell(f, "Sheet1!B1:B3") == [XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", ""); XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", ""); XLSX.Cell(XLSX.CellRef("B3"), "", "", "5", "");;]
-    @test XLSX.getcell(s, XLSX.SheetCellRange("Sheet1!B1:B3")) == [XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", ""); XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", ""); XLSX.Cell(XLSX.CellRef("B3"), "", "", "5", "");;]
-    @test XLSX.getcell(s, "B1,B3") == [[XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", XLSX.Formula("", nothing));;], [XLSX.Cell(XLSX.CellRef("B3"), "", "", "5", XLSX.Formula("", nothing));;]]
-    @test XLSX.getcell(s, "Sheet1!B1,Sheet1!B3") == [[XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", XLSX.Formula("", nothing));;], [XLSX.Cell(XLSX.CellRef("B3"), "", "", "5", XLSX.Formula("", nothing));;]]
-    @test XLSX.getcell(f, "Sheet1!B1,Sheet1!B3") == [[XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", XLSX.Formula("", nothing));;], [XLSX.Cell(XLSX.CellRef("B3"), "", "", "5", XLSX.Formula("", nothing));;]]
-    @test XLSX.getcell(s, "B:B") == [XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", ""); XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", ""); XLSX.Cell(XLSX.CellRef("B3"), "", "", "5", "");;]
-    @test XLSX.getcell(s, "Sheet1!B:B") == [XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", ""); XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", ""); XLSX.Cell(XLSX.CellRef("B3"), "", "", "5", "");;]
-    @test XLSX.getcell(f, "Sheet1!B:B") == [XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", ""); XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", ""); XLSX.Cell(XLSX.CellRef("B3"), "", "", "5", "");;]
-    @test XLSX.getcell(s, XLSX.SheetColumnRange("Sheet1!B:B")) == [XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", ""); XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", ""); XLSX.Cell(XLSX.CellRef("B3"), "", "", "5", "");;]
-    @test XLSX.getcell(s, "Sheet1!2:2") == [XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", "") XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", "") XLSX.Cell(XLSX.CellRef("C2"), "", "", "5", "")]
-    @test XLSX.getcell(f, "Sheet1!2:2") == [XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", "") XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", "") XLSX.Cell(XLSX.CellRef("C2"), "", "", "5", "")]
-    @test XLSX.getcell(s, XLSX.SheetRowRange("Sheet1!2:2")) == [XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", "") XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", "") XLSX.Cell(XLSX.CellRef("C2"), "", "", "5", "")]
-    @test XLSX.getcell(s, "2:2") == [XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", "") XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", "") XLSX.Cell(XLSX.CellRef("C2"), "", "", "5", "")]
-    @test XLSX.getcell(s, :, 2) == [XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", ""); XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", ""); XLSX.Cell(XLSX.CellRef("B3"), "", "", "5", "");;]
-    @test XLSX.getcell(s, 2, :) == [XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", "") XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", "") XLSX.Cell(XLSX.CellRef("C2"), "", "", "5", "")]
-    @test XLSX.getcell(s, 2, 1:2:3) == [XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", ""), XLSX.Cell(XLSX.CellRef("C2"), "", "", "5", "")]
-    @test XLSX.getcell(s, 2, [1, 3]) == [XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", ""), XLSX.Cell(XLSX.CellRef("C2"), "", "", "5", "")]
-    @test XLSX.getcell(s, [2], 1) == [XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", "")]
-    @test XLSX.getcell(s, [2], [1, 3]) == [XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", "") XLSX.Cell(XLSX.CellRef("C2"), "", "", "5", "")]
+    @test XLSX.getcell(s, "A1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A1"), "", "", "2", "", false)
+    @test XLSX.getcell(s, "Sheet1!A1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A1"), "", "", "2", "", false)
+    @test XLSX.getcell(f, "Sheet1!A1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A1"), "", "", "2", "", false)
+    @test XLSX.getcell(s, XLSX.SheetCellRef("Sheet1!A1")) == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A1"), "", "", "2", "", false)
+    @test XLSX.getcell(f, XLSX.SheetCellRef("Sheet1!A1")) == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A1"), "", "", "2", "", false)
+    @test XLSX.getcell(s, "B1:B3") == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B3"), "", "", "5", "", false);;]
+    @test XLSX.getcell(s, "Sheet1!B1:B3") == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B3"), "", "", "5", "", false);;]
+    @test XLSX.getcell(f, "Sheet1!B1:B3") == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B3"), "", "", "5", "", false);;]
+    @test XLSX.getcell(s, XLSX.SheetCellRange("Sheet1!B1:B3")) == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B3"), "", "", "5", "", false);;]
+    @test XLSX.getcell(s, "B1,B3") == [[XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false);;], [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B3"), "", "", "5", "", false);;]]
+    @test XLSX.getcell(s, "Sheet1!B1,Sheet1!B3") == [[XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false);;], [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B3"), "", "", "5", "", false);;]]
+    @test XLSX.getcell(f, "Sheet1!B1,Sheet1!B3") == [[XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false);;], [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B3"), "", "", "5", "", false);;]]
+    @test XLSX.getcell(s, "B:B") == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B3"), "", "", "5", "", false);;]
+    @test XLSX.getcell(s, "Sheet1!B:B") == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B3"), "", "", "5", "", false);;]
+    @test XLSX.getcell(f, "Sheet1!B:B") == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B3"), "", "", "5", "", false);;]
+    @test XLSX.getcell(s, XLSX.SheetColumnRange("Sheet1!B:B")) == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B3"), "", "", "5", "", false);;]
+    @test XLSX.getcell(s, "Sheet1!2:2") == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C2"), "", "", "5", "", false)]
+    @test XLSX.getcell(f, "Sheet1!2:2") == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C2"), "", "", "5", "", false)]
+    @test XLSX.getcell(s, XLSX.SheetRowRange("Sheet1!2:2")) == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C2"), "", "", "5", "", false)]
+    @test XLSX.getcell(s, "2:2") == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C2"), "", "", "5", "", false)]
+    @test XLSX.getcell(s, :, 2) == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B3"), "", "", "5", "", false);;]
+    @test XLSX.getcell(s, 2, :) == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C2"), "", "", "5", "", false)]
+    @test XLSX.getcell(s, 2, 1:2:3) == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false), XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C2"), "", "", "5", "", false)]
+    @test XLSX.getcell(s, 2, [1, 3]) == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false), XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C2"), "", "", "5", "", false)]
+    @test XLSX.getcell(s, [2], 1) == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false)]
+    @test XLSX.getcell(s, [2], [1, 3]) == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C2"), "", "", "5", "", false)]
     @test_throws XLSX.XLSXError XLSX.getcell(f, "Sheet1!garbage")
     @test_throws XLSX.XLSXError XLSX.getcell(s, "Sheet1!garbage")
     @test_throws XLSX.XLSXError XLSX.getcell(s, "garbage")
     @test_throws XLSX.XLSXError XLSX.getcell(s, "garbage1:garbage2")
 
-    @test XLSX.getcellrange(s, "Sheet1!B:B") == [XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", ""); XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", ""); XLSX.Cell(XLSX.CellRef("B3"), "", "", "5", "");;]
-    @test XLSX.getcellrange(f, "Sheet1!B:B") == [XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", ""); XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", ""); XLSX.Cell(XLSX.CellRef("B3"), "", "", "5", "");;]
-    @test XLSX.getcellrange(s, XLSX.SheetColumnRange("Sheet1!B:B")) == [XLSX.Cell(XLSX.CellRef("B1"), "", "", "3", ""); XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", ""); XLSX.Cell(XLSX.CellRef("B3"), "", "", "5", "");;]
-    @test XLSX.getcellrange(s, "Sheet1!2:2") == [XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", "") XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", "") XLSX.Cell(XLSX.CellRef("C2"), "", "", "5", "")]
-    @test XLSX.getcellrange(f, "Sheet1!2:2") == [XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", "") XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", "") XLSX.Cell(XLSX.CellRef("C2"), "", "", "5", "")]
-    @test XLSX.getcellrange(s, XLSX.SheetRowRange("Sheet1!2:2")) == [XLSX.Cell(XLSX.CellRef("A2"), "", "", "3", "") XLSX.Cell(XLSX.CellRef("B2"), "", "", "4", "") XLSX.Cell(XLSX.CellRef("C2"), "", "", "5", "")]
+    @test XLSX.getcellrange(s, "Sheet1!B:B") == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B3"), "", "", "5", "", false);;]
+    @test XLSX.getcellrange(f, "Sheet1!B:B") == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B3"), "", "", "5", "", false);;]
+    @test XLSX.getcellrange(s, XLSX.SheetColumnRange("Sheet1!B:B")) == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "3", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B3"), "", "", "5", "", false);;]
+    @test XLSX.getcellrange(s, "Sheet1!2:2") == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C2"), "", "", "5", "", false)]
+    @test XLSX.getcellrange(f, "Sheet1!2:2") == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C2"), "", "", "5", "", false)]
+    @test XLSX.getcellrange(s, XLSX.SheetRowRange("Sheet1!2:2")) == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "4", "", false) XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("C2"), "", "", "5", "", false)]
 
     XLSX.addDefinedName(f, "MyName1", "Sheet1!A1")
     XLSX.addDefinedName(s, "MyName2", "Sheet1!A2:A3")
@@ -613,12 +797,12 @@ end
     @test s["MyName1"] == 12.9
     s["MyName2"] = 42
     @test s["MyName2"] == [42; 42;;]
-    @test XLSX.getcell(s, "MyName1") == XLSX.Cell(XLSX.CellRef("A1"), "", "", "12.9", "")
-    @test XLSX.getcell(s, "MyName2") == [XLSX.Cell(XLSX.CellRef("A2"), "", "", "42", ""); XLSX.Cell(XLSX.CellRef("A3"), "", "", "42", "");;]
-    @test XLSX.getcell(f, "MyName1") == XLSX.Cell(XLSX.CellRef("A1"), "", "", "12.9", "")
-    @test XLSX.getcellrange(s, "MyName2") == [XLSX.Cell(XLSX.CellRef("A2"), "", "", "42", ""); XLSX.Cell(XLSX.CellRef("A3"), "", "", "42", "");;]
-    @test XLSX.getcellrange(s, "MyName3") == [[XLSX.Cell(XLSX.CellRef("A2"), "", "", "42", XLSX.Formula("", nothing));;], [XLSX.Cell(XLSX.CellRef("A3"), "", "", "42", XLSX.Formula("", nothing));;]]
-    @test XLSX.getcellrange(f, "MyName3") == [[XLSX.Cell(XLSX.CellRef("A2"), "", "", "42", XLSX.Formula("", nothing));;], [XLSX.Cell(XLSX.CellRef("A3"), "", "", "42", XLSX.Formula("", nothing));;]]
+    @test XLSX.getcell(s, "MyName1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A1"), "", "", "12.9", "", false)
+    @test XLSX.getcell(s, "MyName2") == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "42", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A3"), "", "", "42", "", false);;]
+    @test XLSX.getcell(f, "MyName1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A1"), "", "", "12.9", "", false)
+    @test XLSX.getcellrange(s, "MyName2") == [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "42", "", false); XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A3"), "", "", "42", "", false);;]
+    @test XLSX.getcellrange(s, "MyName3") == [[XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "42", "", false);;], [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A3"), "", "", "42", "", false);;]]
+    @test XLSX.getcellrange(f, "MyName3") == [[XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "42", "", false);;], [XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A3"), "", "", "42", "", false);;]]
 
 end
 
@@ -756,6 +940,33 @@ end
     @test_throws XLSX.XLSXError XLSX.addDefinedName(s, "Sheet1!A1:A3", "Sheet1!B2:B3")
     @test_throws XLSX.XLSXError XLSX.addDefinedName(s, "Sheet1!A1,Sheet!A3", 42)
 
+    f=XLSX.newxlsx()
+    XLSX.addsheet!(f, "Tim's Sheet")
+    XLSX.addsheet!(f, "Ano'ther She'et")
+    f[2]["A1"] = "tim"
+    f[3]["A1"] = "another"
+    XLSX.addDefinedName(f, "mine", "Tim's Sheet!A1")
+    XLSX.addDefinedName(f, "yours", "Ano'ther She'et!A1")
+    @test f["mine"] == "tim"
+    @test f["yours"] == "another"
+    @test string(XLSX.get_defined_name_value(XLSX.get_workbook(f), "mine")) == "'Tim''s Sheet'!A1"
+    @test string(XLSX.get_defined_name_value(XLSX.get_workbook(f), "yours")) == "'Ano''ther She''et'!A1"
+
+    XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
+
+    ff = XLSX.openxlsx("mytest.xlsx", mode="rw")
+
+    @test XLSX.hassheet(f, "Tim's Sheet")
+    @test XLSX.hassheet(f, "Ano'ther She'et")
+    @test f[2]["A1"] == "tim"
+    @test f[3]["A1"] == "another"
+    @test f["mine"] == "tim"
+    @test f["yours"] == "another"
+    @test string(XLSX.get_defined_name_value(XLSX.get_workbook(ff), "mine")) == "'Tim''s Sheet'!A1"
+    @test string(XLSX.get_defined_name_value(XLSX.get_workbook(ff), "yours")) == "'Ano''ther She''et'!A1"
+
+    isfile("mytest.xlsx") && rm("mytest.xlsx")
+
 end
 
 @testset "Book1.xlsx" begin
@@ -848,6 +1059,35 @@ end
     @test XLSX.column_number(emptycell) == 2
 end
 
+@testset "Error Values" begin
+    f = XLSX.openxlsx(joinpath(data_directory, "Errors.xlsx"), mode="rw")
+    s=f[1]
+    @test Int64(XLSX.getcell(s, "A1").value) == 1
+    @test Int64(XLSX.getcell(s, "B1").value) == 2
+    @test Int64(XLSX.getcell(s, "C1").value) == 3
+    @test Int64(XLSX.getcell(s, "D1").value) == 4
+    @test Int64(XLSX.getcell(s, "E1").value) == 5
+    @test Int64(XLSX.getcell(s, "F1").value) == 6
+    @test Int64(XLSX.getcell(s, "G1").value) == 7
+    @test Int64(XLSX.getcell(s, "H1").value) == 3
+
+    XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
+
+    f2 = XLSX.openxlsx("mytest.xlsx", mode="rw")
+    s=f[1]
+    @test Int64(XLSX.getcell(s, "A1").value) == 1
+    @test Int64(XLSX.getcell(s, "B1").value) == 2
+    @test Int64(XLSX.getcell(s, "C1").value) == 3
+    @test Int64(XLSX.getcell(s, "D1").value) == 4
+    @test Int64(XLSX.getcell(s, "E1").value) == 5
+    @test Int64(XLSX.getcell(s, "F1").value) == 6
+    @test Int64(XLSX.getcell(s, "G1").value) == 7
+    @test Int64(XLSX.getcell(s, "H1").value) == 3
+
+    isfile("mytest.xlsx") && rm("mytest.xlsx")
+
+end
+
 @testset "No Dimension" begin
     noDim = XLSX.openxlsx(joinpath(data_directory, "NoDim.xlsx"), mode="rw") # This file is the same as customXml but has the dimension nodes removed.
     Dim = XLSX.readxlsx(joinpath(data_directory, "customXml.xlsx"))
@@ -855,31 +1095,31 @@ end
     @test noDim[2].dimension == Dim[2].dimension
 
     f = XLSX.newxlsx()
-    s=f[1]
-    for i=10:20, j=10:20
-        s[i, j] = i+j
+    s = f[1]
+    for i = 10:20, j = 10:20
+        s[i, j] = i + j
     end
-    XLSX.set_dimension!(s,XLSX.CellRange(XLSX.CellRef("J10"), XLSX.CellRef("T20")))
+    XLSX.set_dimension!(s, XLSX.CellRange(XLSX.CellRef("J10"), XLSX.CellRef("T20")))
     @test XLSX.get_dimension(s) == XLSX.CellRange(XLSX.CellRef("J10"), XLSX.CellRef("T20"))
-    s["A1"]=2
+    s["A1"] = 2
     @test XLSX.get_dimension(s) == XLSX.CellRange(XLSX.CellRef("A1"), XLSX.CellRef("T20"))
 
 end
 
 @testset "Range intersect" begin
-    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("A3"), XLSX.CellRef("E4")),XLSX.CellRange(XLSX.CellRef("C1"), XLSX.CellRef("D6")))
-    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("C1"), XLSX.CellRef("D6")),XLSX.CellRange(XLSX.CellRef("A3"), XLSX.CellRef("E4")))
-    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("A3"), XLSX.CellRef("D4")),XLSX.CellRange(XLSX.CellRef("C1"), XLSX.CellRef("E6")))
-    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("C1"), XLSX.CellRef("E6")),XLSX.CellRange(XLSX.CellRef("A3"), XLSX.CellRef("D4")))
-    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("C3"), XLSX.CellRef("E4")),XLSX.CellRange(XLSX.CellRef("C1"), XLSX.CellRef("G6")))
-    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("C1"), XLSX.CellRef("G6")),XLSX.CellRange(XLSX.CellRef("C3"), XLSX.CellRef("E4")))
-    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("A1"), XLSX.CellRef("E4")),XLSX.CellRange(XLSX.CellRef("C3"), XLSX.CellRef("G6")))
-    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("C3"), XLSX.CellRef("G6")),XLSX.CellRange(XLSX.CellRef("A1"), XLSX.CellRef("E4")))
-    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("C3"), XLSX.CellRef("D4")),XLSX.CellRange(XLSX.CellRef("A1"), XLSX.CellRef("E6")))
+    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("A3"), XLSX.CellRef("E4")), XLSX.CellRange(XLSX.CellRef("C1"), XLSX.CellRef("D6")))
+    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("C1"), XLSX.CellRef("D6")), XLSX.CellRange(XLSX.CellRef("A3"), XLSX.CellRef("E4")))
+    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("A3"), XLSX.CellRef("D4")), XLSX.CellRange(XLSX.CellRef("C1"), XLSX.CellRef("E6")))
+    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("C1"), XLSX.CellRef("E6")), XLSX.CellRange(XLSX.CellRef("A3"), XLSX.CellRef("D4")))
+    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("C3"), XLSX.CellRef("E4")), XLSX.CellRange(XLSX.CellRef("C1"), XLSX.CellRef("G6")))
+    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("C1"), XLSX.CellRef("G6")), XLSX.CellRange(XLSX.CellRef("C3"), XLSX.CellRef("E4")))
+    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("A1"), XLSX.CellRef("E4")), XLSX.CellRange(XLSX.CellRef("C3"), XLSX.CellRef("G6")))
+    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("C3"), XLSX.CellRef("G6")), XLSX.CellRange(XLSX.CellRef("A1"), XLSX.CellRef("E4")))
+    @test XLSX.intersects(XLSX.CellRange(XLSX.CellRef("C3"), XLSX.CellRef("D4")), XLSX.CellRange(XLSX.CellRef("A1"), XLSX.CellRef("E6")))
 end
 
 @testset "Column Range" begin
-    
+
     @testset "Single Column" begin
         c = XLSX.ColumnRange("C")
         @test c.start == 3
@@ -899,14 +1139,23 @@ end
         c = XLSX.ColumnRange("A:AA")
         @test c.start == 1
         @test c.stop == 27
+
         cr = XLSX.ColumnRange("B:D")
         @test string(cr) == "B:D"
         @test cr.start == 2
         @test cr.stop == 4
         @test length(cr) == 3
-        @test_throws XLSX.XLSXError XLSX.ColumnRange("B1:D3")
+
+        cr = XLSX.ColumnRange("B")
+        @test string(cr) == "B:B"
+        @test cr.start == 2
+        @test cr.stop == 2
+        @test length(cr) == 1
+
+        @test XLSX.ColumnRange("B1:D3") == XLSX.ColumnRange("B:D")
+
         @test_throws XLSX.XLSXError XLSX.ColumnRange("D:A")
-        @test collect(cr) == ["B", "C", "D"]
+        @test collect(XLSX.ColumnRange("B:D")) == ["B", "C", "D"]
         @test XLSX.ColumnRange("B:D") == XLSX.ColumnRange("B:D")
         @test hash(XLSX.ColumnRange("B:D")) == hash(XLSX.ColumnRange("B:D"))
     end
@@ -927,7 +1176,7 @@ end
     @test length(cr) == 1
     @test collect(cr) == ["2"]
 
-    @test_throws XLSX.XLSXError XLSX.RowRange("B1:D3")
+    @test XLSX.RowRange("B1:D3") == XLSX.RowRange("1:3")
     @test_throws XLSX.XLSXError XLSX.RowRange("5:2")
     @test XLSX.RowRange("2:5") == XLSX.RowRange("2:5")
     @test hash(XLSX.RowRange("2:5")) == hash(XLSX.RowRange("2:5"))
@@ -1353,6 +1602,108 @@ end
             check_test_data(data, test_data)
         end
     end
+
+    @testset "Transposed Tables" begin
+        test_data = Vector{Any}(undef, 6)
+        test_data[1] = [1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020]
+        test_data[2] = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        test_data[3] = [10, 20, 30, 40, 50, 60, 70, 80, 90]
+        test_data[4] = [100, 200, 300, 400, 500, 600, 700, 800, 900]
+        test_data[5] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        test_data[6] = Any["Hello", Date(2025, 12, 19), 3, 3.33, "Hello", Date(2025, 12, 19), 3, 3.33, true]
+
+        f = XLSX.openxlsx(joinpath(data_directory, "HTable.xlsx"), mode="rw")
+        dtable = XLSX.gettransposedtable(f[1])
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Year", "Col A", "Col B", "Col C", "Col D", "Col E"])
+        dtable = XLSX.gettransposedtable(f[1]; normalizenames=true)
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Year", "Col_A", "Col_B", "Col_C", "Col_D", "Col_E"])
+        check_test_data(data, test_data)
+
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"))
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Year", "Col A", "Col B", "Col C", "Col D", "Col E"])
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"); normalizenames=true)
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Year", "Col_A", "Col_B", "Col_C", "Col_D", "Col_E"])
+        check_test_data(data, test_data)
+
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Offset", "2:7")
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Year", "Col A", "Col B", "Col C", "Col D", "Col E"])
+        check_test_data(data, test_data)
+
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7")
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Year", "Col A", "Col B", "Col C", "Col D", "Col E"])
+        check_test_data(data, test_data)
+
+        @test_throws XLSX.XLSXError XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:9") # Beyond worksheet dimension
+        @test_throws XLSX.XLSXError XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "b:d") # Invalid row range
+        test_data[1] = [1840, 1841, 1842, 1843, 1844, 1845, 1846, 1847, 1848]
+        test_data[2] = [12.4, 12.6, 12.8, 13.0, 13.2, 13.4, 13.6, 13.8, 14.0]
+        test_data[3] = [0.045, 0.046, 0.047, 0.048, 0.049, 0.050, 0.051, 0.052, 0.053]
+        test_data[4] = [true, true, false, true, false, true, true, true, false]
+        test_data[5] = [Time(10, 22), Time(10, 23), Time(10, 24), Time(10, 25), Time(10, 26), Time(10, 27), Time(10, 28), Time(10, 29), Time(10, 30)]
+        test_data[6] = Any["Hello", Date(2025, 12, 19), 3, 3.33, "Hello", Date(2025, 12, 19), 3, 3.33, true]
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7"; first_column="M")
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["date", "name1", "name2", "name3", "name4", "name5"])
+        check_test_data(data, test_data)
+
+        @test_throws XLSX.XLSXError XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7"; first_column=4.2) # Invalid first_column
+        @test_throws XLSX.XLSXError XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7"; first_column=200) # first_column beyond worksheet dimension
+
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7"; first_column=13, column_labels=["year", "Col_2", "Col_3", "Col_4", "Col_5", "Col_6"])
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["year", "Col_2", "Col_3", "Col_4", "Col_5", "Col_6"])
+        check_test_data(data, test_data)
+
+        @test_throws XLSX.XLSXError XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7"; first_column=13, column_labels=["Col_2", "Col_3", "Col_4", "Col_5", "Col_6"]) # Missing one label
+
+        test_data[1] = Any["date", 1840, 1841, 1842, 1843, 1844, 1845, 1846, 1847, 1848]
+        test_data[2] = Any["name1", 12.4, 12.6, 12.8, 13.0, 13.2, 13.4, 13.6, 13.8, 14.0]
+        test_data[3] = Any["name2", 0.045, 0.046, 0.047, 0.048, 0.049, 0.050, 0.051, 0.052, 0.053]
+        test_data[4] = Any["name3", true, true, false, true, false, true, true, true, false]
+        test_data[5] = Any["name4", Time(10, 22), Time(10, 23), Time(10, 24), Time(10, 25), Time(10, 26), Time(10, 27), Time(10, 28), Time(10, 29), Time(10, 30)]
+        test_data[6] = Any["name5", "Hello", Date(2025, 12, 19), 3, 3.33, "Hello", Date(2025, 12, 19), 3, 3.33, true]
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7"; first_column=13, header=false, column_labels=["year", "Col2", "Col3", "Col4", "Col5", "Col6"])
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["year", "Col2", "Col3", "Col4", "Col5", "Col6"])
+
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Multiple", "2:7"; first_column=13, header=false)
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Col_1", "Col_2", "Col_3", "Col_4", "Col_5", "Col_6"])
+
+        test_data = Vector{Any}(undef, 4)
+        test_data[1] = ["A", "B", "C", "D"]
+        test_data[2] = [10, 20, 30, 40]
+        test_data[3] = [15, 25, 35, 40]
+        test_data[4] = [20, 30, 40, 50]
+        dtable = XLSX.readtransposedtable(joinpath(data_directory, "HTable.xlsx"), "Example")
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Category", "Variable 1", "Variable 2", "Variable 3"])
+        check_test_data(data, test_data)
+
+        XLSX.addsheet!(f, "ExpandedDim")
+        s = f["ExpandedDim"]
+        s["B2"] = "Category"
+        s["B3"] = "Variable 1"
+        s["B4"] = "Variable 2"
+        s["B5"] = "Variable 3"
+        s["C2"] = test_data[1]
+        s["C3"] = test_data[2]
+        s["C4"] = test_data[3]
+        s["C5"] = test_data[4]
+        s["M10"] = "ExtraData"
+        @test XLSX.get_dimension(s) == XLSX.CellRange("A1:M10")
+        dtable = XLSX.gettransposedtable(s)
+        data, colnames = dtable.data, dtable.column_labels
+        @test colnames == Symbol.(["Category", "Variable 1", "Variable 2", "Variable 3"])
+        check_test_data(data, test_data)
+
+    end
 end
 
 @testset "Helper functions" begin
@@ -1397,15 +1748,20 @@ end
     end
 
     @testset "readtable select column range" begin
+
         dtable = XLSX.readtable(joinpath(data_directory, "general.xlsx"), "table4", "F:G")
         data, col_names = dtable.data, dtable.column_labels
         @test col_names == [:H2, :H3]
         test_data = Any[Any["C3", missing], Any[missing, "D4"]]
         check_test_data(data, test_data)
+
+        @test_throws XLSX.XLSXError XLSX.readtable(joinpath(data_directory, "general.xlsx"), "table4", "F:G"; header=false, column_labels=["a", "b", "c"])
+
     end
 
     @testset "readtable empty rows" begin
-        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "EmptyRow", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true)
+
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "EmptyRow", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true)
         test_data = Vector{Any}(undef, 2)
         test_data[1] = [1, 2, missing, missing, 3, 4, 5]
         test_data[2] = ["a", "b", missing, missing, "c", "d", "e"]
@@ -1413,7 +1769,7 @@ end
         @test t.column_labels == [Symbol("Col A"), Symbol("Col B")]
         @test t.column_label_index == Dict(Symbol("Col A") => 1, Symbol("Col B") => 2)
 
-        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "EmptyCols", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true)
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "EmptyCols", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true)
         test_data = Vector{Any}(undef, 2)
         test_data[1] = [1, 2, missing, missing, 3, 4, 5]
         test_data[2] = ["a", "b", missing, missing, "c", "d", "e"]
@@ -1421,7 +1777,7 @@ end
         @test t.column_labels == [Symbol("Col A"), Symbol("Col B")]
         @test t.column_label_index == Dict(Symbol("Col A") => 1, Symbol("Col B") => 2)
 
-        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "MixedEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true)
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "MixedEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true)
         test_data = Vector{Any}(undef, 2)
         test_data[1] = [1, 2, missing, missing, 3, 4, 5, missing, missing, missing, missing, missing, 6, 7, 8, missing, missing, missing, missing, missing, missing, missing, 9, 10, 11, 12, 13, 14, 15, 16]
         test_data[2] = ["a", "b", missing, missing, "c", "d", "e", missing, missing, missing, missing, missing, "c", "d", "e", missing, missing, missing, missing, missing, missing, missing, "c", "d", "e", "c", "d", "e", "c", "d"]
@@ -1429,7 +1785,7 @@ end
         @test t.column_labels == [Symbol("Col A"), Symbol("Col B")]
         @test t.column_label_index == Dict(Symbol("Col A") => 1, Symbol("Col B") => 2)
 
-        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "EmptyRow", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false)
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "EmptyRow", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false)
         test_data = Vector{Any}(undef, 2)
         test_data[1] = [1, 2, 3, 4, 5]
         test_data[2] = ["a", "b", "c", "d", "e"]
@@ -1437,7 +1793,7 @@ end
         @test t.column_labels == [Symbol("Col A"), Symbol("Col B")]
         @test t.column_label_index == Dict(Symbol("Col A") => 1, Symbol("Col B") => 2)
 
-        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "EmptyCols", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false)
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "EmptyCols", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false)
         test_data = Vector{Any}(undef, 2)
         test_data[1] = [1, 2, 3, 4, 5]
         test_data[2] = ["a", "b", "c", "d", "e"]
@@ -1445,13 +1801,94 @@ end
         @test t.column_labels == [Symbol("Col A"), Symbol("Col B")]
         @test t.column_label_index == Dict(Symbol("Col A") => 1, Symbol("Col B") => 2)
 
-        t=XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "MixedEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false)
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "MixedEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false)
         test_data = Vector{Any}(undef, 2)
         test_data[1] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
         test_data[2] = ["a", "b", "c", "d", "e", "c", "d", "e", "c", "d", "e", "c", "d", "e", "c", "d"]
         check_test_data(t.data, test_data)
         @test t.column_labels == [Symbol("Col A"), Symbol("Col B")]
         @test t.column_label_index == Dict(Symbol("Col A") => 1, Symbol("Col B") => 2)
+
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true)
+        test_data = Vector{Any}(undef, 2)
+        test_data[1] = [missing, missing, missing, 1, 2, missing, missing, 3, 4, 5, missing, missing, missing, missing, missing, 6, 7, 8, missing, missing, missing, missing, missing, missing, missing, 9, 10, 11, 12, 13, 14, 15, 16]
+        test_data[2] = [missing, missing, missing, "a", "b", missing, missing, "c", "d", "e", missing, missing, missing, missing, missing, "c", "d", "e", missing, missing, missing, missing, missing, missing, missing, "c", "d", "e", "c", "d", "e", "c", "d"]
+        check_test_data(t.data, test_data)
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false)
+        test_data = Vector{Any}(undef, 2)
+        test_data[1] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        test_data[2] = ["a", "b", "c", "d", "e", "c", "d", "e", "c", "d", "e", "c", "d", "e", "c", "d"]
+        check_test_data(t.data, test_data)
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingMixed", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true)
+        test_data = Vector{Any}(undef, 2)
+        test_data[1] = [missing, missing, missing, 1, 2, missing, missing, 3, 4, 5, missing, missing, missing, missing, missing, 6, 7, 8, missing, missing, missing, missing, missing, missing, missing, 9, 10, 11, 12, 13, 14, 15, 16]
+        test_data[2] = [missing, missing, missing, "a", "b", missing, missing, "c", "d", "e", missing, missing, missing, missing, missing, "c", "d", "e", missing, missing, missing, missing, missing, missing, missing, "c", "d", "e", "c", "d", "e", "c", "d"]
+        check_test_data(t.data, test_data)
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingMixed", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false)
+        test_data = Vector{Any}(undef, 2)
+        test_data[1] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        test_data[2] = ["a", "b", "c", "d", "e", "c", "d", "e", "c", "d", "e", "c", "d", "e", "c", "d"]
+        check_test_data(t.data, test_data)
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+    end
+
+    @testset "stop function" begin
+
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true, stop_in_row_function=x -> !ismissing(x.cell_values[1]) && x.cell_values[1] == 2)
+        test_data = Vector{Any}(undef, 2)
+        test_data[1] = [missing, missing, missing, 1]
+        test_data[2] = [missing, missing, missing, "a"]
+        check_test_data(t.data, test_data)
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false, stop_in_row_function=x -> !ismissing(x.cell_values[1]) && x.cell_values[1] == 14)
+        test_data = Vector{Any}(undef, 2)
+        test_data[1] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        test_data[2] = ["a", "b", "c", "d", "e", "c", "d", "e", "c", "d", "e", "c", "d"]
+        check_test_data(t.data, test_data)
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true, stop_in_row_function=x -> ismissing(x.cell_values[1]))
+        @test isempty(t.data[1])
+        @test isempty(t.data[2])
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingEmpty", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=false, stop_in_row_function=x -> !ismissing(x.cell_values[1]) && x.cell_values[1] == 1)
+        @test isempty(t.data[1])
+        @test isempty(t.data[2])
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingMixed", "B:C"; first_row=2, stop_in_empty_row=false, keep_empty_rows=true, stop_in_row_function=x -> ismissing(x.cell_values[1]))
+        @test isempty(t.data[1])
+        @test isempty(t.data[2])
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+        t = XLSX.readtable(joinpath(data_directory, "EmptyTableRows.xlsx"), "LeadingMixed", "B:C"; first_row=2, stop_in_empty_row=true)
+        @test isempty(t.data[1])
+        @test isempty(t.data[2])
+        @test t.column_labels == [Symbol("col A"), Symbol("col B")]
+        @test t.column_label_index == Dict(Symbol("col A") => 1, Symbol("col B") => 2)
+
+    end
+
+    @testset "normalizenames" begin
+        test_data = ["hello", "Hello 1", "123", Symbol("name")]
+        @test XLSX.normalizename.(test_data) == [:hello, :Hello_1, :_123, :name]
     end
 
     @testset "Read DataFrame" begin
@@ -1480,7 +1917,7 @@ end
         @test df[3, 2] == Dates.Date(1983, 04, 16)
         @test df[5, 2] == Dates.DateTime(2018, 04, 16, 19, 19, 51)
 
-        @test_throws XLSX.XLSXError df = XLSX.readto(joinpath(data_directory, "general.xlsx"))           # No sink
+        @test_throws XLSX.XLSXError XLSX.readto(joinpath(data_directory, "general.xlsx"))           # No sink
         @test_throws XLSX.XLSXError df = XLSX.readto(joinpath(data_directory, "general.xlsx"), 3)        # No sink
         @test_throws XLSX.XLSXError df = XLSX.readto(joinpath(data_directory, "general.xlsx"), 3, "F:G") # No sink
 
@@ -1529,9 +1966,9 @@ end
 end
 
 @testset "Save" begin
-    f=XLSX.openxlsx("saveable.xlsx", mode="w")
-    XLSX.rename!(f["Sheet1"], "new_name")
-    s=f[1]
+    f = XLSX.openxlsx("saveable.xlsx", mode="w")
+    XLSX.renamesheet!(f["Sheet1"], "new_name")
+    s = f[1]
     s[1:10, 1:10] = "hello world"
     @test XLSX.savexlsx(f) == abspath("saveable.xlsx")
     f2 = XLSX.openxlsx("saveable.xlsx", mode="rw")
@@ -1632,17 +2069,17 @@ end
 
     @testset "copysheet!" begin
 
-        f=XLSX.newxlsx()
-        XLSX.rename!(f["Sheet1"], "new_name")
+        f = XLSX.newxlsx()
+        XLSX.renamesheet!(f["Sheet1"], "new_name")
         XLSX.addsheet!(f)
-        for x=1:10, y=1:10
+        for x = 1:10, y = 1:10
             f["Sheet1"][x, y] = x + y
             f["new_name"][x, y] = x * y
         end
         XLSX.addDefinedName(f["new_name"], "new_name_range", "A1:B10")
         XLSX.addDefinedName(f["Sheet1"], "Sheet1_range", "C1:D10")
-        XLSX.setBorder(f["new_name"], "A1:D10"; allsides=["style"=>"thin", "color"=>"red"])
-        XLSX.setBorder(f["Sheet1"], "A1:D10"; allsides=["style"=>"thin", "color"=>"red"])
+        XLSX.setBorder(f["new_name"], "A1:D10"; allsides=["style" => "thin", "color" => "red"])
+        XLSX.setBorder(f["Sheet1"], "A1:D10"; allsides=["style" => "thin", "color" => "red"])
         XLSX.setConditionalFormat(f["new_name"], "A1:D10", :colorScale)
 
         s3 = XLSX.copysheet!(f["new_name"], "copied_sheet")
@@ -1652,10 +2089,10 @@ end
         @test s3[10, 10] == 100
         @test XLSX.get_workbook(s3).worksheet_names == XLSX.get_workbook(f["new_name"]).worksheet_names
         @test XLSX.getConditionalFormats(s3) == XLSX.getConditionalFormats(f["new_name"])
-        @test XLSX.getBorder(s3,"C5").border == XLSX.getBorder(f["new_name"],"C5").border
+        @test XLSX.getBorder(s3, "C5").border == XLSX.getBorder(f["new_name"], "C5").border
 
         # Check that the original sheet is unchanged
-        s2=f["new_name"]
+        s2 = f["new_name"]
         @test s2["A1"] == 1
         @test s2[5, 5] == 25
         @test s2[10, 10] == 100
@@ -1667,16 +2104,16 @@ end
         @test s4[10, 10] == 100
 
         @test XLSX.get_workbook(s4).worksheet_names == XLSX.get_workbook(f["new_name"]).worksheet_names
-        XLSX.setBorder(s4, "F1:H10"; allsides=["style"=>"thin", "color"=>"green"])
+        XLSX.setBorder(s4, "F1:H10"; allsides=["style" => "thin", "color" => "green"])
         XLSX.setConditionalFormat(s4, "F1:H10", :colorScale; colorscale="redyellowgreen")
-       
+
         XLSX.writexlsx("copied_sheets.xlsx", f, overwrite=true)
         f = XLSX.opentemplate("copied_sheets.xlsx")
         @test XLSX.sheetnames(f) == ["new_name", "Sheet1", "copied_sheet", "copied_sheet (copy)"]
         @test XLSX.get_workbook(f["copied_sheet"]).worksheet_names == XLSX.get_workbook(f["new_name"]).worksheet_names
         @test XLSX.getConditionalFormats(f["copied_sheet (copy)"]) == XLSX.getConditionalFormats(s4)
-        @test XLSX.getBorder(f["copied_sheet (copy)"],"C5").border == XLSX.getBorder(f["new_name"],"C5").border
-        @test XLSX.getBorder(f["copied_sheet (copy)"],"G5").border == XLSX.getBorder(s4,"G5").border
+        @test XLSX.getBorder(f["copied_sheet (copy)"], "C5").border == XLSX.getBorder(f["new_name"], "C5").border
+        @test XLSX.getBorder(f["copied_sheet (copy)"], "G5").border == XLSX.getBorder(s4, "G5").border
 
     end
     isfile("copied_sheets.xlsx") && rm("copied_sheets.xlsx")
@@ -1729,22 +2166,111 @@ end
         @test_throws XLSX.XLSXError XLSX.deletesheet!(s)
         @test_throws XLSX.XLSXError XLSX.deletesheet!(f, "Sheet1")
 
-        f=XLSX.openxlsx(joinpath(data_directory,"deletesheet.xlsx"), mode="rw")
+        f = XLSX.openxlsx(joinpath(data_directory, "deletesheet.xlsx"), mode="rw")
         XLSX.deletesheet!(f[1])
-        @test XLSX.getcell(f[1], "A1") == XLSX.Cell(XLSX.CellRef("A1"), "e", "", "#REF!", XLSX.Formula("#REF!+#REF!", nothing))
+        @test XLSX.getcell(f[1], "A1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A1"), "e", "", "#REF!", "", true)
+        @test XLSX.getFormula(f[1], "A1") == "=#REF!+#REF!"
+
+        isfile("template_with_new_sheet.xlsx") && rm("template_with_new_sheet.xlsx")
+
+        # XLSX.jl cannot currently create formula references that refer to other sheets, so we have to manually 
+        # insert them into the workbook's formula cache to test. Excel cannot read such a workbook and deletes these 
+        # formulas on opening. Tests are for completeness only
+        f=XLSX.openxlsx("renamedelete.xlsx", mode="w") 
+        s=f[1]
+        s[1:10, 1] = collect(1:10)
+        XLSX.addsheet!(f)
+        s2=f[2]
+        s2["A1:B4"]=""
+        XLSX.setFormula(s2, "A1", "=Sheet1!A1+10")
+        XLSX.getcell(s2, "B1").formula=true
+        XLSX.getcell(s2, "B2").formula=true
+        XLSX.getcell(s2, "B3").formula=true
+        XLSX.getcell(s2, "B4").formula=true
+        w=XLSX.get_workbook(s2)
+        w.formulas[XLSX.SheetCellRef("Sheet2!B1")] = XLSX.ReferencedFormula("=Sheet1!A1+10", 0, "B1:B4", nothing)
+        w.formulas[XLSX.SheetCellRef("Sheet2!B2")] = XLSX.FormulaReference(0, nothing)
+        w.formulas[XLSX.SheetCellRef("Sheet2!B3")] = XLSX.FormulaReference(0, nothing)
+        w.formulas[XLSX.SheetCellRef("Sheet2!B4")] = XLSX.FormulaReference(0, nothing)
+
+        XLSX.deletesheet!(s)
+        @test XLSX.hassheet(f, "Sheet1") == false
+        @test XLSX.getcell(s2, "A1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A1"), "e", "", "#REF!", "", true)
+        @test XLSX.getcell(s2, "B1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "e", "", "#REF!", "", true)
+        @test XLSX.getcell(s2, "B2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "e", "", "#REF!", "", true)
+        @test XLSX.getcell(s2, "B4") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B4"), "e", "", "#REF!", "", true)
+        @test XLSX.getFormula(s2, "A1") == "=#REF!+10"
+        @test XLSX.getFormula(s2, "B1") == "=#REF!+10"
+        @test XLSX.getFormula(s2, "B2") == "=#REF!+10"
+        @test XLSX.getFormula(s2, "B4") == "=#REF!+10"
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A1")) == XLSX.Formula("=#REF!+10", nothing, nothing, nothing)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B1")) == XLSX.ReferencedFormula("=#REF!+10", 0, "B1:B4", nothing)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B2")) ==  XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B4")) ==  XLSX.FormulaReference(0, nothing)
+
     end
+    @testset "renamesheet!" begin
 
-    isfile("template_with_new_sheet.xlsx") && rm("template_with_new_sheet.xlsx")
+        # XLSX.jl cannot currently create formula references that refer to other sheets, so we have to manually 
+        # insert them into the workbook's formula cache to test. Excel cannot read such a workbook and deletes these 
+        # formulas on opening. Tests are for completeness only
+        f=XLSX.openxlsx("renamedelete.xlsx", mode="w")
+        s=f[1]
+        s[1:10, 1] = collect(1:10)
+        XLSX.addsheet!(f)
+        s2=f[2]
+        s2["A1:B4"]=""
+        XLSX.setFormula(s2, "A1", "=Sheet1!A1+10")
+        XLSX.getcell(s2, "B1").formula=true
+        XLSX.getcell(s2, "B2").formula=true
+        XLSX.getcell(s2, "B3").formula=true
+        XLSX.getcell(s2, "B4").formula=true
+        w=XLSX.get_workbook(s2)
+        w.formulas[XLSX.SheetCellRef("Sheet2!B1")] = XLSX.ReferencedFormula("=Sheet1!A1+10", 0, "B1:B4", nothing)
+        w.formulas[XLSX.SheetCellRef("Sheet2!B2")] = XLSX.FormulaReference(0, nothing)
+        w.formulas[XLSX.SheetCellRef("Sheet2!B3")] = XLSX.FormulaReference(0, nothing)
+        w.formulas[XLSX.SheetCellRef("Sheet2!B4")] = XLSX.FormulaReference(0, nothing)
 
+        XLSX.renamesheet!(s2, "Sheet4")
+        @test s2.name == "Sheet4"
+        @test XLSX.getcell(s2, "A1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A1"), "", "", "", "", true)
+        @test XLSX.getcell(s2, "B1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "", "", true)
+        @test XLSX.getcell(s2, "B2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "", "", true)
+        @test XLSX.getcell(s2, "B4") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B4"), "", "", "", "", true)
+        @test XLSX.getFormula(s2, "A1") == "=Sheet1!A1+10"
+        @test XLSX.getFormula(s2, "B1") == "=Sheet1!A1+10"
+        @test XLSX.getFormula(s2, "B2") == "=Sheet1!A2+10"
+        @test XLSX.getFormula(s2, "B4") == "=Sheet1!A4+10"
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A1")) == XLSX.Formula("=Sheet1!A1+10", nothing, nothing, nothing)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B1")) == XLSX.ReferencedFormula("=Sheet1!A1+10", 0, "B1:B4", nothing)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B2")) ==  XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B4")) ==  XLSX.FormulaReference(0, nothing)
+
+        XLSX.renamesheet!(s, "Sheet3")
+        @test s.name == "Sheet3"
+        @test XLSX.getcell(s2, "A1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A1"), "", "", "", "", true)
+        @test XLSX.getcell(s2, "B1") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B1"), "", "", "", "", true)
+        @test XLSX.getcell(s2, "B2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B2"), "", "", "", "", true)
+        @test XLSX.getcell(s2, "B4") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("B4"), "", "", "", "", true)
+        @test XLSX.getFormula(s2, "A1") == "=Sheet3!A1+10"
+        @test XLSX.getFormula(s2, "B2") == "=Sheet3!A2+10"
+        @test XLSX.getFormula(s2, "B3") == "=Sheet3!A3+10"
+        @test XLSX.getFormula(s2, "B4") == "=Sheet3!A4+10"
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A1")) == XLSX.Formula("=Sheet3!A1+10", nothing, nothing, nothing)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B1")) == XLSX.ReferencedFormula("=Sheet3!A1+10", 0, "B1:B4", nothing)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B2")) ==  XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B4")) ==  XLSX.FormulaReference(0, nothing)
+
+    end
 end
 
 @testset "Edit" begin
     f = XLSX.open_xlsx_template(joinpath(data_directory, "general.xlsx"))
     s = f["general"]
     @test_throws XLSX.XLSXError s["A1"] = :sym
-    XLSX.rename!(s, "general") # no-op
-    @test_throws XLSX.XLSXError XLSX.rename!(s, "table") # name is taken
-    XLSX.rename!(s, "renamed_sheet")
+    XLSX.renamesheet!(s, "general") # no-op
+    @test_throws XLSX.XLSXError XLSX.renamesheet!(s, "table") # name is taken
+    XLSX.renamesheet!(s, "renamed_sheet") # retain old function to avoid breaking change
     @test s.name == "renamed_sheet"
     s["A1"] = "Hey You!"
     s["B1"] = "Out there in the cold..."
@@ -1923,6 +2449,40 @@ end
         @test f[1]["E1:E4"] == Any["XLSX.CellRef"; "A1"; "B2"; "CCC34000";;]
     end
 
+    @testset "NaN and Inf" begin # Issues #342 and #179
+        col_names = ["Integers", "Strings", "Floats", "Booleans", "Dates", "Times", "DateTimes"]
+        data = Vector{Any}(undef, 7)
+        data[1] = [1, 2, missing, 4]
+        data[2] = ["Hey", "You", "Out", "There"]
+        data[3] = [-Inf, Inf, missing, NaN]
+        data[4] = [true, false, missing, true]
+        data[5] = [Date(2018, 2, 1), Date(2018, 3, 1), Date(2018, 5, 20), Date(2018, 6, 2)]
+        data[6] = [Dates.Time(19, 10), Dates.Time(19, 20), Dates.Time(19, 30), Dates.Time(19, 40)]
+        data[7] = [Dates.DateTime(2018, 5, 20, 19, 10), Dates.DateTime(2018, 5, 20, 19, 20), Dates.DateTime(2018, 5, 20, 19, 30), Dates.DateTime(2018, 5, 20, 19, 40)]
+        table = NamedTuple{Tuple(Symbol(x) for x in col_names)}(Tuple(data))
+
+        f=XLSX.newxlsx()
+        s=f[1]
+        XLSX.writetable!(s, table)
+        @test s["C2"] == "-Inf"
+        @test s["C3"] == "Inf"
+        @test ismissing(s["C4"])
+        @test s["C5"] == "NaN"
+
+        XLSX.writetable("mytest.xlsx", data, col_names; overwrite=true)
+
+        f2=XLSX.readxlsx("mytest.xlsx")
+        s2=f2[1]
+        @test s2["C2"] == "-Inf"
+        @test s2["C3"] == "Inf"
+        @test ismissing(s2["C4"])
+        @test s2["C5"] == "NaN"
+
+        df=XLSX.readto("mytest.xlsx", DataFrames.DataFrame)
+        @test all(isequal.(df.Floats, ["-Inf", "Inf", missing, "NaN"]))
+
+    end
+
     # delete files created by this testset
     delete_files = ["output_table.xlsx", "output_tables.xlsx", "mytest.xlsx"]
     for f in delete_files
@@ -1947,7 +2507,7 @@ end
 
         font = XLSX.styles_add_cell_font(wb, Dict("b" => nothing, "sz" => Dict("val" => "24")))
         xroot = XLSX.styles_xmlroot(wb)
-        fontnodes = find_all_nodes("/$SPREADSHEET_NAMESPACE_XPATH_ARG:styleSheet/$SPREADSHEET_NAMESPACE_XPATH_ARG:fonts/$SPREADSHEET_NAMESPACE_XPATH_ARG:font", xroot)
+        fontnodes = XLSX.find_all_nodes("/$(XLSX.SPREADSHEET_NAMESPACE_XPATH_ARG):styleSheet/$(XLSX.SPREADSHEET_NAMESPACE_XPATH_ARG):fonts/$(XLSX.SPREADSHEET_NAMESPACE_XPATH_ARG):font", xroot)
         fontnode = fontnodes[font+1] # XML is zero indexed so we need to add 1 to get the right node
 
         # Check the font was written correctly
@@ -1964,23 +2524,23 @@ end
         xf = XLSX.styles_get_cellXf_with_numFmtId(wb, 1000)
         @test xf == XLSX.EmptyCellDataFormat()
         @test isempty(xf)
-        @test id(xf) == ""
+        @test id(xf) == UInt64(0)
 
         @test textstyle isa XLSX.CellDataFormat
         @test !isempty(textstyle)
-        @test id(textstyle) == "1"
+        @test id(textstyle) == UInt64(1)
 
         @test XLSX.styles_get_cellXf_with_numFmtId(wb, datefmt) == datestyle
         @test XLSX.styles_numFmt_formatCode(wb, string(datefmt)) == "yyyymmdd"
         @test datestyle isa XLSX.CellDataFormat
         @test !isempty(datestyle)
-        @test id(datestyle) == "2"
+        @test id(datestyle) == UInt64(2)
 
         @test XLSX.styles_get_cellXf_with_numFmtId(wb, numfmt) == numstyle
         @test XLSX.styles_numFmt_formatCode(wb, string(numfmt)) == "\$* #,##0.00;\$* (#,##0.00);\$* &quot;-&quot;??;[Magenta]@"
         @test numstyle isa XLSX.CellDataFormat
         @test !isempty(numstyle)
-        @test id(numstyle) == "3"
+        @test id(numstyle) == UInt64(3)
 
         setdata!(sheet, CellRef("A1"), CellValue(Date(2011, 10, 13), datestyle))
         setdata!(sheet, CellRef("A2"), CellValue(1000, numstyle))
@@ -1993,12 +2553,12 @@ end
         @test sheet["A1"] == Date(2011, 10, 13)
         cell = getcell(sheet, "A1")
         @test cell.style == id(datestyle)
-        formatid = XLSX.styles_cell_xf_numFmtId(wb, parse(Int, cell.style))
+        formatid = XLSX.styles_cell_xf_numFmtId(wb, Int64(cell.style))
         @test formatid == datefmt
 
         cellstyle = getcell(sheet, "A2").style
         @test cellstyle == id(numstyle)
-        formatid = XLSX.styles_cell_xf_numFmtId(wb, parse(Int, cellstyle))
+        formatid = XLSX.styles_cell_xf_numFmtId(wb, Int64(cellstyle))
         @test formatid == numfmt
 
         @test sheet["A2"] == 1000
@@ -2517,7 +3077,7 @@ end
         @test XLSX.setBorder(f, "Sheet1!B2,Sheet1!C2"; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "chocolate4"], diagonal=["style" => "hair"]) == -1
         @test XLSX.setAlignment(s, "A2,B3:C4"; horizontal="right", wrapText=true) == -1
         @test XLSX.setUniformAlignment(s, "B2,D2"; horizontal="right", wrapText=true) == -1
-        @test XLSX.setUniformStyle(s, "B2:D2,E3") ==-1
+        @test XLSX.setUniformStyle(s, "B2:D2,E3") == -1
         @test_throws XLSX.XLSXError XLSX.setUniformFill(s, "B2,B2"; pattern="gray125", bgColor="FF000000")
         @test_throws XLSX.XLSXError XLSX.setFont(s, "A2,A2"; size=18, name="Arial")
         @test_throws XLSX.XLSXError XLSX.setBorder(f, "Sheet1!B2,Sheet1!B2"; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "chocolate4"], diagonal=["style" => "hair"])
@@ -2528,8 +3088,8 @@ end
         f = XLSX.open_empty_template()
         s = f["Sheet1"]
         # All these cells are outside the sheet dimension.
-        @test_throws XLSX.XLSXError  XLSX.setUniformFont(s, "A1:B4"; size=12, name="Times New Roman", color="chocolate4")
-        @test_throws XLSX.XLSXError  XLSX.setUniformBorder(f, "Sheet1!A1:D4"; left=["style" => "dotted", "color" => "chocolate4"],
+        @test_throws XLSX.XLSXError XLSX.setUniformFont(s, "A1:B4"; size=12, name="Times New Roman", color="chocolate4")
+        @test_throws XLSX.XLSXError XLSX.setUniformBorder(f, "Sheet1!A1:D4"; left=["style" => "dotted", "color" => "chocolate4"],
             right=["style" => "medium", "color" => "FF765000"],
             top=["style" => "thick", "color" => "FF230000"],
             bottom=["style" => "medium", "color" => "chocolate4"],
@@ -3053,14 +3613,14 @@ end
 
 
         @test XLSX.setFormat(s, "A2"; format="""_-£* #,##0.00_-;-£* #,##0.00_-;_-£* "-"??_-;_-@_-""") == 164
-        @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("formatCode" => "_-£* #,##0.00_-;-£* #,##0.00_-;_-£* \"-\"??_-;_-@_-"))
+        @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "_-£* #,##0.00_-;-£* #,##0.00_-;_-£* \"-\"??_-;_-@_-"))
         @test XLSX.setFormat(s, "A2"; format="_-£* #,##0.00_-;-£* #,##0.00_-;_-£* \"-\"??_-;_-@_-") == 164
-        @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("formatCode" => "_-£* #,##0.00_-;-£* #,##0.00_-;_-£* \"-\"??_-;_-@_-"))
+        @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "_-£* #,##0.00_-;-£* #,##0.00_-;_-£* \"-\"??_-;_-@_-"))
 
-        @test XLSX.setFormat(s, "D2"; format="h:mm AM/PM") == 165
-        @test XLSX.setFormat(s, "A2"; format="# ??/??") == 166
-        @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("formatCode" => "# ??/??"))
-        @test XLSX.getFormat(s, "D2").format == Dict("numFmt" => Dict("formatCode" => "h:mm AM/PM"))
+        @test XLSX.setFormat(s, "D2"; format="h:mm AM/PM") == 18
+        @test XLSX.setFormat(s, "A2"; format="# ??/??") == 13
+        @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("numFmtId" => "13", "formatCode" => "# ??/??"))
+        @test XLSX.getFormat(s, "D2").format == Dict("numFmt" => Dict("numFmtId" => "18", "formatCode" => "h:mm AM/PM"))
 
         @test XLSX.setFormat(s, "E1:E5"; format="General") == -1
         @test XLSX.setFormat(s, "F1:F5"; format="Currency") == -1
@@ -3070,8 +3630,8 @@ end
 
         @test XLSX.setFormat(f, "Sheet1!E1:F5"; format="#,##0.000") == -1
         @test XLSX.setFormat(s, "F1:F5"; format="#,##0.000") == -1
-        @test XLSX.getFormat(s, "E2").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
-        @test XLSX.getFormat(f, "Sheet1!F2").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "E2").format == Dict("numFmt" => Dict("numFmtId" => "165", "formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(f, "Sheet1!F2").format == Dict("numFmt" => Dict("numFmtId" => "165", "formatCode" => "#,##0.000"))
         @test_throws XLSX.XLSXError XLSX.setFormat(s, "Z100"; format="Currency")
         @test_throws XLSX.XLSXError XLSX.setFormat(s, "Sheet1!Z100"; format="Currency")
         @test_throws XLSX.XLSXError XLSX.setFormat(s, "Sheet1!E1:F5,Sheet1!Z100"; format="Currency")
@@ -3082,10 +3642,10 @@ end
 
         XLSX.openxlsx("test.xlsx") do f # Check the updated formats were written correctly
             s = f["Sheet1"]
-            @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("formatCode" => "# ??/??"))
-            @test XLSX.getFormat(s, "D2").format == Dict("numFmt" => Dict("formatCode" => "h:mm AM/PM"))
-            @test XLSX.getFormat(s, "E2").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
-            @test XLSX.getFormat(f, "Sheet1!F2").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+            @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("numFmtId" => "13", "formatCode" => "# ??/??"))
+            @test XLSX.getFormat(s, "D2").format == Dict("numFmt" => Dict("numFmtId" => "18", "formatCode" => "h:mm AM/PM"))
+            @test XLSX.getFormat(s, "E2").format == Dict("numFmt" => Dict("numFmtId" => "165", "formatCode" => "#,##0.000"))
+            @test XLSX.getFormat(f, "Sheet1!F2").format == Dict("numFmt" => Dict("numFmtId" => "165", "formatCode" => "#,##0.000"))
         end
 
         isfile("test.xlsx") && rm("test.xlsx")
@@ -3102,7 +3662,11 @@ end
         XLSX.setFormat(s, "Sheet1!4:8"; format="Currency")
         @test XLSX.getFormat(s, "Q7").format == Dict("numFmt" => Dict("numFmtId" => "7", "formatCode" => "\$#,##0.00_);(\$#,##0.00)"))
         XLSX.setFormat(s, "N4,M8:M15,Z25:Z26"; format="#,##0.000")
-        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
+        XLSX.setFormat(s, "Sheet1!4:8"; format="39")
+        @test XLSX.getFormat(s, "Q7").format == Dict("numFmt" => Dict("numFmtId" => "39", "formatCode" => "#,##0.00_);(#,##0.00)"))
+        XLSX.setFormat(s, "Sheet1!4:8"; format="#,##0")
+        @test XLSX.getFormat(s, "Q7").format == Dict("numFmt" => Dict("numFmtId" => "3", "formatCode" => "#,##0"))
 
         f = XLSX.newxlsx()
         s = f[1]
@@ -3114,11 +3678,11 @@ end
         XLSX.setFormat(s, :, [8, 23, 4]; format="Currency")
         @test XLSX.getFormat(s, "H1").format == Dict("numFmt" => Dict("numFmtId" => "7", "formatCode" => "\$#,##0.00_);(\$#,##0.00)"))
         XLSX.setFormat(s, 25:26, 20:26; format="#,##0.000")
-        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
         XLSX.setFormat(s, 25:26, 15; format="#,##0.0000")
-        @test XLSX.getFormat(s, "O26").format == Dict("numFmt" => Dict("formatCode" => "#,##0.0000"))
+        @test XLSX.getFormat(s, "O26").format == Dict("numFmt" => Dict("numFmtId" => "165", "formatCode" => "#,##0.0000"))
         XLSX.setFormat(s, 21:2:25, [15, 16]; format="#,##0.0")
-        @test XLSX.getFormat(s, "P25").format == Dict("numFmt" => Dict("formatCode" => "#,##0.0"))
+        @test XLSX.getFormat(s, "P25").format == Dict("numFmt" => Dict("numFmtId" => "166", "formatCode" => "#,##0.0"))
 
         f = XLSX.newxlsx()
         s = f[1]
@@ -3130,7 +3694,7 @@ end
         XLSX.setUniformFormat(s, "Sheet1!4:8"; format="Currency")
         @test XLSX.getFormat(s, "Q7").format == Dict("numFmt" => Dict("numFmtId" => "7", "formatCode" => "\$#,##0.00_);(\$#,##0.00)"))
         XLSX.setUniformFormat(s, "N4,M8:M15,Z25:Z26"; format="#,##0.000")
-        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
         @test_throws XLSX.XLSXError XLSX.setUniformFormat(s, "Z100:Z101"; format="Currency")
         @test_throws XLSX.XLSXError XLSX.setUniformFormat(s, "Sheet1!Z100:Z101"; format="Currency")
         @test_throws XLSX.XLSXError XLSX.setUniformFormat(s, "Sheet1!E1:F5,Sheet1!Z100"; format="Currency")
@@ -3145,11 +3709,11 @@ end
         XLSX.setUniformFormat(s, :, [8, 23, 4]; format="Currency")
         @test XLSX.getFormat(s, "H1").format == Dict("numFmt" => Dict("numFmtId" => "7", "formatCode" => "\$#,##0.00_);(\$#,##0.00)"))
         XLSX.setUniformFormat(s, 25:26, 20:26; format="#,##0.000")
-        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "Z26").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
         XLSX.setUniformFormat(s, 25:26, 15; format="#,##0.0000")
-        @test XLSX.getFormat(s, "O26").format == Dict("numFmt" => Dict("formatCode" => "#,##0.0000"))
+        @test XLSX.getFormat(s, "O26").format == Dict("numFmt" => Dict("numFmtId" => "165", "formatCode" => "#,##0.0000"))
         XLSX.setUniformFormat(s, 21:2:25, [15, 16]; format="#,##0.0")
-        @test XLSX.getFormat(s, "P25").format == Dict("numFmt" => Dict("formatCode" => "#,##0.0"))
+        @test XLSX.getFormat(s, "P25").format == Dict("numFmt" => Dict("numFmtId" => "166", "formatCode" => "#,##0.0"))
 
         f = XLSX.newxlsx()
         s = f[1]
@@ -3157,9 +3721,9 @@ end
         XLSX.setUniformFormat(s, :, :; format="Currency")
         @test XLSX.getFormat(f, "Sheet1!B23").format == Dict("numFmt" => Dict("numFmtId" => "7", "formatCode" => "\$#,##0.00_);(\$#,##0.00)"))
         XLSX.setUniformFormat(s, 4:10, :; format="#,##0.000")
-        @test XLSX.getFormat(s, "Q7").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "Q7").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
         XLSX.setUniformFormat(s, [8, 23, 4], 8; format="#,##0.0")
-        @test XLSX.getFormat(s, "H8").format == Dict("numFmt" => Dict("formatCode" => "#,##0.0"))
+        @test XLSX.getFormat(s, "H8").format == Dict("numFmt" => Dict("numFmtId" => "165", "formatCode" => "#,##0.0"))
 
     end
 
@@ -3169,86 +3733,83 @@ end
         s["A1:Z26"] = ""
 
         XLSX.setFont(s, "A1:F5"; size=18, name="Arial")
-        cell_style = parse(Int, XLSX.getcell(s, "A1").style)
+        cell_style = XLSX.getcell(s, "A1").style
         @test XLSX.setUniformStyle(s, "A1:F5") == cell_style
-        @test parse(Int, XLSX.getcell(s, "F5").style) == cell_style
+        @test XLSX.getcell(s, "F5").style == cell_style
 
         XLSX.setFont(s, "A6:F10"; size=10, name="Aptos")
-        cell_style = parse(Int, XLSX.getcell(s, "E6").style)
+        cell_style = XLSX.getcell(s, "E6").style
         @test XLSX.setUniformStyle(s, [6, 7, 8, 9, 10], 5) == cell_style
-        @test parse(Int, XLSX.getcell(s, "E8").style) == cell_style
+        @test XLSX.getcell(s, "E8").style == cell_style
 
         XLSX.setFont(s, "A11:F15"; size=10, name="Times New Roman")
-        cell_style = parse(Int, XLSX.getcell(s, "E6").style)
+        cell_style = XLSX.getcell(s, "E6").style
         @test XLSX.setUniformStyle(s, [6, 7, 8, 9, 10], :) == cell_style
-        @test parse(Int, XLSX.getcell(s, "Z8").style) == cell_style
+        @test XLSX.getcell(s, "Z8").style == cell_style
 
         XLSX.setFont(s, "A16"; size=80, name="Ariel")
-        cell_style = parse(Int, XLSX.getcell(s, "A16").style)
+        cell_style = XLSX.getcell(s, "A16").style
         @test XLSX.setUniformStyle(s, "A16,A15,D20:E25,F25") == cell_style
-        @test parse(Int, XLSX.getcell(s, "A15").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "D20").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "F25").style) == cell_style
+        @test XLSX.getcell(s, "A15").style == cell_style
+        @test XLSX.getcell(s, "D20").style == cell_style
+        @test XLSX.getcell(s, "F25").style == cell_style
 
         XLSX.setFont(s, "A1"; size=8, name="Aptos")
-        cell_style = parse(Int, XLSX.getcell(s, "A1").style)
+        cell_style = XLSX.getcell(s, "A1").style
         @test XLSX.setUniformStyle(s, :) == cell_style
-        @test parse(Int, XLSX.getcell(s, "A1").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "M13").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "Z26").style) == cell_style
-
+        @test XLSX.getcell(s, "A1").style == cell_style
+        @test XLSX.getcell(s, "M13").style == cell_style
+        @test XLSX.getcell(s, "Z26").style == cell_style
         f = XLSX.newxlsx()
         s = f[1]
         s["A1:Z26"] = ""
         XLSX.setFont(s, "A1"; size=8, name="Aptos")
-        cell_style = parse(Int, XLSX.getcell(s, "A1").style)
+        cell_style = XLSX.getcell(s, "A1").style
         @test XLSX.setUniformStyle(s, "Sheet1!A1:A26") == cell_style
-        @test parse(Int, XLSX.getcell(s, "A2").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "A13").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "A26").style) == cell_style
+        @test XLSX.getcell(s, "A2").style == cell_style
+        @test XLSX.getcell(s, "A13").style == cell_style
+        @test XLSX.getcell(s, "A26").style == cell_style
         @test XLSX.setUniformStyle(s, "Sheet1!1:2") == cell_style
-        @test parse(Int, XLSX.getcell(s, "B1").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "M2").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "Z1").style) == cell_style
+        @test XLSX.getcell(s, "B1").style == cell_style
+        @test XLSX.getcell(s, "M2").style == cell_style
+        @test XLSX.getcell(s, "Z1").style == cell_style
         @test XLSX.setUniformStyle(s, "Sheet1!B:C") == cell_style
-        @test parse(Int, XLSX.getcell(s, "C3").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "B13").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "C26").style) == cell_style
-
+        @test XLSX.getcell(s, "C3").style == cell_style
+        @test XLSX.getcell(s, "B13").style == cell_style
+        @test XLSX.getcell(s, "C26").style == cell_style
         XLSX.setFont(s, "A1"; size=8, name="Arial")
-        cell_style = parse(Int, XLSX.getcell(s, "A1").style)
+        cell_style = XLSX.getcell(s, "A1").style
         @test XLSX.setUniformStyle(s, "A1:A26") == cell_style
-        @test parse(Int, XLSX.getcell(s, "A2").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "A13").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "A26").style) == cell_style
+        @test XLSX.getcell(s, "A2").style == cell_style
+        @test XLSX.getcell(s, "A13").style == cell_style
+        @test XLSX.getcell(s, "A26").style == cell_style
         @test XLSX.setUniformStyle(s, "1:2") == cell_style
-        @test parse(Int, XLSX.getcell(s, "B1").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "M2").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "Z1").style) == cell_style
+        @test XLSX.getcell(s, "B1").style == cell_style
+        @test XLSX.getcell(s, "M2").style == cell_style
+        @test XLSX.getcell(s, "Z1").style == cell_style
         @test XLSX.setUniformStyle(s, "B:C") == cell_style
-        @test parse(Int, XLSX.getcell(s, "C3").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "B13").style) == cell_style
-        @test parse(Int, XLSX.getcell(s, "C26").style) == cell_style
-
+        @test XLSX.getcell(s, "C3").style == cell_style
+        @test XLSX.getcell(s, "B13").style == cell_style
+        @test XLSX.getcell(s, "C26").style == cell_style
         f = XLSX.newxlsx()
         s = f[1]
         s["A1:Z26"] = ""
         XLSX.setFont(s, "A1"; size=8, name="Aptos")
-        cell_style = parse(Int, XLSX.getcell(s, "A1").style)
+        cell_style = XLSX.getcell(s, "A1").style
         @test XLSX.setUniformStyle(s, 1, :) == cell_style
-        @test parse(Int, XLSX.getcell(s, "B1").style) == cell_style
+        @test XLSX.getcell(s, "B1").style == cell_style
         @test XLSX.setUniformStyle(s, :, 2) == cell_style
-        @test parse(Int, XLSX.getcell(s, "B13").style) == cell_style
+        @test XLSX.getcell(s, "B13").style == cell_style
         @test XLSX.setUniformStyle(s, :, 5:2:15) == cell_style
-        @test parse(Int, XLSX.getcell(s, "E25").style) == cell_style
+        @test XLSX.getcell(s, "E25").style == cell_style
         @test XLSX.setUniformStyle(s, 5:10, [15, 16, 17]) == cell_style
-        @test parse(Int, XLSX.getcell(s, "P10").style) == cell_style
+        @test XLSX.getcell(s, "P10").style == cell_style
         @test XLSX.setUniformStyle(s, 5:10, 17:19) == cell_style
-        @test parse(Int, XLSX.getcell(s, "S10").style) == cell_style
+        @test XLSX.getcell(s, "S10").style == cell_style
         @test XLSX.setUniformStyle(s, [10, 12, 26], [19, 24, 26]) == cell_style
-        @test parse(Int, XLSX.getcell(s, "Z26").style) == cell_style
+        @test XLSX.getcell(s, "Z26").style == cell_style
         @test XLSX.setUniformStyle(s, :, :) == cell_style
-        @test parse(Int, XLSX.getcell(s, "Y4").style) == cell_style
+        @test XLSX.getcell(s, "Y4").style == cell_style
         @test_throws XLSX.XLSXError XLSX.setUniformStyle(s, :, [1, 3, 10, 15, 28])
         @test_throws XLSX.XLSXError XLSX.setUniformStyle(s, [1, 3, 10, 15, 28], :)
         @test_throws XLSX.XLSXError XLSX.setUniformStyle(s, 1, [1, 3, 10, 15, 28])
@@ -3559,7 +4120,7 @@ end
         @test_throws XLSX.XLSXError XLSX.getFormat(s, 2, 3)
         s[1:3, 1:3] = ""
         XLSX.setFormat(s, "A1"; format="#,##0.000;(#,##0.000)")
-        @test XLSX.getFormat(s, "A1").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000;(#,##0.000)"))
+        @test XLSX.getFormat(s, "A1").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000;(#,##0.000)"))
         XLSX.setFormat(s, 2, 2; format="Currency")
         @test XLSX.getFormat(s, 2, 2).format == Dict("numFmt" => Dict("numFmtId" => "7", "formatCode" => "\$#,##0.00_);(\$#,##0.00)"))
         XLSX.setFormat(s, [2, 3], 1:3; format="LongDate")
@@ -3608,10 +4169,10 @@ end
         @test XLSX.getFill(s, "F30").fill == Dict("patternFill" => Dict("bgrgb" => "FF00FF00", "patternType" => "lightGrid", "fgrgb" => "FF0000FF"))
 
         XLSX.setUniformFormat(s, :; format="#,##0.000")
-        @test XLSX.getFormat(s, "A1").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
-        @test XLSX.getFormat(s, "G10").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
-        @test XLSX.getFormat(s, "M20").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
-        @test XLSX.getFormat(s, "X30").format == Dict("numFmt" => Dict("formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "A1").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "G10").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "M20").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
+        @test XLSX.getFormat(s, "X30").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000"))
 
         f = XLSX.open_xlsx_template(joinpath(data_directory, "Borders.xlsx"))
         s = f["Sheet1"]
@@ -3626,6 +4187,7 @@ end
         @test XLSX.getBorder(s, 4, 4).border == Dict("left" => Dict("style" => "dotted", "rgb" => "FF9BCD9B"), "bottom" => Dict("style" => "medium", "rgb" => "FF0000FF"), "right" => Dict("style" => "medium", "rgb" => "FF765000"), "top" => Dict("style" => "thick", "rgb" => "FF230000"), "diagonal" => nothing)
 
     end
+
     @testset "existing formatting" begin
         f = XLSX.opentemplate(joinpath(data_directory, "customXml.xlsx"))
         s = f[1]
@@ -3720,9 +4282,9 @@ end
         end
         @test XLSX.setConditionalFormat(s, "A1:A5", :dataBar) == 0
         @test XLSX.setConditionalFormat(s, :, 2, :dataBar; databar="orange") == 0
-        @test XLSX.setConditionalFormat(s, "Sheet1!E:E", :dataBar; databar = "purplegrad") == 0
+        @test XLSX.setConditionalFormat(s, "Sheet1!E:E", :dataBar; databar="purplegrad") == 0
         @test XLSX.setConditionalFormat(s, 1:5, 3:4, :dataBar;
-            borders = "false",    
+            borders="false",
             min_type="percentile",
             min_val="25",
             max_type="percentile",
@@ -3738,7 +4300,7 @@ end
 
         @test XLSX.setConditionalFormat(s, :, 1:4, :dataBar;
             databar="red",
-            borders="true",    
+            borders="true",
             fill_col="blue",
             border_col="yellow",
             neg_fill_col="magenta",
@@ -3753,19 +4315,19 @@ end
         end
         XLSX.addDefinedName(s, "myRange", "A1:B5")
         @test XLSX.setConditionalFormat(s, "myRange", :dataBar;
-            showVal = "false",
+            showVal="false",
             direction="leftToRight",
             borders="true",
             sameNegBorders="false"
         ) == 0
         XLSX.addDefinedName(s, "myNCRange", "C1:C5,D1:D5")
         @test_throws MethodError XLSX.setConditionalFormat(s, "myNCRange", :dataBar; # Non-contiguous ranges not allowed
-            showVal = "false",
+            showVal="false",
             direction="leftToRight",
             borders="true",
             sameNegBorders="false"
         )
-        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A2", :dataBar; 
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A2", :dataBar;
             databar="rainbow"
         )
 
@@ -3774,29 +4336,29 @@ end
         for i in 1:5, j in 1:12
             s[i, j] = i + j
         end
-        s[1, 13]=5
-        
+        s[1, 13] = 5
+
         @test XLSX.setConditionalFormat(s, :, 1, :dataBar;
             databar="orange",
             sameNegFill="true",
             sameNegBorders="true"
-        )==0
+        ) == 0
         @test XLSX.setConditionalFormat(s, :, 2, :dataBar;
             databar="orange",
             axis_pos="none"
-        )==0
+        ) == 0
         @test XLSX.setConditionalFormat(s, :, 3, :dataBar;
             databar="orange",
             axis_pos="middle"
-        )==0
+        ) == 0
         @test XLSX.setConditionalFormat(s, :, 4, :dataBar;
             databar="orange",
             min_type="num",
             min_val="Sheet1!\$M\$1"
-        )==0
+        ) == 0
         @test XLSX.setConditionalFormat(s, :, 5, :dataBar;
             databar="orange",
-            showVal = "false",
+            showVal="false",
             direction="rightToLeft",
             borders="true",
             sameNegBorders="false",
@@ -3839,7 +4401,7 @@ end
             s[i, j] = i + j
         end
         for (j, k) in enumerate(keys(XLSX.databars))
-            @test XLSX.setConditionalFormat(s, :, j, :dataBar; databar=k)==0
+            @test XLSX.setConditionalFormat(s, :, j, :dataBar; databar=k) == 0
         end
     end
 
@@ -4002,7 +4564,7 @@ end
             max_type="max",
             max_col="blue"
         )
-        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A2", :colorScale; 
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A2", :colorScale;
             colorscale="rainbow"
         )
 
@@ -4012,7 +4574,7 @@ end
             s[i, j] = i + j
         end
         for (j, k) in enumerate(keys(XLSX.colorscales))
-            @test XLSX.setConditionalFormat(s, :, j, :colorScale; colorscale=k)==0
+            @test XLSX.setConditionalFormat(s, :, j, :colorScale; colorscale=k) == 0
         end
     end
 
@@ -4045,7 +4607,7 @@ end
             max_type="percent",
             max_val="95"
         ) == 0
-        @test XLSX.getConditionalFormats(s) == [XLSX.CellRange("A5:E5") => (type = "iconSet", priority = 5),XLSX.CellRange("A4:E4") => (type = "iconSet", priority = 4), XLSX.CellRange("A3:E3") => (type = "iconSet", priority = 3), XLSX.CellRange("A2:E2") => (type = "iconSet", priority = 2), XLSX.CellRange("A1:E1") => (type = "iconSet", priority = 1)]
+        @test XLSX.getConditionalFormats(s) == [XLSX.CellRange("A5:E5") => (type="iconSet", priority=5), XLSX.CellRange("A4:E4") => (type="iconSet", priority=4), XLSX.CellRange("A3:E3") => (type="iconSet", priority=3), XLSX.CellRange("A2:E2") => (type="iconSet", priority=2), XLSX.CellRange("A1:E1") => (type="iconSet", priority=1)]
         @test XLSX.setConditionalFormat(s, "A1", :iconSet) == 0
         @test XLSX.setConditionalFormat(s, "A1:C3", :iconSet) == 0
         @test XLSX.setConditionalFormat(s, "Sheet1!A1", :iconSet) == 0
@@ -4066,197 +4628,197 @@ end
         @test length(XLSX.getConditionalFormats(s)) == 22
 
         @test XLSX.getConditionalFormats(s) == [
-            XLSX.CellRange("A1:E5") => (type = "iconSet", priority = 21),
-            XLSX.CellRange("A1:E5") => (type = "iconSet", priority = 22),
-            XLSX.CellRange("A1:E3") => (type = "iconSet", priority = 17),
-            XLSX.CellRange("A1:C5") => (type = "iconSet", priority = 12),
-            XLSX.CellRange("A1:C5") => (type = "iconSet", priority = 13),
-            XLSX.CellRange("A1:C5") => (type = "iconSet", priority = 15),
-            XLSX.CellRange("A1:C5") => (type = "iconSet", priority = 16),
-            XLSX.CellRange("A1:C5") => (type = "iconSet", priority = 19),
-            XLSX.CellRange("A1:C5") => (type = "iconSet", priority = 20),
-            XLSX.CellRange("A2:E4") => (type = "iconSet", priority = 11),
-            XLSX.CellRange("A2:E4") => (type = "iconSet", priority = 18),
-            XLSX.CellRange("A1:E2") => (type = "iconSet", priority = 10),
-            XLSX.CellRange("A1:E2") => (type = "iconSet", priority = 14),
-            XLSX.CellRange("A1:A2") => (type = "iconSet", priority = 9),
-            XLSX.CellRange("A1:C3") => (type = "iconSet", priority = 7),
-            XLSX.CellRange("A1:A1") => (type = "iconSet", priority = 6),
-            XLSX.CellRange("A1:A1") => (type = "iconSet", priority = 8),
-            XLSX.CellRange("A5:E5") => (type = "iconSet", priority = 5),
-            XLSX.CellRange("A4:E4") => (type = "iconSet", priority = 4),
-            XLSX.CellRange("A3:E3") => (type = "iconSet", priority = 3),
-            XLSX.CellRange("A2:E2") => (type = "iconSet", priority = 2),
-            XLSX.CellRange("A1:E1") => (type = "iconSet", priority = 1)
+            XLSX.CellRange("A1:E5") => (type="iconSet", priority=21),
+            XLSX.CellRange("A1:E5") => (type="iconSet", priority=22),
+            XLSX.CellRange("A1:E3") => (type="iconSet", priority=17),
+            XLSX.CellRange("A1:C5") => (type="iconSet", priority=12),
+            XLSX.CellRange("A1:C5") => (type="iconSet", priority=13),
+            XLSX.CellRange("A1:C5") => (type="iconSet", priority=15),
+            XLSX.CellRange("A1:C5") => (type="iconSet", priority=16),
+            XLSX.CellRange("A1:C5") => (type="iconSet", priority=19),
+            XLSX.CellRange("A1:C5") => (type="iconSet", priority=20),
+            XLSX.CellRange("A2:E4") => (type="iconSet", priority=11),
+            XLSX.CellRange("A2:E4") => (type="iconSet", priority=18),
+            XLSX.CellRange("A1:E2") => (type="iconSet", priority=10),
+            XLSX.CellRange("A1:E2") => (type="iconSet", priority=14),
+            XLSX.CellRange("A1:A2") => (type="iconSet", priority=9),
+            XLSX.CellRange("A1:C3") => (type="iconSet", priority=7),
+            XLSX.CellRange("A1:A1") => (type="iconSet", priority=6),
+            XLSX.CellRange("A1:A1") => (type="iconSet", priority=8),
+            XLSX.CellRange("A5:E5") => (type="iconSet", priority=5),
+            XLSX.CellRange("A4:E4") => (type="iconSet", priority=4),
+            XLSX.CellRange("A3:E3") => (type="iconSet", priority=3),
+            XLSX.CellRange("A2:E2") => (type="iconSet", priority=2),
+            XLSX.CellRange("A1:E1") => (type="iconSet", priority=1)
         ]
 
-        f=XLSX.newxlsx()
-        s=f[1]
+        f = XLSX.newxlsx()
+        s = f[1]
 
         XLSX.writetable!(s, [collect(1:10), collect(1:10), collect(1:10), collect(1:10), collect(1:10), collect(1:10)],
-                    ["normal", "showVal=\"false\"", "reverse=\"true\"", "min_gte=\"false\"", "extra1", "extra2"])
-        s["G1"]=3
-        s["G4"]="y"
+            ["normal", "showVal=\"false\"", "reverse=\"true\"", "min_gte=\"false\"", "extra1", "extra2"])
+        s["G1"] = 3
+        s["G4"] = "y"
 
         @test XLSX.setConditionalFormat(s, "A2:A11", :iconSet;
-                    min_type="num",  max_type="formula",
-                    min_val="3",     max_val="if(\$G\$4=\"y\", \$G\$1+5, 10)") == 0
+            min_type="num", max_type="formula",
+            min_val="3", max_val="if(\$G\$4=\"y\", \$G\$1+5, 10)") == 0
 
-                    @test XLSX.setConditionalFormat(s, "A2:A11", :iconSet;
-                    min_type="num",  max_type="num",
-                    min_val="3",     max_val="8") == 0
+        @test XLSX.setConditionalFormat(s, "A2:A11", :iconSet;
+            min_type="num", max_type="num",
+            min_val="3", max_val="8") == 0
 
-        @test XLSX.setConditionalFormat(s, "B2:B11", :iconSet; iconset = "4TrafficLights",
-                    min_type="num",  mid_type="percent", max_type="num",
-                    min_val="3",     mid_val="50",       max_val="8",
-                    showVal="false") == 0
+        @test XLSX.setConditionalFormat(s, "B2:B11", :iconSet; iconset="4TrafficLights",
+            min_type="num", mid_type="percent", max_type="num",
+            min_val="3", mid_val="50", max_val="8",
+            showVal="false") == 0
 
-        @test XLSX.setConditionalFormat(s, "C2:C11", :iconSet; iconset = "3Symbols2",
-                    min_type="num",  mid_type="percentile", max_type="num",
-                    min_val="3",     mid_val="50",          max_val="8",
-                    reverse="true") == 0
+        @test XLSX.setConditionalFormat(s, "C2:C11", :iconSet; iconset="3Symbols2",
+            min_type="num", mid_type="percentile", max_type="num",
+            min_val="3", mid_val="50", max_val="8",
+            reverse="true") == 0
 
-        @test XLSX.setConditionalFormat(s, "D2:D11", :iconSet; iconset = "5Arrows",
-                    min_type="num",  mid_type="percentile", mid2_type="percentile", max_type="num",
-                    min_val="3",     mid_val="45", mid2_val="65", max_val="8",
-                    min_gte="false", max_gte="false") == 0
+        @test XLSX.setConditionalFormat(s, "D2:D11", :iconSet; iconset="5Arrows",
+            min_type="num", mid_type="percentile", mid2_type="percentile", max_type="num",
+            min_val="3", mid_val="45", mid2_val="65", max_val="8",
+            min_gte="false", max_gte="false") == 0
 
-        @test XLSX.setConditionalFormat(s, "E2:E11", :iconSet; iconset = "3Stars",
-                    reverse = "true",
-                    showVal = "false",
-                    min_type="num",  mid_type="percentile", mid2_type="percentile", max_type="num",
-                    min_val="3",     mid_val="45",          mid2_val="65",          max_val="8",
-                    min_gte="false", max_gte="false") == 0
+        @test XLSX.setConditionalFormat(s, "E2:E11", :iconSet; iconset="3Stars",
+            reverse="true",
+            showVal="false",
+            min_type="num", mid_type="percentile", mid2_type="percentile", max_type="num",
+            min_val="3", mid_val="45", mid2_val="65", max_val="8",
+            min_gte="false", max_gte="false") == 0
 
-        @test XLSX.setConditionalFormat(s, "F2:F11", :iconSet; iconset = "5Boxes",
-                    reverse = "true",
-                    showVal = "false",
-                    min_type="num",  mid_type="percentile", mid2_type="percentile", max_type="num",
-                    min_val="3",     mid_val="45",          mid2_val="65",          max_val="8",
-                    min_gte="false", mid_gte="false",       mid2_gte="false",       max_gte="false") == 0
+        @test XLSX.setConditionalFormat(s, "F2:F11", :iconSet; iconset="5Boxes",
+            reverse="true",
+            showVal="false",
+            min_type="num", mid_type="percentile", mid2_type="percentile", max_type="num",
+            min_val="3", mid_val="45", mid2_val="65", max_val="8",
+            min_gte="false", mid_gte="false", mid2_gte="false", max_gte="false") == 0
 
         @test XLSX.getConditionalFormats(s) == [
-            XLSX.CellRange("D2:D11") => (type = "iconSet", priority = 5),
-            XLSX.CellRange("C2:C11") => (type = "iconSet", priority = 4),
-            XLSX.CellRange("B2:B11") => (type = "iconSet", priority = 3),
-            XLSX.CellRange("A2:A11") => (type = "iconSet", priority = 1),
-            XLSX.CellRange("A2:A11") => (type = "iconSet", priority = 2),
-            XLSX.CellRange("E2:E11") => (type = "iconSet", priority = 6),
-            XLSX.CellRange("F2:F11") => (type = "iconSet", priority = 7)
+            XLSX.CellRange("D2:D11") => (type="iconSet", priority=5),
+            XLSX.CellRange("C2:C11") => (type="iconSet", priority=4),
+            XLSX.CellRange("B2:B11") => (type="iconSet", priority=3),
+            XLSX.CellRange("A2:A11") => (type="iconSet", priority=1),
+            XLSX.CellRange("A2:A11") => (type="iconSet", priority=2),
+            XLSX.CellRange("E2:E11") => (type="iconSet", priority=6),
+            XLSX.CellRange("F2:F11") => (type="iconSet", priority=7)
         ]
-        
-        f=XLSX.newxlsx()
-        s=f[1]
+
+        f = XLSX.newxlsx()
+        s = f[1]
         for i = 0:3
-            for j=1:13
-                s[i+1,j]=i*13+j
+            for j = 1:13
+                s[i+1, j] = i * 13 + j
             end
         end
-        for j=1:13
+        for j = 1:13
             @test XLSX.setConditionalFormat(s, 1:4, j, :iconSet; # Create a custom 4-icon set in each column.
                 iconset="Custom",
-                icon_list=[j, 13+j, 26+j, 39+j],
+                icon_list=[j, 13 + j, 26 + j, 39 + j],
                 min_type="percent", mid_type="percent", max_type="percent",
                 min_val="25", mid_val="50", max_val="75"
-                ) == 0
+            ) == 0
         end
 
-        @test XLSX.setConditionalFormat(s, 1:4, 1, :iconSet; 
-                iconset="Custom",
-                icon_list = [1,2,3,4,5],
-                min_type="percent", max_type="percent",
-                min_val="25", max_val="75",
-                min_gte="false", max_gte="false"
-                ) == 0
-        @test XLSX.setConditionalFormat(s, 1:4, 1, :iconSet; 
-                iconset="Custom",
-                showVal = "false",
-                icon_list = [1,2,3,4,5],
-                min_type="percent", mid_type="percent", max_type="percent",
-                min_val="25", mid_val="50", max_val="75"
-                ) == 0
-        @test XLSX.setConditionalFormat(s, 1:4, 1, :iconSet; 
-                iconset="Custom",
-                reverse="true",
-                icon_list = [1,2,3,4,5],
-                min_type="percent", mid_type="percent", mid2_type="percentile", max_type="percent",
-                min_val="25", mid_val="50", mid2_val="60", max_val="75"
-                ) == 0
+        @test XLSX.setConditionalFormat(s, 1:4, 1, :iconSet;
+            iconset="Custom",
+            icon_list=[1, 2, 3, 4, 5],
+            min_type="percent", max_type="percent",
+            min_val="25", max_val="75",
+            min_gte="false", max_gte="false"
+        ) == 0
+        @test XLSX.setConditionalFormat(s, 1:4, 1, :iconSet;
+            iconset="Custom",
+            showVal="false",
+            icon_list=[1, 2, 3, 4, 5],
+            min_type="percent", mid_type="percent", max_type="percent",
+            min_val="25", mid_val="50", max_val="75"
+        ) == 0
+        @test XLSX.setConditionalFormat(s, 1:4, 1, :iconSet;
+            iconset="Custom",
+            reverse="true",
+            icon_list=[1, 2, 3, 4, 5],
+            min_type="percent", mid_type="percent", mid2_type="percentile", max_type="percent",
+            min_val="25", mid_val="50", mid2_val="60", max_val="75"
+        ) == 0
 
         @test XLSX.setConditionalFormat(s, "A2:M2", :iconSet;
-                iconset = "Custom",
-                icon_list = [31,24,11],
-                min_type="num",  max_type="formula",
-                min_val="3",     max_val="if(\$G\$4=\"y\", \$G\$1+5, 10)") == 0
+            iconset="Custom",
+            icon_list=[31, 24, 11],
+            min_type="num", max_type="formula",
+            min_val="3", max_val="if(\$G\$4=\"y\", \$G\$1+5, 10)") == 0
 
-        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet; 
-                iconset="Custom",
-                icon_list = [1,2,3,4,5],
-                min_type="percent", mid_type="madeUp", mid2_type="percentile", max_type="num",
-                min_val="25", mid_val="50", mid2_val="60", max_val="75"
-                )
-        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet; 
-                iconset="Custom",
-                icon_list = [99,2,3,4,5],
-                min_type="percent", mid_type="percent", mid2_type="percentile", max_type="num",
-                min_val="25", mid_val="50", mid2_val="60", max_val="75"
-                )
-        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet; 
-                iconset="Custom",
-                min_type="percent", mid_type="percent", max_type="percent",
-                min_val="25", mid_val="50", max_val="75"
-                )
-        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet; 
-                iconset="Custom",
-                icon_list=[],
-                min_type="percent", mid_type="percent", max_type="percent",
-                min_val="25", mid_val="50", max_val="75"
-                )
-        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet; 
-                iconset="Custom",
-                icon_list=[1, 13, 26],
-                min_type="percent", mid_type="percent", max_type="percent",
-                min_val="25", mid_val="50", max_val="75"
-                )
-        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet; 
-                iconset="Custom",
-                icon_list=[1, 13, 26, 39],
-                min_type="percent", max_type="percent",
-                min_val="25"
-                )==0
         @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet;
-                iconset="Custom",
-                icon_list=[1, 13, 26, 39],
-                min_type="percent", 
-                min_val="25", max_val="75"
-                )==0
-        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet; 
-                iconset="Custom",
-                icon_list=[1, 13, 26, 39]
-                )==0
-        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet; 
-                iconset="10ThousandManiacs",
-                )==0
+            iconset="Custom",
+            icon_list=[1, 2, 3, 4, 5],
+            min_type="percent", mid_type="madeUp", mid2_type="percentile", max_type="num",
+            min_val="25", mid_val="50", mid2_val="60", max_val="75"
+        )
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet;
+            iconset="Custom",
+            icon_list=[99, 2, 3, 4, 5],
+            min_type="percent", mid_type="percent", mid2_type="percentile", max_type="num",
+            min_val="25", mid_val="50", mid2_val="60", max_val="75"
+        )
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet;
+            iconset="Custom",
+            min_type="percent", mid_type="percent", max_type="percent",
+            min_val="25", mid_val="50", max_val="75"
+        )
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet;
+            iconset="Custom",
+            icon_list=[],
+            min_type="percent", mid_type="percent", max_type="percent",
+            min_val="25", mid_val="50", max_val="75"
+        )
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet;
+            iconset="Custom",
+            icon_list=[1, 13, 26],
+            min_type="percent", mid_type="percent", max_type="percent",
+            min_val="25", mid_val="50", max_val="75"
+        )
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet;
+            iconset="Custom",
+            icon_list=[1, 13, 26, 39],
+            min_type="percent", max_type="percent",
+            min_val="25"
+        ) == 0
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet;
+            iconset="Custom",
+            icon_list=[1, 13, 26, 39],
+            min_type="percent",
+            min_val="25", max_val="75"
+        ) == 0
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet;
+            iconset="Custom",
+            icon_list=[1, 13, 26, 39]
+        ) == 0
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet;
+            iconset="10ThousandManiacs",
+        ) == 0
 
 
         @test XLSX.getConditionalFormats(s) == [
-            XLSX.CellRange("A1:A4") => (type = "iconSet", priority = 16),
-            XLSX.CellRange("A1:A4") => (type = "iconSet", priority = 15),
-            XLSX.CellRange("A1:A4") => (type = "iconSet", priority = 14),
-            XLSX.CellRange("A1:A4") => (type = "iconSet", priority = 1),
-            XLSX.CellRange("B1:B4") => (type = "iconSet", priority = 2),
-            XLSX.CellRange("C1:C4") => (type = "iconSet", priority = 3),
-            XLSX.CellRange("D1:D4") => (type = "iconSet", priority = 4),
-            XLSX.CellRange("E1:E4") => (type = "iconSet", priority = 5),
-            XLSX.CellRange("F1:F4") => (type = "iconSet", priority = 6),
-            XLSX.CellRange("G1:G4") => (type = "iconSet", priority = 7),
-            XLSX.CellRange("H1:H4") => (type = "iconSet", priority = 8),
-            XLSX.CellRange("I1:I4") => (type = "iconSet", priority = 9),
-            XLSX.CellRange("J1:J4") => (type = "iconSet", priority = 10),
-            XLSX.CellRange("K1:K4") => (type = "iconSet", priority = 11),
-            XLSX.CellRange("L1:L4") => (type = "iconSet", priority = 12),
-            XLSX.CellRange("M1:M4") => (type = "iconSet", priority = 13),
-            XLSX.CellRange("A2:M2") => (type = "iconSet", priority = 17)
+            XLSX.CellRange("A1:A4") => (type="iconSet", priority=16),
+            XLSX.CellRange("A1:A4") => (type="iconSet", priority=15),
+            XLSX.CellRange("A1:A4") => (type="iconSet", priority=14),
+            XLSX.CellRange("A1:A4") => (type="iconSet", priority=1),
+            XLSX.CellRange("B1:B4") => (type="iconSet", priority=2),
+            XLSX.CellRange("C1:C4") => (type="iconSet", priority=3),
+            XLSX.CellRange("D1:D4") => (type="iconSet", priority=4),
+            XLSX.CellRange("E1:E4") => (type="iconSet", priority=5),
+            XLSX.CellRange("F1:F4") => (type="iconSet", priority=6),
+            XLSX.CellRange("G1:G4") => (type="iconSet", priority=7),
+            XLSX.CellRange("H1:H4") => (type="iconSet", priority=8),
+            XLSX.CellRange("I1:I4") => (type="iconSet", priority=9),
+            XLSX.CellRange("J1:J4") => (type="iconSet", priority=10),
+            XLSX.CellRange("K1:K4") => (type="iconSet", priority=11),
+            XLSX.CellRange("L1:L4") => (type="iconSet", priority=12),
+            XLSX.CellRange("M1:M4") => (type="iconSet", priority=13),
+            XLSX.CellRange("A2:M2") => (type="iconSet", priority=17)
         ]
 
         XLSX.addDefinedName(s, "myRange", "A1:B2")
@@ -4270,15 +4832,15 @@ end
             s[i, j] = i + j
         end
         for (j, k) in enumerate(keys(XLSX.iconsets))
-            if k=="Custom"
+            if k == "Custom"
                 @test XLSX.setConditionalFormat(s, :, j, :iconSet;
                     iconset=k,
-                    icon_list=[1,2,3,4,5],
+                    icon_list=[1, 2, 3, 4, 5],
                     min_type="num", mid_type="num", mid2_type="num", max_type="num",
                     min_val="8", mid_val="12", mid2_val="15", max_val="18",
-                    )==0
+                ) == 0
             else
-                @test XLSX.setConditionalFormat(s, :, j, :iconSet; iconset=k)==0
+                @test XLSX.setConditionalFormat(s, :, j, :iconSet; iconset=k) == 0
             end
         end
         f = XLSX.newxlsx()
@@ -4304,7 +4866,7 @@ end
             max_type="num",
             max_val="Sheet2!\$C\$4"
         )
-        @test_throws XLSX.XLSXError  XLSX.setConditionalFormat(f, "Sheet1!A5:E5", :iconSet;
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(f, "Sheet1!A5:E5", :iconSet;
             min_type="percentile",
             min_val="Sheet2!\$D\$5",
             max_type="percent",
@@ -4469,7 +5031,7 @@ end
             s[i, j] = i + j
         end
         for (j, k) in enumerate(keys(XLSX.highlights))
-            @test XLSX.setConditionalFormat(s, :, j, :cellIs; dxStyle=k)==0
+            @test XLSX.setConditionalFormat(s, :, j, :cellIs; dxStyle=k) == 0
         end
     end
 
@@ -5211,11 +5773,11 @@ end
             end
         end
 
-        @test_throws MethodError XLSX.setConditionalFormat(s, "A1:A5,C1:C5", :expression; formula = "A1>3") # Non-contiguous ranges not allowed
-        @test_throws MethodError XLSX.setConditionalFormat(s, [2, 3, 8], 1:3, :expression; formula = "A1 > 11") # Vectors may be non-contiguous
-        @test_throws MethodError XLSX.setConditionalFormat(s, 2, 1:3:7, :expression; formula = "A1 < 7") # StepRange is non-contiguous
-        @test XLSX.setConditionalFormat(s, "2:2", :expression; formula = "A1 = 16") == 0
-        @test XLSX.setConditionalFormat(s, 2, :, :expression; formula = "A1 < 16", dxStyle="greenfilltext") == 0
+        @test_throws MethodError XLSX.setConditionalFormat(s, "A1:A5,C1:C5", :expression; formula="A1>3") # Non-contiguous ranges not allowed
+        @test_throws MethodError XLSX.setConditionalFormat(s, [2, 3, 8], 1:3, :expression; formula="A1 > 11") # Vectors may be non-contiguous
+        @test_throws MethodError XLSX.setConditionalFormat(s, 2, 1:3:7, :expression; formula="A1 < 7") # StepRange is non-contiguous
+        @test XLSX.setConditionalFormat(s, "2:2", :expression; formula="A1 = 16") == 0
+        @test XLSX.setConditionalFormat(s, 2, :, :expression; formula="A1 < 16", dxStyle="greenfilltext") == 0
         @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:10, 1:3, :expression;
             stopIfTrue="true",
             fill=["pattern" => "none", "bgColor" => "FFFFC7CE"],
@@ -5223,28 +5785,28 @@ end
             font=["color" => "blue", "bold" => "true", "strike" => "true"]
         ) == 0
         @test XLSX.setConditionalFormat(s, 1:10, 1:3, :expression;
-            formula = "A1 > 15",
+            formula="A1 > 15",
             stopIfTrue="true",
             fill=["pattern" => "none", "bgColor" => "FFFFC7CE"],
             border=["style" => "thick", "color" => "coral"],
             font=["color" => "blue", "bold" => "true", "strike" => "true"]
         ) == 0
         @test XLSX.setConditionalFormat(s, 1:10, 1:3, :expression;
-            formula = "iseven(A1)",
+            formula="iseven(A1)",
             stopIfTrue="true",
             fill=["pattern" => "lightVertical", "fgColor" => "grey", "bgColor" => "FFFFC7CE"],
             border=["style" => "thick", "color" => "coral"],
             font=["color" => "blue", "bold" => "true", "strike" => "true"]
         ) == 0
         @test XLSX.setConditionalFormat(s, 1:10, 1:3, :expression;
-            formula = "A1 < 10",
+            formula="A1 < 10",
             stopIfTrue="true",
             fill=["pattern" => "none", "bgColor" => "FFFFC7CE"],
             border=["style" => "thick", "color" => "coral"],
             font=["color" => "blue", "bold" => "true", "strike" => "true"]
         ) == 0
         @test XLSX.setConditionalFormat(s, 1:10, 1:3, :expression;
-            formula = "A1 < 5",
+            formula="A1 < 5",
             stopIfTrue="true",
             fill=["pattern" => "none", "bgColor" => "pink"],
             border=["style" => "thick", "color" => "coral"],
@@ -5259,48 +5821,48 @@ end
             XLSX.CellRange("A2:J2") => (type="expression", priority=2),
         ]
 
-        @test XLSX.setConditionalFormat(s, "A1", :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(s, "A1:C3", :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(s, "Sheet1!A1", :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(s, "Sheet1!A1:A2", :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(s, "Sheet1!1:2", :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(s, "2:4", :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(s, "A:C", :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(s, "Sheet1!A:C", :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(f, "Sheet1!1:2", :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(f, "Sheet1!A:C", :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(s, :, 1:3, :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(s, 1:3, :, :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(s, "2:4", :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(s, "A:C", :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(s, "Sheet1!A:C", :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(s, :, :expression; formula = "iseven(A1)") == 0
-        @test XLSX.setConditionalFormat(s, :, :, :expression; formula = "iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(s, "A1", :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(s, "A1:C3", :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(s, "Sheet1!A1", :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(s, "Sheet1!A1:A2", :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(s, "Sheet1!1:2", :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(s, "2:4", :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(s, "A:C", :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(s, "Sheet1!A:C", :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(f, "Sheet1!1:2", :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(f, "Sheet1!A:C", :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(s, :, 1:3, :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(s, 1:3, :, :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(s, "2:4", :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(s, "A:C", :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(s, "Sheet1!A:C", :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(s, :, :expression; formula="iseven(A1)") == 0
+        @test XLSX.setConditionalFormat(s, :, :, :expression; formula="iseven(A1)") == 0
         @test length(XLSX.getConditionalFormats(s)) == 23
         @test XLSX.getConditionalFormats(s) == [
-            XLSX.CellRange("A1:J10") => (type = "expression", priority = 22),
-            XLSX.CellRange("A1:J10") => (type = "expression", priority = 23),
-            XLSX.CellRange("A1:J3") => (type = "expression", priority = 18),
-            XLSX.CellRange("A2:J4") => (type = "expression", priority = 12),
-            XLSX.CellRange("A2:J4") => (type = "expression", priority = 19),
-            XLSX.CellRange("A1:J2") => (type = "expression", priority = 11),
-            XLSX.CellRange("A1:J2") => (type = "expression", priority = 15),
-            XLSX.CellRange("A1:A2") => (type = "expression", priority = 10),
-            XLSX.CellRange("A1:C3") => (type = "expression", priority = 8),
-            XLSX.CellRange("A1:A1") => (type = "expression", priority = 7),
-            XLSX.CellRange("A1:A1") => (type = "expression", priority = 9),
-            XLSX.CellRange("A1:C10") => (type = "expression", priority = 3),
-            XLSX.CellRange("A1:C10") => (type = "expression", priority = 4),
-            XLSX.CellRange("A1:C10") => (type = "expression", priority = 5),
-            XLSX.CellRange("A1:C10") => (type = "expression", priority = 6),
-            XLSX.CellRange("A1:C10") => (type = "expression", priority = 13),
-            XLSX.CellRange("A1:C10") => (type = "expression", priority = 14),
-            XLSX.CellRange("A1:C10") => (type = "expression", priority = 16),
-            XLSX.CellRange("A1:C10") => (type = "expression", priority = 17),
-            XLSX.CellRange("A1:C10") => (type = "expression", priority = 20),
-            XLSX.CellRange("A1:C10") => (type = "expression", priority = 21),
-            XLSX.CellRange("A2:J2") => (type = "expression", priority = 1),
-            XLSX.CellRange("A2:J2") => (type = "expression", priority = 2)
+            XLSX.CellRange("A1:J10") => (type="expression", priority=22),
+            XLSX.CellRange("A1:J10") => (type="expression", priority=23),
+            XLSX.CellRange("A1:J3") => (type="expression", priority=18),
+            XLSX.CellRange("A2:J4") => (type="expression", priority=12),
+            XLSX.CellRange("A2:J4") => (type="expression", priority=19),
+            XLSX.CellRange("A1:J2") => (type="expression", priority=11),
+            XLSX.CellRange("A1:J2") => (type="expression", priority=15),
+            XLSX.CellRange("A1:A2") => (type="expression", priority=10),
+            XLSX.CellRange("A1:C3") => (type="expression", priority=8),
+            XLSX.CellRange("A1:A1") => (type="expression", priority=7),
+            XLSX.CellRange("A1:A1") => (type="expression", priority=9),
+            XLSX.CellRange("A1:C10") => (type="expression", priority=3),
+            XLSX.CellRange("A1:C10") => (type="expression", priority=4),
+            XLSX.CellRange("A1:C10") => (type="expression", priority=5),
+            XLSX.CellRange("A1:C10") => (type="expression", priority=6),
+            XLSX.CellRange("A1:C10") => (type="expression", priority=13),
+            XLSX.CellRange("A1:C10") => (type="expression", priority=14),
+            XLSX.CellRange("A1:C10") => (type="expression", priority=16),
+            XLSX.CellRange("A1:C10") => (type="expression", priority=17),
+            XLSX.CellRange("A1:C10") => (type="expression", priority=20),
+            XLSX.CellRange("A1:C10") => (type="expression", priority=21),
+            XLSX.CellRange("A2:J2") => (type="expression", priority=1),
+            XLSX.CellRange("A2:J2") => (type="expression", priority=2)
         ]
 
         f = XLSX.newxlsx()
@@ -5311,8 +5873,8 @@ end
             end
         end
         XLSX.setConditionalFormat(s, "A1:A5", :expression; formula="A1=1")
-        XLSX.setConditionalFormat(s, :, 2, :expression;  formula="A1=1", dxStyle="redborder")
-        XLSX.setConditionalFormat(s, "Sheet1!E:E", :expression;  formula="A1=1", dxStyle="redfilltext")
+        XLSX.setConditionalFormat(s, :, 2, :expression; formula="A1=1", dxStyle="redborder")
+        XLSX.setConditionalFormat(s, "Sheet1!E:E", :expression; formula="A1=1", dxStyle="redfilltext")
         XLSX.setConditionalFormat(s, 1:5, 3:4, :expression;
             formula="A1=1",
             fill=["pattern" => "none", "bgColor" => "yellow"],
@@ -5331,7 +5893,7 @@ end
             end
         end
         @test XLSX.setConditionalFormat(s, :, 1:4, :expression;
-            formula = "A1 > \$E\$3",
+            formula="A1 > \$E\$3",
             fill=["pattern" => "none", "bgColor" => "yellow"],
             format=["format" => "0.0"],
             font=["color" => "green", "under" => "double"],
@@ -5348,7 +5910,7 @@ end
         XLSX.addDefinedName(f, "myTest", "Sheet1!L11")
         s["L11"] = 70
         XLSX.addDefinedName(s, "myRange", "F6:J10")
-        
+
         @test XLSX.setConditionalFormat(s, "myRange", :expression;
             formula="E5 > myTest",
             fill=["pattern" => "none", "bgColor" => "yellow"],
@@ -5358,7 +5920,7 @@ end
         ) == 0
         XLSX.addDefinedName(s, "myNCRange", "C1:C5,D1:D5")
         @test_throws MethodError XLSX.setConditionalFormat(s, "myNCRange", :expression; # Non-contiguous ranges not allowed
-            formula = "C4 < myTest",
+            formula="C4 < myTest",
             fill=["pattern" => "none", "bgColor" => "yellow"],
             format=["format" => "0.0"],
             font=["color" => "green"],
@@ -5537,7 +6099,7 @@ end
     XLSX.openxlsx(joinpath(data_directory, "customXml.xlsx")) do f
         @test_throws XLSX.XLSXError XLSX.getMergedCells(f["Mock-up"]) # File isn't writeable
     end
-    f=XLSX.openxlsx(joinpath(data_directory, "customXml.xlsx"); mode="rw")
+    f = XLSX.openxlsx(joinpath(data_directory, "customXml.xlsx"); mode="rw")
     mc = sort(XLSX.getMergedCells(f["Mock-up"]))
     @test length(mc) == 25
     @test mc == sort(XLSX.CellRange[XLSX.CellRange("D49:H49"), XLSX.CellRange("D72:J72"), XLSX.CellRange("F94:J94"), XLSX.CellRange("F96:J96"), XLSX.CellRange("F84:J84"), XLSX.CellRange("F86:J86"), XLSX.CellRange("D62:J63"), XLSX.CellRange("D51:J53"), XLSX.CellRange("D55:J60"), XLSX.CellRange("D92:J92"), XLSX.CellRange("D82:J82"), XLSX.CellRange("D74:J74"), XLSX.CellRange("D67:J68"), XLSX.CellRange("D47:H47"), XLSX.CellRange("D9:H9"), XLSX.CellRange("D11:G11"), XLSX.CellRange("D12:G12"), XLSX.CellRange("D14:E14"), XLSX.CellRange("D16:E16"), XLSX.CellRange("D32:F32"), XLSX.CellRange("D38:J38"), XLSX.CellRange("D34:J34"), XLSX.CellRange("D18:E18"), XLSX.CellRange("D20:E20"), XLSX.CellRange("D13:G13")])
@@ -5688,7 +6250,7 @@ end
     # test create new file
     XLSX.openxlsx(filename, mode="w") do xf
         sheet = xf[1]
-        XLSX.rename!(sheet, sheetname)
+        XLSX.renamesheet!(sheet, sheetname)
 
         sheet["A1"] = data[1, :]
         sheet[2, :] = data[2, :]
@@ -5781,6 +6343,19 @@ end
                 @test sheet[r+6, c] == test_data[r, c]
             end
         end
+
+        xf = XLSX.newxlsx()
+        sheet = xf[1]
+        sheet[7, 1] = test_data
+        XLSX.writexlsx(filename, xf, overwrite=true)
+
+        XLSX.openxlsx(filename) do xf
+            sheet = xf[1]
+            rows, cols = size(test_data)
+            for c in 1:cols, r in 1:rows
+                @test sheet[r+6, c] == test_data[r, c]
+            end
+        end
     end
 
     @testset "write matrix with range" begin
@@ -5789,6 +6364,19 @@ end
             sheet = xf[1]
             sheet["A7:C9"] = test_data
         end
+
+        XLSX.openxlsx(filename) do xf
+            sheet = xf[1]
+            rows, cols = size(test_data)
+            for c in 1:cols, r in 1:rows
+                @test sheet[r+6, c] == test_data[r, c]
+            end
+        end
+
+        xf = XLSX.newxlsx()
+        sheet = xf[1]
+        sheet[7:9, 1:3] = test_data
+        XLSX.writexlsx(filename, xf, overwrite=true)
 
         XLSX.openxlsx(filename) do xf
             sheet = xf[1]
@@ -5880,11 +6468,8 @@ end
 
 @testset "escape" begin
 
-    # These tests are not sufficient. It may be possible using these tests (or similar) to create XLSX files
-    # that are not valid Excel files and will not successfully open. I do not now how to test this here but
-    # have successfully tested `output_table_escape_test.xlsx` and `escape.xlsx` manually.
-    @test XML.escape("hello&world<'") == "hello&amp;world&lt;&apos;"
-    @test XML.unescape("hello&amp;world&lt;&apos;") == "hello&world<'"
+    @test XLSX.escape("hello&world<'") == "hello&amp;world&lt;&apos;"
+    @test XLSX.unescape("hello&amp;world&lt;&apos;") == "hello&world<'"
 
     esc_filename = "output_table_escape_test.xlsx"
     isfile(esc_filename) && rm(esc_filename)
@@ -5905,17 +6490,46 @@ end
     @test r1_col_names[3] == Symbol(esc_col_names[3])
     @test r1_col_names[2] == Symbol(esc_col_names[2])
     @test r1_col_names[1] == Symbol(esc_col_names[1])
-    rm(esc_filename)
+    isfile(esc_filename) && rm(esc_filename)
 
     # compare to the backup version: escape.xlsx
     dtable = XLSX.readtable(joinpath(data_directory, "escape.xlsx"), esc_sheetname)
-    r2_data, r2_col_names = [[x isa String ? XML.unescape(x) : x for x in y] for y in dtable.data], dtable.column_labels
+    r2_data, r2_col_names = dtable.data, dtable.column_labels
     check_test_data(r2_data, esc_data)
     check_test_data(r2_data, r1_data)
     @test string(r2_col_names[4]) == esc_col_names[4]
     @test string(r2_col_names[3]) == esc_col_names[3]
     @test string(r2_col_names[2]) == esc_col_names[2]
     @test string(r2_col_names[1]) == esc_col_names[1]
+
+    esc_col_names = ["&; &amp; &quot; &lt; &gt; &apos; ", "I❤Julia", "\"<'&O-O&'>\"", "<&>"]
+    esc_sheetname = string( esc_col_names[1],esc_col_names[2],esc_col_names[3],esc_col_names[4])[1:30] # There is a hard limit in Excel
+    esc_data = Vector{Any}(undef, 4)
+    esc_data[1] = ["11&amp;&",    "12&quot;&",    "13&lt;&",    "14&gt;&",    "15&apos;&"    ]
+    esc_data[2] = ["21&&amp;&&",  "22&&quot;&&",  "23&&lt;&&",  "24&&gt;&&",  "25&&apos;&&"  ]
+    esc_data[3] = ["31&&&amp;&&&","32&&&quot;&&&","33&&&lt;&&&","34&&&gt;&&&","35&&&apos;&&&"]
+    esc_data[4] = ["41& &; &&",   "42\" \"; \"\"","43< <; <<",  "44> >; >>",  "45' '; ''"    ]
+    XLSX.writetable(esc_filename, esc_data, esc_col_names, overwrite=true, sheetname=esc_sheetname)
+
+    dtable = XLSX.readtable(esc_filename, esc_sheetname)
+    r3_data, r3_col_names = dtable.data, dtable.column_labels
+    check_test_data(r3_data, esc_data)
+    @test r3_col_names[4] == Symbol( esc_col_names[4] )
+    @test r3_col_names[3] == Symbol( esc_col_names[3] )
+    @test r3_col_names[2] == Symbol( esc_col_names[2] )
+    @test r3_col_names[1] == Symbol( esc_col_names[1] )
+    isfile(esc_filename) && rm(esc_filename)
+
+    # compare to the backup version: escape2.xlsx
+    dtable = XLSX.readtable(joinpath(data_directory, "escape2.xlsx"), esc_sheetname)
+    r4_data, r4_col_names = dtable.data, dtable.column_labels
+    check_test_data(r4_data, esc_data)
+    check_test_data(r4_data, r3_data)
+    @test r4_col_names[4] == Symbol( esc_col_names[4] )
+    @test r4_col_names[3] == Symbol( esc_col_names[3] )
+    @test r4_col_names[2] == Symbol( esc_col_names[2] )
+    @test r4_col_names[1] == Symbol( esc_col_names[1] )
+
 end
 
 # issue #67
@@ -5985,18 +6599,18 @@ end
 
 # issue #303
 @testset "xml:space" begin
-    f = XLSX.openxlsx(joinpath(data_directory,"sstTest.xlsx"), mode="rw")
-    s=f[1]
-    @test XLSX.getdata(s, :) ==  ["  hello" "    "; "  hello  " "    "; " hello\">" "    "; "hello\">" "    "; "  hello" "    "]
-    s["C1"]=" "
-    s["C2"]=" hello"
-    s["C3"]="hello "
-    s["C4"]=" hello "
-    s["C5"]=" \"hello\" "
-    @test XLSX.getdata(s, "C1:C5") ==  Any[" "; " hello"; "hello "; " hello "; " \"hello\" ";;]
+    f = XLSX.openxlsx(joinpath(data_directory, "sstTest.xlsx"), mode="rw")
+    s = f[1]
+    @test XLSX.getdata(s, :) == ["  hello" "    "; "  hello  " "    "; " hello\">" "    "; "hello\">" "    "; "  hello" "    "]
+    s["C1"] = " "
+    s["C2"] = " hello"
+    s["C3"] = "hello "
+    s["C4"] = " hello "
+    s["C5"] = " \"hello\" "
+    @test XLSX.getdata(s, "C1:C5") == Any[" "; " hello"; "hello "; " hello "; " \"hello\" ";;]
     XLSX.writexlsx("mydata.xlsx", f, overwrite=true)
     @test XLSX.readdata("mydata.xlsx", 1, :) == ["  hello" "    " " "; "  hello  " "    " " hello"; " hello\">" "    " "hello "; "hello\">" "    " " hello "; "  hello" "    " " \"hello\" "]
-    XLSX.writetable("mydata.xlsx", [["  hello", "  hello  ", " hello\">", "hello\">", "  hello"], ["    ", "    ", "    ", "    ", "    "],[" ", " hello", "hello ", " hello ", " \"hello\" "]], ["Col_A", "Col_B", "Col_C"]; overwrite=true)
+    XLSX.writetable("mydata.xlsx", [["  hello", "  hello  ", " hello\">", "hello\">", "  hello"], ["    ", "    ", "    ", "    ", "    "], [" ", " hello", "hello ", " hello ", " \"hello\" "]], ["Col_A", "Col_B", "Col_C"]; overwrite=true)
     @test XLSX.readdata("mydata.xlsx", 1, :) == ["Col_A" "Col_B" "Col_C"; "  hello" "    " " "; "  hello  " "    " " hello"; " hello\">" "    " "hello "; "hello\">" "    " " hello "; "  hello" "    " " \"hello\" "]
     isfile("mydata.xlsx") && rm("mydata.xlsx")
 end
@@ -6062,83 +6676,168 @@ end
 end
 
 @testset "rich text formats" begin
-    xf = XLSX.readxlsx(joinpath(data_directory, "is.xlsx"))
-    sh = xf["Sheet1"]
-    @test_throws XLSX.XLSXError XLSX.setFont(sh, "A1"; name="Palatino") # Must be in write mode for rich text formats
+    @testset "setAttributes" begin
+        xf = XLSX.readxlsx(joinpath(data_directory, "is.xlsx"))
+        sh = xf["Sheet1"]
+        @test_throws XLSX.XLSXError XLSX.setFont(sh, "A1"; name="Palatino") # Must be in write mode for rich text formats
 
-    xf = XLSX.opentemplate(joinpath(data_directory, "is.xlsx"))
-    sh = xf["Sheet1"]
-    @test XLSX.getFont(sh, "A1") === nothing
-    XLSX.setFont(sh, "A1"; name="Palatino")
-    @test XLSX.getFont(sh, "A1").font == Dict("name" => Dict("val" => "Palatino"), "sz" => Dict("val" => "11"), "color" => Dict("theme" => "1"))
-    @test XLSX.get_workbook(sh).sst.formatted_strings[parse(Int, XLSX.getcell(sh, "A1").value)] == "<si>\n  <r>\n    <t>h</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"20\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>e</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>l</t>\n  </r>\n  <r>\n    <rPr>\n      <vertAlign val=\"subscript\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>lo</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>ki</t>\n  </r>\n  <r>\n    <rPr>\n      <u/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <u/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>y</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n</si>"
-    XLSX.setFont(sh, "A1:F2"; name="Palatino")
-    @test XLSX.get_workbook(sh).sst.formatted_strings[parse(Int, XLSX.getcell(sh, "E2").value)] == "<si>\n  <r>\n    <t>h</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"20\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>e</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>l</t>\n  </r>\n  <r>\n    <rPr>\n      <vertAlign val=\"subscript\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>lo</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>ki</t>\n  </r>\n  <r>\n    <rPr>\n      <u/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <u/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>y</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n</si>"
-    @test XLSX.getFont(sh, "B2").font["name"] == Dict("val" => "Palatino")
-    XLSX.setFont(sh, "B"; under="none")
-    @test haskey(XLSX.getFont(sh, "B2").font, "u") == false
-    XLSX.setFont(sh, "C1,D2:E2", color="orange")
-    @test XLSX.getFont(sh, "C1").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
-    @test XLSX.getFont(sh, "D2").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
-    @test XLSX.getFont(sh, "D1").font["color"] == Dict("theme" => "1")
+        xf = XLSX.opentemplate(joinpath(data_directory, "is.xlsx"))
+        sh = xf["Sheet1"]
+        @test XLSX.getFont(sh, "A1") === nothing
+        XLSX.setFont(sh, "A1"; name="Palatino")
+        @test XLSX.getFont(sh, "A1").font == Dict("name" => Dict("val" => "Palatino"), "sz" => Dict("val" => "11"), "color" => Dict("theme" => "1"))
+        @test XLSX.get_workbook(sh).sst.shared_strings[Int(XLSX.getcell(sh, "A1").value)+1] == "<si>\n  <r>\n    <t>h</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"20\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>el</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t xml:space=\"preserve\">lo </t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>ki</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>ty</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n</si>"
+        XLSX.setFont(sh, "A1:F2"; name="Palatino")
+        @test XLSX.get_workbook(sh).sst.shared_strings[Int(XLSX.getcell(sh, "E2").value)+1] == "<si>\n  <r>\n    <t>h</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"20\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>e</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>l</t>\n  </r>\n  <r>\n    <rPr>\n      <vertAlign val=\"superscript\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>lo</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>k</t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <i/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>i</t>\n  </r>\n  <r>\n    <rPr>\n      <i/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>y</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n</si>"
+        @test XLSX.getFont(sh, "B2").font["name"] == Dict("val" => "Palatino")
+        XLSX.setFont(sh, "B"; under="none")
+        @test haskey(XLSX.getFont(sh, "B2").font, "u") == false
+        XLSX.setFont(sh, "C1,D2:E2", color="orange")
+        @test XLSX.getFont(sh, "C1").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
+        @test XLSX.getFont(sh, "D2").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
+        @test XLSX.getFont(sh, "D1").font["color"] == Dict("theme" => "1")
 
-    xf = XLSX.opentemplate(joinpath(data_directory, "is.xlsx"))
-    sh = xf["Sheet1"]
-    XLSX.setUniformFont(sh, [1,2], 1:2; under="double")
-    @test XLSX.getFont(sh, "A1").font["u"] == Dict("val" => "double")
-    @test XLSX.getFont(sh, "B2").font["u"] == Dict("val" => "double")
-    @test XLSX.getFont(sh, "A1").font["sz"] == Dict("val" => "11")
-    @test XLSX.getFont(sh, "B2").font["sz"] == Dict("val" => "11")
-    @test XLSX.getFont(sh, "A1").font["color"] == Dict("theme" => "1")
-    @test XLSX.getFont(sh, "B2").font["color"] == Dict("theme" => "1")
-    @test XLSX.getFont(sh, "C2") === nothing
-    @test XLSX.get_workbook(sh).sst.formatted_strings[parse(Int, XLSX.getcell(sh, "B2").value)] == "<si>\n  <r>\n    <t>h</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"20\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>e</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>l</t>\n  </r>\n  <r>\n    <rPr>\n      <vertAlign val=\"subscript\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>lo</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>ki</t>\n  </r>\n  <r>\n    <rPr>\n      <u/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <u/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>y</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n</si>"
+        xf = XLSX.opentemplate(joinpath(data_directory, "is.xlsx"))
+        sh = xf["Sheet1"]
+        XLSX.setUniformFont(sh, [1, 2], 1:2; under="double")
+        @test XLSX.getFont(sh, "A1").font["u"] == Dict("val" => "double")
+        @test XLSX.getFont(sh, "B2").font["u"] == Dict("val" => "double")
+        @test XLSX.getFont(sh, "A1").font["sz"] == Dict("val" => "11")
+        @test XLSX.getFont(sh, "B2").font["sz"] == Dict("val" => "11")
+        @test XLSX.getFont(sh, "A1").font["color"] == Dict("theme" => "1")
+        @test XLSX.getFont(sh, "B2").font["color"] == Dict("theme" => "1")
+        @test XLSX.getFont(sh, "C2") === nothing
+        @test XLSX.get_workbook(sh).sst.shared_strings[Int(XLSX.getcell(sh, "B2").value)+1] == "<si>\n  <r>\n    <t>h</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"20\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>e</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>l</t>\n  </r>\n  <r>\n    <rPr>\n      <vertAlign val=\"subscript\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>lo</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>ki</t>\n  </r>\n  <r>\n    <rPr>\n      <u/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <u/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>y</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n</si>"
 
-    XLSX.setUniformFont(sh, :, 3:2:5; color = "orange")
-    @test XLSX.getFont(sh, "C1").font["sz"] == Dict("val" => "11")
-    @test XLSX.getFont(sh, "E2").font["sz"] == Dict("val" => "11")
-    @test XLSX.getFont(sh, "C1").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
-    @test XLSX.getFont(sh, "E2").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
-    @test XLSX.getFont(sh, "D2") === nothing
-    @test XLSX.get_workbook(sh).sst.formatted_strings[parse(Int, XLSX.getcell(sh, "E2").value)] == "<si>\n  <r>\n    <t>h</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"20\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>e</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>l</t>\n  </r>\n  <r>\n    <rPr>\n      <vertAlign val=\"subscript\"/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>lo</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>ki</t>\n  </r>\n  <r>\n    <rPr>\n      <u/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>tt</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\">y </t>\n  </r>\n</si>"
+        XLSX.setUniformFont(sh, :, 3:2:5; color="orange")
+        @test XLSX.getFont(sh, "C1").font["sz"] == Dict("val" => "11")
+        @test XLSX.getFont(sh, "E2").font["sz"] == Dict("val" => "11")
+        @test XLSX.getFont(sh, "C1").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
+        @test XLSX.getFont(sh, "E2").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
+        @test XLSX.getFont(sh, "D2") === nothing
+        @test XLSX.get_workbook(sh).sst.shared_strings[Int(XLSX.getcell(sh, "E2").value)+1] == "<si>\n  <r>\n    <t>h</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"20\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>e</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>l</t>\n  </r>\n  <r>\n    <rPr>\n      <vertAlign val=\"subscript\"/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>lo</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>ki</t>\n  </r>\n  <r>\n    <rPr>\n      <u/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>tt</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\">y </t>\n  </r>\n</si>"
 
-    xf = XLSX.opentemplate(joinpath(data_directory, "is.xlsx"))
-    sh = xf["Sheet1"]
-    XLSX.setUniformFont(sh, "A1,C2,D1:F1"; under="double")
-    @test XLSX.getFont(sh, "A1").font["u"] == Dict("val" => "double")
-    @test XLSX.getFont(sh, "C2").font["u"] == Dict("val" => "double")
-    @test XLSX.getFont(sh, "D1").font["sz"] == Dict("val" => "11")
-    @test XLSX.getFont(sh, "E1").font["sz"] == Dict("val" => "11")
-    @test XLSX.getFont(sh, "F1").font["color"] == Dict("theme" => "1")
-    @test XLSX.getFont(sh, "C2").font["color"] == Dict("theme" => "1")
-    @test XLSX.getFont(sh, "B2") === nothing
-    @test XLSX.get_workbook(sh).sst.formatted_strings[parse(Int, XLSX.getcell(sh, "F1").value)] == "<si>\n  <r>\n    <t>h</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"20\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>e</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>l</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <vertAlign val=\"subscript\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>lo</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <u val=\"double\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>ki</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"11\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>y</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n</si>"
-    xf = XLSX.opentemplate(joinpath(data_directory, "is.xlsx"))
-    sh = xf["Sheet1"]
-    XLSX.setFont(sh, "A1"; under="double", color="orange", name="Palatino", size=20, bold=true, italic=true, strike=true)
-    XLSX.setUniformStyle(sh, "A1:F2")
-    @test XLSX.getFont(sh, "A1").font["u"] == Dict("val" => "double")
-    @test XLSX.getFont(sh, "C2").font["u"] == Dict("val" => "double")
-    @test XLSX.getFont(sh, "D1").font["sz"] == Dict("val" => "20")
-    @test XLSX.getFont(sh, "E1").font["sz"] == Dict("val" => "20")
-    @test XLSX.getFont(sh, "F1").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
-    @test XLSX.getFont(sh, "C2").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
-    @test XLSX.getFont(sh, "A1").font["name"] == Dict("val" => "Palatino")
-    @test XLSX.getFont(sh, "F2").font["name"] == Dict("val" => "Palatino")
-    @test haskey(XLSX.getFont(sh, "B2").font, "b") == true
-    @test haskey(XLSX.getFont(sh, "B2").font, "i") == true
-    @test haskey(XLSX.getFont(sh, "B2").font, "strike") == true
+        xf = XLSX.opentemplate(joinpath(data_directory, "is.xlsx"))
+        sh = xf["Sheet1"]
+        XLSX.setUniformFont(sh, "A1,C2,D1:F1"; under="double")
+        @test XLSX.getFont(sh, "A1").font["u"] == Dict("val" => "double")
+        @test XLSX.getFont(sh, "C2").font["u"] == Dict("val" => "double")
+        @test XLSX.getFont(sh, "D1").font["sz"] == Dict("val" => "11")
+        @test XLSX.getFont(sh, "E1").font["sz"] == Dict("val" => "11")
+        @test XLSX.getFont(sh, "F1").font["color"] == Dict("theme" => "1")
+        @test XLSX.getFont(sh, "C2").font["color"] == Dict("theme" => "1")
+        @test XLSX.getFont(sh, "B2") === nothing
+        @test XLSX.get_workbook(sh).sst.shared_strings[Int(XLSX.getcell(sh, "F1").value)+1] == "<si>\n  <r>\n    <t>h</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"20\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>e</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>l</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <vertAlign val=\"subscript\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>lo</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <u val=\"double\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>ki</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"11\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>y</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n</si>"
+        xf = XLSX.opentemplate(joinpath(data_directory, "is.xlsx"))
+        sh = xf["Sheet1"]
+        XLSX.setFont(sh, "A1"; under="double", color="orange", name="Palatino", size=20, bold=true, italic=true, strike=true)
+        XLSX.setUniformStyle(sh, "A1:F2")
+        @test XLSX.getFont(sh, "A1").font["u"] == Dict("val" => "double")
+        @test XLSX.getFont(sh, "C2").font["u"] == Dict("val" => "double")
+        @test XLSX.getFont(sh, "D1").font["sz"] == Dict("val" => "20")
+        @test XLSX.getFont(sh, "E1").font["sz"] == Dict("val" => "20")
+        @test XLSX.getFont(sh, "F1").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
+        @test XLSX.getFont(sh, "C2").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
+        @test XLSX.getFont(sh, "A1").font["name"] == Dict("val" => "Palatino")
+        @test XLSX.getFont(sh, "F2").font["name"] == Dict("val" => "Palatino")
+        @test haskey(XLSX.getFont(sh, "B2").font, "b") == true
+        @test haskey(XLSX.getFont(sh, "B2").font, "i") == true
+        @test haskey(XLSX.getFont(sh, "B2").font, "strike") == true
+    end
 
+    @static if VERSION >= v"1.11-"
+        @testset "styledStrings" begin
+            f=XLSX.newxlsx()
+            s=f[1]
+            s["A1"] = styled"{yellow:hello} {blue:there}"
+            s["A2"] = styled"The {bold:{italic:quick {(foreground=#cd853f):brown} fox} jumps over the {(foreground=#FFC000):lazy} dog}"
+            s["A3"] = styled"In terms of color, we have named faces for the 16 standard terminal colors:\n {black:■} {red:■} {green:■} {yellow:■} {blue:■} {magenta:■} {cyan:■} {white:■}\n {bright_black:■} {bright_red:■} {bright_green:■} {bright_yellow:■} {bright_blue:■} {bright_magenta:■} {bright_cyan:■} {bright_white:■}"
+            s["A4"] = styled"\nThe basic font-style attributes are {bold:bold}, {light:light}, {italic:italic},\n {underline:underline}, and {strikethrough:strikethrough}"
+            s["A5"] = styled"{red:{(height=2.0):{bold:Hello}} {(height=120):Tim!}}"
+            StyledStrings.addface!(:MyFace => StyledStrings.Face(foreground = 0xFF7700))
+            s["A6"] = styled"{MyFace:this is orange text}"
+            s["A7"] = styled"{(weight=bold):{(underline=true, slant=italic):deleted {(strikethrough=true):and more {(height=2.5):too}}, aswell}}. And now unbolded!"
+            s["A8"] = styled"Hello {(font=Consolas):computer - do {bright_green:you have {(height=2.4):any} {(font=Palatino, foreground=#cd853f):rhymes}} for} me"
+            @test s["A1"] == "hello there"
+            @test s["A2"] == "The quick brown fox jumps over the lazy dog"
+            @test s["A3"] == "In terms of color, we have named faces for the 16 standard terminal colors:\n ■ ■ ■ ■ ■ ■ ■ ■\n ■ ■ ■ ■ ■ ■ ■ ■"
+            @test s["A4"] == "\nThe basic font-style attributes are bold, light, italic,\n underline, and strikethrough" # in Excel, light is simply plain text (not bold).
+            @test s["A5"] == "Hello Tim!"
+            @test s["A6"] == "this is orange text"
+            @test s["A7"] == "deleted and more too, aswell. And now unbolded!"
+            @test s["A8"] == "Hello computer - do you have any rhymes for me"
+            @test XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, "A1").value)+1] == "<si><r><rPr><color rgb=\"FFE5A509\"/><sz val=\"12\"/></rPr><t>hello</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FF195EB3\"/><sz val=\"12\"/></rPr><t>there</t></r></si>"
+            @test XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, "A2").value)+1] == "<si><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\">The </t></r><r><rPr><b/><i/><sz val=\"12\"/></rPr><t xml:space=\"preserve\">quick </t></r><r><rPr><b/><i/><color rgb=\"FFCD853F\"/><sz val=\"12\"/></rPr><t>brown</t></r><r><rPr><b/><i/><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> fox</t></r><r><rPr><b/><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> jumps over the </t></r><r><rPr><b/><color rgb=\"FFFFC000\"/><sz val=\"12\"/></rPr><t>lazy</t></r><r><rPr><b/><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> dog</t></r></si>"
+            @test XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, "A3").value)+1] == "<si><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\">In terms of color, we have named faces for the 16 standard terminal colors:\n </t></r><r><rPr><color rgb=\"FF1C1A23\"/><sz val=\"12\"/></rPr><t>■</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FFA51C2C\"/><sz val=\"12\"/></rPr><t>■</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FF25A268\"/><sz val=\"12\"/></rPr><t>■</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FFE5A509\"/><sz val=\"12\"/></rPr><t>■</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FF195EB3\"/><sz val=\"12\"/></rPr><t>■</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FF803D9B\"/><sz val=\"12\"/></rPr><t>■</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FF0097A7\"/><sz val=\"12\"/></rPr><t>■</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FFDDDCD9\"/><sz val=\"12\"/></rPr><t>■</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\">\n </t></r><r><rPr><color rgb=\"FF76757A\"/><sz val=\"12\"/></rPr><t>■</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FFED333B\"/><sz val=\"12\"/></rPr><t>■</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FF33D079\"/><sz val=\"12\"/></rPr><t>■</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FFF6D22C\"/><sz val=\"12\"/></rPr><t>■</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FF3583E4\"/><sz val=\"12\"/></rPr><t>■</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FFBF60CA\"/><sz val=\"12\"/></rPr><t>■</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FF26C6DA\"/><sz val=\"12\"/></rPr><t>■</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FFF6F5F4\"/><sz val=\"12\"/></rPr><t>■</t></r></si>"
+            @test XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, "A4").value)+1] == "<si><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\">\nThe basic font-style attributes are </t></r><r><rPr><b/><sz val=\"12\"/></rPr><t>bold</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\">, </t></r><r><rPr><sz val=\"12\"/></rPr><t>light</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\">, </t></r><r><rPr><i/><sz val=\"12\"/></rPr><t>italic</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\">,\n </t></r><r><rPr><sz val=\"12\"/><u/></rPr><t>underline</t></r><r><rPr><sz val=\"12\"/></rPr><t xml:space=\"preserve\">, and </t></r><r><rPr><strike/><sz val=\"12\"/></rPr><t>strikethrough</t></r></si>"
+            @test XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, "A5").value)+1] == "<si><r><rPr><b/><color rgb=\"FFA51C2C\"/><sz val=\"24\"/></rPr><t>Hello</t></r><r><rPr><color rgb=\"FFA51C2C\"/><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> </t></r><r><rPr><color rgb=\"FFA51C2C\"/><sz val=\"12\"/></rPr><t>Tim!</t></r></si>"
+            @test XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, "A6").value)+1] == "<si>\n  <t>this is orange text</t>\n</si>"
+            @test XLSX.getFont(s, "A6").font == Dict("name" => Dict("val" => "Calibri"), "sz" => Dict("val" => "12"), "color" => Dict("rgb" => "FFFF7700"))
+            @test XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, "A7").value)+1] == "<si><r><rPr><b/><i/><sz val=\"12\"/><u/></rPr><t xml:space=\"preserve\">deleted </t></r><r><rPr><b/><i/><strike/><sz val=\"12\"/><u/></rPr><t xml:space=\"preserve\">and more </t></r><r><rPr><b/><i/><strike/><sz val=\"30\"/><u/></rPr><t>too</t></r><r><rPr><b/><i/><sz val=\"12\"/><u/></rPr><t>, aswell</t></r><r><rPr><sz val=\"12\"/></rPr><t>. And now unbolded!</t></r></si>"
+        end
+
+    end
+
+    @testset "RichTextString" begin
+        f=XLSX.newxlsx()
+        s=f[1]
+        rtf1=XLSX.RichTextRun("Hello", [:vertAlign => "subscript"])
+        rtf2=XLSX.RichTextRun(" Kitty ", [:color => "green", :size => 14, :bold => true, :under => true])
+        rtf3=XLSX.RichTextRun("Hello", [:color => "green", :size => 14, :under => true])
+        s["A1"] = XLSX.RichTextString(rtf1, rtf2, rtf3)
+        @test XLSX.getRichTextString(s, "A1").runs[1].atts == Dict(:vertAlign => "subscript")
+        @test XLSX.getRichTextString(s, "A1") == XLSX.RichTextString(rtf1, rtf2, rtf3)
+
+        rtf4=XLSX.RichTextRun("Hell", [:color => "red", :size => 18, :name => "Times New Roman"])
+        rtf5=XLSX.RichTextRun("o", [:color => "green", :size => 24, :vertAlign => "superscript", :name => "Arial"])
+        rtf6=XLSX.RichTextRun(" Kitt", [:color => "blue", :size => 12, :name => "Consolas"])
+        rtf7=XLSX.RichTextRun("y", [:color => "green", :size => 14, :vertAlign => "subscript"])
+        s["A2"] = XLSX.RichTextString(rtf4, rtf5, rtf6, rtf7)
+        @test XLSX.getRichTextString(s, "A2").runs[1].atts == Dict(:color => XLSX.get_color("red"), :size => 18, :name => "Times New Roman")
+        @test XLSX.getRichTextString(s, "A2") == XLSX.RichTextString(rtf4, rtf5, rtf6, rtf7)
+
+        @test XLSX.getRichTextString(s, "A1")*XLSX.getRichTextString(s, "A2") == XLSX.RichTextString(rtf1, rtf2, rtf3, rtf4, rtf5, rtf6, rtf7)
+        @test string((XLSX.getRichTextString(s, "A1")*XLSX.getRichTextString(s, "A2"))[8:24]) == "itty HelloHello K"
+        @test length((XLSX.getRichTextString(s, "A1")*XLSX.getRichTextString(s, "A2"))[8:24]) == 17
+        rtf1=XLSX.RichTextRun("single run", [:color => "green", :size => 14, :vertAlign => "subscript"])
+        s["A3"] = XLSX.RichTextString(rtf1)
+
+        @test s["A1"] == "Hello Kitty Hello"
+        @test s["A2"] == "Hello Kitty"
+        @test s["A3"] == "single run"
+        @test XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, "A1").value)+1] == "<si><r><rPr><vertAlign val=\"subscript\"/></rPr><t>Hello</t></r><r><rPr><b/><color rgb=\"FF008000\"/><sz val=\"14\"/><u/></rPr><t xml:space=\"preserve\"> Kitty </t></r><r><rPr><color rgb=\"FF008000\"/><sz val=\"14\"/><u/></rPr><t>Hello</t></r></si>"
+        @test XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, "A2").value)+1] == "<si><r><rPr><rFont val=\"Times New Roman\"/><color rgb=\"FFFF0000\"/><sz val=\"18\"/></rPr><t>Hell</t></r><r><rPr><rFont val=\"Arial\"/><color rgb=\"FF008000\"/><sz val=\"24\"/><vertAlign val=\"superscript\"/></rPr><t>o</t></r><r><rPr><rFont val=\"Consolas\"/><color rgb=\"FF0000FF\"/><sz val=\"12\"/></rPr><t xml:space=\"preserve\"> Kitt</t></r><r><rPr><color rgb=\"FF008000\"/><sz val=\"14\"/><vertAlign val=\"subscript\"/></rPr><t>y</t></r></si>"
+        @test XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, "A3").value)+1] == "<si>\n  <t>single run</t>\n</si>"
+        @test XLSX.getFont(s, "A3").font == Dict("name" => Dict("val" => "Calibri"), "sz" => Dict("val" => "14"), "color" => Dict("rgb" => "FF008000"), "vertAlign" => Dict("val" => "subscript"))
+
+        rts_expected_result = "RichTextString: \"Hello Kitty\" \n" *
+                              " containing 4 runs:\n" *
+                              " Run text                 Run attributes\n" *
+                              " -------------------------------------------------------------------------------------------\n" *
+                              " \"Hell\"                   [:color => \"FFFF0000\", :name => \"Times New Roman\", :size => 18.0] \n" *
+                              " \"o\"                      [:color => \"FF008000\", :name => \"Arial\", :size => 24.0, :vertAli…]\n" *
+                              " \" Kitt\"                  [:color => \"FF0000FF\", :name => \"Consolas\", :size => 12.0]        \n" *
+                              " \"y\"                      [:color => \"FF008000\", :size => 14.0, :vertAlign => \"subscript\"]  \n"
+        rtr_expected_result = "RichTextRun (\"Hell\"  [:color => \"FFFF0000\", :name => \"Times New Roman\", :size => 18.0])"
+        io1 = IOBuffer()
+        io2 = IOBuffer()
+        show(io1, XLSX.getRichTextString(s, "A2"))
+        @test String(take!(io1)) == rts_expected_result
+        show(io1, XLSX.getRichTextString(s, "A2").runs[1])
+        @test String(take!(io1)) == rtr_expected_result
+    end
 end
 
 # issue #299 & 301
 @testset "empty_v" begin
     xf = XLSX.openxlsx(joinpath(data_directory, "empty_v.xlsx"), mode="rw")
     sheet1 = xf["Sheet1"]
-    @test XLSX.getcell(sheet1, "A1") == XLSX.Cell(XLSX.CellRef("A1"), "str", "", "", XLSX.Formula("\"\""))
+    @test XLSX.getcell(sheet1, "A1") == XLSX.Cell(XLSX.get_workbook(xf), XLSX.CellRef("A1"), "str", "", "", "", true)
+    @test XLSX.get_formula_from_cache(sheet1, XLSX.CellRef("A1")) == XLSX.Formula("\"\"")
     XLSX.writexlsx("mytest.xlsx", xf, overwrite=true)
     xf2 = XLSX.readxlsx(joinpath(data_directory, "empty_v.xlsx"))
-    @test XLSX.getcell(xf2[1], "A1") == XLSX.Cell(XLSX.CellRef("A1"), "str", "", "", XLSX.Formula("\"\""))
+    @test XLSX.getcell(xf2[1], "A1") == XLSX.Cell(XLSX.get_workbook(xf2), XLSX.CellRef("A1"), "str", "", "", "", true)
+    @test XLSX.get_formula_from_cache(sheet1, XLSX.CellRef("A1")) == XLSX.Formula("\"\"")
     isfile("mytest.xlsx") && rm("mytest.xlsx")
 end
 
@@ -6177,7 +6876,8 @@ end
     ct = XLSX.eachtablerow(f["table6"]) |> Tables.columntable
     @test length(ct) == 1
     @test isempty(ct.hey)
-    ct = XLSX.eachtablerow(f["table7"]) |> Tables.columntable
+    #    @test ct.hey == Any[missing]
+    ct = XLSX.eachtablerow(f["table7"]; header=false) |> Tables.columntable
     @test length(ct) == 1
     @test length(ct[1]) == 1
 
@@ -6198,7 +6898,7 @@ end
 
     XLSX.openxlsx("output_table2.xlsx", mode="w") do xf
         sheet = XLSX.getsheet(xf, 1)
-        XLSX.rename!(sheet, "report")
+        XLSX.renamesheet!(sheet, "report")
         XLSX.writetable!(sheet, table)
     end
 
@@ -6248,18 +6948,43 @@ end
             isfile(file) && rm(file)
         end
     end
+
+    @testset "Tables.jl as sink" begin
+        f = CSV.read(joinpath(data_directory, "iris.csv"), XLSX.XLSXFile)
+        @test XLSX.hassheet(f, "Sheet1") == true
+        sheet = f["Sheet1"]
+        @test sheet["A1"] == "sepal_length"
+        @test sheet["B1"] == "sepal_width"
+        @test sheet["C1"] == "petal_length"
+        @test sheet["D1"] == "petal_width"
+        @test sheet["E1"] == "species"
+        @test sheet["A150"] ≈ 6.2
+        @test sheet["B150"] ≈ 3.4
+        @test sheet["C150"] ≈ 5.4
+        @test sheet["D150"] ≈ 2.3
+        @test sheet["E150"] == "virginica"
+        XLSX.setFormula(f[1], "G1", "=GROUPBY(E1:E151,A1:D151,AVERAGE,3,1)")
+        @test XLSX.get_formula_from_cache(sheet, XLSX.CellRef("G1")) == XLSX.Formula("_xlfn.GROUPBY(E1:E151,A1:D151,_xleta.AVERAGE,3,1)", "array", "G1:G1", nothing)
+        f[1]["M1"] = "versicolor"
+        XLSX.setFormula(f[1], "M2", "=VLOOKUP(M1,G1#,3,FALSE)")
+        @test XLSX.get_formula_from_cache(sheet, XLSX.CellRef("M2")) == XLSX.Formula("=VLOOKUP(M1,_xlfn.ANCHORARRAY(G1),3,FALSE)", "array", "M2:M2", nothing)
+        XLSX.setFormula(f[1], "G1", "=GROUPBY(E1:E151,A1:D151,STDEV.P,3,1)")
+        @test XLSX.get_formula_from_cache(sheet, XLSX.CellRef("G1")) == XLSX.Formula("_xlfn.GROUPBY(E1:E151,A1:D151,_xleta.STDEV.P,3,1)", "array", "G1:G1", nothing)
+        XLSX.setFormula(f[1], "G10", "_xlfn.GROUPBY(E1:E151,A1:D151,_xlfn.LAMBDA(_xlpm.x,AVERAGE(_xlpm.x)),3,1)"; raw=true)
+        @test XLSX.get_formula_from_cache(sheet, XLSX.CellRef("G10")) == XLSX.Formula("_xlfn.GROUPBY(E1:E151,A1:D151,_xlfn.LAMBDA(_xlpm.x,AVERAGE(_xlpm.x)),3,1)", "array", "G10:G10", nothing)
+    end
 end
 
 @testset "stream iterator" begin
     f = XLSX.openxlsx(joinpath(data_directory, "general.xlsx"), enable_cache=false)
-    s=f["table"]
+    s = f["table"]
     for sheetrow in XLSX.eachrow(s)
         for column in 2:4
             cell = XLSX.getcell(sheetrow, column)
-            if XLSX.row_number(cell)==2 && XLSX.column_number(cell) == 2
+            if XLSX.row_number(cell) == 2 && XLSX.column_number(cell) == 2
                 @test XLSX.getdata(s, cell) == "Column B"
             end
-            if XLSX.row_number(cell)==12 && XLSX.column_number(cell) == 2
+            if XLSX.row_number(cell) == 12 && XLSX.column_number(cell) == 2
                 @test XLSX.getdata(s, cell) == "trash"
             end
         end

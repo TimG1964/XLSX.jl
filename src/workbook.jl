@@ -1,6 +1,29 @@
-
+#=
+const Workbook_elements = String[
+    "fileVersion",
+    "fileSharing",
+    "workbookPr",
+    "workbookProtection",
+    "bookViews",
+    "sheets",
+    "functionGroups",
+    "externalReferences",
+    "definedNames",
+    "calcPr",
+    "oleSize",
+    "customWorkbookViews",
+    "pivotCaches",
+    "smartTagPr",
+    "smartTagTypes",
+    "webPublishing",
+    "fileRecoveryPr",
+    "webPublishObjects",
+    "extLst"
+    ]
+=#
+    
 EmptyWorkbook() = Workbook(EmptyMSOfficePackage(), Vector{Worksheet}(), false,
-    Vector{Relationship}(), SharedStringTable(), Dict{Int,Bool}(), Dict{Int,Bool}(),
+    Vector{Relationship}(), Dict{SheetCellRef, AbstractFormula}(), SharedStringTable(), Dict{Int,Bool}(), Dict{Int,Bool}(),
     Dict{String,DefinedNameValueTypes}(), Dict{Tuple{Int,String},DefinedNameValueTypes}(), nothing)
 
 #=
@@ -151,7 +174,7 @@ function getdata(xl::XLSXFile, s::AbstractString)
         return getdata(xl, NonContiguousRange(s))
     end
 
-    throw(XLSXError("`$s` is not a valid sheetname, definedName or cell/range reference."))
+    throw(XLSXError("`$s` is not a valid sheetname, workbook definedName or cell/range reference."))
 end
 
 function getcell(xl::XLSXFile, ref::SheetCellRef)
@@ -231,21 +254,6 @@ end
 
 @inline get_defined_name_value(wb::Workbook, name::AbstractString)::DefinedNameValueTypes = wb.workbook_names[name].value
 
-#=
-function get_defined_names(f::XLSXFile, type::Symbol)
-    if type == :Workbook
-        names=keys(XLSX.get_workbook(f).workbook_names)
-        vals = values(XLSX.get_workbook(f).workbook_names)
-        list1 = ["\"Workbook\" $k =>  $(v.value)" for (k, v) in collect(zip(names, vals))]
-    elseif type == :Worksheet 
-        names=keys(XLSX.get_workbook(f).worksheet_names)
-        vals = values(XLSX.get_workbook(f).worksheet_names)
-        list2 = ["$(get_workbook(f).sheets[k[1]].name) $(k[2]) =>  $(v.value)" for (k, v) in collect(zip(names, vals))]
-        return list2
-    end
-end
-=#
-
 function get_defined_name_value(ws::Worksheet, name::AbstractString)::DefinedNameValueTypes
     wb = get_workbook(ws)
     sheetId = ws.sheetId
@@ -311,8 +319,23 @@ function addDefName(ws::Worksheet, name::AbstractString, value::DefinedNameValue
     wb.worksheet_names[(ws.sheetId, name)] = DefinedNameValue(value, abs)
 end
 
-quoteit(x::AbstractString) = occursin(r"[^\w]|\s", x) ? "'$x'" : x
-unquoteit(x::AbstractString) = replace(x, "'" => "")
+function quoteit(x::AbstractString)
+    if occursin(r"[^\w]|\s", x)
+        escaped = replace(x, "'" => "''")
+        return "'$escaped'"
+    else
+        return x
+    end
+end
+
+function unquoteit(x::AbstractString)
+    if startswith(x, "'") && endswith(x, "'") && ncodeunits(x) >= 2
+        inner = x[2:prevind(x, end)] # First character always ASCII - "'".
+        return replace(inner, "''" => "'")
+    else
+        return x
+    end
+end
 
 """
     addDefinedName(xf::XLSXFile,  name::AbstractString, value::Union{Int, Float64, String}; absolute=true)

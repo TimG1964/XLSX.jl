@@ -16,12 +16,12 @@ import Base: isempty
 function CellFormula(ws::Worksheet, val::AbstractFormula)
     CellFormula(val, default_cell_format(ws, val))
 end
-function CellValue(ws::Worksheet, val::CellValueType)
+function CellValue(ws::Worksheet, val::CellConcreteType)
     CellValue(val, default_cell_format(ws, val))
 end
 
-id(format::CellDataFormat) = string(format.id)
-id(::EmptyCellDataFormat) = ""
+id(format::CellDataFormat) = format.id
+id(::EmptyCellDataFormat) = UInt64(0)
 isempty(::CellDataFormat) = false
 isempty(::EmptyCellDataFormat) = true
 
@@ -38,7 +38,7 @@ const DEFAULT_BOOL_numFmtId = 0 # General - seems like an OK default for now
 
 # Returns the default `CellDataFormat` for a type
 default_cell_format(ws::Worksheet, ::AbstractFormula) = EmptyCellDataFormat()
-default_cell_format(ws::Worksheet, ::CellValueType) = EmptyCellDataFormat()
+default_cell_format(ws::Worksheet, ::CellConcreteType) = EmptyCellDataFormat()
 default_cell_format(ws::Worksheet, ::Dates.Date) = get_num_style_index(ws, DEFAULT_DATE_numFmtId)
 default_cell_format(ws::Worksheet, ::Dates.Time) = get_num_style_index(ws, DEFAULT_TIME_numFmtId)
 default_cell_format(ws::Worksheet, ::Dates.DateTime) = get_num_style_index(ws, DEFAULT_DATETIME_numFmtId)
@@ -72,6 +72,7 @@ end
 
 # get styles document for workbook
 function styles_xmlroot(workbook::Workbook)
+#    xf=get_xlsxfile(workbook)
     if workbook.styles_xroot === nothing
         STYLES_RELATIONSHIP_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"
         if has_relationship_by_type(workbook, STYLES_RELATIONSHIP_TYPE)
@@ -95,12 +96,12 @@ end
 
 # Returns the xf XML node element for style `index`.
 # `index` is 0-based.
-function styles_cell_xf(wb::Workbook, index::Int)::XML.Node
+function styles_cell_xf(wb::Workbook, index::Integer)::XML.Node
     xroot = styles_xmlroot(wb)
     xf_elements = find_all_nodes("/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":styleSheet/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":cellXfs/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":xf", xroot)
     return xf_elements[index+1]
 end
-function styles_cell_xf(allXfNodes::Vector{XML.Node}, index::Int)::XML.Node
+function styles_cell_xf(allXfNodes::Vector{XML.Node}, index::Integer)::XML.Node
     return allXfNodes[index+1]
 end
 
@@ -141,7 +142,7 @@ function styles_add_numFmt(wb::Workbook, format_code::AbstractString)::Integer
     fmt_code = existing_numFmt_elements_count + PREDEFINED_NUMFMT_COUNT
     new_fmt = XML.Element("numFmt";
         numFmtId=fmt_code,
-        formatCode=XML.escape(format_code)
+        formatCode=XLSX.escape(format_code)
     )
     push!(numfmts, new_fmt)
     return fmt_code
@@ -161,11 +162,11 @@ function styles_numFmt_formatCode(wb::Workbook, numFmtId::AbstractString)::Strin
     return XML.attributes(elements_found[1])["formatCode"]
 end
 
-styles_numFmt_formatCode(wb::Workbook, numFmtId::Int) = styles_numFmt_formatCode(wb, string(numFmtId))
+styles_numFmt_formatCode(wb::Workbook, numFmtId::Int)::String = styles_numFmt_formatCode(wb, string(numFmtId))
 
 const DATETIME_CODES = ["d", "m", "yy", "h", "s", "a/p", "am/pm"]
 
-function remove_formatting(code::AbstractString)
+function remove_formatting(code)
     # this regex should cover all the formatting cases found here(colors/conditionals/quotes/spacing):
     # https://support.office.com/en-us/article/create-or-delete-a-custom-number-format-78f2a361-936b-4c03-8772-09fab54be7f4
     ignoredformatting = r"""\[.{2,}?\]|&quot;.+?&quot;|_.|\\.|\*."""x # Had to add ? to "&quot;.+&quot;" to make it work. Don't understand what made this necessary!

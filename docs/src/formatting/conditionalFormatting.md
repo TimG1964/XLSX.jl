@@ -12,7 +12,7 @@ but not otherwise. Such conditional formatting is generally straightforward to a
     In Excel, conditional formats are dynamic. If the cell values change, the formats are updated based 
     on application of the condition to the new values.
 
-    The examples of conditional formatting given here a mix of static and dynamic formats.
+    The examples of conditional formatting given here are a mix of static and dynamic formats.
     
     Static conditional formats apply formatting based on the current cell values at the time the format 
     is set, but the formats are then static regardless of updates to cell values. They can be updated 
@@ -136,7 +136,7 @@ whether or not to apply the formatting. Valid `operator` values for `:cellIs` ar
 - `between`         (cell between `value` and `value2`)
 - `notBetween`      (cell not between `value` and `value2`)
 
-Each of these need the keyword `value` to be specified and, for `between` and `notBetween`, `value2` 
+Each of these needs the keyword `value` to be specified and, for `between` and `notBetween`, `value2` 
 must also be specified.
 
 Like all the cell value formatting types, `:cellIs` can use one of six built-in Excel formats, as 

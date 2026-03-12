@@ -11,8 +11,9 @@ makedocs(
             "Cell formats" => "formatting/cellFormatting.md",
             "Conditional formats" => "formatting/conditionalFormatting.md",
             "Working with merged cells" => "formatting/mergedCells.md",
-            "Examples" => "formatting/examples.md"
         ],
+        "Using Formulas" => "formulae/formulas.md",
+        "Examples" => "examples.md",
         "Migration Guide" => "migration.md",
         "API Reference" => Any[
             "Files and worksheets" => "api/files.md",
@@ -24,6 +25,6 @@ makedocs(
 )
 
 deploydocs(
-    repo = "github.com/felipenoris/XLSX.jl.git",
+    repo = "github.com/juliahub/XLSX.jl.git",
     target = "build",
 )

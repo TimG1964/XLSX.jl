@@ -13,6 +13,7 @@ XLSX.eachtablerow
 ## Cell data
 
 ```@docs
+#XLSX.CellConcreteType
 XLSX.readdata
 XLSX.getdata
 XLSX.getcell
@@ -20,8 +21,17 @@ XLSX.getcellrange
 XLSX.gettable
 XLSX.readtable
 XLSX.readto
+XLSX.gettransposedtable
+XLSX.readtransposedtable
 XLSX.writetable
 XLSX.writetable!
+```
+
+## Cell formulas
+
+```@docs
+XLSX.setFormula
+XLSX.getFormula
 ```
 
 ## Defined names

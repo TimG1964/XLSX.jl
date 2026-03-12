@@ -14,6 +14,9 @@ XLSX.setUniformFill
 XLSX.setAlignment
 XLSX.setUniformAlignment
 XLSX.setUniformStyle
+XLSX.RichTextRun
+XLSX.RichTextString
+XLSX.getRichTextString
 ```
 
 ## Conditional format

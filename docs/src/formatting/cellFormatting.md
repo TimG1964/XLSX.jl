@@ -6,7 +6,7 @@
 Each cell in an Excel spreadsheet may refer to an Excel `style`. Multiple cells can 
 refer to the same `style` and therefore have a uniform appearance. A `style` defines
 the cell's `alignment` directly (as part of the `style` definition), but it may also 
-refer to further formatting definitions for `font`, `fill`, `border`, `format`. 
+refer to further formatting definitions for `font`, `fill`, `border` and number `format`. 
 Multiple `style`s may each refer to the same `fill` definition or the same `font` 
 definition, etc, and therefore share these formatting characteristics.
 This hierarchy can be shown like this:
@@ -77,7 +77,7 @@ all remain unchanged from before. This new combination of attributes is unique,
 so a new `fontId` has been created.
 
 Font colors (and colors in any of the other formatting functions) can be set using a 
-hex RGB value or by name using any of the colors provided by [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/)
+hex RGB value or by name using any of the colors provided by [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/).
 
 The other set attribute functions behave in similar ways. See [`XLSX.setBorder`](@ref), 
 [`XLSX.setFill`](@ref), [`XLSX.setFormat`](@ref) and [`XLSX.setAlignment`](@ref).
@@ -308,12 +308,113 @@ This is referred to here as rich text formatting.
 
 These rich text formats are stored separately from the cell Style and over-ride any Style-based formatting.
 
-The `setFont`, `setUniformFont` and `setUniformStyle` functions operate at the cell level and cannot appply 
+### Creating a rich text cell value
+
+It is possible to create a rich text value in a cell in two ways: using an `XLSX.RichTextString` or using a `StyledString` from StyledStrings.jl. If the latter, `StyledString`s are translated to `RichTextStrings` before being written to cells.
+
+#### Using RichTextStrings
+
+A rich text string includes formatting that changes for different substring elements of the string. Each substring element is described as a `RichTextRun`, and multiple `RichTextRuns` together form a `RichTextString`. A `RichTextRun` can describe any or all of the following font attributes: `:bold`, `:italic`, `:under`, `:strike`, `:vertAlign`, `:color`, `:size`, `:name`. These attributes have the same effect as described in [`XLSX.setFont`](@ref), but, unlike `setFont`, they do not apply to the whole cell, they only apply to the current rich text run substring.
+
+Thus,
+
+```
+julia> rtf1=XLSX.RichTextRun("Hello", [:color => "red", :size => 24])
+RichTextRun ("Hello"  [:color => "red", :size => 24])
+
+julia> rtf2=XLSX.RichTextRun("o", [:color => "green", :size => 24, :vertAlign => "superscript"])
+RichTextRun ("o"  [:color => "green", :size => 24, :vertAlign => "superscript"])
+
+julia> rtf3=XLSX.RichTextRun(" Kitt", [:color => "blue", :size => 14])
+RichTextRun (" Kitt"  [:color => "blue", :size => 14])
+
+julia> rtf4=XLSX.RichTextRun("y", [:color => "green", :size => 14, :vertAlign => "subscript"])
+RichTextRun ("y"  [:color => "green", :size => 14, :vertAlign => "subscript"])
+
+julia> rt = XLSX.RichTextString(rtf1, rtf2, rtf3, rtf4)
+RichTextString: "Helloo Kitty"
+ containing 4 runs:
+ Run text                 Run attributes
+ -------------------------------------------------------------------------------------------
+ "Hello"                  [:color => "red", :size => 24]
+ "o"                      [:color => "green", :size => 24, :vertAlign => "superscript"]
+ " Kitt"                  [:color => "blue", :size => 14]
+ "y"                      [:color => "green", :size => 14, :vertAlign => "subscript"]
+
+julia> s["A1"] = rt
+RichTextString: "Helloo Kitty"
+ containing 4 runs:
+ Run text                 Run attributes
+ -------------------------------------------------------------------------------------------
+ "Hello"                  [:color => "red", :size => 24]
+ "o"                      [:color => "green", :size => 24, :vertAlign => "superscript"]
+ " Kitt"                  [:color => "blue", :size => 14]
+ "y"                      [:color => "green", :size => 14, :vertAlign => "subscript"]       
+```
+![image|320x500](../images/richTextString.png)
+
+A `RichTextString` with only a single run will be converted to a simple text string with font attributes set through `setFont`.
+
+For more information, refer to [`XLSX.RichTextString`](@ref).
+
+#### Using StyledStrings
+
+An XLSX.jl package extension provides support for `AnnotatedStrings` from StyledStrings.jl when that package is being used in the current environment. For example:
+```
+julia> using StyledStrings, XLSX
+
+julia> f = newxlsx()
+XLSXFile("blank.xlsx") containing 1 Worksheet
+            sheetname size          range
+-------------------------------------------------
+               Sheet1 1x1           A1:A1
+
+julia> s = f[1]
+1×1 Worksheet: ["Sheet1"](A1:A1) 
+
+julia> s["A1"] = styled"{yellow:hello} {blue:there}"
+"hello there"
+
+julia> s["A2"] = styled"The {bold:{italic:quick {(foreground=#cd853f):brown} fox} jumps over the {(foreground=#FFC000):lazy} dog}"
+"The quick brown fox jumps over the lazy dog"
+
+julia> XLSX.getRichTextString(s, "A1")
+RichTextString: "hello there"
+ containing 3 runs:
+ Run text                 Run attributes
+ -------------------------------------------------------------------------------------------
+ "hello"                  [:color => "FFE5A509", :size => 12.0]
+ " "                      [:size => 12.0]
+ "there"                  [:color => "FF195EB3", :size => 12.0]
+
+
+julia> XLSX.getRichTextString(s, "A2")
+RichTextString: "The quick brown fox jumps over the lazy dog"
+ containing 7 runs:
+ Run text                 Run attributes
+ -------------------------------------------------------------------------------------------
+ "The "                   [:size => 12.0]
+ "quick "                 [:bold => true, :italic => true, :size => 12.0]
+ "brown"                  [:bold => true, :color => "FFCD853F", :italic => true, :size => …]
+ " fox"                   [:bold => true, :italic => true, :size => 12.0]
+ " jumps over the "       [:bold => true, :size => 12.0]
+ "lazy"                   [:bold => true, :color => "FFFFC000", :size => 12.0]
+ " dog"                   [:bold => true, :size => 12.0]
+
+```
+
+![image|320x500](../images/styledString.png)
+
+For more information on the use of styled strings, refer to the documentation for the [StyledStrings.jl](https://github.com/JuliaLang/StyledStrings.jl) package.
+
+### Updating a rich text cell value
+
+The `setFont`, `setUniformFont` and `setUniformStyle` functions operate at the cell level and cannot apply 
 formatting at a substring level. Instead, using any of these functions will remove from a cell's rich text format 
-any attributes that these functions are themselves applying or updating to the whole cell, but will leave the remaining 
+any attributes that these functions are themselves applying or updating on the whole cell, but will leave the remaining 
 rich text format attributes in place.
 
-For example, to remove the underlining in column B:
+For example, to remove the underlining in column B from the "Hello Kitty" example, above:
 
 ```julia
 julia> setFont(s, "B"; under="none")
@@ -326,6 +427,7 @@ The underlining has been removed, but the other rich text formats remain in plac
 Applying `setUniformFont` to a range of cells will remove those elements of the rich text format that are now being applied 
 to the whole cell so that those elements become uniform. Any other heterogeneity arising from rich text formats 
 (which over-ride Style-based formatting) will remain.
+
 For example:
 ```julia
 julia> setUniformFont(s, "A1:F2"; color="orange")
@@ -357,7 +459,7 @@ If the first cell in the specified range has no defined Style (`s=""`), all cell
 In Excel, subscript and superscript formatting to a substring (for example) can only be made using this kind of rich text formatting, and cannot be set at cell level (neither in Excel nor in `setFont`). Retaining rich text format heterogeneity in the ways described here preserves these string formatting elements through format changes.
 
 To clear any rich text formatting and remove the heterogeneity it introduces, simply copy the cells over themselves.
-This strips out all formatting and style information from the cells, leaving only the cell content.
+This strips out all rich text formatting information from the cells, leaving only the cell content and Style-base formating.
 For example, for arbitrary cells:
 
 ```julia
@@ -371,6 +473,8 @@ julia> writetable!(s, gettable(s, "A:F"; header=false); write_columnnames=false)
 ![image|320x500](../images/complexNone.png)
 
 An `XLSXFile` must be opened in write mode for rich text formatting to be editable, otherwise an error is thrown.
+
+There is no way in XLSX.jl to edit the individual runs of a rich text value. To make changes to individual runs beyond what `setFont` can achieve, it is neseccary to overwrite the cell with a new `RichTextString` or `AnnotatedString`.
 
 ## Setting column width and row height
 

@@ -1,5 +1,5 @@
 
-const font_tags = ["b", "i", "u", "strike", "outline", "shadow", "condense", "extend", "sz", "color", "name", "scheme"]
+const font_tags = ["b", "i", "u", "strike", "outline", "shadow", "condense", "extend", "sz", "color", "name", "vertAlign", "scheme"]
 const border_tags = ["left", "right", "top", "bottom", "diagonal"]
 const fill_tags = ["patternFill"]
 const builtinFormats = Dict(
@@ -46,12 +46,67 @@ const builtinFormatNames = Dict(
     "Time" => 21,
     "Scientific" => 48
 )
-const floatformats = r"""
-\.[0#?]|
-[0#?]e[+-]?[0#?]|
-[0#?]/[0#?]|
-%
-"""ix
+
+# Regex fragments for canonical tokens (from Claude)
+const LITERAL      = raw"\"[^\"]*\""       # quoted text (check first)
+const CONDITION    = raw"\[[<>=].+?\]"
+const COLOR        = raw"\[[A-Za-z]+\]"
+const DATETIME     = raw"(?:AM/PM|A/P|am/pm|a/p|d{1,4}|m{1,5}|y{2,4}|h{1,2}|s{1,2})"
+const DECIMAL      = raw"\.[0#?]+"         
+const EXPONENT     = raw"[0#?]+[eE][+-]?[0#?]+"
+const FRACTION     = raw"\?+/\?+"          # fraction with multiple ?
+const PERCENT      = raw"%"
+const ESCAPE       = raw"\\."              
+const ALIGN        = raw"_."               
+const FILL         = raw"\*."              
+const TEXTPLACE    = raw"@"
+const DIGIT        = raw"[0#?]"            # single digit placeholder
+const COMMA        = raw","                # thousand separator
+const PAREN        = raw"[\(\)]"
+const COLON        = raw":"                # time separator
+const SPACE        = raw" +"               # one or more spaces
+const DASH         = raw"-"                # minus/dash
+const CURRENCY     = raw"[\$£€¥₹]"
+const PLUS         = raw"\+"
+
+# Combine into a master regex - ORDER MATTERS!
+const RGX_FMT = Regex(
+    join([
+        LITERAL, CONDITION, COLOR, DATETIME,
+        DECIMAL, EXPONENT, FRACTION, PERCENT,
+        ESCAPE, ALIGN, FILL, TEXTPLACE,
+        DIGIT, COMMA, COLON, DASH, PAREN, SPACE, 
+        CURRENCY, PLUS
+    ], "|")
+)
+
+const VALID_FILL_PATTERNS = (
+    "none", "solid", "mediumGray", "darkGray", "lightGray",
+    "darkHorizontal", "darkVertical", "darkDown", "darkUp", "darkGrid", "darkTrellis",
+    "lightHorizontal", "lightVertical", "lightDown", "lightUp", "lightGrid", "lightTrellis",
+    "gray125", "gray0625"
+)
+
+const VALID_BORDER_STYLES = (
+    "none", "thin", "medium", "dashed", "dotted", "thick", "double", "hair",
+    "mediumDashed", "dashDot", "mediumDashDot", "dashDotDot", "mediumDashDotDot", "slantDashDot"
+)
+const VALID_DIAGONAL_DIRECTIONS = ("up", "down", "both")
+
+# Shared kwarg type alias for border sides
+const BorderKw = Union{Nothing,Vector{Pair{String,String}}}
+
+const VALID_HORIZONTAL_ALIGNMENTS = ("left", "center", "right", "fill", "justify", "centerContinuous", "distributed")
+const VALID_VERTICAL_ALIGNMENTS   = ("top", "center", "bottom", "justify", "distributed")
+
+const BUILTIN_NUMFMT_RANGES = (0:22, 37:40, 45:49)
+
+# Reverse lookup: format code string -> built-in numFmtId integer.
+# Avoids linear scan of builtinFormats on every setFormat call.
+const BUILTIN_FORMAT_CODES = Dict{String,Int}(v => parse(Int, k) for (k, v) in builtinFormats)
+
+# Excel adds this padding to any user-specified column width
+const EXCEL_COLUMN_WIDTH_PADDING = 0.7109375
 
 #
 # -- A bunch of helper functions ...
@@ -165,13 +220,169 @@ function isInDim(ws::Worksheet, dim::CellRange, row, col)
     end
     return true
 end
+
+_xpath(parts...) = join(["/$SPREADSHEET_NAMESPACE_XPATH_ARG:$p" for p in parts], "")
+
+# Merges a boolean/flag font tag (e.g. "b", "i", "strike").
+# Returns nothing (present, no attributes) if kept/set, or missing to omit.
+function _merge_flag_tag(tag::String, new_val::Union{Nothing,Bool}, old_atts::Dict)
+    (isnothing(new_val) ? haskey(old_atts, tag) : new_val) ? nothing : missing
+end
+
+# Merges a single-value font tag (e.g. "sz", "name", "vertAlign").
+# Returns Dict("val" => ...) if set, preserves old value, or missing to omit.
+function _merge_val_tag(tag::String, new_val, old_atts::Dict)
+    isnothing(new_val) ? get(old_atts, tag, missing) : Dict("val" => string(new_val))
+end
+
+# Merges a dict-valued tag (e.g. "color") using a provided constructor for new values.
+# Returns a Dict of attributes if set/preserved, or missing to omit.
+function _merge_dict_tag(tag::String, new_val, old_atts::Dict, build_fn::Function)
+    isnothing(new_val) ? get(old_atts, tag, missing) : build_fn(new_val)
+end
+
+"""
+    is_valid_format(fmt::AbstractString) -> Bool
+
+Check if `fmt` is a syntactically valid Excel number format string.
+"""
+function is_valid_format(fmt::AbstractString) # From Claude
+    # Split into up to 4 sections
+    sections = split(fmt, ';')
+    length(sections) > 4 && return false
+
+    for sec in sections
+        pos = 1
+        while pos <= lastindex(sec)
+            # Use SubString to match from current position
+            m = match(RGX_FMT, SubString(sec, pos))
+
+            # No token matches at this position
+            if m === nothing
+                return false
+            end
+
+            # Token must start at beginning of substring (offset should be 1)
+            if m.offset != 1
+                return false
+            end
+
+            # Zero-length matches are invalid (avoid infinite loops)
+            tok = m.match
+            if isempty(tok)
+                return false
+            end
+
+            # Advance by the number of characters in the match
+            pos = nextind(sec, pos, length(tok))
+        end
+    end
+
+    return true
+end
+
+# Parses a patternFill XML node into a flat dict of fill attributes.
+# patternType is stored directly, fg/bg color attributes are prefixed with "fg"/"bg".
+function _parse_pattern_fill(pattern::XML.Node)::Dict{String,String}
+    atts = Dict{String,String}()
+    a = XML.attributes(pattern)
+    if !isnothing(a)
+        for (k, v) in a
+            atts[k] = v  # e.g. "patternType" => "solid"
+        end
+    end
+    for subc in XML.children(pattern)
+        XML.nodetype(subc) == XML.Element || continue
+        tag_prefix = first(XML.tag(subc), 2)  # "fg" or "bg"
+        sub_atts = XML.attributes(subc)
+        if isnothing(sub_atts) || isempty(sub_atts)
+            throw(XLSXError("Expected attributes on fill sub-element <$(XML.tag(subc))>, found none."))
+        end
+        for (k, v) in sub_atts
+            atts[tag_prefix * k] = v  # e.g. "fgrgb" => "FFFF0000"
+        end
+    end
+    return atts
+end
+
+# Dispatch boilerplate
+# Merges a single alignment attribute into atts.
+# Preserves the old value if new_val is nothing, otherwise applies convert_fn to new_val.
+function _merge_alignment_att(
+    atts::AbstractDict, xml_key::String, new_val,
+    old_atts::Dict{String,String}, convert_fn=string
+)
+    if isnothing(new_val)
+        haskey(old_atts, xml_key) && (atts[xml_key] = old_atts[xml_key])
+    else
+        atts[xml_key] = convert_fn(new_val)
+    end
+end
+
+# Coerces a Vector{Pair{String,String}} kwarg to Dict{String,String}, or returns nothing.
+_to_border_dict(v) = isnothing(v) ? nothing : Dict{String,String}(p for p in v)
+
+# Validates that `outside` is not combined with any other border kwargs.
+function _check_outside_conflict(outside, left, right, top, bottom, diagonal, allsides)
+    !isnothing(outside) && !all(isnothing, [left, right, top, bottom, diagonal, allsides]) &&
+        throw(XLSXError("Keyword `outside` is incompatible with any other keywords."))
+end
+
+# Merges new and old attributes for a single border side.
+# Handles style, color, and (for diagonal) direction.
+function _merge_border_side(
+    side::String,
+    new_val::Union{Nothing,Dict{String,String}},
+    old_atts::Union{Nothing,Dict{String,Union{Dict{String,String},Nothing}}}
+)::Dict{String,String}
+
+    result = Dict{String,String}()
+    old_side = (!isnothing(old_atts) && haskey(old_atts, side)) ? old_atts[side] : nothing
+
+    # If no new value, preserve old side entirely
+    isnothing(new_val) && return isnothing(old_side) ? result : old_side
+
+    # Style: use new if provided, else inherit from old
+    if haskey(new_val, "style")
+        new_val["style"] ∈ VALID_BORDER_STYLES ||
+            throw(XLSXError("Invalid border style: $(new_val["style"]). Must be one of: $(join(VALID_BORDER_STYLES, ", "))."))
+        result["style"] = new_val["style"]
+    elseif !isnothing(old_side) && haskey(old_side, "style")
+        result["style"] = old_side["style"]
+    end
+
+    # Color: use new if provided, else inherit all non-style keys from old
+    if haskey(new_val, "color")
+        result["rgb"] = get_color(new_val["color"])
+    elseif !isnothing(old_side)
+        for (k, v) in old_side
+            k != "style" && (result[k] = v)
+        end
+    end
+
+    # Diagonal direction: use new if provided, else inherit, else default to "both"
+    if side == "diagonal"
+        if haskey(new_val, "direction")
+            new_val["direction"] ∈ VALID_DIAGONAL_DIRECTIONS ||
+                throw(XLSXError("Invalid diagonal direction: $(new_val["direction"]). Must be one of: $(join(VALID_DIAGONAL_DIRECTIONS, ", "))."))
+            result["direction"] = new_val["direction"]
+        elseif !isnothing(old_side) && haskey(old_side, "direction")
+            result["direction"] = old_side["direction"]
+        else
+            result["direction"] = "both"
+        end
+    end
+
+    return result
+end
+
 function get_new_formatId(wb::Workbook, format::String)::Int
     if haskey(builtinFormatNames, uppercasefirst(format)) # User specified a format by name
         return builtinFormatNames[format]
-    else                                      # user specified a format code
-        code = lowercase(format)
-        code = remove_formatting(code)
-        if !occursin(floatformats, code) && !any(map(x -> occursin(x, code), DATETIME_CODES)) # Only a very weak test!
+    elseif haskey(builtinFormats, format)                 # User specified a built-in format by ID
+        return parse(Int64, format)
+    else                                                  # user specified a format code
+        if !is_valid_format(format)
             throw(XLSXError("Specified format is not a valid numFmt: $format"))
         end
 
@@ -187,7 +398,7 @@ function get_new_formatId(wb::Workbook, format::String)::Int
 
             format_node = XML.Element("numFmt";
                 numFmtId=string(existing_elements_count + PREDEFINED_NUMFMT_COUNT),
-                formatCode=XML.escape(format)
+                formatCode=XLSX.escape(format)
             )
 
             return styles_add_cell_attribute(wb, format_node, "numFmts") + PREDEFINED_NUMFMT_COUNT
@@ -276,7 +487,7 @@ function styles_add_cell_attribute(wb::Workbook, new_att::XML.Node, att::String)
 
     return existing_elements_count # turns out this is the new index (because it's zero-based)
 end
-function process_sheetcell(f::Function, xl::XLSXFile, sheetcell::String; kw...)::Int
+function process_sheetcell(f::Function, xl::XLSXFile, sheetcell::String; kw...)
     if is_workbook_defined_name(xl, sheetcell)
         v = get_defined_name_value(xl.workbook, sheetcell)
         if is_defined_name_value_a_constant(v)
@@ -364,7 +575,7 @@ function process_ranges(f::Function, ws::Worksheet, ref_or_rng::AbstractString; 
     end
     return newid
 end
-function process_columnranges(f::Function, ws::Worksheet, colrng::ColumnRange; kw...)::Int
+function process_columnranges(f::Function, ws::Worksheet, colrng::ColumnRange; kw...)
     bounds = column_bounds(colrng)
     dim = (get_dimension(ws))
     left = bounds[begin]
@@ -384,7 +595,7 @@ function process_columnranges(f::Function, ws::Worksheet, colrng::ColumnRange; k
         throw(XLSXError("Column range $colrng is out of bounds. Worksheet `$(ws.name)` only has dimension `$dim`."))
     end
 end
-function process_rowranges(f::Function, ws::Worksheet, rowrng::RowRange; kw...)::Int
+function process_rowranges(f::Function, ws::Worksheet, rowrng::RowRange; kw...)
     bounds = row_bounds(rowrng)
     dim = (get_dimension(ws))
     top = bounds[begin]
@@ -419,7 +630,7 @@ function process_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguousRange;
     if OK
         for r in ncrng.rng
             if r isa CellRef && getcell(ws, r) isa EmptyCell
-                single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(r.name). Set the value first."))
+                single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
                 continue
             end
             _ = f(ws, r; kw...)
@@ -438,7 +649,7 @@ function process_cellranges(f::Function, ws::Worksheet, rng::CellRange; kw...)::
     isInDim(ws, get_dimension(ws), rng)
     for cellref in rng
         if getcell(ws, cellref) isa EmptyCell
-            single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellref.name). Set the value first."))
+            single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(cellref)). Set the value first."))
             continue
         end
         _ = f(ws, cellref; kw...)
@@ -462,10 +673,10 @@ function process_get_cellref(f::Function, ws::Worksheet, cellref::CellRef; kw...
     if cellref ∉ d
         throw(XLSXError("Cell specified is outside sheet dimension \"$d\""))
     end
-    if cell isa EmptyCell || cell.style == ""
+    if cell isa EmptyCell || cell.style == UInt64(0)
         return nothing
     end
-    cell_style = styles_cell_xf(wb, parse(Int, cell.style))
+    cell_style = styles_cell_xf(wb, Int(cell.style))
     return f(wb, cell_style; kw...)
 end
 function process_get_cellname(f::Function, ws::Worksheet, ref_or_rng::AbstractString; kw...)
@@ -475,7 +686,8 @@ function process_get_cellname(f::Function, ws::Worksheet, ref_or_rng::AbstractSt
         if is_defined_name_value_a_constant(v)
             throw(XLSXError("Can only assign attributes to cells but `$(ref_or_rng)` is a constant: $(ref_or_rng)=$v."))
         elseif is_defined_name_value_a_reference(v)
-            new_att = f(get_xlsxfile(wb), replace(string(v), "'" => ""); kw...)
+            new_att = f(get_xlsxfile(wb), unquoteit(string(v)); kw...)
+#            new_att = f(get_xlsxfile(wb), replace(string(v), "'" => ""); kw...)
         else
             throw(XLSXError("Unexpected defined name value: $v."))
         end
@@ -525,7 +737,7 @@ function process_veccolon(f::Function, ws::Worksheet, row, col; kw...)
         for b in col
             cellref = CellRef(a, b)
             if getcell(ws, cellref) isa EmptyCell
-                single && throw(XLSXError("Cannot set attribute for an `EmptyCell`: $(cellref.name). Set the value first."))
+                single && throw(XLSXError("Cannot set attribute for an `EmptyCell`: $(cellname(cellref)). Set the value first."))
                 continue
             end
             f(ws, cellref; kw...)
@@ -544,7 +756,7 @@ function process_vecint(f::Function, ws::Worksheet, row, col; kw...)
     for a in row, b in col
         cellref = CellRef(a, b)
         if getcell(ws, cellref) isa EmptyCell
-            single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellref.name). Set the value first."))
+            single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(cellref)). Set the value first."))
             continue
         end
         f(ws, cellref; kw...)
@@ -568,10 +780,10 @@ function process_uniform_core(f::Function, ws::Worksheet, allXfNodes::Vector{XML
         newid = f(ws, cellref; kw...)
         first = false
     else                               # Apply the same attribute to the rest of the cells in the range.
-        if cell.style == ""
-            cell.style = string(get_num_style_index(ws, allXfNodes, 0).id)
+        if cell.style == UInt64(0)
+            cell.style = get_num_style_index(ws, allXfNodes, 0).id
         end
-        cell.style = string(update_template_xf(ws, allXfNodes, CellDataFormat(parse(Int, cell.style)), atts, [string(newid), "1"]).id)
+        cell.style = update_template_xf(ws, allXfNodes, CellDataFormat(cell.style), atts, [string(newid), "1"]).id
     end
     return newid, first
 end
@@ -588,9 +800,9 @@ function process_uniform_attribute(f::Function, ws::Worksheet, rng::CellRange, a
             newid, first = process_uniform_core(f, ws, allXfNodes, cellref, atts, newid, first; kw...)
             if f==setFont
                 cell=getcell(ws, cellref)
-                if !(cell isa EmptyCell) && cell.datatype == "s"
+                if !(cell isa EmptyCell) && cell.datatype == CT_STRING
                     v=update_sharedString_font(ws, cell; kw...)
-                    cell.value = isnothing(v) ? cell.value : v
+                    cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
                 end
             end
         end
@@ -622,22 +834,22 @@ function process_uniform_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguo
                 if r isa CellRef
                     cell=getcell(ws, r)
                     if cell isa EmptyCell
-                        single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(r.name). Set the value first."))
+                        single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
                         continue
                     end
                     newid, first = process_uniform_core(f, ws, allXfNodes, r, atts, newid, first; kw...)
-                    if f==setFont && cell.datatype == "s"
+                    if f==setFont && cell.datatype == CT_STRING
                         v=update_sharedString_font(ws, cell; kw...)
-                        cell.value = isnothing(v) ? cell.value : v
+                        cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
                     end
                 else
                     for c in r
                         newid, first = process_uniform_core(f, ws, allXfNodes, c, atts, newid, first; kw...)
                         if f==setFont
                             cell=getcell(ws, c)
-                            if !(cell isa EmptyCell) &&!(cell isa EmptyCell) && cell.datatype == "s"
+                            if !(cell isa EmptyCell) &&!(cell isa EmptyCell) && cell.datatype == CT_STRING
                                 v=update_sharedString_font(ws, cell; kw...)
-                                cell.value = isnothing(v) ? cell.value : v
+                                cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
                             end
                         end
                     end
@@ -677,9 +889,9 @@ function process_uniform_veccolon(f::Function, ws::Worksheet, row, col, atts::Ve
                     continue
                 end
                 newid, first = process_uniform_core(f, ws, allXfNodes, cellref, atts, newid, first; kw...)
-                if f==setFont && cell.datatype == "s"
+                if f==setFont && cell.datatype == CT_STRING
                     v=update_sharedString_font(ws, cell; kw...)
-                    cell.value = isnothing(v) ? cell.value : v
+                    cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
                 end
             end
         end
@@ -703,9 +915,9 @@ function process_uniform_vecint(f::Function, ws::Worksheet, row, col, atts::Vect
                 continue
             end
             newid, first = process_uniform_core(f, ws, allXfNodes, cellref, atts, newid, first; kw...)
-            if f==setFont && cell.datatype == "s"
+            if f==setFont && cell.datatype == CT_STRING
                 v=update_sharedString_font(ws, cell; kw...)
-                cell.value = isnothing(v) ? cell.value : v
+                cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
             end
         end
         if first
@@ -724,17 +936,17 @@ function process_uniform_core(ws::Worksheet, cellref::CellRef, newid::Union{Int,
         return newid, first, firstFont
     end
     if first                           # Get the style of the first cell in the range.
-        if cell.style !== ""
-            newid = parse(Int, cell.style)
+        if cell.style !== UInt64(0)
+            newid = Int(cell.style)
         end
         firstFont=getFont(ws, cellref)
         first = false
     else                               # Apply the same style to the rest of the cells in the range.
-        cell.style = isnothing(newid) ? "" : string(newid)
+        cell.style = isnothing(newid) ? UInt64(0) : UInt64(newid)
     end
-    if cell.datatype == "s" && !isnothing(firstFont)
+    if cell.datatype == CT_STRING && !isnothing(firstFont)
         v=update_sharedString_font(ws, cell, firstFont)
-        cell.value= isnothing(v) ? cell.value : v
+        cell.value= isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
     end
 
     return newid, first, firstFont
@@ -760,7 +972,7 @@ function process_uniform_ncranges(ws::Worksheet, ncrng::NonContiguousRange)
                 @assert r isa CellRef || r isa CellRange "Something wrong here"
                 if r isa CellRef
                     if getcell(ws, r) isa EmptyCell
-                        single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(r.name). Set the value first."))
+                        single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
                         continue
                     end
                     newid, first, firstFont = process_uniform_core(ws, r, newid, first, firstFont)
@@ -861,10 +1073,10 @@ function process_uniform_core(f::Function, ws::Worksheet, allXfNodes::Vector{XML
         alignment_node = XML.Node(XML.Element, "alignment", new_alignment, nothing, nothing)
         first = false
     else                               # Apply the same attribute to the rest of the cells in the range.
-        if cell.style == ""
-            cell.style = string(get_num_style_index(ws, allXfNodes, 0).id)
+        if cell.style == UInt64(0)
+            cell.style = get_num_style_index(ws, allXfNodes, 0).id
         end
-        cell.style = string(update_template_xf(ws, allXfNodes, CellDataFormat(parse(Int, cell.style)), alignment_node).id)
+        cell.style = update_template_xf(ws, allXfNodes, CellDataFormat(cell.style), alignment_node).id
     end
     return newid, first, alignment_node
 end
@@ -911,12 +1123,12 @@ function process_uniform_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguo
             for r in ncrng.rng
                 @assert r isa CellRef || r isa CellRange "Something wrong here"
                 if r isa CellRef && getcell(ws, r) isa EmptyCell
-                    single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(r.name). Set the value first."))
+                    single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
                     continue
                 end
                 if r isa CellRef
                     if getcell(ws, r) isa EmptyCell
-                        single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(r.name). Set the value first."))
+                        single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
                         continue
                     end
                     newid, first, alignment_node = process_uniform_core(f, ws, allXfNodes, r, newid, first, alignment_node; kw...)
@@ -998,6 +1210,7 @@ function process_uniform_vecint(f::Function, ws::Worksheet, row, col; kw...)
 end
 
 # Check if a string is a valid named color in Colors.jl and convert to "FFRRGGBB" if it is.
+get_colorant(color_symb::Symbol) = get_colorant(String(color_symb))
 function get_colorant(color_string::String)
     try
         c = Colors.parse(Colors.Colorant, color_string)
@@ -1007,17 +1220,19 @@ function get_colorant(color_string::String)
         return nothing
     end
 end
-function get_color(s::String)::String
-    if occursin(r"^[0-9A-F]{8}$", s) # is a valid 8 digit hexadecimal color
-        return s
+get_color(s::Symbol)::String = get_color(String(s))
+function get_color(str::String)::String
+    if occursin(r"^[0-9A-F]{8}$", str) # is a valid 8 digit hexadecimal color
+        return str
     end
+    s = replace(lowercase(str), "grey" => "gray")
     c = get_colorant(s)
     if isnothing(c)
         throw(XLSXError("Invalid color specified: $s. Either give a valid color name (from Colors.jl) or an 8-digit rgb color in the form FFRRGGBB"))
     end
     return c
 end
-function update_sharedString_font(ws::Worksheet, cell::Cell, firstFont::CellFont)
+function update_sharedString_font(ws::Worksheet, cell::Cell, firstFont::CellFont) :: Int64
     let bold=nothing, italic=nothing, under=nothing, strike=nothing, size=nothing, color=nothing, name=nothing
         for (k, v) in firstFont.font
             if k=="b"
@@ -1035,7 +1250,6 @@ function update_sharedString_font(ws::Worksheet, cell::Cell, firstFont::CellFont
             elseif k=="name"
                 name = v === nothing ? nothing : v["val"]
             else
-                println(k)
                 throw(XLSXError("Something wrong here!"))
             end
         end
@@ -1051,17 +1265,16 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
     size::Union{Nothing,Int}=nothing,
     color::Union{Nothing,String,Dict{String,String}}=nothing,
     name::Union{Nothing,String}=nothing
-)
+) :: Union{Nothing,Int64}
     # <rPr> elements in a sharedString override any font attributes in the cell Style.
     # If setFont is called, we need to replace any of the attributes it is setting in the <rPr> elements.
     # When this makes successive <rPr> elements identical, the <r> elements that contain them can be merged.
 
     # starting values
     wb=get_workbook(ws)
-    index=parse(Int, cell.value)
+    index=reinterpret(Int64,cell.value)
     sst=get_sst(wb)
-    str_unformatted=sst.unformatted_strings[index+1]
-    str_formatted=sst.formatted_strings[index+1]
+    str_formatted=sst.shared_strings[index+1]
 
     isnothing(findfirst("<r>", str_formatted)) && return nothing # no <r> elements to manage
 
@@ -1177,26 +1390,30 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
 =#
 
     # reconstruct updated str_formatted
-    new_r = String[]
-    push!(new_r, "<si>")
+    new_r = IOBuffer()
+    write(new_r, "<si>\n")
     for r in 1:length(all_r)
         if t[r] != ")___DeleteMe___(" # signals a merged <r> element to be skipped
-            push!(new_r, "  <r>")
-            r > inc_first && push!(new_r, XML.write(rPr_elements[r-inc_first];depth=3))
-            push!(new_r, "    <t" * (xml_space[r] ? " xml:space=\"preserve\"" : "") * ">" *t[r] * "</t>")
-            push!(new_r, "  </r>")
+            write(new_r, "  <r>\n")
+            r > inc_first && write(new_r, XML.write(rPr_elements[r-inc_first];depth=3) * "\n")
+            write(new_r, "    <t" * (xml_space[r] ? " xml:space=\"preserve\"" : "") * ">" *t[r] * "</t>\n")
+            write(new_r, "  </r>\n")
         end
     end
-    push!(new_r, "</si>")
-    str_formatted = join(new_r, "\n")
+    write(new_r, "</si>")
+    str_formatted = String(take!(new_r))
 
-    i = get_shared_string_index(sst, str_formatted) # see if new formatted string is already in the table
-    if i !== nothing # new formatted string is already in the table, so use that
-        return string(i)
+    ind = get(sst.index, str_formatted, nothing)
+    if ind !== nothing
+        return ind  # Found exact match
     end
+#    ind = get_shared_string_index(sst, str_formatted) # see if new formatted string is already in the table
+#    if sst.shared_strings[ind] == str_formatted
+#        return ind  # Found exact match
+#    end
 
-    new_index=add_shared_string!(sst, str_unformatted, str_formatted) # can't update existing sharded string in case it is used by another cell
+    new_index=add_formatted_string!(sst, str_formatted) # can't update existing sharded string in case it is used by another cell
 
-    return string(new_index)
+    return new_index
 
 end

@@ -88,7 +88,7 @@ You can also use `XLSX.openxlsx` to read file contents as needed (see [Reading L
 This package uses the following concrete types when handling XLSX files.
 
 ```@docs
-XLSX.CellValueType
+XLSX.CellConcreteType
 ```
 
 - Abstract types of these concrete types are converted to the appropriate concrete type when writing.
@@ -195,11 +195,11 @@ julia> m = hcat(dtable.data...)
 
 The method `XLSX.openxlsx` has a `enable_cache` option to control worksheet cells caching.
 
-Cache is enabled by default, so if you read a worksheet cell twice it will use the cached value instead of reading from disk
-in the second time.
+Cache is enabled by default, so if you read a worksheet cell twice it will use the cached value instead of reading from disk 
+the second time.
 
 If `enable_cache=false`, worksheet cells will always be read from disk. In addition, if `enable_cache=false` 
-and `openxlsx` is used with do-syntax, the xlsx file itself will be opened usning `Mmap.mmap` so that the 
+and `openxlsx` is used with do-syntax, the xlsx file itself will be opened as a `FileArray` so that the 
 zip archives themselves are not read into memory. This is useful when you want to read a spreadsheet that 
 doesn't fit into memory.
 
@@ -210,7 +210,7 @@ where `myfile.xlsx` is a spreadsheet that doesn't fit into memory.
 julia> XLSX.openxlsx("myfile.xlsx", enable_cache=false) do f
            sheet = f["mysheet"]
            for r in XLSX.eachrow(sheet)
-              # r is a `SheetRow`, values are read using column references
+              # r is a `SheetRow`. Values are read using column references
               rn = XLSX.row_number(r) # `SheetRow` row number
               v1 = r[1]    # will read value at column 1
               v2 = r["B"]  # will read value at column 2
@@ -224,14 +224,14 @@ v1=2, v2=second
 v1=3, v2=third
 ```
 
-You could also stream tabular data using `XLSX.eachtablerow(sheet)`, which is the underlying iterator in `gettable` method.
+You could also stream tabular data using `XLSX.eachtablerow(sheet)`, which is the underlying iterator in the `gettable` method.
 Check docstrings for `XLSX.eachtablerow` for more advanced options.
 
 ```julia
 julia> XLSX.openxlsx("myfile.xlsx", enable_cache=false) do f
            sheet = f["mysheet"]
            for r in XLSX.eachtablerow(sheet)
-               # r is a `TableRow`, values are read using column labels or numbers
+               # r is a `TableRow`. Values are read using column labels or numbers
                rn = XLSX.row_number(r) # `TableRow` row number
                v1 = r[1] # will read value at table column 1
                v2 = r[:HeaderB] # will read value at column labeled `:HeaderB`
@@ -253,7 +253,7 @@ Opening a file in `write` mode with `XLSX.openxlsx` will open a new (blank) Exce
 ```julia
 XLSX.openxlsx("my_new_file.xlsx", mode="w") do xf
     sheet = xf[1]
-    XLSX.rename!(sheet, "new_sheet")
+    XLSX.renamesheet!(sheet, "new_sheet")
     sheet["A1"] = "this"
     sheet["A2"] = "is a"
     sheet["A3"] = "new file"
@@ -386,7 +386,7 @@ XLSX.openxlsx("report.xlsx", mode="w") do xf
         
         if i == firstindex(sheet_names)
             sheet = xf[1]
-            XLSX.rename!(sheet, sheet_name)
+            XLSX.renamesheet!(sheet, sheet_name)
             XLSX.writetable!(sheet, df)
         else
             sheet = XLSX.addsheet!(xf, sheet_name)
@@ -401,7 +401,7 @@ end
 Both types `XLSX.DataTable` and `XLSX.TableRowIterator` conforms to [Tables.jl](https://github.com/JuliaData/Tables.jl) interface.
 An instance of `XLSX.TableRowIterator` is created by the function `XLSX.eachtablerow`.
 
-Also, `XLSX.writetable` accepts an argument that conforms to the `Tables.jl` interface.
+Also, both `XLSX.writetable` and `XLSX.XLSXFile` accept an argument that conforms to the `Tables.jl` interface.
 
 As an example, the type `DataFrame` from [DataFrames](https://github.com/JuliaData/DataFrames.jl) package
 supports the `Tables.jl` interface. The following code writes and reads back a `DataFrame` to an Excel file.
@@ -442,4 +442,18 @@ julia> df2 = XLSX.eachtablerow(s) |> DataFrames.DataFrame
 │ 2   │ 2        │ You     │ 20.3    │ 2018-02-21 │ 19:20:00 │ 2018-05-20T19:20:00 │
 │ 3   │ 3        │ Out     │ 30.4    │ 2018-02-22 │ 19:30:00 │ 2018-05-20T19:30:00 │
 │ 4   │ 4        │ There   │ 40.5    │ 2018-02-23 │ 19:40:00 │ 2018-05-20T19:40:00 │
+```
+Some other packages provide functions (such as `CSV.read`) that can take a sink function 
+to accept a `Tables.jl` table. `XLSXFile` can serve as such a sink function, allowing 
+`XLSXFile` objects to be created directly.
+
+For example, using the example of `CSV.read`:
+```
+julia> using CSV, XLSX
+
+julia> xf = CSV.read("iris.csv", XLSXFile)
+XLSXFile("blank.xlsx") containing 1 Worksheet
+            sheetname size          range
+-------------------------------------------------
+               Sheet1 151x5         A1:E151
 ```
