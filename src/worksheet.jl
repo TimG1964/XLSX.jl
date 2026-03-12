@@ -39,18 +39,16 @@ function read_worksheet_dimension(xf::XLSXFile, relationship_id, name)::Union{No
         end
     end
 
+    # Otherwise inspect the xml file
     local result::Union{Nothing,CellRange} = nothing
     target_file = get_relationship_target_by_id("xl", wb, relationship_id)
-    doc = open_internal_file_stream(xf, target_file)
-    reader = iterate(doc)
-    # Now let's look for a row element, if it exists
-    while reader !== nothing # go next node
-        (sheet_row, state) = reader
-        if XML.nodetype(sheet_row) == XML.Element && XML.tag(sheet_row) == "dimension"
+    doc = open_internal_file_stream(xf, target_file)[end]
+    chn = XML.children(doc)
+    for d in chn
+        if XML.tag=="dimension"
+            XML.depth(d) != 2 && throw(XLSXError("Malformed Worksheet \"$name\": unexpected node depth for dimension node: $(XML.depth(d))."))
 
-            XML.depth(sheet_row) != 2 && throw(XLSXError("Malformed Worksheet \"$name\": unexpected node depth for dimension node: $(XML.depth(sheet_row))."))
-
-            ref_str = XML.attributes(sheet_row)["ref"]
+            ref_str = d["ref"]
             if is_valid_cellname(ref_str)
                 result = CellRange("$(ref_str):$(ref_str)")
             else
@@ -59,9 +57,7 @@ function read_worksheet_dimension(xf::XLSXFile, relationship_id, name)::Union{No
 
             break
         end
-        reader = iterate(doc, state)
     end
-
     return result
 end
 

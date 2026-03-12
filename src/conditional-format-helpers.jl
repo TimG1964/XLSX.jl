@@ -56,7 +56,7 @@ function update_worksheet_cfx!(allcfs, cfx, ws, rng)
     matchcfs = filter(x -> x["sqref"] == string(rng), allcfs)   # Match range with existing conditional formatting blocks.
     l = length(matchcfs)
     if l == 0                                                   # No existing conditional formatting blocks for this range so create a new one.
-        new_cf = XML.Element("conditionalFormatting"; sqref=rng)
+        new_cf = XML.Element("conditionalFormatting"; sqref=string(rng))
         push!(new_cf, cfx)
         add_cf_to_XML(ws, new_cf)                               # Add the new conditional formatting block to the worksheet XML.
     elseif l == 1                                               # Existing conditional formatting block found for this range so add new rule to that block.

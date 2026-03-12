@@ -433,14 +433,20 @@ function getBorder(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellBorder
         borderid = cell_style["borderId"]
         applyborder = haskey(cell_style, "applyBorder") ? cell_style["applyBorder"] : "0"
         xroot = styles_xmlroot(wb)
-        border_elements = find_all_nodes("/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":styleSheet/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":borders", xroot)[begin]
-        if parse(Int, border_elements["count"]) != length(XML.children(border_elements))
+        borders = first(XML.xpath(xroot, "//borders"))
+        border_count = count(child ->
+            XML.nodetype(child) == XML.Element &&
+            XML.tag(child) == "border",
+            XML.children(borders)
+        )
+        if parse(Int, borders["count"]) != border_count
             throw(XLSXError("Unexpected number of border definitions found : $(length(XML.children(border_elements))). Expected $(parse(Int, border_elements["count"]))"))
         end
-        current_border = XML.children(border_elements)[parse(Int, borderid)+1] # Zero based!
+        current_border = borders[parse(Int, borderid)+1] # Zero based!
         diag_atts = XML.attributes(current_border)
         border_atts = Dict{String,Union{Dict{String,String},Nothing}}()
-        for side in XML.children(current_border)
+        chn = XML.children(current_border)
+        for side in chn
             if isnothing(XML.attributes(side)) || length(XML.attributes(side)) == 0
                 border_atts[XML.tag(side)] = nothing
             else

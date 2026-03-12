@@ -112,10 +112,66 @@ const EXCEL_COLUMN_WIDTH_PADDING = 0.7109375
 # -- A bunch of helper functions ...
 #
 
+#function copynode(o::XML.Node)
+#    n = XML.Node(o.nodetype, o.tag, o.attributes, o.value, isnothing(o.children) ? nothing : [copynode(x) for x in o.children])
+#    return n
+#end
 function copynode(o::XML.Node)
-    n = XML.Node(o.nodetype, o.tag, o.attributes, o.value, isnothing(o.children) ? nothing : [copynode(x) for x in o.children])
-    return n
+    nt = XML.nodetype(o)
+    if nt == XML.Document
+        n = XML.Document()
+        for child in XML.children(o)
+            push!(n, copynode(child))
+        end
+        return n
+
+    elseif nt == XML.Element
+        n = XML.Element(XML.tag(o))
+
+        # Copy attributes
+        atts =  XML.attributes(o)
+        if !isnothing(atts)
+            for (k, v) in atts
+                n[k] = v
+            end
+        end
+
+        # Copy children
+        chn = XML.children(o)
+        if !isnothing(chn)
+            for child in chn
+                push!(n, copynode(child))
+            end
+        end
+
+        return n
+
+    elseif nt == XML.Text
+        return XML.Text(XML.is_simple(o) ? XML.simple_value(o) : XML.value(o))
+
+    elseif nt == XML.CData
+        return XML.CData(XML.text(o))
+
+    elseif nt == XML.Comment
+        return XML.Comment(XML.text(o))
+
+    elseif nt == XML.ProcessingInstruction
+        return XML.ProcessingInstruction(XML.target(o); XML.attributes(o)...)
+
+    elseif nt == XML.Declaration
+        atts = XML.attributes(o)
+        sym_atts = Pair{Symbol,String}[Symbol(k) => v for (k,v) in atts]
+        return XML.Declaration(; sym_atts...)
+
+    elseif nt == XML.DTD
+        return XML.DTD(XML.text(o))
+
+    else
+        error("Unhandled node type: $(nt)")
+    end
+
 end
+
 function do_sheet_names_match(ws::Worksheet, rng::T) where {T<:Union{SheetCellRef,AbstractSheetCellRange}}
     if ws.name == rng.sheet
         return true
@@ -123,88 +179,99 @@ function do_sheet_names_match(ws::Worksheet, rng::T) where {T<:Union{SheetCellRe
         throw(XLSXError("Worksheet `$(ws.name)` does not match sheet in cell reference: `$(rng.sheet)`"))
     end
 end
-function buildNode(tag::String, attributes::Dict{String,Union{Nothing,Dict{String,String}}})::XML.Node
-    if tag == "font"
-        attribute_tags = font_tags
-    elseif tag == "border"
-        attribute_tags = border_tags
-    elseif tag == "fill"
-        attribute_tags = fill_tags
-    else
-        throw(XLSXError("Unknown tag: $tag"))
-    end
-    new_node = XML.Element(tag)
-    for a in attribute_tags # Use this as a device to keep ordering constant for Excel
+function buildNode(tag::String, attributes::Dict{String,Union{Nothing,Dict{String,String}}})
+    # Select the tag ordering list
+    attribute_tags = tag == "font"  ? font_tags  :
+                     tag == "border" ? border_tags :
+                     tag == "fill"   ? fill_tags   :
+                     throw(XLSXError("Unknown tag: $tag"))
+
+    node = XML.Element(tag)
+
+    for a in attribute_tags
+        haskey(attributes, a) || continue
+        spec = attributes[a]
+
         if tag == "font"
-            if haskey(attributes, a)
-                if isnothing(attributes[a])
-                    cnode = XML.Element(a)
-                else
-                    cnode = XML.Node(XML.Element, a, XML.OrderedDict{String,String}(), nothing, tag ∈ ["border", "fill"] ? Vector{XML.Node}() : nothing)
-                    for (k, v) in attributes[a]
-                        cnode[k] = v
-                    end
+            # <font> children are simple: <b/>, <i/>, <color ...>, etc.
+            if isnothing(spec)
+                push!(node, XML.Element(a))
+            else
+                child = XML.Element(a)
+                for (k, v) in spec
+                    child[k] = v
                 end
-                push!(new_node, cnode)
+                push!(node, child)
             end
+
         elseif tag == "border"
-            if haskey(attributes, a)
-                if isnothing(attributes[a])
-                    cnode = XML.Element(a)
-                else
-                    cnode = XML.Node(XML.Element, a, XML.OrderedDict{String,String}(), nothing, tag ∈ ["border", "fill"] ? Vector{XML.Node}() : nothing)
-                    color = XML.Element("color")
-                    for (k, v) in attributes[a]
-                        if k == "style" && v != "none"
-                            cnode[k] = v
-                        elseif k == "direction"
-                            if v in ["up", "both"]
-                                new_node["diagonalUp"] = "1"
-                            end
-                            if v in ["down", "both"]
-                                new_node["diagonalDown"] = "1"
-                            end
-                        else
-                            color[k] = v
+            # <border> children: <left>, <right>, <top>, <bottom>, <diagonal>
+            if isnothing(spec)
+                push!(node, XML.Element(a))
+            else
+                child = XML.Element(a)
+                color = XML.Element("color")
+
+                for (k, v) in spec
+                    if k == "style" && v != "none"
+                        child[k] = v
+                    elseif k == "direction"
+                        if v in ("up", "both")
+                            node["diagonalUp"] = "1"
                         end
-                    end
-                    if length(XML.attributes(color)) > 0 # Don't push an empty color.
-                        push!(cnode, color)
+                        if v in ("down", "both")
+                            node["diagonalDown"] = "1"
+                        end
+                    else
+                        color[k] = v
                     end
                 end
-                push!(new_node, cnode)
+
+                # Only add <color> if it has attributes
+                if !isempty(XML.attributes(color))
+                    push!(child, color)
+                end
+
+                push!(node, child)
             end
+
         elseif tag == "fill"
-            if haskey(attributes, a)
-                if isnothing(attributes[a])
-                    cnode = XML.Element(a)
-                else
-                    cnode = XML.Node(XML.Element, a, XML.OrderedDict{String,String}(), nothing, tag ∈ ["border", "fill"] ? Vector{XML.Node}() : nothing)
-                    patternfill = XML.Element("patternFill")
-                    fgcolor = XML.Element("fgColor")
-                    bgcolor = XML.Element("bgColor")
-                    for (k, v) in attributes[a]
-                        if k == "patternType"
-                            patternfill[k] = v
-                        elseif first(k, 2) == "fg"
-                            fgcolor[k[3:end]] = v
-                        elseif first(k, 2) == "bg"
-                            bgcolor[k[3:end]] = v
-                        end
+            # <fill> → <patternFill> → <fgColor>, <bgColor>
+            if isnothing(spec)
+                push!(node, XML.Element(a))
+            else
+                pattern = XML.Element("patternFill")
+                fg = XML.Element("fgColor")
+                bg = XML.Element("bgColor")
+
+                for (k, v) in spec
+                    if k == "patternType"
+                        pattern[k] = v
+                    elseif startswith(k, "fg")
+                        fg[k[3:end]] = v
+                    elseif startswith(k, "bg")
+                        bg[k[3:end]] = v
                     end
-                    if !haskey(patternfill, "patternType")
-                        throw(XLSXError("No `patternType` attribute found."))
-                    end
-                    length(XML.attributes(fgcolor)) > 0 && push!(patternfill, fgcolor)
-                    length(XML.attributes(bgcolor)) > 0 && push!(patternfill, bgcolor)
                 end
-                push!(new_node, patternfill)
+
+                haskey(pattern, "patternType") ||
+                    throw(XLSXError("No `patternType` attribute found."))
+
+                if !isempty(XML.attributes(fg))
+                    push!(pattern, fg)
+                end
+                if !isempty(XML.attributes(bg))
+                    push!(pattern, bg)
+                end
+
+                push!(node, pattern)
             end
-            #else
         end
     end
-    return new_node
+
+    return node
 end
+
 function isInDim(ws::Worksheet, dim::CellRange, rng::CellRange)
     if !issubset(rng, dim)
         throw(XLSXError("Cell range $rng is out of bounds. Worksheet `$(ws.name)` only has dimension `$dim`."))
@@ -463,30 +530,50 @@ end
 # Used by setFont(), setBorder(), setFill(), setAlignment() and setNumFmt()
 function styles_add_cell_attribute(wb::Workbook, new_att::XML.Node, att::String)::Int
     xroot = styles_xmlroot(wb)
+
+    # Locate <styleSheet>/<att> (e.g. <borders>, <fills>, <fonts>)
     i, j = get_idces(xroot, "styleSheet", att)
-    existing_elements_count = length(XML.children(xroot[i][j]))
-    if parse(Int, xroot[i][j]["count"]) != existing_elements_count
-        throw(XLSXError("Wrong number of elements elements found: $existing_elements_count. Expected $(parse(Int, xroot[i][j]["count"]))."))
+    parent = xroot[i][j]
+
+    # Find the <att> node via XPath (e.g. //borders)
+    atts = first(XML.xpath(xroot, "//$(att)"))
+
+    # Infer child tag name: borders → border, fills → fill, fonts → font
+    child_tag = att[end] == 's' ? att[1:end-1] : att
+
+    # Count existing child elements
+    att_count = count(child ->
+        XML.nodetype(child) == XML.Element &&
+        XML.tag(child) == child_tag,
+        XML.children(atts)
+    )
+
+    # Validate count attribute
+    if parse(Int, parent["count"]) != att_count
+        throw(XLSXError("Wrong number of <$att> elements: $att_count. Expected $(parent["count"])."))
     end
 
-    # Check new_att doesn't duplicate any existing att. If yes, use that rather than create new.
-    for (k, node) in enumerate(XML.children(xroot[i][j]))
-        if XML.tag(new_att) == "numFmt" # mustn't compare numFmtId attribute for formats
+    # Check for duplicates
+    for (k, node) in enumerate(XML.children(parent))
+        if XML.tag(new_att) == "numFmt"
             if node["formatCode"] == new_att["formatCode"]
-                return k - 1 # CellDataFormat is zero-indexed
+                return k - 1  # zero‑based
             end
         else
             if node == new_att
-                return k - 1 # CellDataFormat is zero-indexed
+                return k - 1
             end
         end
     end
 
-    push!(xroot[i][j], new_att)
-    xroot[i][j]["count"] = string(existing_elements_count + 1)
+    # Append new attribute
+    push!(parent, new_att)
 
-    return existing_elements_count # turns out this is the new index (because it's zero-based)
+    # Update count and return zero‑based index of new element
+    parent["count"] = string(att_count + 1)
+    return att_count
 end
+
 function process_sheetcell(f::Function, xl::XLSXFile, sheetcell::String; kw...)
     if is_workbook_defined_name(xl, sheetcell)
         v = get_defined_name_value(xl.workbook, sheetcell)

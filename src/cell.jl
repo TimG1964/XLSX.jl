@@ -348,9 +348,9 @@ function getdata(ws::Worksheet, cell::Cell)
 end
 
 # Extract cells from a <row> LazyNode and push them (in place) into a Dict(column -> Cell)
-function get_rowcells!(rowcells::Dict{Int,Cell}, row::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothing}=nothing)
+#=function get_rowcells!(rowcells::Dict{Int,Cell}, row::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothing}=nothing)
 
-    #=
+    
         # threaded cell extraction causes hugely more lock conflicts for low cellchunk size.
         # may be worthwhile if many columns (hundreds+), with a cellchunk size > ~10 or ~20, but this is unverified.
 
@@ -423,7 +423,7 @@ function get_rowcells!(rowcells::Dict{Int,Cell}, row::XML.LazyNode, ws::Workshee
         else                                             # no more rows
             return nothing, sst_count
         end
-    =#
+    
     # unthreaded cell extraction is (exceedingly marginally) slower but no lock conflicts introduced.
 
     # debug
@@ -431,22 +431,49 @@ function get_rowcells!(rowcells::Dict{Int,Cell}, row::XML.LazyNode, ws::Workshee
 
     sst_count = 0
 
-    d = row.depth
+#    d = row.depth
 
-    cellnode = XML.next(row)
-
-    while !isnothing(cellnode) && cellnode.depth > d
-        if cellnode.tag == "c" # This is a cell
-            cell = Cell(cellnode, ws; mylock) # construct an XLSX.Cell from an XML.LazyNode
-            sst_count += cell.datatype == CT_STRING ? 1 : 0
-            rowcells[column_number(cell)] = cell
+    i = 1
+    chn = XML.children(row)
+    len=length(chn)
+    while i <= len
+        while XML.tag(chn[i]) != "c" # Check for `cell`
+            i += 1
+            i > len && break;break
         end
-        cellnode = XML.next(cellnode)
-    end
-    if !isnothing(cellnode) && cellnode.tag == "row" # have reached the beginning of next row
-        return cellnode, sst_count
-    else                                             # no more rows
-        return nothing, sst_count
+        cellnode = chn[i]
+        cell = Cell(cellnode, ws; mylock) # construct an XLSX.Cell from an XML.LazyNode
+        sst_count += cell.datatype == CT_STRING ? 1 : 0
+        rowcells[column_number(cell)] = cell
+        i += 1
     end
 
+#    if !isnothing(cellnode) && cellnode.tag == "row" # have reached the beginning of next row
+        return sst_count
+#    else                                             # no more rows
+#        return nothing, sst_count
+#    end
+
+end=#
+function get_rowcells!(rowcells::Dict{Int,Cell}, row::XML.LazyNode, ws::Worksheet; mylock=nothing)
+    sst_count = 0
+
+    len = length(row)
+    for i in 1:len
+        child = row[i]
+
+        # Only care about element nodes
+        XML.nodetype(child) == XML.Element || continue
+
+        # Only process <c> cells
+        XML.tag(child) == "c" || continue
+
+        cell = Cell(child, ws; mylock)
+
+        sst_count += cell.datatype == CT_STRING ? 1 : 0
+        rowcells[column_number(cell)] = cell
+    end
+
+    return sst_count
 end
+

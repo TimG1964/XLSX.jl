@@ -121,32 +121,41 @@ function sst_load!(workbook::Workbook)
 end
 @inline _is_tag(n::String, tag::String) = n == tag
 @inline _is_tag(n::Nothing, tag::String) = false
- function produce_sstchunks(out, n, ssts, chunksize)
-    i = 0           # Position within current chunk
-    global_idx = 0  # Global position in SST table
-   
-    while !isnothing(n)
-        if _is_tag(n.tag, "si")
+
+function produce_sstchunks(out, sstnode, ssts, chunksize)
+    # sstnode is the <sst> element
+    children = XML.children(sstnode)
+
+    i = 0           # position within current chunk
+    global_idx = 0  # global SST index
+
+    for n in children
+        if _is_tag(XML.tag(n), "si")
             i += 1
             global_idx += 1
-            ssts[i] = SstToken(n, global_idx)  # ← Use global index
+            ssts[i] = SstToken(n, global_idx)
         end
+
         if i >= chunksize
             put!(out, copy(ssts))
-            i = 0  # Reset chunk position, but global_idx keeps going
+            i = 0
         end
-        n = XML.next(n)
     end
+
     if i > 0
         put!(out, copy(ssts[1:i]))
     end
 end
 
-function stream_ssts(n::XML.LazyNode, chunksize::Int; channel_size::Int=1 << 8)
-    n = XML.next(n)
-    ssts = Vector{SstToken}(undef, chunksize)
+function stream_ssts(n::XML.LazyNode, chunksize::Int; channel_size::Int = 1 << 8)
     Channel{Vector{SstToken}}(channel_size) do out
-        produce_sstchunks(out, n, ssts, chunksize)
+        ssts = Vector{SstToken}(undef, chunksize)
+
+        for child in XML.children(n)
+            if XML.nodetype(child) == XML.Element && XML.tag(child) == "si"
+                produce_sstchunks(out, child, ssts, chunksize)
+            end
+        end
     end
 end
 

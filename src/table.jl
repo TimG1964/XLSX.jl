@@ -573,11 +573,11 @@ julia> PrettyTable(XLSX.gettable(xf["mysheet"], "A:C"))
 See also: [`XLSX.readtable`](@ref), [`XLSX.readto`](@ref).
 """
 function gettable(sheet::Worksheet, cols::Union{ColumnRange,AbstractString};
+    
     first_row::Union{Nothing,Int}=nothing, column_labels=nothing, header::Bool=true,
     infer_eltypes::Bool=true, stop_in_empty_row::Bool=true,
     stop_in_row_function::Union{Function,Nothing}=nothing,
     keep_empty_rows::Bool=false, normalizenames::Bool=false)
-
     itr = eachtablerow(sheet, cols; first_row, column_labels, header,
                         stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames)
     return gettable(itr; infer_eltypes)

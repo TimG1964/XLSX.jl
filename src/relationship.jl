@@ -58,21 +58,54 @@ function has_relationship_by_type(wb::Workbook, _type_::String)::Bool
 end
 
 function get_package_relationship_root(xf::XLSXFile)::XML.Node
-    xroot = xmlroot(xf, "_rels/.rels")[end]
-    XML.tag(xroot) != "Relationships" && throw(XLSXError("Malformed XLSX file $(xf.source). _rels/.rels root node name should be `Relationships`. Found $(XML.tag(xroot))."))
-    if ("" => "http://schemas.openxmlformats.org/package/2006/relationships") ∉ get_namespaces(xroot)
-        throw(XLSXError("Unexpected namespace at workbook relationship file: `$(get_namespaces(xroot))`."))
+    roots = xmlroot(xf, "_rels/.rels")
+
+    root = nothing
+    for n in XML.children(roots)
+        if XML.nodetype(n) == XML.Element
+            root = n
+            break
+        end
     end
-    return xroot
+
+    root === nothing &&
+        throw(XLSXError("Malformed workbook.xml.rels: no element root found."))
+
+    XML.tag(root) != "Relationships" && 
+        throw(XLSXError("Malformed XLSX file $(xf.source). _rels/.rels root node name should be `Relationships`. Found $(XML.tag(root))."))
+
+    expected = "" => "http://schemas.openxmlformats.org/package/2006/relationships"
+    expected ∉ get_namespaces(root) &&
+        throw(XLSXError("Unexpected namespace at workbook relationship file: `$(get_namespaces(root))`."))
+
+    return root
 end
 
 function get_workbook_relationship_root(xf::XLSXFile)::XML.Node
-    xroot = xmlroot(xf, "xl/_rels/workbook.xml.rels")[end]
-    XML.tag(xroot) != "Relationships" && throw(XLSXError("Malformed XLSX file $(xf.source). xl/_rels/workbook.xml.rels root node name should be `Relationships`. Found $(XML.tag(xroot))."))
-    if ("" => "http://schemas.openxmlformats.org/package/2006/relationships") ∉ get_namespaces(xroot)
-        throw(XLSXError("Unexpected namespace at workbook relationship file: `$(get_namespaces(xroot))`."))
+    roots = xmlroot(xf, "xl/_rels/workbook.xml.rels")
+
+    # Find the actual element root
+    root = nothing
+    for n in XML.children(roots)
+        if XML.nodetype(n) == XML.Element
+            root = n
+            break
+        end
     end
-    return xroot
+
+    root === nothing &&
+        throw(XLSXError("Malformed workbook.xml.rels: no element root found."))
+
+    # Validate root tag
+    XML.tag(root) != "Relationships" &&
+        throw(XLSXError("Malformed XLSX file $(xf.source). Expected <Relationships>, found $(XML.tag(root))."))
+
+    # Validate namespace
+    expected = "" => "http://schemas.openxmlformats.org/package/2006/relationships"
+    expected ∉ get_namespaces(root) &&
+        throw(XLSXError("Unexpected namespace at workbook relationship file: $(get_namespaces(root))."))
+
+    return root
 end
 
 # Adds new relationship. Returns new generated rId.

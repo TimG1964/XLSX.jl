@@ -282,7 +282,7 @@ function update_single_sheet!(wb::Workbook, sheet_no::Int, full::Bool)::Union{No
             dimension_node["ref"] = string(get_dimension(sheet))
         end
 
-        empty_doc=XML.write(doc)
+        empty_doc=XML.write(xroot)
         idx=findfirst("<sheetData/>", empty_doc)
         idx === nothing && throw(XLSXError("<sheetData/> placeholder not found"))
         new_doc=IOBuffer()

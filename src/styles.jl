@@ -278,29 +278,50 @@ function styles_get_cellXf_with_numFmtId(allXfNodes::Vector{XML.Node}, numFmtId:
 end
 
 function styles_add_cell_xf(wb::Workbook, attributes::Dict{String,String})::CellDataFormat
-    new_xf = XML.Node(XML.Element, "xf", XML.OrderedDict{String,String}(), nothing, nothing)
-    for k in keys(attributes)
-        new_xf[k] = attributes[k]
+    # Create a new <xf> element
+    new_xf = XML.Element("xf")
+
+    # Assign attributes
+    for (k, v) in attributes
+        new_xf[k] = v
     end
+
     return styles_add_cell_xf(wb, new_xf)
 end
 
 function styles_add_cell_xf(wb::Workbook, new_xf::XML.Node)::CellDataFormat
     xroot = styles_xmlroot(wb)
+
+    # Locate <styleSheet>/<cellXfs>
     i, j = get_idces(xroot, "styleSheet", "cellXfs")
-    existing_cellxf_elements_count = length(XML.children(xroot[i][j]))
-    if parse(Int, xroot[i][j]["count"]) != existing_cellxf_elements_count
-        throw(XLSXError("Wrong number of xf elements found: $existing_cellxf_elements_count. Expected $(parse(Int, xroot[i][j]["count"]))."))
+    cellXfs = xroot[i][j]
+
+    # Count existing <xf> children
+    existing = XML.children(cellXfs)
+    existing_count = count(child ->
+        XML.nodetype(child) == XML.Element &&
+        XML.tag(child) == "xf",
+        XML.children(cellXfs)
+    )
+
+    # Validate the count attribute
+    if parse(Int, cellXfs["count"]) != existing_count
+        throw(XLSXError("Wrong number of <xf> elements: $existing_count. Expected $(cellXfs["count"])."))
     end
-    # Check new_xf doesn't duplicate any existing xf. If yes, use that rather than create new.
-    for (k, node) in enumerate(XML.children(xroot[i][j]))
+
+    # Check for duplicates
+    for (k, node) in enumerate(existing)
         if node == new_xf
-            return CellDataFormat(k - 1) # CellDataFormat is zero-indexed
+            return CellDataFormat(k - 1)   # zero‑based
         end
     end
-    push!(xroot[i][j], new_xf)
-    xroot[i][j]["count"] = string(existing_cellxf_elements_count + 1)
 
-    return CellDataFormat(existing_cellxf_elements_count) # turns out this is the new index (because it's zero-based)
+    # Append new <xf>
+    push!(cellXfs, new_xf)
 
+    # Update count
+    cellXfs["count"] = string(existing_count + 1)
+
+    # Return zero‑based index of the new element
+    return CellDataFormat(existing_count)
 end
