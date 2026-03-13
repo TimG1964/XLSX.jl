@@ -34,7 +34,7 @@ export
     setFormat, setFont, setBorder, setFill, setAlignment,
     setUniformFormat, setUniformFont, setUniformBorder, setUniformFill, setUniformAlignment, setUniformStyle,
     setConditionalFormat,
-    getRichTextFormat,
+    RichTextString, RichTextRun,
     setColumnWidth, setRowHeight,
     getMergedCells, isMergedCell, getMergedBaseCell, mergeCells
   
