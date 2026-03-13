@@ -25,6 +25,7 @@ using XLSX
         _ssToRuns(s::Union{<:AnnotatedString, SubString{<:AnnotatedString}})                 -> Vector{XLSX.RichTextRun}
 
     Converts a `StyledString` to a vector of `RichTextRun`s.
+
     """
     function _ssToRuns end
 

@@ -508,6 +508,8 @@ each run with its own distinct font formatting within the cell. See also [`XLSX.
 If a `RichTextString` containing only one run is assigned to a cell, the text will be assigned as plain 
 text and the formatting attributes will be implemented on the whole cell using [`XLSX.setFont`](@ref).
 
+See also [`XLSX.RichTextRun`](@ref).
+
 # Examples
 ```julia
 julia> rt = XLSX.RichTextString(rtf1, rtf2, rtf3, rtf4) # Create a RichTextString from four separate RichTextRuns.

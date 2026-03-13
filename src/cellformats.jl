@@ -11,7 +11,7 @@
     setFont(sh::Worksheet, row, col; kw...) -> ::Int
 
 Set the font used by a single cell, a cell range, a column range or 
-row range or a named cell or named range in a worksheet or XLSXfile.
+row range or a named cell or named range in a worksheet or XLSXFile.
 Alternatively, specify the row and column using any combination of 
 Integer, UnitRange, Vector{Integer} or `:`.
 
@@ -189,7 +189,7 @@ end
     setUniformFont(sh::Worksheet, rows, cols; kw...) -> ::Int
 
 Set the font used by a cell range, a column range or row range or 
-a named range in a worksheet or XLSXfile to be uniformly the same font.
+a named range in a worksheet or XLSXFile to be uniformly the same font.
 Alternatively, specify the rows and columns using any combination of 
 Integer, UnitRange, Vector{Integer} or `:`.
 
@@ -267,7 +267,7 @@ setUniformFont(ws::Worksheet, rng::CellRange; kw...)::Int = process_uniform_attr
 
     getFont(sh::Worksheet, row::Int, col::Int) -> ::Union{Nothing, CellFont}
 
-Get the font used by a single cell reference in a worksheet `sh` or XLSXfile `xf`.
+Get the font used by a single cell reference in a worksheet `sh` or XLSXFile `xf`.
 The specified cell must be within the sheet dimension.
 
 Return a `CellFont` object containing:
@@ -359,7 +359,7 @@ end
 
     getBorder(sh::Worksheet, row::Int, col::Int) -> ::Union{Nothing, CellBorder}
    
-Get the borders used by a single cell at reference in a worksheet or XLSXfile.
+Get the borders used by a single cell at reference in a worksheet or XLSXFile.
 The specified cell must be within the sheet dimension.
 
 Return a `CellBorder` object containing:
@@ -481,7 +481,7 @@ end
     setBorder(sh::Worksheet, row, col; kw...) -> ::Int
    
 Set the borders used used by a single cell, a cell range, a column range or 
-row range or a named cell or named range in a worksheet or XLSXfile.
+row range or a named cell or named range in a worksheet or XLSXFile.
 Alternatively, specify the row and column using any combination of 
 Integer, UnitRange, Vector{Integer} or `:`.
 
@@ -692,7 +692,7 @@ end
     setUniformBorder(sh::Worksheet, rows, cols; kw...) -> ::Int
 
 Set the border used by a cell range, a column range or row range or 
-a named range in a worksheet or XLSXfile to be uniformly the same border.
+a named range in a worksheet or XLSXFile to be uniformly the same border.
 Alternatively, specify the rows and columns using any combination of 
 Integer, UnitRange, Vector{Integer} or `:`.
 
@@ -770,7 +770,7 @@ setUniformBorder(ws::Worksheet, rng::CellRange; kw...)::Int = process_uniform_at
     setOutsideBorder(sh::Worksheet, rows, cols; kw...) -> ::Int
 
 Set the border around the outside of a cell range, a column range or row range 
-or a named range in a worksheet or XLSXfile.
+or a named range in a worksheet or XLSXFile.
 Alternatively, specify the rows and columns using integers, UnitRanges or `:`.
 
 There is one key word:
@@ -844,7 +844,7 @@ end
 
     getFill(sh::Worksheet, row::Int, col::Int) -> ::Union{Nothing, CellFill}
    
-Get the fill used by a single cell at reference `cr` in a worksheet or XLSXfile.
+Get the fill used by a single cell at reference `cr` in a worksheet or XLSXFile.
 The specified cell must be within the sheet dimension.
 
 Return a `CellFill` object containing:
@@ -961,7 +961,7 @@ end
     setFill(sh::Worksheet, row, col; kw...) -> ::Int
 
 Set the fill used used by a single cell, a cell range, a column range or 
-row range or a named cell or named range in a worksheet or XLSXfile.
+row range or a named cell or named range in a worksheet or XLSXFile.
 Alternatively, specify the row and column using any combination of 
 Integer, UnitRange, Vector{Integer} or `:`.
 
@@ -1101,7 +1101,7 @@ end
     setUniformFill(sh::Worksheet, rows, cols; kw...) -> ::Int
 
 Set the fill used by a cell range, a column range or row range or a 
-named range in a worksheet or XLSXfile to be uniformly the same fill.
+named range in a worksheet or XLSXFile to be uniformly the same fill.
 Alternatively, specify the rows and columns using any combination of 
 Integer, UnitRange, Vector{Integer} or `:`.
 
@@ -1172,7 +1172,7 @@ setUniformFill(ws::Worksheet, rng::CellRange; kw...)::Int = process_uniform_attr
 
     getAlignment(sh::Worksheet, row::Int, col::Int) -> ::Union{Nothing, CellAlignment}
    
-Get the alignment used by a single cell at reference `cr` in a worksheet or XLSXfile.
+Get the alignment used by a single cell at reference `cr` in a worksheet or XLSXFile.
 The specified cell must be within the sheet dimension.
 
 Return a `CellAlignment` object containing:
@@ -1249,7 +1249,7 @@ end
 
    
 Set the alignment used used by a single cell, a cell range, a column range or 
-row range or a named cell or named range in a worksheet or XLSXfile.
+row range or a named cell or named range in a worksheet or XLSXFile.
 Alternatively, specify the row and column using any combination of 
 Integer, UnitRange, Vector{Integer} or `:`.
 
@@ -1379,7 +1379,7 @@ end
     setUniformAlignment(sh::Worksheet, rows, cols; kw...) -> ::Int
 
 Set the alignment used by a cell range, a column range or row range or a 
-named range in a worksheet or XLSXfile to be uniformly the same alignment.
+named range in a worksheet or XLSXFile to be uniformly the same alignment.
 Alternatively, specify the rows and columns using any combination of 
 Integer, UnitRange, Vector{Integer} or `:`.
 
@@ -1453,13 +1453,13 @@ setUniformAlignment(ws::Worksheet, rng::CellRange; kw...)::Int = process_uniform
 
     getFormat(sh::Worksheet, row::Int, col::int) -> ::Union{Nothing, CellFormat}
    
-Get the format (numFmt) used by a single cell at reference `cr` in a worksheet or XLSXfile.
+Get the format (numFmt) used by a single cell at reference `cr` in a worksheet or XLSXFile.
 The specified cell must be within the sheet dimension.
 
 Return a `CellFormat` object containing:
 - `numFmtId`          : a 0-based index of the formats in the workbook. Values below 164 are 
                         reserved for built-in formats. Values of 164 and over are custom formats
-                        and are stored in the `styles.xml` file within the XLSXfile.
+                        and are stored in the `styles.xml` file within the XLSXFile.
 - `format`            : a dictionary of numFmt attributes: formatAttribute -> (attribute -> value)
 - `applyNumberFormat` : "1" or "0", indicating whether or not the format is applied to the cell.
 
@@ -1534,7 +1534,7 @@ end
    
 Set the number format used used by a single cell, a cell range, a column 
 range or row range or a named cell or named range in a worksheet or 
-XLSXfile. Alternatively, specify the row and column using any combination 
+XLSXFile. Alternatively, specify the row and column using any combination 
 of Integer, UnitRange, Vector{Integer} or `:`.
 
 The function uses one keyword used to define a format:
@@ -1589,7 +1589,7 @@ format ID (as a string). The following built-in format IDs are supported:
 
 Lastly, `format` can be used to specify any custom format directly. 
 Only weak checks are made of custom formats specified - they are otherwise added 
-to the XLSXfile verbatim.
+to the `XLSXFile` verbatim.
 
 Formats may need characters that must be escaped when specified (see last 
 example, below).
@@ -1683,7 +1683,7 @@ end
     setUniformFormat(sh::Worksheet, rows, cols; kw...) -> ::Int
 
 Set the number format used by a cell range, a column range or row range or a 
-named range in a worksheet or XLSXfile to be to be uniformly the same format.
+named range in a worksheet or XLSXFile to be to be uniformly the same format.
 Alternatively, specify the rows and columns using any combination of 
 Integer, UnitRange, Vector{Integer} or `:`.
 
@@ -1746,7 +1746,7 @@ setUniformFormat(ws::Worksheet, rng::CellRange; kw...)::Int = process_uniform_at
     setUniformStyle(sh::Worksheet, rows, cols) -> ::Int
 
 Set the cell `style` used by a cell range, a column range or row range 
-or a named range in a worksheet or XLSXfile to be the same as that of 
+or a named range in a worksheet or XLSXFile to be the same as that of 
 the first cell in the range that is not an `EmptyCell`.
 Alternatively, specify the rows and columns using any combination of 
 Integer, UnitRange, Vector{Integer} or `:`.

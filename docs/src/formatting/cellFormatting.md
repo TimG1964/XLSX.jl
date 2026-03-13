@@ -407,6 +407,11 @@ RichTextString: "The quick brown fox jumps over the lazy dog"
 
 For more information on the use of styled strings, refer to the documentation for the [StyledStrings.jl](https://github.com/JuliaLang/StyledStrings.jl) package.
 
+!!! note
+
+    The use of `AnnotatedStrings` requires Julia v1.11 or higher
+
+
 ### Updating a rich text cell value
 
 The `setFont`, `setUniformFont` and `setUniformStyle` functions operate at the cell level and cannot apply 
