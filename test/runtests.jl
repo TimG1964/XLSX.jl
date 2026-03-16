@@ -6685,14 +6685,29 @@ end
         sh = xf["Sheet1"]
         @test XLSX.getFont(sh, "A1") === nothing
         XLSX.setFont(sh, "A1"; name="Palatino")
+        r = XLSX.getRichTextString(sh, "A1")
+        @test r.runs[4].text == "ki"
+        @test r.runs[4].atts == Dict(:bold => true, :size => 11)
+        @test r.runs[6].text == "ty"
+        @test r.runs[6].atts == Dict(:color => "FFFF0000", :size => 11)
         @test XLSX.getFont(sh, "A1").font == Dict("name" => Dict("val" => "Palatino"), "sz" => Dict("val" => "11"), "color" => Dict("theme" => "1"))
-        @test XLSX.get_workbook(sh).sst.shared_strings[Int(XLSX.getcell(sh, "A1").value)+1] == "<si>\n  <r>\n    <t>h</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"20\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>el</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t xml:space=\"preserve\">lo </t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>ki</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>ty</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n</si>"
         XLSX.setFont(sh, "A1:F2"; name="Palatino")
-        @test XLSX.get_workbook(sh).sst.shared_strings[Int(XLSX.getcell(sh, "E2").value)+1] == "<si>\n  <r>\n    <t>h</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"20\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>e</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>l</t>\n  </r>\n  <r>\n    <rPr>\n      <vertAlign val=\"superscript\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>lo</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>k</t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <i/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>i</t>\n  </r>\n  <r>\n    <rPr>\n      <i/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t>y</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Palatino\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n</si>"
+        r = XLSX.getRichTextString(sh, "B2")
+        @test r.runs[4].text == "k"
+        @test r.runs[4].atts == Dict(:bold => true, :size => 11, :under => true)
+        r = XLSX.getRichTextString(sh, "F2")
+        @test r.runs[3].text == "lo "
+        @test r.runs[3].atts == Dict(:size => 11)
         @test XLSX.getFont(sh, "B2").font["name"] == Dict("val" => "Palatino")
         XLSX.setFont(sh, "B"; under="none")
         @test haskey(XLSX.getFont(sh, "B2").font, "u") == false
         XLSX.setFont(sh, "C1,D2:E2", color="orange")
+        r = XLSX.getRichTextString(sh, "C1")
+        @test r.runs[6].text == "ty "
+        @test r.runs[6].atts == Dict(:size => 11)
+        r = XLSX.getRichTextString(sh, "E2")
+        @test r.runs[9].text == "t"
+        @test r.runs[9].atts == Dict(:size => 24)
         @test XLSX.getFont(sh, "C1").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
         @test XLSX.getFont(sh, "D2").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
         @test XLSX.getFont(sh, "D1").font["color"] == Dict("theme" => "1")
@@ -6707,7 +6722,11 @@ end
         @test XLSX.getFont(sh, "A1").font["color"] == Dict("theme" => "1")
         @test XLSX.getFont(sh, "B2").font["color"] == Dict("theme" => "1")
         @test XLSX.getFont(sh, "C2") === nothing
-        @test XLSX.get_workbook(sh).sst.shared_strings[Int(XLSX.getcell(sh, "B2").value)+1] == "<si>\n  <r>\n    <t>h</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"20\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>e</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>l</t>\n  </r>\n  <r>\n    <rPr>\n      <vertAlign val=\"subscript\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>lo</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>ki</t>\n  </r>\n  <r>\n    <rPr>\n      <u/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <u/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>y</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n</si>"
+        r = XLSX.getRichTextString(sh, "C1")
+        @test r.runs[3].text == "lo "
+        @test r.runs[3].atts == Dict(:name => "Aptos Narrow", :size => 11)
+        @test r.runs[4].text == "ki"
+        @test r.runs[4].atts == Dict(:bold => true, :italic => true, :name => "Aptos Narrow", :size => 11)
 
         XLSX.setUniformFont(sh, :, 3:2:5; color="orange")
         @test XLSX.getFont(sh, "C1").font["sz"] == Dict("val" => "11")
@@ -6715,7 +6734,11 @@ end
         @test XLSX.getFont(sh, "C1").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
         @test XLSX.getFont(sh, "E2").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
         @test XLSX.getFont(sh, "D2") === nothing
-        @test XLSX.get_workbook(sh).sst.shared_strings[Int(XLSX.getcell(sh, "E2").value)+1] == "<si>\n  <r>\n    <t>h</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"20\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>e</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>l</t>\n  </r>\n  <r>\n    <rPr>\n      <vertAlign val=\"subscript\"/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>lo</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>ki</t>\n  </r>\n  <r>\n    <rPr>\n      <u/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>tt</t>\n  </r>\n  <r>\n    <rPr>\n      <sz val=\"11\"/>\n      <color rgb=\"FFFFA500\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\">y </t>\n  </r>\n</si>"
+        r = XLSX.getRichTextString(sh, "E2")
+        @test r.runs[9].text == "t"
+        @test r.runs[9].atts == Dict(:name => "Aptos Narrow", :size => 24)
+        @test r.runs[10].text == "y "
+        @test r.runs[10].atts == Dict(:name => "Aptos Narrow", :size => 11)
 
         xf = XLSX.opentemplate(joinpath(data_directory, "is.xlsx"))
         sh = xf["Sheet1"]
@@ -6727,14 +6750,18 @@ end
         @test XLSX.getFont(sh, "F1").font["color"] == Dict("theme" => "1")
         @test XLSX.getFont(sh, "C2").font["color"] == Dict("theme" => "1")
         @test XLSX.getFont(sh, "B2") === nothing
-        @test XLSX.get_workbook(sh).sst.shared_strings[Int(XLSX.getcell(sh, "F1").value)+1] == "<si>\n  <r>\n    <t>h</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"20\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>e</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>l</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <vertAlign val=\"subscript\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>lo</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n  <r>\n    <rPr>\n      <b/>\n      <u val=\"double\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>ki</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"24\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"24\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>t</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"11\"/>\n      <color rgb=\"FFFF0000\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t>y</t>\n  </r>\n  <r>\n    <rPr>\n      <u val=\"double\"/>\n      <sz val=\"11\"/>\n      <color theme=\"1\"/>\n      <rFont val=\"Aptos Narrow\"/>\n      <family val=\"2\"/>\n      <scheme val=\"minor\"/>\n    </rPr>\n    <t xml:space=\"preserve\"> </t>\n  </r>\n</si>"
+        r = XLSX.getRichTextString(sh, "F1")
+        @test r.runs[3].text == "lo "
+        @test r.runs[3].atts == Dict(:name => "Calibri", :size => 11)
+        @test r.runs[8].text == " "
+        @test r.runs[8].atts == Dict(:name => "Aptos Narrow", :size => 11)
         xf = XLSX.opentemplate(joinpath(data_directory, "is.xlsx"))
         sh = xf["Sheet1"]
         XLSX.setFont(sh, "A1"; under="double", color="orange", name="Palatino", size=20, bold=true, italic=true, strike=true)
         XLSX.setUniformStyle(sh, "A1:F2")
         @test XLSX.getFont(sh, "A1").font["u"] == Dict("val" => "double")
         @test XLSX.getFont(sh, "C2").font["u"] == Dict("val" => "double")
-        @test XLSX.getFont(sh, "D1").font["sz"] == Dict("val" => "20")
+        @test XLSX.getFont(sh, "D1").font["sz"] == Dict("val" => "11")
         @test XLSX.getFont(sh, "E1").font["sz"] == Dict("val" => "20")
         @test XLSX.getFont(sh, "F1").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
         @test XLSX.getFont(sh, "C2").font["color"] == Dict("rgb" => XLSX.get_color("orange"))
@@ -6814,11 +6841,11 @@ end
                               " containing 4 runs:\n" *
                               " Run text                 Run attributes\n" *
                               " -------------------------------------------------------------------------------------------\n" *
-                              " \"Hell\"                   [:color => \"FFFF0000\", :name => \"Times New Roman\", :size => 18.0] \n" *
-                              " \"o\"                      [:color => \"FF008000\", :name => \"Arial\", :size => 24.0, :vertAli…]\n" *
-                              " \" Kitt\"                  [:color => \"FF0000FF\", :name => \"Consolas\", :size => 12.0]        \n" *
-                              " \"y\"                      [:color => \"FF008000\", :size => 14.0, :vertAlign => \"subscript\"]  \n"
-        rtr_expected_result = "RichTextRun (\"Hell\"  [:color => \"FFFF0000\", :name => \"Times New Roman\", :size => 18.0])"
+                              " \"Hell\"                   [:color => \"FFFF0000\", :name => \"Times New Roman\", :size => 18]   \n" *
+                              " \"o\"                      [:color => \"FF008000\", :name => \"Arial\", :size => 24, :vertAlign…]\n" *
+                              " \" Kitt\"                  [:color => \"FF0000FF\", :name => \"Consolas\", :size => 12]          \n" *
+                              " \"y\"                      [:color => \"FF008000\", :size => 14, :vertAlign => \"subscript\"]    \n"
+        rtr_expected_result = "RichTextRun (\"Hell\"  [:color => \"FFFF0000\", :name => \"Times New Roman\", :size => 18])"
         io1 = IOBuffer()
         io2 = IOBuffer()
         show(io1, XLSX.getRichTextString(s, "A2"))

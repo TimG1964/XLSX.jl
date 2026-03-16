@@ -83,6 +83,9 @@ The example above used `xf = XLSX.readxlsx(filename)` to open a file, so all fil
 
 You can also use `XLSX.openxlsx` to read file contents as needed (see [Reading Large Excel Files and Caching](@ref)).
 
+If you need to read an Excel file that has been protected with a password, consider using [XLSXDecrypt.jl](https://github.com/TimG1964/XLSXDecrypt.jl) 
+to decrypt the file so it can be read by XLSX.jl.
+
 ## Data Types
 
 This package uses the following concrete types when handling XLSX files.

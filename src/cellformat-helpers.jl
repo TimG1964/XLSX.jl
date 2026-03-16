@@ -802,7 +802,7 @@ function process_uniform_attribute(f::Function, ws::Worksheet, rng::CellRange, a
                 cell=getcell(ws, cellref)
                 if !(cell isa EmptyCell) && cell.datatype == CT_STRING
                     v=update_sharedString_font(ws, cell; kw...)
-                    cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
+                    cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v))
                 end
             end
         end
@@ -840,7 +840,7 @@ function process_uniform_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguo
                     newid, first = process_uniform_core(f, ws, allXfNodes, r, atts, newid, first; kw...)
                     if f==setFont && cell.datatype == CT_STRING
                         v=update_sharedString_font(ws, cell; kw...)
-                        cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
+                        cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v))
                     end
                 else
                     for c in r
@@ -849,7 +849,7 @@ function process_uniform_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguo
                             cell=getcell(ws, c)
                             if !(cell isa EmptyCell) &&!(cell isa EmptyCell) && cell.datatype == CT_STRING
                                 v=update_sharedString_font(ws, cell; kw...)
-                                cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
+                                cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v))
                             end
                         end
                     end
@@ -891,7 +891,7 @@ function process_uniform_veccolon(f::Function, ws::Worksheet, row, col, atts::Ve
                 newid, first = process_uniform_core(f, ws, allXfNodes, cellref, atts, newid, first; kw...)
                 if f==setFont && cell.datatype == CT_STRING
                     v=update_sharedString_font(ws, cell; kw...)
-                    cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
+                    cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v))
                 end
             end
         end
@@ -917,7 +917,7 @@ function process_uniform_vecint(f::Function, ws::Worksheet, row, col, atts::Vect
             newid, first = process_uniform_core(f, ws, allXfNodes, cellref, atts, newid, first; kw...)
             if f==setFont && cell.datatype == CT_STRING
                 v=update_sharedString_font(ws, cell; kw...)
-                cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
+                cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v))
             end
         end
         if first
@@ -946,7 +946,7 @@ function process_uniform_core(ws::Worksheet, cellref::CellRef, newid::Union{Int,
     end
     if cell.datatype == CT_STRING && !isnothing(firstFont)
         v=update_sharedString_font(ws, cell, firstFont)
-        cell.value= isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v)-1)
+        cell.value= isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v))
     end
 
     return newid, first, firstFont
@@ -1232,7 +1232,7 @@ function get_color(str::String)::String
     end
     return c
 end
-function update_sharedString_font(ws::Worksheet, cell::Cell, firstFont::CellFont) :: Int64
+function update_sharedString_font(ws::Worksheet, cell::Cell, firstFont::CellFont) :: Union{Nothing,Int64}
     let bold=nothing, italic=nothing, under=nothing, strike=nothing, size=nothing, color=nothing, name=nothing
         for (k, v) in firstFont.font
             if k=="b"
@@ -1283,15 +1283,14 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
     all_r = filter(z -> z.tag == "r", XML.children(is))
     run_elements = reduce(vcat, [XML.children(z) for z in all_r])
     rPr_elements=filter(z -> z.tag == "rPr", run_elements) # rPr elements
+
     t=String[] # text elements
-    xml_space=Bool[] # xml:space="preserve" flags
     for i in filter(z -> z.tag == "t", run_elements)
         push!(t, XML.is_simple(i[1]) ? XML.simple_value(i[1]) : XML.value(i[1]))
-        push!(xml_space, !isnothing(XML.attributes(i)) && haskey(XML.attributes(i), "xml:space") && XML.attributes(i)["xml:space"] == "preserve")
     end
 
     for rPr in rPr_elements
-        # Overwrite rPr attributes with any attributes (kw...) given in setFont
+        # Delete rPr attributes for any attributes (kw...) given in setFont
         atts = ["b", "i", "strike", "u", "vertAlign", "sz", "color", "rFont", "family", "scheme"] # set of all possible rPr attributes in required order
 
         new_rPr = fill(XML.Element("DeleteMe"), length(atts)) # to collect new rPr elements
@@ -1304,60 +1303,37 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
             end
         end
 
-        # then overwrite from keywords given in setFont/setUniformFont
+        # then mark any elements for deletion that are in the keywords given in setFont/setUniformFont
         if !isnothing(bold)
-            if bold
-                new_rPr[1] = XML.Element("b")
-            else
-                new_rPr[1] = XML.Element("DeleteMe")
-            end
+            new_rPr[1] = XML.Element("DeleteMe")
         end
         if !isnothing(italic)
-            if italic
-                new_rPr[2] = XML.Element("i")
-            else !isnothing(italic) && !italic
-                new_rPr[2] = XML.Element("DeleteMe")
-            end
+            new_rPr[2] = XML.Element("DeleteMe")
         end
         if !isnothing(strike)
-            if strike
-                new_rPr[3] = XML.Element("strike")
-            else
-                new_rPr[3] = XML.Element("DeleteMe")
-            end
+            new_rPr[3] = XML.Element("DeleteMe")
         end
         if !isnothing(under)
-            if under == "none"
-                new_rPr[4] = XML.Element("DeleteMe")
-            else
-                new_rPr[4] = XML.Element("u"; val = under)
-            end
+            new_rPr[4] = XML.Element("DeleteMe")
         end
         if !isnothing(size)
-            new_rPr[6] = XML.Element("sz"; val = string(size))
+            new_rPr[6] = XML.Element("DeleteMe")
         end
         if !isnothing(color)
-            if color isa String # specified in setFont
-                new_rPr[7] = XML.Element("color"; rgb = string(get_color(color)))
-            elseif color isa Dict{String,String} # specified in the original Excel file and (as yet) unchanged
-                new_rPr[7] = XML.Element("color") 
-                for (k, v) in color
-                    new_rPr[7][k] = v
-                end
-            else
-                throw(XLSXError("Something wrong here!"))
-            end
+            new_rPr[7] = XML.Element("DeleteMe")
         end
         if !isnothing(name)
-            new_rPr[8] = XML.Element("rFont"; val = name)
+            new_rPr[8] = XML.Element("DeleteMe")
             new_rPr[9] = XML.Element("DeleteMe")
             new_rPr[10] = XML.Element("DeleteMe")
         end
 
         # finally push merged elements back to rPr
-        empty!(rPr.children)
-        foreach(new_rPr) do element 
-            element.tag != "DeleteMe" && push!(rPr.children, element)
+        if !isnothing(rPr.children)
+            empty!(rPr.children)
+            foreach(new_rPr) do element 
+                element.tag != "DeleteMe" && push!(rPr.children, element)
+            end
         end
     end
 
@@ -1373,47 +1349,53 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
         if rPr_elements[i] == rPr_elements[i-1]
             t[i+inc_first-1] *= t[i+inc_first]
             t[i+inc_first] = ")___DeleteMe___("
-            xml_space[i+inc_first-1] |= xml_space[i+inc_first]
         end
     end
 
-#=
-    # identify any rPr elements that are the same as the font definition in the cell Style
-    same_as_fontId = falses(length(rPr_elements))
-    fId = getFont(ws, cell.ref)
-    if !isnothing(fId)
-        if haskey(fId, "sz") && haskey(new_rPr[5], "sz") && fId["sz"]["val"] == new_rPr[5]["val"] &&
-              haskey(fId, "color") && haskey(new_rPr[6], "rgb") && fId["color"]["rgb"] == new_rPr[6]["rgb"] &&
-              haskey(fId, "rFont") && haskey(new_rPr[7], "val") && fId["rFont"]["val"] == new_rPr[7]["val"]
-                same_as_fontId .= true
-          end
-=#
-
-    # reconstruct updated str_formatted
-    new_r = IOBuffer()
-    write(new_r, "<si>\n")
-    for r in 1:length(all_r)
-        if t[r] != ")___DeleteMe___(" # signals a merged <r> element to be skipped
-            write(new_r, "  <r>\n")
-            r > inc_first && write(new_r, XML.write(rPr_elements[r-inc_first];depth=3) * "\n")
-            write(new_r, "    <t" * (xml_space[r] ? " xml:space=\"preserve\"" : "") * ">" *t[r] * "</t>\n")
-            write(new_r, "  </r>\n")
+    # if first <r> has no <rPr> and the only remaining <rPr> is empty, merge text
+    if inc_first==1 && (length(t) == 2 || all([x == ")___DeleteMe___(" for x in t[3:end]]))
+        if isnothing(XML.attributes(rPr_elements[1]))
+            t[1] *= t[2]
+            t[2] = ")___DeleteMe___("
         end
     end
-    write(new_r, "</si>")
-    str_formatted = String(take!(new_r))
 
-    ind = get(sst.index, str_formatted, nothing)
-    if ind !== nothing
-        return ind  # Found exact match
+
+    pattern = ")___DeleteMe___("
+    valid = s -> !occursin(pattern, s)
+    only_first_valid = valid(t[1]) && count(valid, t) == 1
+    if only_first_valid
+        # only one <r>, so convert to cell level Font
+        if inc_first == 1
+            # no atts => no op
+        else
+            # move single run attributes to cell Font attributes
+            setFont(ws, cell.ref; XLSX.getRichTextString(ws, cell.ref).runs[1].atts...)
+        end
+        new_index=add_shared_string!(wb, t[1])
+    else
+        # reconstruct updated str_formatted
+        new_r = IOBuffer()
+        write(new_r, "<si>\n")
+        for r in 1:length(all_r)
+            if t[r] != ")___DeleteMe___(" # signals a merged <r> element to be skipped
+                write(new_r, "  <r>\n")
+                r > inc_first && write(new_r, XML.write(rPr_elements[r-inc_first];depth=3) * "\n")
+                write(new_r, "    <t" * (needs_preserve(t[r]) ? " xml:space=\"preserve\"" : "") * ">" *t[r] * "</t>\n")
+                write(new_r, "  </r>\n")
+            end
+        end
+        write(new_r, "</si>")
+
+        str_formatted = String(take!(new_r))
+
+        ind = get(sst.index, str_formatted, nothing)
+        if ind !== nothing
+            return ind  # Found exact match
+        end
+
+        new_index=add_formatted_string!(sst, str_formatted) # can't update existing sharded string in case it is used by another cell
     end
-#    ind = get_shared_string_index(sst, str_formatted) # see if new formatted string is already in the table
-#    if sst.shared_strings[ind] == str_formatted
-#        return ind  # Found exact match
-#    end
-
-    new_index=add_formatted_string!(sst, str_formatted) # can't update existing sharded string in case it is used by another cell
-
     return new_index
 
 end

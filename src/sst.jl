@@ -88,13 +88,16 @@ function add_formatted_string!(wb::Workbook, str_formatted::String; mylock::Unio
     return add_formatted_string!(sst, str_formatted; mylock)
 end
 
+# check if unformatted shared string needs xml:space="preserve"
+needs_preserve(s::String) = startswith(s, ' ') || endswith(s, ' ') || contains(s, '\n')  || contains(s, "  ")
+
 # allow to write cells containing only whitespace characters or with leading or trailing whitespace.
 function add_shared_string!(wb::Workbook, str_unformatted::AbstractString; mylock::Union{Nothing,ReentrantLock}=nothing) :: Int
-    needs_preserve = startswith(str_unformatted, ' ') || endswith(str_unformatted, ' ') || contains(str_unformatted, '\n')  || contains(str_unformatted, "  ")
+#    needs_preserve = startswith(str_unformatted, ' ') || endswith(str_unformatted, ' ') || contains(str_unformatted, '\n')  || contains(str_unformatted, "  ")
     escaped = XLSX.escape(str_unformatted)
     io = IOBuffer()
     write(io, "<si>\n  <t")
-    if needs_preserve
+    if needs_preserve(str_unformatted)
         write(io, " xml:space=\"preserve\"")
     end
     write(io, ">", escaped, "</t>\n</si>")
@@ -664,7 +667,7 @@ function getRichTextString(xml_string::String)::Union{RichTextString, Nothing}
             any(c -> XML.tag(c) == "u",      rpr_children) && push!(pairs, :under     => true)
             
             sz_node = findfirst(c -> XML.tag(c) == "sz", rpr_children)
-            !isnothing(sz_node) && push!(pairs, :size => parse(Float64, XML.attributes(rpr_children[sz_node])["val"]))
+            !isnothing(sz_node) && push!(pairs, :size => parse(Int, XML.attributes(rpr_children[sz_node])["val"]))
             
             color_node = findfirst(c -> XML.tag(c) == "color", rpr_children)
             if !isnothing(color_node)

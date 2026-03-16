@@ -5,9 +5,14 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## Unreleased
+- 
+
+## [v0.11.0](https://github.com/JuliaData/XLSX.jl/tree/v0.11.0) - 2026-03-18
 This release introduces significant new functionality as set out below.
 
 There are almost no changes in existing functional APIs in v0.11.0 compared with v0.10.4. Those changes that have been made are described briefly here.
+
+This version drops support for Julia v1.6, and requires at least Julia v1.8.
 
 ### Breaking changes
 There is only one breaking change in this version:
@@ -78,12 +83,12 @@ A number of changes to package internals have been made. Specifically, changes h
 - `SheetRow`
 - `Cell`
 
-In particular, the internal memory configuration of an `XLSXFile` object and its components have been changed significantly, nearly halving the package's memory footprint.
+In particular, the internal memory configuration of an `XLSXFile` object and its components has been changed significantly, nearly halving the package's memory footprint.
 
 ### Changed dependencies
 v0.11.0 has now fully migrated to `ZipArchives.jl` whereas v0.10.4 relied upon both this and `ZipFiles.jl`. In addition, xml support is now from `XML.jl` rather than `EzXML.jl`.
 
-The use of `AnnotatedStrings` is supported through a package extension. This requires StyledStrings.jl to be in the active environment. 
+The use of `AnnotatedStrings` is supported through a package extension. This requires `StyledStrings.jl` to be in the active environment. 
 
 New functionality that has been added has brought the following additional dependencies compared with v0.10.4:
 - `Colors.jl`
