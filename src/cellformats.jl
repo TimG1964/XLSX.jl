@@ -1591,7 +1591,7 @@ Lastly, `format` can be used to specify any custom format directly.
 Only weak checks are made of custom formats specified - they are otherwise added 
 to the `XLSXFile` verbatim.
 
-Formats may need characters that must be escaped when specified (see last 
+Formats may need characters that must be escaped when specified (see penultimate 
 example, below).
 
 # Examples:
@@ -1606,7 +1606,7 @@ julia> XLSX.setFormat(sh, "named_range"; format = "Percentage")
 
 julia> XLSX.setFormat(sh, "A2"; format = "_-£* #,##0.00_-;-£* #,##0.00_-;_-£* \\\"-\\\"??_-;_-@_-")
 
-julia> XLSX.setFormat(sh, "named_range"; format = "39") # specifies thee built in format "#,##0.00_);(#,##0.00)"
+julia> XLSX.setFormat(sh, "named_range"; format = "39") # specifies the built-in format "#,##0.00_);(#,##0.00)"
  
 ```
 """
