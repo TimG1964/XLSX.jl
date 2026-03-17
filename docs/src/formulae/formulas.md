@@ -15,7 +15,7 @@ exactly as it would appear in the Excel formula bar.
 To set a formula, it must be a valid Excel formula and written in US english with 
 a comma separator. Cell references may be absolute or relative references in either 
 the row or the column or both (e.g. `\$A\$2`). No validation of the specified 
-formula is made by `XLSX.jl` and the formula wil be accepted as given.
+formula is made by `XLSX.jl` and the formula will be accepted as given.
 
 
 For example:
@@ -46,7 +46,7 @@ julia> XLSX.getFormula(s, "A5")
 
 Special characters need escaping in the usual way, so that absolute references must be written as, 
 for example, `\$A\$1`. Similarly, when entering text strings into formulas, quotation marks need 
-to be quoted. For example:
+to be escaped. For example:
 
 ```julia
 julia> setFormula(s, "B1", "=hyperlink(\"https://www.bbc.co.uk/news\", \"BBC News\")")
@@ -297,7 +297,7 @@ named cell range, should it be necessary to use the `raw` keyword option describ
 !!! note
 
     Excel is often very fussy about the internal structure of an xlsx file but the resulting
-    error messages (when Excel tries to open a file it considers mal-formed) may be somewhat cryptic. 
+    error messages (when Excel tries to open a file it considers malformed) may be somewhat cryptic. 
     If there is an error in the formula you enter, it may not be clear what it is from the error 
     Excel produces (as shown below). A safe fall back may be to test the formula in Excel itself and copy/paste 
     it into julia. Alternatively, copy the formula directly from the xml representation of a working 

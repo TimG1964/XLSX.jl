@@ -10,7 +10,8 @@ makedocs(
         "Formatting Guide" => Any[
             "Cell formats" => "formatting/cellFormatting.md",
             "Conditional formats" => "formatting/conditionalFormatting.md",
-            "Working with merged cells" => "formatting/mergedCells.md",
+            "Column width and row height" => "formatting/widthAndHeight.md",
+            "Merged cells" => "formatting/mergedCells.md",
         ],
         "Using Formulas" => "formulae/formulas.md",
         "Examples" => "examples.md",
