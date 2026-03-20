@@ -124,9 +124,9 @@ const GROUPBY_AGGREGATORS = Dict(
 Base.isempty(f::Formula) = f.formula == ""
 Base.isempty(f::ReferencedFormula) = f.formula == ""
 Base.isempty(f::FormulaReference) = false # always links to another formula
-Base.hash(f::Formula) = hash(f.formula) + hash(f.unhandled)
-Base.hash(f::FormulaReference) = hash(f.id) + hash(f.unhandled)
-Base.hash(f::ReferencedFormula) = hash(f.formula) + hash(f.id) + hash(f.ref) + hash(f.unhandled)
+Base.hash(f::Formula, h::UInt) = hash(f.unhandled, hash(f.formula, h))
+Base.hash(f::FormulaReference, h::UInt) = hash(f.unhandled, hash(f.id, h))
+Base.hash(f::ReferencedFormula, h::UInt) = hash(f.unhandled, hash(f.ref, hash(f.id, hash(f.formula, h))))
 
 function new_ReferencedFormula_Id(ws::Worksheet)
     # return the first positive integer (or 0) not currently used as a ReferencedFormula Id

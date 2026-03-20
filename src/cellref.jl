@@ -59,7 +59,7 @@ end
 Base.string(c::CellRef) = string(encode_column_number(column_number(c))) * string(row_number(c))
 Base.show(io::IO, c::CellRef) = print(io, string(c))
 Base.:(==)(c1::CellRef, c2::CellRef) = c1.row_number == c2.row_number && c1.column_number == c2.column_number
-Base.hash(c::CellRef) = hash(string(c))
+Base.hash(c::CellRef, h::UInt) = hash(c.column_number, hash(c.row_number, h))
 Base.isless(c1::CellRef, c2::CellRef) = Base.isless(string(c1), string(c2))
 cellname(c::CellRef) :: String = string(encode_column_number(column_number(c))) * string(row_number(c))
 
@@ -211,7 +211,7 @@ CellRange(start_row::Integer, start_column::Integer, stop_row::Integer, stop_col
 Base.string(cr::CellRange) = string(cr.start)*":"*string(cr.stop)
 Base.show(io::IO, cr::CellRange) = print(io, string(cr))
 Base.:(==)(cr1::CellRange, cr2::CellRange) = cr1.start == cr2.start && cr1.stop == cr2.stop
-Base.hash(cr::CellRange) = hash(cr.start) + hash(cr.stop)
+Base.hash(cr::CellRange, h::UInt) = hash(cr.stop, hash(cr.start, h))
 Base.isless(cr1::CellRange, cr2::CellRange) = Base.isless(string(cr1), string(cr2)) # needed for tests
 
 macro range_str(cellrange)
@@ -334,13 +334,13 @@ end
 Base.string(cr::ColumnRange) = encode_column_number(cr.start)*":"*encode_column_number(cr.stop)
 Base.show(io::IO, cr::ColumnRange) = print(io, string(cr))
 Base.:(==)(cr1::ColumnRange, cr2::ColumnRange) = cr1.start == cr2.start && cr1.stop == cr2.stop
-Base.hash(cr::ColumnRange) = hash(cr.start) + hash(cr.stop)
+Base.hash(cr::ColumnRange, h::UInt) = hash(cr.stop, hash(cr.start, h))
 Base.in(column_number::Integer, rng::ColumnRange) = rng.start <= column_number && column_number <= rng.stop
 
 Base.string(cr::RowRange) = string(cr.start)*":"*string(cr.stop)
 Base.show(io::IO, cr::RowRange) = print(io, string(cr))
 Base.:(==)(cr1::RowRange, cr2::RowRange) = cr1.start == cr2.start && cr1.stop == cr2.stop
-Base.hash(cr::RowRange) = hash(cr.start) + hash(cr.stop)
+Base.hash(cr::RowRange, h::UInt) = hash(cr.stop, hash(cr.start, h))
 Base.in(row_number::Integer, rng::RowRange) = rng.start <= row_number && row_number <= rng.stop
 
 function cell_offset(from::CellRef, to::CellRef) # return tuple (row_offset, column_offset) between `from` and `to` cells
@@ -489,27 +489,27 @@ end
 Base.string(cr::SheetCellRef) = string(quoteit(cr.sheet), "!", cr.cellref)
 Base.show(io::IO, cr::SheetCellRef) = print(io, string(cr))
 Base.:(==)(cr1::SheetCellRef, cr2::SheetCellRef) = cr1.sheet == cr2.sheet && cr1.cellref == cr2.cellref
-Base.hash(cr::SheetCellRef) = hash(cr.sheet) + hash(cr.cellref)
+Base.hash(cr::SheetCellRef, h::UInt) = hash(cr.cellref, hash(cr.sheet, h))
 
 Base.string(cr::SheetCellRange) = string(quoteit(cr.sheet), "!", cr.rng)
 Base.show(io::IO, cr::SheetCellRange) = print(io, string(cr))
 Base.:(==)(cr1::SheetCellRange, cr2::SheetCellRange) = cr1.sheet == cr2.sheet && cr1.rng == cr2.rng
-Base.hash(cr::SheetCellRange) = hash(cr.sheet) + hash(cr.rng)
+Base.hash(cr::SheetCellRange, h::UInt) = hash(cr.rng, hash(cr.sheet, h))
 
 Base.string(cr::SheetColumnRange) = string(quoteit(cr.sheet), "!", cr.colrng)
 Base.show(io::IO, cr::SheetColumnRange) = print(io, string(cr))
 Base.:(==)(cr1::SheetColumnRange, cr2::SheetColumnRange) = cr1.sheet == cr2.sheet && cr1.colrng == cr2.colrng
-Base.hash(cr::SheetColumnRange) = hash(cr.sheet) + hash(cr.colrng)
+Base.hash(cr::SheetColumnRange, h::UInt) = hash(cr.colrng, hash(cr.sheet, h))
 
 Base.string(cr::SheetRowRange) = string(quoteit(cr.sheet), "!", cr.rowrng)
 Base.show(io::IO, cr::SheetRowRange) = print(io, string(cr))
 Base.:(==)(cr1::SheetRowRange, cr2::SheetRowRange) = cr1.sheet == cr2.sheet && cr1.rowrng == cr2.rowrng
-Base.hash(cr::SheetRowRange) = hash(cr.sheet) + hash(cr.colrng)
+Base.hash(cr::SheetRowRange, h::UInt) = hash(cr.rowrng, hash(cr.sheet, h))
 
 Base.string(cr::NonContiguousRange) = join([string(quoteit(cr.sheet), "!", x) for x in cr.rng],",")
 Base.show(io::IO, cr::NonContiguousRange) = print(io, string(cr))
 Base.:(==)(cr1::NonContiguousRange, cr2::NonContiguousRange) = cr1.sheet == cr2.sheet && cr1.rng == cr2.rng
-Base.hash(cr::NonContiguousRange) = hash(cr.sheet) + hash(cr.rng)
+Base.hash(cr::NonContiguousRange, h::UInt) = hash(cr.rng, hash(cr.sheet, h))
 
 function Base.in(ref::SheetCellRef, ncrng::NonContiguousRange) :: Bool
     if ref.sheet != ncrng.sheet
