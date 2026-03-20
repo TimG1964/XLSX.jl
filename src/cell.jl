@@ -13,7 +13,7 @@
 @inline relative_column_position(c::EmptyCell, rng::ColumnRange) = relative_column_position(c.ref, rng)
 
 Base.:(==)(c1::Cell, c2::Cell) = c1.ref == c2.ref && c1.datatype == c2.datatype && c1.style == c2.style && c1.value == c2.value && c1.meta == c2.meta && c1.formula == c2.formula
-Base.hash(c::Cell, h::UInt) = hash(c.formula, hash(c.meta, (hash(c.value, hash(c.style, hash(c.datatype, hash(c.ref, h)))))))
+Base.hash(c::Cell, h::UInt) = hash(c.formula, hash(c.meta, hash(c.value, hash(c.style, hash(c.datatype, hash(c.ref, h))))))
 
 Base.:(==)(c1::EmptyCell, c2::EmptyCell) = c1.ref == c2.ref
 Base.hash(c::EmptyCell, h::UInt) = hash(c.ref, h)

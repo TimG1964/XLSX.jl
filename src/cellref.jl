@@ -59,7 +59,7 @@ end
 Base.string(c::CellRef) = string(encode_column_number(column_number(c))) * string(row_number(c))
 Base.show(io::IO, c::CellRef) = print(io, string(c))
 Base.:(==)(c1::CellRef, c2::CellRef) = c1.row_number == c2.row_number && c1.column_number == c2.column_number
-Base.hash(c::CellRef, h::UInt) = hash(string(c), h)
+Base.hash(c::CellRef, h::UInt) = hash(c.column_number, hash(c.row_number, h))
 Base.isless(c1::CellRef, c2::CellRef) = Base.isless(string(c1), string(c2))
 cellname(c::CellRef) :: String = string(encode_column_number(column_number(c))) * string(row_number(c))
 
@@ -211,7 +211,7 @@ CellRange(start_row::Integer, start_column::Integer, stop_row::Integer, stop_col
 Base.string(cr::CellRange) = string(cr.start)*":"*string(cr.stop)
 Base.show(io::IO, cr::CellRange) = print(io, string(cr))
 Base.:(==)(cr1::CellRange, cr2::CellRange) = cr1.start == cr2.start && cr1.stop == cr2.stop
-Base.hash(cr::ColumnRange, h::UInt) = hash(cr.stop, hash(cr.start, h))
+Base.hash(cr::CellRange, h::UInt) = hash(cr.stop, hash(cr.start, h))
 Base.isless(cr1::CellRange, cr2::CellRange) = Base.isless(string(cr1), string(cr2)) # needed for tests
 
 macro range_str(cellrange)
@@ -334,13 +334,13 @@ end
 Base.string(cr::ColumnRange) = encode_column_number(cr.start)*":"*encode_column_number(cr.stop)
 Base.show(io::IO, cr::ColumnRange) = print(io, string(cr))
 Base.:(==)(cr1::ColumnRange, cr2::ColumnRange) = cr1.start == cr2.start && cr1.stop == cr2.stop
-Base.hash(cr::RowRange, h::UInt) = hash(cr.stop, hash(cr.start, h))
+Base.hash(cr::ColumnRange, h::UInt) = hash(cr.stop, hash(cr.start, h))
 Base.in(column_number::Integer, rng::ColumnRange) = rng.start <= column_number && column_number <= rng.stop
 
 Base.string(cr::RowRange) = string(cr.start)*":"*string(cr.stop)
 Base.show(io::IO, cr::RowRange) = print(io, string(cr))
 Base.:(==)(cr1::RowRange, cr2::RowRange) = cr1.start == cr2.start && cr1.stop == cr2.stop
-Base.hash(cr::RowRange, h::UInt) = hash(cr.stop, hash(cr.start, h)) 
+Base.hash(cr::RowRange, h::UInt) = hash(cr.stop, hash(cr.start, h))
 Base.in(row_number::Integer, rng::RowRange) = rng.start <= row_number && row_number <= rng.stop
 
 function cell_offset(from::CellRef, to::CellRef) # return tuple (row_offset, column_offset) between `from` and `to` cells
