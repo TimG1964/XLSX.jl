@@ -718,7 +718,7 @@ function stream_files(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int, ch
     end
 end
 
-# Read xml files in two passes
+# Read xml files in three passes
 # pass 1 - read all but worksheets and sharedStrings
 # pass 2 - only read sharedStrings (needed before worksheets)
 # pass 3 - only read worksheets

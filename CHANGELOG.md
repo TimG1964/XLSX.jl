@@ -4,10 +4,9 @@ All notable changes to this package will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## Unreleased
-- 
+## [Unreleased]
 
-## [v0.11.0](https://github.com/JuliaData/XLSX.jl/tree/v0.11.0) - 2026-03-18
+## [v0.11.0](https://github.com/JuliaData/XLSX.jl/tree/v0.11.0) - 2026-03-23
 This release introduces significant new functionality as set out below.
 
 There are almost no changes in existing functional APIs in v0.11.0 compared with v0.10.4. Those changes that have been made are described briefly here.
