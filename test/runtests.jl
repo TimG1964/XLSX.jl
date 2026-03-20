@@ -6618,8 +6618,8 @@ end
 # issue #243
 @testset "xml bom" begin
     xf = XLSX.readxlsx(joinpath(data_directory, "Bom - issue243.xlsx"))
-    @test XLSX.sheetnames(xf) == ["QMJ Factors", "Definition", "Data Sources", "--> Additional Global Factors", "MKT", "SMB", "HML FF", "HML Devil", "UMD", "ME(t-1)", "RF", "Sources and Definitions", "Disclosures"]
-    @test XLSX.sheetcount(xf) == 13
+    @test XLSX.sheetnames(xf) == ["QMJ Factors", "Definition", "Data Sources", "--> Additional Global Factors", "Disclosures"]
+    @test XLSX.sheetcount(xf) == 5
     @test XLSX.hassheet(xf, "QMJ Factors") == true
     @test xf["QMJ Factors"]["H833"] ≈ -0.0686846616503713
 end

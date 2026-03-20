@@ -1,4 +1,4 @@
-# Cells and data
+# Formatting
 
 ## Cell format
 
