@@ -2,6 +2,7 @@
 import XLSX
 import Tables
 using Test, Dates, XML
+using OrderedCollections: OrderedDict
 import DataFrames, Random
 import Distributions as Dist
 import CSV
@@ -4873,7 +4874,7 @@ end
             max_val="95"
         )
         @test XML.tag(XLSX.get_x14_icon("3Triangles")) == "x14:cfRule"
-        @test XML.attributes(XLSX.get_x14_icon("3Stars")) == XML.OrderedDict("type" => "iconSet", "priority" => "1", "id" => "XXXX-xxxx-XXXX")
+        @test XML.attributes(XLSX.get_x14_icon("3Stars")) == OrderedDict("type" => "iconSet", "priority" => "1", "id" => "XXXX-xxxx-XXXX")
         @test length(XML.children(XLSX.get_x14_icon("5Boxes"))) == 1
         @test typeof(XLSX.get_x14_icon("Custom")) == XML.Node
     end

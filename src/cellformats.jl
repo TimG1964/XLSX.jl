@@ -1357,7 +1357,7 @@ function setAlignment(sh::Worksheet, cellref::CellRef;
     cell_alignment = getAlignment(wb, cell_style)
     old_atts       = isnothing(cell_alignment) ? Dict{String,String}() : cell_alignment.alignment["alignment"]
 
-    atts = XML.OrderedDict{String,String}()
+    atts = OrderedDict{String,String}()
     _merge_alignment_att(atts, "horizontal",   horizontal, old_atts)
     _merge_alignment_att(atts, "vertical",     vertical,   old_atts)
     _merge_alignment_att(atts, "wrapText",     wrapText,   old_atts, b -> b ? "1" : "0")

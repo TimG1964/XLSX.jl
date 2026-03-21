@@ -5,7 +5,7 @@ using XLSX
 # StyledStrings is only available in Julia 1.11+
 @static if VERSION >= v"1.11-"
 
-    using StyledStrings
+    using StyledStrings: StyledStrings, AnnotatedString
 
     # Import from StyledStrings
     import StyledStrings: load_customisations!, getface, Face, FACES, SimpleColor, HTML_BASIC_COLORS
