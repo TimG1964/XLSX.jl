@@ -133,7 +133,7 @@ function styles_add_numFmt(wb::Workbook, format_code::AbstractString)::Integer
         # We need to add the numFmts node directly after the styleSheet node
         # Move everything down one and then insert the new node at the top
         numfmts = XML.Element("numFmts", count="1")
-        XML.pushfirst!(stylesheet, numfmts)
+        pushfirst!(stylesheet, numfmts)
     else
         numfmts = numfmts[1]
     end
@@ -278,7 +278,7 @@ function styles_get_cellXf_with_numFmtId(allXfNodes::Vector{XML.Node}, numFmtId:
 end
 
 function styles_add_cell_xf(wb::Workbook, attributes::Dict{String,String})::CellDataFormat
-    new_xf = XML.Node(XML.Element, "xf", XML.OrderedDict{String,String}(), nothing, nothing)
+    new_xf = XML.Node(XML.Element, "xf", OrderedDict{String,String}(), nothing, nothing)
     for k in keys(attributes)
         new_xf[k] = attributes[k]
     end
