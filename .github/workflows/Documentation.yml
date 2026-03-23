@@ -8,6 +8,11 @@ on:
       - 'v*'
   pull_request:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref (branch or tag) to build docs for'
+        required: false
+        default: 'refs/heads/main'
 
 jobs:
   build:
@@ -16,6 +21,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.inputs.ref }}
 
       - name: Set up Julia
         uses: julia-actions/setup-julia@v1
@@ -35,7 +42,7 @@ jobs:
           julia --project=docs docs/make.jl
 
       - name: Deploy documentation
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: julia-actions/julia-docdeploy@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
