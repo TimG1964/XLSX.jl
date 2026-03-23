@@ -7,29 +7,34 @@ on:
     tags:
       - 'v*'
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Check out repository
+        uses: actions/checkout@v3
 
       - name: Set up Julia
         uses: julia-actions/setup-julia@v1
         with:
           version: '1'
 
-      - name: Install dependencies
-        run: julia --project=docs -e '
-          using Pkg;
-          Pkg.develop(PackageSpec(path=pwd()));
-          Pkg.instantiate();
-        '
+      - name: Install docs dependencies
+        run: |
+          julia --project=docs -e '
+            using Pkg;
+            Pkg.develop(PackageSpec(path=pwd()));
+            Pkg.instantiate();
+          '
 
-      - name: Build docs
-        run: julia --project=docs docs/make.jl
+      - name: Build documentation
+        run: |
+          julia --project=docs docs/make.jl
 
-      - name: Deploy
+      - name: Deploy documentation
         if: github.event_name == 'push'
         uses: julia-actions/julia-docdeploy@v1
         env:
