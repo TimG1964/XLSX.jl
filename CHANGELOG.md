@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-## [v0.11.1](https://github.com/JuliaData/XLSX.jl/tree/v0.11.0) - 2026-03-30
+## [v0.11.1](https://github.com/JuliaData/XLSX.jl/tree/v0.11.1) - 2026-03-30
 Minor bug-fix to get the StyledStrings extension working in Julia v1.14
 
 ## [v0.11.0](https://github.com/JuliaData/XLSX.jl/tree/v0.11.0) - 2026-03-23
