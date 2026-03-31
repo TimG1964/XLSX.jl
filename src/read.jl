@@ -562,8 +562,8 @@ function parse_workbook!(xf::XLSXFile)
                             defined_value = missing
                         end
                         isabs = false
-                    elseif tryparse(Int, defined_value_string) !== nothing
-                        defined_value = parse(Int, defined_value_string)
+                    elseif tryparse(Int64, defined_value_string) !== nothing
+                        defined_value = parse(Int64, defined_value_string)
                         isabs = false
                     elseif tryparse(Float64, defined_value_string) !== nothing
                         defined_value = parse(Float64, defined_value_string)

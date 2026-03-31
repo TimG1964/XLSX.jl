@@ -43,8 +43,8 @@ data_directory = joinpath(dirname(pathof(XLSX)), "..", "data")
     @test ef_Book1["Sheet1"].name == "Sheet1"
     @test ef_Book1[1].name == "Sheet1"
 
-    @test XLSX.sst_unformatted_string(ef_Book1.workbook, 0) == "B2" # index is 0-based
-    @test XLSX.sst_unformatted_string(ef_Book1, 0) == "B2"
+    @test XLSX.sst_unformatted_string(ef_Book1.workbook, Int64(0)) == "B2" # index is 0-based
+    @test XLSX.sst_unformatted_string(ef_Book1, Int64(0)) == "B2"
     @test XLSX.sst_unformatted_string(ef_Book1, "0") == "B2"
 
     @test !XLSX.has_relationship_by_type(ef_Book1.workbook, "invalid_type")
@@ -1041,7 +1041,7 @@ end
     ints = f["int"][:]
     for n in ints
         if !ismissing(n)
-            @test isa(n, Int)
+            @test isa(n, Int64)
         end
     end
 
@@ -1323,7 +1323,7 @@ end
 
     check_test_data(data, test_data)
 
-    @test XLSX.infer_eltype(data[1]) == Int
+    @test XLSX.infer_eltype(data[1]) == Int64
     @test XLSX.infer_eltype(data[2]) == Union{Missing,String}
     @test XLSX.infer_eltype(data[3]) == Date
     @test XLSX.infer_eltype(data[4]) == Union{Missing,String}
@@ -1333,13 +1333,13 @@ end
     @test XLSX.infer_eltype(Vector{Float64}()) == Float64
     @test XLSX.infer_eltype(Vector{Any}()) == Any
     @test XLSX.infer_eltype([1, "1", 10.2]) == Any
-    @test XLSX.infer_eltype([1, 10]) == Int64
+    @test XLSX.infer_eltype([1, 10]) == Int
     @test XLSX.infer_eltype([1.0, 10.0]) == Float64
     @test XLSX.infer_eltype([1, 10.2]) == Float64 # Promote mixed int/float columns to float (#192)
 
     dtable_inferred = XLSX.gettable(s, infer_eltypes=true)
     data_inferred, col_names = dtable_inferred.data, dtable_inferred.column_labels
-    @test eltype(data_inferred[1]) == Int
+    @test eltype(data_inferred[1]) == Int64
     @test eltype(data_inferred[2]) == Union{Missing,String}
     @test eltype(data_inferred[3]) == Date
     @test eltype(data_inferred[4]) == Union{Missing,String}

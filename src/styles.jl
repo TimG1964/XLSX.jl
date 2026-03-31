@@ -106,14 +106,14 @@ function styles_cell_xf(allXfNodes::Vector{XML.Node}, index::Integer)::XML.Node
 end
 
 # Queries numFmtId from cellXfs -> xf nodes."
-function styles_cell_xf_numFmtId(wb::Workbook, index::Int)::Int
+function styles_cell_xf_numFmtId(wb::Workbook, index::Integer)::Int
     el = styles_cell_xf(wb, index)
     if !haskey(el, "numFmtId")
         return 0
     end
     return parse(Int, el["numFmtId"])
 end
-function styles_cell_xf_numFmtId(allXfNodes::Vector{XML.Node}, index::Int)::Int
+function styles_cell_xf_numFmtId(allXfNodes::Vector{XML.Node}, index::Integer)::Int
     el = styles_cell_xf(allXfNodes, index)
     if !haskey(el, "numFmtId")
         return 0
@@ -173,7 +173,7 @@ function remove_formatting(code)
     replace(code, ignoredformatting => "")
 end
 
-function styles_is_datetime(wb::Workbook, index::Int)::Bool
+function styles_is_datetime(wb::Workbook, index::Integer)::Bool
     if !haskey(wb.buffer_styles_is_datetime, index)
         isdatetime = false
 
@@ -204,7 +204,7 @@ end
 
 styles_is_datetime(ws::Worksheet, index) = styles_is_datetime(get_workbook(ws), index)
 
-function styles_is_float(wb::Workbook, index::Int)::Bool
+function styles_is_float(wb::Workbook, index::Integer)::Bool
     if !haskey(wb.buffer_styles_is_float, index)
         isfloat = false
         numFmtId = styles_cell_xf_numFmtId(wb, index)

@@ -648,7 +648,7 @@ end
 xlsx_encode(::Worksheet, val::Missing) = (CT_EMPTY, UInt64(0))
 xlsx_encode(::Worksheet, val::Bool) = (CT_BOOL, UInt64(val))
 xlsx_encode(::Worksheet, val::Float64) = (CT_FLOAT, reinterpret(UInt64, val))
-xlsx_encode(::Worksheet, val::Int) = (CT_INT, reinterpret(UInt64, Int64(val)))
+xlsx_encode(::Worksheet, val::Int64) = (CT_INT, reinterpret(UInt64, val))
 xlsx_encode(ws::Worksheet, val::Dates.Date) = (CT_DATE, reinterpret(UInt64, date_to_excel_value(val, isdate1904(get_xlsxfile(ws)))))
 xlsx_encode(ws::Worksheet, val::Dates.DateTime) = (CT_DATETIME, reinterpret(UInt64, datetime_to_excel_value(val, isdate1904(get_xlsxfile(ws)))))
 xlsx_encode(::Worksheet, val::Dates.Time) = (CT_TIME, reinterpret(UInt64, time_to_excel_value(val)))
@@ -1130,10 +1130,10 @@ function addsheet!(wb::Workbook, name::AbstractString=""; relocatable_data_path:
 
     new_cache = XLSX.WorksheetCache(
         true,
-        Dict{Int64,Dict{Int64,XLSX.Cell}}(),
-        Int64[],
+        Dict{Int,Dict{Int,XLSX.Cell}}(),
+        Int[],
         Dict{Int,Union{Float64,Nothing}}(),
-        Dict{Int64,Int64}(),
+        Dict{Int,Int}(),
         SheetRowStreamIterator(get_xlsxfile(wb)[1]), # Dummy - not needed because using full cache.
         nothing,
         false
