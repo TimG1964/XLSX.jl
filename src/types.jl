@@ -222,12 +222,14 @@ Union{String, Missing, Float64, Int, Bool, Dates.Date, Dates.Time, Dates.DateTim
     `.xlsx` file.
 
 """
-const CellConcreteType = Union{String, Missing, Float64, Int, Bool, Dates.Date, Dates.Time, Dates.DateTime}
+const CellConcreteType = Union{String, Missing, Float64, Int64, Bool, Dates.Date, Dates.Time, Dates.DateTime}
 
 # CellValue is a Julia type of a value read from a Spreadsheet.
 struct CellValue
     value::CellConcreteType
     styleid::AbstractCellDataFormat
+    CellValue(value::CellConcreteType, styleid::AbstractCellDataFormat) = new(value, styleid)
+    CellValue(value::Integer, styleid::AbstractCellDataFormat) = new(Int64(value), styleid)
 end
 
 #=
