@@ -551,6 +551,7 @@ mutable struct Workbook
     sst::SharedStringTable # shared string table
     buffer_styles_is_float::Dict{Int, Bool}      # cell style -> true if is float
     buffer_styles_is_datetime::Dict{Int, Bool}   # cell style -> true if is datetime
+    styles_lock::ReentrantLock # Prevent race conditions when accessing Styles
     workbook_names::Dict{String, DefinedNameValue} # definedName
     worksheet_names::Dict{Tuple{Int, String}, DefinedNameValue} # definedName. (sheetId, name) -> value.
     styles_xroot::Union{XML.Node, Nothing}
