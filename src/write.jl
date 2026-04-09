@@ -919,7 +919,7 @@ function setdata!(sheet::Worksheet, rows::UnitRange{T}, col::Integer, data::Abst
     setdata!(sheet, anchor_cell_ref, data, 1)
 end
 
-function setdata!(sheet::Worksheet, ref_or_rng::AbstractString, matrix::Array{T,2}) where {T}
+function setdata!(sheet::Worksheet, ref_or_rng::AbstractString, matrix::AbstractArray{T,2}) where {T}
     if is_valid_cellrange(ref_or_rng)
         setdata!(sheet, CellRange(ref_or_rng), matrix)
     elseif is_valid_cellname(ref_or_rng)
@@ -929,17 +929,18 @@ function setdata!(sheet::Worksheet, ref_or_rng::AbstractString, matrix::Array{T,
     end
 end
 
-function setdata!(sheet::Worksheet, ref::CellRef, matrix::Array{T,2}) where {T}
-    rows, cols = size(matrix)
+# Generalise to AbstractArray (#158)
+function setdata!(sheet::Worksheet, ref::CellRef, matrix::AbstractArray{T,2}) where {T}
+    row_ax, col_ax = axes(matrix)
     anchor_row = row_number(ref)
     anchor_col = column_number(ref)
 
-    @inbounds for c in 1:cols, r in 1:rows
-        setdata!(sheet, anchor_row + r - 1, anchor_col + c - 1, matrix[r, c])
+    @inbounds for c in col_ax, r in row_ax
+        setdata!(sheet, anchor_row + (r - first(row_ax)), anchor_col + (c - first(col_ax)), matrix[r, c])
     end
 end
 
-function setdata!(sheet::Worksheet, rng::CellRange, matrix::Array{T,2}) where {T}
+function setdata!(sheet::Worksheet, rng::CellRange, matrix::AbstractArray{T,2}) where {T}
     size(rng) != size(matrix) && throw(XLSXError("Target range $rng size ($(size(rng))) must be equal to the input matrix size ($(size(matrix)))"))
     setdata!(sheet, rng.start, matrix)
 end
