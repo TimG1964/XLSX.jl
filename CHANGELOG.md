@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 - Add support for custom missing strings (issue #90)
-- Widen setdata! to accept an AbstractArray (issue #158)
+- Widen `setdata!` to accept an AbstractArray (issue #158)
 - Fix intermittent bug with race condition when reading styles
 
 ## [v0.11.2](https://github.com/JuliaData/XLSX.jl/tree/v0.11.2) - 2026-04-01
