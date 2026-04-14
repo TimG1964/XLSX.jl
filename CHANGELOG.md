@@ -5,8 +5,11 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
+- Bake in relocatable data (issue #351)
+- Add type inference to `eachtablerow` (issue #225)
 - Add support for custom missing strings (issue #90)
 - Widen `setdata!` to accept an AbstractArray (issue #158)
+- Resolve excessive lock conflicts introduced by below bug fix
 - Fix intermittent bug with race condition when reading styles
 
 ## [v0.11.2](https://github.com/JuliaData/XLSX.jl/tree/v0.11.2) - 2026-04-01
