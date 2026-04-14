@@ -9,7 +9,7 @@ import CSV
 using StyledStrings
 
 
-data_directory = joinpath(dirname(pathof(XLSX)), "..", "data")
+data_directory = joinpath(dirname(pathof(XLSX)), "..", "test", "data")
 
 @assert isdir(data_directory)
 
