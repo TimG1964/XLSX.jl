@@ -5,6 +5,8 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
+
+## [v0.11.3](https://github.com/JuliaData/XLSX.jl/tree/v0.11.3) - 2026-04-14
 - Bake in relocatable data (issue #351)
 - Add type inference to `eachtablerow` (issue #225)
 - Add support for custom missing strings (issue #90)
