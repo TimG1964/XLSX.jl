@@ -13,6 +13,10 @@ data_directory = joinpath(dirname(pathof(XLSX)), "..", "data")
 
 @assert isdir(data_directory)
 
+src_data_directory = joinpath(dirname(pathof(XLSX)), "data")
+
+@assert isdir(src_data_directory)
+
 @testset "read test files" begin
     ef_blank_ptbr_1904 = XLSX.readxlsx(joinpath(data_directory, "blank_ptbr_1904.xlsx"))
     ef_Book1 = XLSX.readxlsx(joinpath(data_directory, "Book1.xlsx"))
@@ -75,9 +79,9 @@ data_directory = joinpath(dirname(pathof(XLSX)), "..", "data")
     end
 
     @testset "Read invalid XLSX error" begin
-        @test_throws XLSX.XLSXError XLSX.readxlsx(joinpath(data_directory, "sheet_template.xml"))
+        @test_throws XLSX.XLSXError XLSX.readxlsx(joinpath(src_data_directory, "sheet_template.xml"))
         try
-            XLSX.readxlsx(joinpath(data_directory, "sheet_template.xml"))
+            XLSX.readxlsx(joinpath(src_data_directory, "sheet_template.xml"))
             @test false # didn't throw exception
         catch e
             @test occursin("is not a valid XLSX file", "$e")
@@ -6571,7 +6575,7 @@ end
 
 @testset "show xlsx" begin
     @testset "single sheet" begin
-        xf = XLSX.readxlsx(joinpath(data_directory, "blank.xlsx"))
+        xf = XLSX.readxlsx(joinpath(src_data_directory, "blank.xlsx"))
         show(IOBuffer(), xf)
     end
 
