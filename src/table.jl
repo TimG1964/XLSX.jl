@@ -476,7 +476,7 @@ infer_eltype(v::Vector{T}) where T = T
 
 
 # Address issue 225
-#Tables.columnaccess(::Type{<:XLSX.TableRowIterator}) = true # Not needed, it seems.
+#Tables.columnaccess(::Type{<:TableRowIterator}) = true # Not needed, it seems.
 function typed_column(v::Vector{Any})
     T = XLSX.infer_eltype(v)
     result = Vector{T}(undef, length(v))
@@ -485,7 +485,7 @@ function typed_column(v::Vector{Any})
     end
     return result
 end
-function Tables.columns(tr::XLSX.TableRowIterator)
+function Tables.columns(tr::TableRowIterator)
     schema = Tables.schema(tr)
     names = schema.names
     rows = Tables.rows(tr)

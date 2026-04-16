@@ -964,7 +964,7 @@ Use `normalizenames=true` to normalize column names to valid Julia identifiers.
 
 Use `missing_strings` to specify strings that should be interpreted as 
 `missing` values in the resulting table. `missing_strings` can be a single 
-string (e.g. "N/A") or a vector of strings (e.g. ["N/A", "NULL"]). 
+string (e.g. `"N/A"`) or a vector of strings (e.g. `["N/A", "NULL"]`). 
 The default value is `missing_strings=nothing`.
 
 Use `infer_eltypes=true` to get `data` as a `Vector{Any}` of typed vectors.
@@ -988,7 +988,7 @@ end
 ```
 
 `enable_cache` is a boolean that determines whether cell data are loaded 
-into the worksheet cache on reading. `readtable` with `enable_cache=true` 
+into the worksheet cache on reading. Using `readtable` with `enable_cache=true` 
 is faster than with `enable_cache=false` for large files, but uses more 
 memory. The default behavior is `enable_cache=true`.
 

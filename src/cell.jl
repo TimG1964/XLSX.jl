@@ -1,8 +1,6 @@
 
 @inline Base.isempty(::EmptyCell) = true
 @inline Base.isempty(::AbstractCell) = false
-@inline iserror(c::Cell) = c.datatype == CT_ERROR
-@inline iserror(::AbstractCell) = false
 @inline row_number(c::EmptyCell) = row_number(c.ref)
 @inline column_number(c::EmptyCell) = column_number(c.ref)
 @inline row_number(c::Cell) = row_number(c.ref)
@@ -41,8 +39,6 @@ function get_error_type(v::AbstractString)::UInt64
     end
 end
 
-#=
-# Only needed if ever cells containing error return something other than missing!
 function get_error_string(e::UInt64)::String
     if e == UInt64(XL_NULL)
         return "#NULL!"
@@ -63,6 +59,103 @@ function get_error_string(e::UInt64)::String
      else
         throw(XLSXError("Unknown error code: $e"))
     end
+end
+get_error_string(::Nothing) = ""
+
+
+"""
+    iserror(s::Worksheet, ref::AbstractString)
+    iserror(s::Worksheet, rows, cols)
+
+Returns `true` if the cell(s) at the given reference contain an error, `false` otherwise.
+An `EmptyCell` is not considered an error and returns `false`.
+
+The return type depends on the type of `ref` and is the same shape as the return 
+type of `getcell` for the same `ref`:
+- If `ref` or (`row`, `col`) refers to a single cell, returns a single Bool.
+- If `ref` or (`rows`, `cols`) refers to a range of cells, returns a matrix of Bools.
+- If `ref` or (`rows`, `cols`) refers to a non-contiguous range of cells, returns a vector of matrices of Bools.
+
+# Examples
+```julia
+julia> XLSX.iserror(sh, "A1") # Cell
+true
+
+julia> XLSX.iserror(sh, "I1") # EmptyCell
+false
+
+julia> XLSX.iserror(sh, "A1:I1") # CellRange - note that I1 is an EmptyCell, which is not an error
+1×9 Matrix{Bool}:
+ 1  1  1  1  1  1  1  1  0
+
+julia> XLSX.iserror(sh, "A1:B1,D1:E1") # non-contiguous range
+2-element Vector{Matrix{Bool}}:
+ [1 1]
+ [1 1]
+```
+
+See also [`XLSX.geterror`](@ref), [`XLSX.getcell`](@ref).
+"""
+iserror(s::Worksheet, ref::AbstractString) = iserror(getcell(s, ref))
+iserror(s::Worksheet, ::Colon) = iserror(getcell(s, :))
+iserror(s::Worksheet, r, c) = iserror(getcell(s, r, c))
+iserror(c::AbstractVector) = collect(iserror.(c))
+iserror(c::AbstractMatrix) = collect(iserror.(c))
+iserror(c::AbstractVector{<:AbstractMatrix}) = [collect(iserror.(M)) for M in c]
+@inline iserror(c::Cell) = c.datatype == CT_ERROR
+@inline iserror(::EmptyCell) = false
+
+getval(x) = hasproperty(x, :datatype) && x.datatype == CT_ERROR && hasproperty(x, :value) ? x.value : nothing
+
+"""
+    geterror(s::Worksheet, ref::AbstractString)
+    geterror(s::Worksheet, rows, cols)
+
+Returns the error value (e.g. `#DIV/0!`) for the cell(s) at the given reference, if any. 
+If there is no error, returns an empty string.
+
+The return type depends on the type of `ref` and is the same shape as the return 
+type of `getcell` for the same `ref`:
+- If `ref` or (`row`, `col`) refers to a single cell, returns a single Bool.
+- If `ref` or (`rows`, `cols`) refers to a range of cells, returns a matrix of Bools.
+- If `ref` or (`rows`, `cols`) refers to a non-contiguous range of cells, returns a vector of matrices of Bools.
+
+# Examples
+```julia
+julia> XLSX.geterror(sh, "A1") # Cell
+"#NULL!"
+
+julia> XLSX.geterror(sh, "I1") # EmptyCell
+""
+
+julia> XLSX.geterror(sh, "A1:I1") # CellRange - note that I1 is an EmptyCell, which returns an empty string
+1×9 Matrix{String}:
+ "#NULL!"  "#DIV/0!"  "#VALUE!"  "#REF!"  "#NAME?"  "#NUM!"  "#N/A"  "#VALUE!"  ""
+
+julia> XLSX.geterror(sh, "A1:B1,D1:E1") # non-contiguous range
+2-element Vector{Matrix{String}}:
+ ["#NULL!" "#DIV/0!"]
+ ["#REF!" "#NAME?"]
+```
+
+See also [`XLSX.iserror`](@ref), [`XLSX.getcell`](@ref).
+"""
+geterror(s::Worksheet, ref::AbstractString) = geterror(getcell(s, ref))
+geterror(s::Worksheet, ::Colon) = geterror(getcell(s, :))
+geterror(s::Worksheet, r, c) = geterror(getcell(s, r, c))
+geterror(c::AbstractVector) = collect(geterror.(c))
+geterror(c::AbstractMatrix) = collect(geterror.(c))
+geterror(c::AbstractVector{<:AbstractMatrix}) = [collect(geterror.(M)) for M in c]
+geterror(c::AbstractCell) = get_error_string(getval(c))
+#=
+# Returns the enums directly rather than the strings:
+# julia> XLSX.geterror(s, "A1")
+# XL_NULL::CellErrorType = 0x0000000000000001
+#
+function geterror(c::AbstractCell)
+    c = getval(c)
+    isnothing(c) && return ""
+    return CellErrorType(c)
 end
 =#
 
