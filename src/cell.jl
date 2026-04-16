@@ -99,8 +99,9 @@ See also [`XLSX.geterror`](@ref), [`XLSX.getcell`](@ref).
 iserror(s::Worksheet, ref::AbstractString) = iserror(getcell(s, ref))
 iserror(s::Worksheet, ::Colon) = iserror(getcell(s, :))
 iserror(s::Worksheet, r, c) = iserror(getcell(s, r, c))
+iserror(c::AbstractVector) = collect(iserror.(c))
 iserror(c::AbstractMatrix) = collect(iserror.(c))
-iserror(c::AbstractVector) = [collect(iserror.(M)) for M in c]
+iserror(c::AbstractVector{<:AbstractMatrix}) = [collect(iserror.(M)) for M in c]
 @inline iserror(c::Cell) = c.datatype == CT_ERROR
 @inline iserror(::EmptyCell) = false
 
@@ -142,8 +143,9 @@ See also [`XLSX.iserror`](@ref), [`XLSX.getcell`](@ref).
 geterror(s::Worksheet, ref::AbstractString) = geterror(getcell(s, ref))
 geterror(s::Worksheet, ::Colon) = geterror(getcell(s, :))
 geterror(s::Worksheet, r, c) = geterror(getcell(s, r, c))
+geterror(c::AbstractVector) = collect(geterror.(c))
 geterror(c::AbstractMatrix) = collect(geterror.(c))
-geterror(c::AbstractVector) = [collect(geterror.(M)) for M in c]
+geterror(c::AbstractVector{<:AbstractMatrix}) = [collect(geterror.(M)) for M in c]
 geterror(c::AbstractCell) = get_error_string(getval(c))
 #=
 # Returns the enums directly rather than the strings:

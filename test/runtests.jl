@@ -1094,15 +1094,34 @@ end
     f = XLSX.readxlsx(joinpath(data_directory, "Errors.xlsx"))
     sh = f[1]
     @test XLSX.iserror(sh, "A1") == true
+    @test XLSX.iserror(sh, 1, 1) == true
     @test XLSX.iserror(sh, "I1") == false
+    @test XLSX.iserror(sh, 1, 9) == false
     @test XLSX.iserror(sh, "A1:I1") == [true true true true true true true true false]
+    @test XLSX.iserror(sh, 1, 1:9) == [true true true true true true true true false]
     @test XLSX.iserror(sh, "A1:B1,D1:E1") == [[true true], [true true]]
-
+    @test XLSX.iserror(sh, 1, [1, 2, 4, 5]) == [true, true, true, true]
+    @test XLSX.iserror(sh, :) == Bool[
+                                        1 1 1 1 1 1 1 1
+                                        0 0 0 0 0 0 0 0
+                                        0 0 0 0 0 0 0 0
+                                        0 0 0 0 0 0 0 0
+                                        0 0 0 0 0 0 0 0
+                                     ]
     @test XLSX.geterror(sh, "A1") == "#NULL!"
+    @test XLSX.geterror(sh, 1, 1) == "#NULL!"
     @test XLSX.geterror(sh, "I1") == ""
-    @test XLSX.geterror(sh, "H2") == ""
+    @test XLSX.geterror(sh, 1, 9) == ""
     @test XLSX.geterror(s, "A1:I1") == ["#NULL!"  "#DIV/0!"  "#VALUE!"  "#REF!"  "#NAME?"  "#NUM!"  "#N/A"  "#VALUE!"  ""]
+    @test XLSX.geterror(s, 1, 1:9) == ["#NULL!"  "#DIV/0!"  "#VALUE!"  "#REF!"  "#NAME?"  "#NUM!"  "#N/A"  "#VALUE!"  ""]
     @test XLSX.geterror(sh, "A1:B1,D1:E1") == [["#NULL!" "#DIV/0!"], ["#REF!" "#NAME?"]]
+    @test XLSX.geterror(sh, 1, [1, 2, 4, 5]) == ["#NULL!", "#DIV/0!", "#REF!", "#NAME?"]
+    @test XLSX.geterror(sh, :) == [ "#NULL!"  "#DIV/0!"  "#VALUE!"  "#REF!"  "#NAME?"  "#NUM!"  "#N/A"  "#VALUE!"
+                                    ""        ""         ""         ""       ""        ""       ""      ""
+                                    ""        ""         ""         ""       ""        ""       ""      ""
+                                    ""        ""         ""         ""       ""        ""       ""      ""
+                                    ""        ""         ""         ""       ""        ""       ""      ""
+                                 ]
 
 end
 
