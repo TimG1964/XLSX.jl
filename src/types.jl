@@ -163,8 +163,6 @@ mutable struct CellAlignment # Alignment is part of the cell style `xf` so doesn
     end
 end
 
-abstract type AbstractCell end
-
 @enum CellValueType::UInt8 begin
     CT_EMPTY = 0
     CT_STRING = 1
@@ -186,6 +184,9 @@ end
     XL_NA = 7
     XL_SPILL = 8 # Turns out #SPILL is not an official error. These will return #VALUE errors
 end
+
+abstract type AbstractCell end
+
 mutable struct Cell <: AbstractCell
     ref::CellRef 
     value::UInt64 # Needs to be `reinterpret`ed according to the `Cell.datatype`

@@ -26,6 +26,7 @@ export
     # Cells & data
     CellRef, row_number, column_number, eachtablerow,
     readdata, getdata, gettable, readtable, readto, 
+    iserror, geterror,
     gettransposedtable, readtransposedtable,
     writetable, writetable!,
     addDefinedName, setFormula,
