@@ -815,9 +815,6 @@ function setdata!(ws::Worksheet, ref::AbstractString, value)
         return setdata!(ws, SheetRowRange(ref), value)
     elseif is_valid_non_contiguous_cellrange(ref)
         return setdata!(ws, NonContiguousRange(ws, ref), value)
-    elseif is_valid_non_contiguous_sheetcellrange(ref)
-        nc = NonContiguousRange(ref)
-        return do_sheet_names_match(ws, nc) && setdata!(ws, nc, value)
     end
     throw(XLSXError("`$ref` is not a valid cell or range reference."))
 end
@@ -841,6 +838,7 @@ function setdata!(ws::Worksheet, rng::ColumnRange, value)
     setdata!(ws, CellRange(start, stop), value)
 end
 function setdata!(ws::Worksheet, rng::NonContiguousRange, value)
+    do_sheet_names_match(ws, rng)
     for r in rng.rng
         setdata!(ws, r, value) # r may be a single Cell or a CellRange
     end

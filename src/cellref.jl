@@ -750,7 +750,7 @@ end
 NonContiguousRange(s::Worksheet, v::AbstractString)::NonContiguousRange = nCR(s.name, string.(split(v, ",")))
 function NonContiguousRange(v::AbstractString)::NonContiguousRange
 
-    !is_valid_non_contiguous_range(v) && throw(XLSXError("$v is not a valid non-contiguous range."))
+    !is_valid_non_contiguous_sheetcellrange(v) && throw(XLSXError("$v is not a valid non-contiguous sheetcell range."))
     
     ranges = string.(split(v, ","))
     firstsheet = parse_sheetname_from_sheetcell_name(ranges[1])
