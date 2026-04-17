@@ -86,6 +86,37 @@ function check_for_xlsx_file_format(filepath::AbstractString)
     end
 end
 
+# Determine if the file is a Strict OOXML file.
+function is_strict_ooxml(xf::XLSXFile)::Bool
+    files = xf.data
+
+    # Primary check: conformance attribute on workbook root
+    if haskey(files, "xl/workbook.xml")
+        wb = files["xl/workbook.xml"][end]
+        attrs = XML.attributes(wb)
+        if get(attrs, "conformance", "") == "strict"
+            return true
+        end
+        # Also catch strict namespace declarations on root element
+        if any(occursin("purl.oclc.org/ooxml", v) for v in values(attrs))
+            return true
+        end
+    end
+
+    # Fallback: check relationship types in _rels/.rels
+    if haskey(files, "_rels/.rels")
+        rels = files["_rels/.rels"][end]
+        for el in XML.children(rels)
+            if xml_local_name(XML.tag(el)) == "Relationship"
+                if occursin("purl.oclc.org/ooxml", get(XML.attributes(el), "Type", ""))
+                    return true
+                end
+            end
+        end
+    end
+
+    return false
+end
 
 """
     opentemplate(source::Union{AbstractString, IO}) :: XLSXFile
@@ -362,6 +393,8 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
 
     load_files!(xf, zip_io; pass=1) # multi-threaded file load
 
+    is_strict_ooxml(xf) && throw(XLSXError("Strict OOXML files are not supported."))
+
     check_minimum_requirements(xf)
     parse_relationships!(xf)
     parse_workbook!(xf)
@@ -380,6 +413,15 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
 
     return xf
 end
+
+# Returns the local name of an XML tag, stripping any namespace prefix.
+# e.g. "x:worksheet" -> "worksheet", "worksheet" -> "worksheet"
+@inline xml_local_name(tag::AbstractString) =
+    let i = findfirst(':', tag)
+        isnothing(i) ? tag : SubString(tag, i+1)
+    end
+@inline xml_local_name(::Nothing) = nothing
+
 function get_namespaces(r::XML.Node)::Dict{String,String}
     nss = Dict{String,String}()
     for (key, value) in XML.attributes(r)
@@ -464,7 +506,7 @@ end
 function parse_workbook!(xf::XLSXFile)
     xroot = xmlroot(xf,"xl/workbook.xml")[end]
     chn = XML.children(xroot)
-    XML.tag(xroot) != "workbook" && throw(XLSXError("Malformed xl/workbook.xml. Root node name should be 'workbook'. Got '$(XML.tag(xroot))'."))
+    xml_local_name(XML.tag(xroot)) != "workbook" && throw(XLSXError("Malformed xl/workbook.xml. Root node name should be 'workbook'. Got '$(xml_local_name(XML.tag(xroot)))'."))
 
     # workbook to be parsed
     workbook = get_workbook(xf)
@@ -475,7 +517,7 @@ function parse_workbook!(xf::XLSXFile)
 
     # changes workbook.date1904 if there is a setting in the workbookPr node
     for node in chn
-        if XML.tag(node) == "workbookPr"
+        if xml_local_name(XML.tag(node)) == "workbookPr"
 
             # read date1904 attribute
             attributes = XML.attributes(node)
@@ -499,10 +541,10 @@ function parse_workbook!(xf::XLSXFile)
     # sheets
     sheets = Vector{Worksheet}()
     for node in chn
-        if XML.tag(node) == "sheets"
+        if xml_local_name(XML.tag(node)) == "sheets"
 
             for sheet_node in XML.children(node)
-                XML.tag(sheet_node) != "sheet" && throw(XLSXError("Unsupported node $(XML.tag(sheet_node)) in node $(XML.tag(node)) in 'xl/workbook.xml'."))
+                xml_local_name(XML.tag(sheet_node)) != "sheet" && throw(XLSXError("Unsupported node $(xml_local_name(XML.tag(sheet_node))) in node $(xml_local_name(XML.tag(node))) in 'xl/workbook.xml'."))
                 worksheet = Worksheet(xf, sheet_node)
                 push!(sheets, worksheet)
             end
@@ -513,11 +555,11 @@ function parse_workbook!(xf::XLSXFile)
 
     # named ranges
     for node in chn
-        if XML.tag(node) == "definedNames"
+        if xml_local_name(XML.tag(node)) == "definedNames"
 
             for defined_name_node in XML.children(node)
 
-                if XML.tag(defined_name_node) == "definedName"
+                if xml_local_name(XML.tag(defined_name_node)) == "definedName"
 
                     defined_value_string = XML.value(defined_name_node[1])
                     name = XML.attributes(defined_name_node)["name"]

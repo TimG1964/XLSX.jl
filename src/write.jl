@@ -11,6 +11,13 @@ to specify a file name for the saved file.
 
 Returns the filepath of the written file if a filename is supplied, or `nothing` if writing to an `IO`.
 
+!!! note
+    If the source file used a namespace prefix (e.g. `xmlns:x="..."`) rather than
+    a default namespace (`xmlns="..."`) on its worksheet XML elements, the written
+    file will use the default namespace style instead. The output is valid OOXML
+    and can be read by Excel and other spreadsheet applications, but the XML
+    structure will differ from the original.
+
 """
 function savexlsx(f::XLSXFile)
     f.source == "blank.xlsx" && throw(XLSXError("Can't save to a blank `XLSXFile` instance. Use `writexlsx` instead to specify a file name."))
@@ -30,6 +37,14 @@ Returns the filepath of the written file if a filename is supplied, or `nothing`
 If `overwrite=true`, `output_source` (when a filepath) will be overwritten if it exists.
 
 See also [`savexlsx`](@ref).
+
+!!! note
+    If the source file used a namespace prefix (e.g. `xmlns:x="..."`) rather than
+    a default namespace (`xmlns="..."`) on its worksheet XML elements, the written
+    file will use the default namespace style instead. The output is valid OOXML
+    and can be read by Excel and other spreadsheet applications, but the XML
+    structure will differ from the original.
+
 """
 function writexlsx(output_source::Union{AbstractString,IO}, xf::XLSXFile; overwrite::Bool=false)
 
@@ -217,7 +232,7 @@ function unlink(node::XML.Node, att::Tuple{String,String})
         end
     end
     for child in XML.children(node) # Copy any child nodes with tags that are not att[2] across to new node
-        if XML.tag(child) != last(att)
+        if xml_local_name(XML.tag(child)) != last(att)
             push!(new_node, child)
         end
     end
@@ -226,11 +241,32 @@ end
 
 # Remove all children with tag given by att[2] from a parent XML node with a tag given by att[1].
 function get_idces(doc::XML.Node, t, b)
+    match_tag(tag, name) = contains(name, ':') ? tag == name : xml_local_name(tag) == name
+    
+    i = 1
+    j = 1
+    chn = XML.children(doc)
+    l = length(chn)
+    while !match_tag(XML.tag(chn[i]), t)
+        i += 1
+        i > l && return nothing, nothing
+    end
+    chn = XML.children(chn[i])
+    l = length(chn)
+    while !match_tag(XML.tag(chn[j]), b)
+        j += 1
+        j > l && return i, nothing
+    end
+    return i, j
+end
+#=
+function get_idces(doc::XML.Node, t, b)
     i = 1
     j = 1
     chn=XML.children(doc)
     l=length(chn)
-    while XML.tag(chn[i]) != t
+    while xml_local_name(XML.tag(chn[i])) != t
+        println(xml_local_name(XML.tag(chn[i])))
         i += 1
         if i > l
             return nothing, nothing
@@ -238,7 +274,7 @@ function get_idces(doc::XML.Node, t, b)
     end
     chn=XML.children(chn[i])
     l=length(chn)
-    while XML.tag(chn[j]) != b
+    while xml_local_name(XML.tag(chn[j])) != b
         j += 1
         if j > l
             return i, nothing
@@ -246,7 +282,7 @@ function get_idces(doc::XML.Node, t, b)
     end
     return i, j
 end
-
+=#
 """
     update_worksheets_xml!(xl::XLSXFile; full=false)
 
@@ -270,8 +306,12 @@ function update_single_sheet!(wb::Workbook, sheet_no::Int, full::Bool)::Union{No
     xroot = doc[end]
 
     # check namespace and root node name
-    get_default_namespace(xroot) != SPREADSHEET_NAMESPACE_XPATH_ARG && throw(XLSXError("Unsupported Spreadsheet XML namespace $(get_default_namespace(xroot))."))
-    XML.tag(xroot) != "worksheet" && throw(XLSXError("Malformed Excel file. Expected root node named `worksheet` in worksheet XML file."))
+    # get_default_namespace(xroot) != SPREADSHEET_NAMESPACE_XPATH_ARG && throw(XLSXError("Unsupported Spreadsheet XML namespace $(get_default_namespace(xroot))."))
+    ns_map = get_namespaces(xroot)
+    spreadsheet_ns_declared = SPREADSHEET_NAMESPACE_XPATH_ARG in values(ns_map)
+    spreadsheet_ns_declared ||
+        throw(XLSXError("Unsupported Spreadsheet XML namespace."))
+    xml_local_name(XML.tag(xroot)) != "worksheet" && throw(XLSXError("Malformed Excel file. Expected root node named `worksheet` in worksheet XML file."))
 
     if full # need to reconstruct row and cell data from cache
 
@@ -1088,7 +1128,7 @@ function renamesheet!(ws::Worksheet, name::AbstractString)
     # updates XML
     xroot = xmlroot(xf, "xl/workbook.xml")[end]
     for node in XML.children(xroot)
-        if XML.tag(node) == "sheets"
+        if xml_local_name(XML.tag(node)) == "sheets"
 
             for sheet_node in XML.children(node)
                 if sheet_node["name"] == ws.name
@@ -1346,7 +1386,7 @@ end
 add_override!(wb::Workbook, part::String, content::String) = add_override!(get_xlsxfile(wb), part, content)
 function add_override!(xf::XLSXFile, part::String, content::String) 
     ctype_root = xmlroot(xf, "[Content_Types].xml")[end]
-    XML.tag(ctype_root) != "Types" && throw(XLSXError("Something wrong here!"))
+    xml_local_name(XML.tag(ctype_root)) != "Types" && throw(XLSXError("Something wrong here!"))
     override_node = XML.Element("Override";
         PartName=part,
         ContentType=content
@@ -1364,7 +1404,7 @@ function renumber_files!(xf::XLSXFile, rId::String)
     w = XML.children(wbdoc[i][j])
     if length(w) > 0
         for c in w
-            if XML.tag(c) == "workbookView"
+            if xml_local_name(XML.tag(c)) == "workbookView"
                 a = XML.attributes(c)
                 if haskey(a, "activeTab")
                     at = parse(Int64, a["activeTab"])
@@ -1534,7 +1574,7 @@ function deletesheet!(wb::Workbook, name::AbstractString)::XLSXFile
 
     # update [Content_Types].xml
     ctype_root = xmlroot(get_xlsxfile(wb), "[Content_Types].xml")[end]
-    XML.tag(ctype_root) != "Types" && throw(XLSXError("Something wrong here!"))
+    xml_local_name(XML.tag(ctype_root)) != "Types" && throw(XLSXError("Something wrong here!"))
     cont = XML.children(ctype_root)
     let idx = 0
         for (i, c) in enumerate(cont)
