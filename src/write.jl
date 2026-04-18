@@ -12,12 +12,13 @@ to specify a file name for the saved file.
 Returns the filepath of the written file if a filename is supplied, or `nothing` if writing to an `IO`.
 
 !!! note
-    If the source file used a namespace prefix (e.g. `xmlns:x="..."`) rather than
-    a default namespace (`xmlns="..."`) on its worksheet XML elements, the written
-    file will use the default namespace style instead. The output is valid OOXML
+    XLSX files that use a namespace prefix (e.g. `xmlns:x="..."`) rather than a
+    default namespace (`xmlns="..."`) are fully supported for reading and writing.
+    On writing, the namespace prefix is normalised to a default namespace style.
+    `customXml` content is preserved as-is. The output is valid OOXML
     and can be read by Excel and other spreadsheet applications, but the XML
     structure will differ from the original.
-
+    
 """
 function savexlsx(f::XLSXFile)
     f.source == "blank.xlsx" && throw(XLSXError("Can't save to a blank `XLSXFile` instance. Use `writexlsx` instead to specify a file name."))
@@ -39,9 +40,10 @@ If `overwrite=true`, `output_source` (when a filepath) will be overwritten if it
 See also [`savexlsx`](@ref).
 
 !!! note
-    If the source file used a namespace prefix (e.g. `xmlns:x="..."`) rather than
-    a default namespace (`xmlns="..."`) on its worksheet XML elements, the written
-    file will use the default namespace style instead. The output is valid OOXML
+    XLSX files that use a namespace prefix (e.g. `xmlns:x="..."`) rather than a
+    default namespace (`xmlns="..."`) are fully supported for reading and writing.
+    On writing, the namespace prefix is normalised to a default namespace style.
+    `customXml` content is preserved as-is. The output is valid OOXML
     and can be read by Excel and other spreadsheet applications, but the XML
     structure will differ from the original.
 
@@ -60,19 +62,27 @@ function writexlsx(output_source::Union{AbstractString,IO}, xf::XLSXFile; overwr
     
     wb=get_workbook(xf)
 
+    prefix = get_default_namespace_prefix(xf.data["xl/workbook.xml"][end])
+
     ZipArchives.ZipWriter(output_source) do xlsx
 
         # write XML files not in cache
         for f in keys(xf.files)
-            if !occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", f) # will be generated from cache below
+            if !occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", f)
                 ZipArchives.zip_newfile(xlsx, f; compress=true)
-                write(xlsx, XML.write(xf.data[f]))
+                xml_str = XML.write(xf.data[f])
+                if !isempty(prefix)
+                    xml_str = replace(xml_str,
+                        "<$(prefix):"  => "<",
+                        "</$(prefix):" => "</",
+                        "xmlns:$(prefix)=" => "xmlns=")
+                end
+                write(xlsx, xml_str)
             end
         end
-
         # write worksheet files from cache (cache must be enabled in write mode)
         for sheet_no in 1:sheetcount(wb)
-            doc = update_single_sheet!(wb, sheet_no, true)
+            doc = update_single_sheet!(wb, sheet_no, true, prefix)
             f = get_relationship_target_by_id("xl", wb, getsheet(wb, sheet_no).relationship_id)
             ZipArchives.zip_newfile(xlsx, f; compress=true)
             write(xlsx, doc)
@@ -295,12 +305,11 @@ worksheet xml files are not stored.
 function update_worksheets_xml!(xl::XLSXFile; full=false)
     wb = get_workbook(xl)
     for sheet_no in 1:sheetcount(wb)
-        update_single_sheet!(wb, sheet_no, full)
+        update_single_sheet!(wb, sheet_no, full, get_prefix(wb))
     end
     return nothing
 end
-
-function update_single_sheet!(wb::Workbook, sheet_no::Int, full::Bool)::Union{Nothing,Vector{UInt8}}
+function update_single_sheet!(wb::Workbook, sheet_no::Int, full::Bool, prefix::AbstractString)::Union{Nothing,Vector{UInt8}}
     sheet = getsheet(wb, sheet_no)
     doc = copynode(get_worksheet_xml_document(sheet))
     xroot = doc[end]
@@ -322,8 +331,14 @@ function update_single_sheet!(wb::Workbook, sheet_no::Int, full::Bool)::Union{No
             dimension_node["ref"] = string(get_dimension(sheet))
         end
 
-        empty_doc=XML.write(doc)
-        idx=findfirst("<sheetData/>", empty_doc)
+        empty_doc = XML.write(doc)
+        if !isempty(prefix)
+            empty_doc = replace(empty_doc,
+                "<$(prefix):"  => "<",
+                "</$(prefix):" => "</",
+                "xmlns:$(prefix)=" => "xmlns=")
+        end
+        idx = findfirst("<sheetData/>", empty_doc)
         idx === nothing && throw(XLSXError("<sheetData/> placeholder not found"))
         new_doc=IOBuffer()
         print(new_doc, empty_doc[begin:first(idx)-1])

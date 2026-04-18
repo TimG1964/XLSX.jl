@@ -188,6 +188,11 @@ function build_tag_dict!(xf::XLSXFile)
     wb.tag_dict = Dict(name => qualify(name) for name in SPREADSHEET_ELEMENT_NAMES)
     return nothing
 end
+function get_prefix(wb::Workbook)
+    s = first(values(wb.tag_dict))
+    i = findfirst(':', s)
+    return i === nothing ? "" : SubString(s, 1, i-1)
+end
 
 # Determine if the file is a Strict OOXML file.
 function is_strict_ooxml(xf::XLSXFile)::Bool
