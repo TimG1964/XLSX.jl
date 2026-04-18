@@ -25,7 +25,7 @@ function create_new_sst(wb::Workbook, sst::SharedStringTable)
 
         # add Content Type <Override ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml" PartName="/xl/sharedStrings.xml"/>
         ctype_root = xmlroot(get_xlsxfile(wb), "[Content_Types].xml")[end]
-        xml_local_name(XML.tag(ctype_root)) != "Types" && throw(XLSXError("Something wrong here!"))
+        XML.tag(ctype_root) != wb.tag_dict["Types"] && throw(XLSXError("Something wrong here!"))
         override_node = XML.Element("Override";
             ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",
             PartName = "/xl/sharedStrings.xml"
@@ -153,12 +153,12 @@ function stream_ssts(n::XML.LazyNode, chunksize::Int; channel_size::Int=1 << 8)
     end
 end
 
-function process_sst(sst::SstToken)
+function process_sst(wb, sst::SstToken)
     el = sst.n
     i = sst.idx
 
     if XML.nodetype(el) != XML.Text
-        xml_local_name(XML.tag(el)) != "si" && throw(XLSXError("Unsupported node $(xml_local_name(XML.tag(el))) in sst table."))
+        XML.tag(el) != wb.tag_dict["si"] && throw(XLSXError("Unsupported node $(XML.tag(el)) in sst table."))
         sst = Sst(XML.write(el), i)
         return sst
 
@@ -195,7 +195,7 @@ end
         Threads.@spawn begin
             for ssts in chan
                 # ssts is already a chunk - just process it
-                processed = [process_sst(tok) for tok in ssts]
+                processed = [process_sst(wb, tok) for tok in ssts]
                 put!(sst_results, processed)
             end
         end
@@ -214,20 +214,20 @@ end
 # Helper function to gather unformatted text from Excel data files.
 # It looks at all children of `el` for tag name `t` and returns
 # a join of all the strings found.
-function unformatted_text(el::XML.LazyNode) :: String
+function unformatted_text(wb::Workbook, el::XML.LazyNode) :: String
     io = IOBuffer()
-    gather_strings!(io, el)
+    gather_strings!(wb, io, el)
     s = XLSX.unescape(String(take!(io)))
     return s
 end
 
-function gather_strings!(io::IOBuffer, e::XML.LazyNode)
-    tag = xml_local_name(XML.tag(e))
+function gather_strings!(wb::Workbook, io::IOBuffer, e::XML.LazyNode)
+    tag = XML.tag(e)
     
     # Skip phonetic hints entirely
     tag == "rPh" && return nothing
     
-    if tag == "t"
+    if tag == wb.tag_dict["t"]
         children = XML.children(e)
         n = length(children)
         
@@ -244,7 +244,7 @@ function gather_strings!(io::IOBuffer, e::XML.LazyNode)
         # Recurse into children for all other tags
         children = XML.children(e)
         for ch in children
-            gather_strings!(io, ch)
+            gather_strings!(wb,io, ch)
         end
     end
     
@@ -256,7 +256,7 @@ end
 @inline function sst_unformatted_string(wb::Workbook, index::Int64)::String
     sst_load!(wb)
     uss = get_sst(wb).shared_strings[index+1]
-    return unformatted_text(parse(XML.LazyNode, uss))
+    return unformatted_text(wb, parse(XML.LazyNode, uss))
 end
 
 @inline sst_unformatted_string(xl::XLSXFile, index::Int64) :: String = sst_unformatted_string(get_workbook(xl), index)
@@ -628,16 +628,16 @@ function getRichTextString(s::Worksheet, c::CellRef)::Union{RichTextString, Noth
     cell.datatype == CT_STRING || return nothing
     sst_load!(get_workbook(s))
     uss = get_sst(get_workbook(s)).shared_strings[reinterpret(Int64, cell.value)+1]
-    return getRichTextString(uss)
+    return getRichTextString(get_workbook(s), uss)
 end
 
 # Create a RichTextString from a shared string with multiple runs (or nothing if a simple text)
-function getRichTextString(xml_string::String)::Union{RichTextString, Nothing}
+function getRichTextString(wb::Workbook, xml_string::String)::Union{RichTextString, Nothing}
     doc = parse(XML.Node, xml_string)
     si = doc[end]
     
     # Check for rich text runs <r> elements
-    runs = [child for child in XML.children(si) if xml_local_name(XML.tag(child)) == "r"]
+    runs = [child for child in XML.children(si) if XML.tag(child) == wb.tag_dict["r"]]
     
     # No rich text runs — plain string, return nothing
     isempty(runs) && return nothing
@@ -647,13 +647,13 @@ function getRichTextString(xml_string::String)::Union{RichTextString, Nothing}
     for run in runs
         children = XML.children(run)
         
-        t_node = findfirst(c -> xml_local_name(XML.tag(c)) == "t", children)
+        t_node = findfirst(c -> XML.tag(c) == wb.tag_dict["t"], children)
         isnothing(t_node) && continue
 
         text = XML.is_simple(children[t_node]) ? XML.simple_value(children[t_node]) : XML.value(children[t_node][1])
         isempty(text) && continue
         
-        rpr = findfirst(c -> XML.tag(c) == "rPr", children)
+        rpr = findfirst(c -> XML.tag(c) == wb.tag_dict["rPr"], children)
         atts = if isnothing(rpr)
             nothing
         else
@@ -661,24 +661,24 @@ function getRichTextString(xml_string::String)::Union{RichTextString, Nothing}
             rpr_children = XML.children(rpr_node)
             pairs = Pair{Symbol, Any}[]
             
-            any(c -> xml_local_name(XML.tag(c)) == "b",      rpr_children) && push!(pairs, :bold      => true)
-            any(c -> xml_local_name(XML.tag(c)) == "i",      rpr_children) && push!(pairs, :italic    => true)
-            any(c -> xml_local_name(XML.tag(c)) == "strike", rpr_children) && push!(pairs, :strike    => true)
-            any(c -> xml_local_name(XML.tag(c)) == "u",      rpr_children) && push!(pairs, :under     => true)
+            any(c -> XML.tag(c) == wb.tag_dict["b"],      rpr_children) && push!(pairs, :bold      => true)
+            any(c -> XML.tag(c) == wb.tag_dict["i"],      rpr_children) && push!(pairs, :italic    => true)
+            any(c -> XML.tag(c) == wb.tag_dict["strike"], rpr_children) && push!(pairs, :strike    => true)
+            any(c -> XML.tag(c) == wb.tag_dict["u"],      rpr_children) && push!(pairs, :under     => true)
             
-            sz_node = findfirst(c -> xml_local_name(XML.tag(c)) == "sz", rpr_children)
+            sz_node = findfirst(c -> XML.tag(c) == wb.tag_dict["sz"], rpr_children)
             !isnothing(sz_node) && push!(pairs, :size => parse(Int, XML.attributes(rpr_children[sz_node])["val"]))
             
-            color_node = findfirst(c -> xml_local_name(XML.tag(c)) == "color", rpr_children)
+            color_node = findfirst(c -> XML.tag(c) == wb.tag_dict["color"], rpr_children)
             if !isnothing(color_node)
                 atts_dict = XML.attributes(rpr_children[color_node])
                 haskey(atts_dict, "rgb") && push!(pairs, :color => atts_dict["rgb"])
             end
             
-            font_node = findfirst(c -> xml_local_name(XML.tag(c)) == "rFont", rpr_children)
+            font_node = findfirst(c -> XML.tag(c) == wb.tag_dict["rFont"], rpr_children)
             !isnothing(font_node) && push!(pairs, :name => XML.attributes(rpr_children[font_node])["val"])
             
-            va_node = findfirst(c -> xml_local_name(XML.tag(c)) == "vertAlign", rpr_children)
+            va_node = findfirst(c -> XML.tag(c) == wb.tag_dict["vertAlign"], rpr_children)
             !isnothing(va_node) && push!(pairs, :vertAlign => XML.attributes(rpr_children[va_node])["val"])
             
             isempty(pairs) ? nothing : pairs

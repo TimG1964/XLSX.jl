@@ -547,6 +547,7 @@ mutable struct Workbook
     package::MSOfficePackage # parent XLSXFile
     sheets::Vector{Worksheet} # workbook -> sheets -> <sheet name="Sheet1" r:id="rId1" sheetId="1"/>. sheetId determines the index of the WorkSheet in this vector.
     date1904::Bool              # workbook -> workbookPr -> attribute date1904 = "1" or absent
+    tag_dict::Dict{String, String} # name -> prefix:name
     relationships::Vector{Relationship} # contains workbook level relationships
     formulas::Dict{SheetCellRef, AbstractFormula} # eg SheetCellRef("mysheet!A1") => formula (not deduped)
     sst::SharedStringTable # shared string table

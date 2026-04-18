@@ -281,6 +281,13 @@ function is_valid_format(fmt::AbstractString) # From Claude
     return true
 end
 
+function first2_after_colon(tag::AbstractString)
+    parts = split(tag, ':', limit=2)
+    s = length(parts) == 1 ? parts[1] : parts[2]
+    chars = collect(s)
+    return join(chars[1:min(2, length(chars))])
+end
+
 # Parses a patternFill XML node into a flat dict of fill attributes.
 # patternType is stored directly, fg/bg color attributes are prefixed with "fg"/"bg".
 function _parse_pattern_fill(pattern::XML.Node)::Dict{String,String}
@@ -293,7 +300,7 @@ function _parse_pattern_fill(pattern::XML.Node)::Dict{String,String}
     end
     for subc in XML.children(pattern)
         XML.nodetype(subc) == XML.Element || continue
-        tag_prefix = first(XML.tag(subc), 2)  # "fg" or "bg"
+        tag_prefix = first2_after_colon(XML.tag(subc))  # "fg" or "bg"
         sub_atts = XML.attributes(subc)
         if isnothing(sub_atts) || isempty(sub_atts)
             throw(XLSXError("Expected attributes on fill sub-element <$(XML.tag(subc))>, found none."))
@@ -471,7 +478,7 @@ function styles_add_cell_attribute(wb::Workbook, new_att::XML.Node, att::String)
 
     # Check new_att doesn't duplicate any existing att. If yes, use that rather than create new.
     for (k, node) in enumerate(XML.children(xroot[i][j]))
-        if XML.tag(new_att) == "numFmt" # mustn't compare numFmtId attribute for formats
+        if XML.tag(new_att) == wb.tag_dict["numFmt"] # mustn't compare numFmtId attribute for formats
             if node["formatCode"] == new_att["formatCode"]
                 return k - 1 # CellDataFormat is zero-indexed
             end

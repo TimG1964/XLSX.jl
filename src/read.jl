@@ -1,3 +1,96 @@
+const SPREADSHEET_ELEMENT_NAMES = Set{String}([
+    "worksheet", "workbook", "sheetData", "row", "c", "v", "f", "d",
+    "dimension", "sheetView", "sheetViews", "selection", "sheets",
+    "sheet", "definedNames", "definedName", "sheetFormatPr",
+    "pageMargins", "sst", "si", "t", "rPh", "phoneticPr",
+    "Relationship", "cfRule", "numFmt", "workbookPr", 
+    "styleSheet", "Types", "calcPr", "extLst", "dxfs", "dxf", 
+    "cellXfs", "is", "externalReferences", "externalLink", 
+    "externalBook", "externalBookPr", "bookViews", "workbookView", 
+    "cols", "col", "alignment", "ext", "r", "rPr", "b", "i", 
+    "strike", "u", "sz", "color", "rFont", "vertAlign"
+    # ...
+])
+
+const STRICT_TO_TRANSITIONAL = Dict(
+    # core markup
+    "http://purl.oclc.org/ooxml/spreadsheetml/main" =>
+        "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+    "http://purl.oclc.org/ooxml/wordprocessingml/main" =>
+        "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+    "http://purl.oclc.org/ooxml/presentationml/main" =>
+        "http://schemas.openxmlformats.org/presentationml/2006/main",
+    "http://purl.oclc.org/ooxml/drawingml/main" =>
+        "http://schemas.openxmlformats.org/drawingml/2006/main",
+
+    # drawingml sub-namespaces
+    "http://purl.oclc.org/ooxml/drawingml/chartDrawing" =>
+        "http://schemas.openxmlformats.org/drawingml/2006/chartDrawing",
+    "http://purl.oclc.org/ooxml/drawingml/picture" =>
+        "http://schemas.openxmlformats.org/drawingml/2006/picture",
+    "http://purl.oclc.org/ooxml/drawingml/wordprocessingDrawing" =>
+        "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
+    "http://purl.oclc.org/ooxml/drawingml/spreadsheetDrawing" =>
+        "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+
+    # officeDocument and relationships
+    "http://purl.oclc.org/ooxml/officeDocument/relationships" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/worksheet" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/officeDocument" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/sharedStrings" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/styles" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/theme" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/chartsheet" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/drawing" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/extendedProperties" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/calcChain" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain",
+
+    # docProps and vTypes
+    "http://purl.oclc.org/ooxml/officeDocument/extendedProperties" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
+    "http://purl.oclc.org/ooxml/officeDocument/docPropsVTypes" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
+
+    # customXml, math, bibliography
+    "http://purl.oclc.org/ooxml/officeDocument/customXml" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/customXml",
+    "http://purl.oclc.org/ooxml/officeDocument/math" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/math",
+    "http://purl.oclc.org/ooxml/officeDocument/bibliography" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/bibliography",
+
+     # chart relationships
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/chart" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/image" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/hyperlink" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/table" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/pivotTable" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/pivotCacheDefinition" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition",
+
+    # chart namespace
+    "http://purl.oclc.org/ooxml/drawingml/chart" =>
+        "http://schemas.openxmlformats.org/drawingml/2006/chart",
+
+    # markup compatibility
+    "http://purl.oclc.org/ooxml/markup-compatibility/2006" =>
+        "http://schemas.openxmlformats.org/markup-compatibility/2006",
+)
 
 @inline get_xlsxfile(wb::Workbook)::XLSXFile = wb.package
 @inline get_xlsxfile(ws::Worksheet)::XLSXFile = ws.package
@@ -86,14 +179,25 @@ function check_for_xlsx_file_format(filepath::AbstractString)
     end
 end
 
+# Build a lookup dictionary for element names, qualified with the default namespace prefix if it exists.
+function build_tag_dict!(xf::XLSXFile)
+    xroot = xmlroot(xf,"xl/workbook.xml")[end]
+    prefix=get_default_namespace_prefix(xroot)
+    wb = get_workbook(xf)
+    qualify(name) = isempty(prefix) ? name : "$(prefix):$(name)"
+    wb.tag_dict = Dict(name => qualify(name) for name in SPREADSHEET_ELEMENT_NAMES)
+    return nothing
+end
+
 # Determine if the file is a Strict OOXML file.
 function is_strict_ooxml(xf::XLSXFile)::Bool
+    wb = get_workbook(xf)
     files = xf.data
 
     # Primary check: conformance attribute on workbook root
     if haskey(files, "xl/workbook.xml")
-        wb = files["xl/workbook.xml"][end]
-        attrs = XML.attributes(wb)
+        wbNode = files["xl/workbook.xml"][end]
+        attrs = XML.attributes(wbNode)
         if get(attrs, "conformance", "") == "strict"
             return true
         end
@@ -107,7 +211,7 @@ function is_strict_ooxml(xf::XLSXFile)::Bool
     if haskey(files, "_rels/.rels")
         rels = files["_rels/.rels"][end]
         for el in XML.children(rels)
-            if xml_local_name(XML.tag(el)) == "Relationship"
+            if XML.tag(el) == wb.tag_dict["Relationship"]
                 if occursin("purl.oclc.org/ooxml", get(XML.attributes(el), "Type", ""))
                     return true
                 end
@@ -375,6 +479,56 @@ function parse_file_mode(mode::AbstractString)::Tuple{Bool,Bool}
     end
 end
 
+# Convert a strict OOXML file to transitional format in-place by remapping
+# `purl.oclc.org/ooxml` namespaces and relationship types to their
+# `schemas.openxmlformats.org` equivalents, and dropping the `conformance="strict"` attribute.
+function convert_strict_to_transitional!(xf::XLSXFile, pass::Int)
+
+    for filename in keys(xf.files)
+        should_process = if pass == 1
+            !occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", filename)
+        elseif pass == 2
+            occursin(r"xl/sharedStrings\.xml", filename)
+        else  # pass == 3
+            occursin(r"xl/worksheets/sheet\d+\.xml", filename)
+        end
+           
+        if should_process
+            data = xf.data[filename]
+            xroot = data[end]
+            attrs = XML.attributes(xroot)
+            new_attrs = Dict{String,String}()
+
+            for (k, v) in attrs
+                if k == "conformance" && v == "strict"
+                    delete!(attrs, "conformance")
+                elseif (k == "xmlns" || startswith(k, "xmlns:")) && haskey(STRICT_TO_TRANSITIONAL, v)
+                    attrs[k] = STRICT_TO_TRANSITIONAL[v]
+                elseif startswith(v, "http://purl.oclc.org/ooxml") && haskey(STRICT_TO_TRANSITIONAL, v)
+                    # Catches Type= attributes in .rels files
+                    attrs[k] = STRICT_TO_TRANSITIONAL[v]
+                else
+                    attrs[k] = v
+                end
+            end
+
+            # For .rels files, also patch Type= on child Relationship elements
+            for el in XML.children(xroot)
+                el_attrs = XML.attributes(el)
+                if !isnothing(el_attrs)
+                    haskey(el_attrs, "conformance") && delete!(el_attrs, "conformance")
+                    type_val = get(el_attrs, "Type", "")
+                    if haskey(STRICT_TO_TRANSITIONAL, type_val)
+                        el_attrs["Type"] = STRICT_TO_TRANSITIONAL[type_val]
+                    end
+                end
+            end
+        end
+    end
+
+    return nothing
+end
+
 function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable_cache::Bool, _write::Bool)::XLSXFile
     # sanity check
     if _write
@@ -392,8 +546,11 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
 
 
     load_files!(xf, zip_io; pass=1) # multi-threaded file load
-
-    is_strict_ooxml(xf) && throw(XLSXError("Strict OOXML files are not supported."))
+    build_tag_dict!(xf::XLSXFile)
+    strict = is_strict_ooxml(xf)
+    if strict
+        convert_strict_to_transitional!(xf, 1)
+    end
 
     check_minimum_requirements(xf)
     parse_relationships!(xf)
@@ -403,7 +560,17 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
     remove_calcChain!(xf)
 
     load_files!(xf, zip_io; pass=2) # Need to load sst before worksheets
+
+    if strict
+        convert_strict_to_transitional!(xf, 2)
+    end
+
     load_files!(xf, zip_io; pass=3) # load worksheets last so inlineStrings go after existing ssts
+
+    if strict
+        convert_strict_to_transitional!(xf, 3)
+    end
+
 
     for sheet in get_workbook(xf).sheets
         if isnothing(sheet.dimension)
@@ -436,6 +603,23 @@ function get_namespaces(r::XML.Node)::Dict{String,String}
     end
     return nss
 end
+function get_default_namespace_prefix(r::XML.Node)::String
+    nss = get_namespaces(r)
+
+    # in case that only one namespace is defined, assume that it is the default one
+    # even if it has a prefix
+    length(nss) == 1 && return first(keys(nss))
+
+    # otherwise, look for the default namespace (without prefix)
+    for (prefix, ns) in nss
+        if prefix == ""
+            return prefix
+        end
+    end
+
+    throw(XLSXError("No default namespace found."))
+end
+
 function get_default_namespace(r::XML.Node)::String
     nss = get_namespaces(r)
 
@@ -452,6 +636,7 @@ function get_default_namespace(r::XML.Node)::String
 
     throw(XLSXError("No default namespace found."))
 end
+
 
 # See section 12.2 - Package Structure
 function check_minimum_requirements(xf::XLSXFile)
@@ -483,19 +668,19 @@ end
 # Parses package level relationships defined in `_rels/.rels`.
 # Parses workbook level relationships defined in `xl/_rels/workbook.xml.rels`.
 function parse_relationships!(xf::XLSXFile)
+    wb = get_workbook(xf)
 
     # package level relationships
     xroot = get_package_relationship_root(xf)
     for el in XML.children(xroot)
-        push!(xf.relationships, Relationship(el))
+        push!(xf.relationships, Relationship(wb, el))
     end
     isempty(xf.relationships) && throw(XLSXError("Relationships not found in _rels/.rels!"))
 
     # workbook level relationships
-    wb = get_workbook(xf)
     xroot = get_workbook_relationship_root(xf)
     for el in XML.children(xroot)
-        push!(wb.relationships, Relationship(el))
+        push!(wb.relationships, Relationship(wb, el))
     end
     isempty(wb.relationships) && throw(XLSXError("Relationships not found in xl/_rels/workbook.xml.rels"))
 
@@ -506,7 +691,8 @@ end
 function parse_workbook!(xf::XLSXFile)
     xroot = xmlroot(xf,"xl/workbook.xml")[end]
     chn = XML.children(xroot)
-    xml_local_name(XML.tag(xroot)) != "workbook" && throw(XLSXError("Malformed xl/workbook.xml. Root node name should be 'workbook'. Got '$(xml_local_name(XML.tag(xroot)))'."))
+    wb = get_workbook(xf)
+    XML.tag(xroot) != wb.tag_dict["workbook"] && throw(XLSXError("Malformed xl/workbook.xml. Root node name should be '$(wb.tag_dict["workbook"])'. Got '$(XML.tag(xroot))'."))
 
     # workbook to be parsed
     workbook = get_workbook(xf)
@@ -517,7 +703,7 @@ function parse_workbook!(xf::XLSXFile)
 
     # changes workbook.date1904 if there is a setting in the workbookPr node
     for node in chn
-        if xml_local_name(XML.tag(node)) == "workbookPr"
+        if XML.tag(node) == wb.tag_dict["workbookPr"]
 
             # read date1904 attribute
             attributes = XML.attributes(node)
@@ -541,10 +727,10 @@ function parse_workbook!(xf::XLSXFile)
     # sheets
     sheets = Vector{Worksheet}()
     for node in chn
-        if xml_local_name(XML.tag(node)) == "sheets"
+        if XML.tag(node) == wb.tag_dict["sheets"]
 
             for sheet_node in XML.children(node)
-                xml_local_name(XML.tag(sheet_node)) != "sheet" && throw(XLSXError("Unsupported node $(xml_local_name(XML.tag(sheet_node))) in node $(xml_local_name(XML.tag(node))) in 'xl/workbook.xml'."))
+                XML.tag(sheet_node) != wb.tag_dict["sheet"] && throw(XLSXError("Unsupported node $(XML.tag(sheet_node)) in node $(XML.tag(node)) in 'xl/workbook.xml'."))
                 worksheet = Worksheet(xf, sheet_node)
                 push!(sheets, worksheet)
             end
@@ -555,11 +741,11 @@ function parse_workbook!(xf::XLSXFile)
 
     # named ranges
     for node in chn
-        if xml_local_name(XML.tag(node)) == "definedNames"
+        if XML.tag(node) == wb.tag_dict["definedNames"]
 
             for defined_name_node in XML.children(node)
 
-                if xml_local_name(XML.tag(defined_name_node)) == "definedName"
+                if XML.tag(defined_name_node) == wb.tag_dict["definedName"]
 
                     defined_value_string = XML.value(defined_name_node[1])
                     name = XML.attributes(defined_name_node)["name"]
@@ -646,9 +832,10 @@ end
 
 # Returns a Dict mapping Workbook <externalReferences>: index => relationship id.
 function get_wb_ext_refs(xf::XLSXFile)
+    wb = get_workbook(xf)
     ext_refs = Dict{Int, String}()
     xroot = xmlroot(xf, "xl/workbook.xml")
-    i, j = get_idces(xroot, "workbook", "externalReferences")
+    i, j = get_idces(xroot, wb.tag_dict["workbook"], wb.tag_dict["externalReferences"])
     if !isnothing(j)
         for (i, ref) in enumerate(XML.children(xroot[i][j]))
             ext_refs[i] = ref["r:id"]
@@ -829,31 +1016,31 @@ end
 
 function process_file(zip_io::ZipArchives.ZipReader, filename::String)
 
-        node=nothing
-        raw=nothing
-        bin=nothing
+    node=nothing
+    raw=nothing
+    bin=nothing
 
-        try
-            bytes = ZipArchives.zip_readentry(zip_io, filename)
-            if !startswith(filename, "customXml") && (endswith(filename, ".xml") || endswith(filename, ".rels"))
-                if occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", filename)
-                    strip_bom_and_lf!(bytes)
-                    skipnode = filename == "xl/sharedStrings.xml" ? "sst" : "sheetData"
-                    f, s = skipNode(XML.Raw(bytes), skipnode) # <row> and <sst> elements can be very numerous in large files, so split out and keep as Raw XML data for speed
-                    node = XML.Node(XML.Raw(f))
-                    raw = XML.Raw(s)
-                else
-                    strip_bom_and_lf!(bytes)
-                    node = XML.Node(XML.Raw(bytes))
-                end
+    try
+        bytes = ZipArchives.zip_readentry(zip_io, filename)
+        if !startswith(filename, "customXml") && (endswith(filename, ".xml") || endswith(filename, ".rels"))
+            if occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", filename)
+                strip_bom_and_lf!(bytes)
+                skipnode = filename == "xl/sharedStrings.xml" ? "sst" : "sheetData"
+                f, s = skipNode(XML.Raw(bytes), skipnode) # <row> and <sst> elements can be very numerous in large files, so split out and keep as Raw XML data for speed
+                node = XML.Node(XML.Raw(f))
+                raw = XML.Raw(s)
             else
-                bin = bytes                
+                strip_bom_and_lf!(bytes)
+                node = XML.Node(XML.Raw(bytes))
             end
-        catch err
-            throw(XLSXError("Failed to parse internal XML file `$filename`"))
+        else
+            bin = bytes                
         end
+    catch err
+        throw(XLSXError("Failed to parse internal XML file `$filename`"))
+    end
 
-        return ReadFile(node, raw, bin, filename)
+    return ReadFile(node, raw, bin, filename)
 end
 
 function internal_xml_file_read(xf::XLSXFile, filename::String)

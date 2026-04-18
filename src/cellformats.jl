@@ -1231,7 +1231,7 @@ function getAlignment(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellAli
 
     # alignment is an optional child element of the cell xf node
     children = filter(n -> XML.nodetype(n) == XML.Element, XML.children(cell_style))
-    alignment_node = findfirst(n -> XML.tag(n) == "alignment", children)
+    alignment_node = findfirst(n -> XML.tag(n) == wb.tag_dict["alignment"], children)
     isnothing(alignment_node) && return nothing
 
     atts = Dict{String,String}(XML.attributes(children[alignment_node]))
@@ -1894,6 +1894,8 @@ function setColumnWidth(ws::Worksheet, rng::CellRange; width::Union{Nothing,Real
     # Validate and resolve width before any XML work
     isnothing(width) && return 0
     width < 0 && throw(XLSXError("Invalid width: $width. Must be >= 0."))
+
+    wb=get_workbook(ws)
     padded_width = width + EXCEL_COLUMN_WIDTH_PADDING
 
     left  = rng.start.column_number
@@ -1901,10 +1903,10 @@ function setColumnWidth(ws::Worksheet, rng::CellRange; width::Union{Nothing,Real
 
     # Find the <cols> block in the worksheet XML, inserting one before <sheetData> if absent
     sheetdoc = xmlroot(ws.package, "xl/worksheets/sheet$(ws.sheetId).xml")
-    i, j = get_idces(sheetdoc, "worksheet", "cols")
+    i, j = get_idces(sheetdoc, wb.tag_dict["worksheet"], wb.tag_dict["cols"])
 
     if isnothing(j)
-        k, l = get_idces(sheetdoc, "worksheet", "sheetData")
+        k, l = get_idces(sheetdoc, wb.tag_dict["worksheet"], wb.tag_dict["sheetData"])
         i != k && throw(XLSXError("Unexpected worksheet structure: <cols> parent index does not match <worksheet> index."))
         insert!(sheetdoc[k].children, l, XML.Element("Cols"))
         j = l
@@ -1933,7 +1935,7 @@ function setColumnWidth(ws::Worksheet, rng::CellRange; width::Union{Nothing,Real
     end
 
     # Rebuild the <cols> node from the updated definitions
-    new_cols = unlink(sheetdoc[i][j], ("cols", "col"))
+    new_cols = unlink(sheetdoc[i][j], (wb.tag_dict["cols"], wb.tag_dict["col"]))
     for atts in values(col_defs)
         new_col = XML.Element("col")
         for (k, v) in atts

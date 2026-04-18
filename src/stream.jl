@@ -38,7 +38,7 @@ The iterator element is a SheetRow.
 
 # strip off namespace prefix of nodename
 function nodename(x::XML.LazyNode)
-    t = xml_local_name(XML.tag(x))
+    t = XML.tag(x)
     i = findlast(==(':'), t)
     return isnothing(i) ? t : t[i+1:end]
 end
@@ -68,15 +68,16 @@ end
 # Creates an iterator for row elements in the Worksheet's XML.
 function Base.iterate(itr::SheetRowStreamIterator)
     ws = get_worksheet(itr)
+    wb = get_workbook(ws)
     target_file = get_relationship_target_by_id("xl", get_workbook(ws), ws.relationship_id)
     sheetnode = open_internal_file_stream(get_xlsxfile(ws), target_file) # worksheet target files are LazyNodes
 
     length(sheetnode) <= 0 && throw(XLSXError("Couldn't open reader for Worksheet $(ws.name)."))
-    xml_local_name(XML.tag(sheetnode[end])) != "worksheet" && throw(XLSXError("Expecting to find a worksheet node.: Found a $(xml_local_name(XML.tag(sheetnode[end])))."))
+    XML.tag(sheetnode[end]) != wb.tag_dict["worksheet"] && throw(XLSXError("Expecting to find a worksheet node: Found a $(XML.tag(sheetnode[end]))."))
 
     sheetnode=XML.next(sheetnode)
 
-    while xml_local_name(XML.tag(sheetnode)) != "sheetData" # Check for `sheetData`
+    while XML.tag(sheetnode) != wb.tag_dict["sheetData"] # Check for `sheetData`
         sheetnode = XML.next(sheetnode)
         sheetnode === nothing && throw(XLSXError("No `sheetData` node found in worksheet"))
     end
@@ -85,7 +86,7 @@ function Base.iterate(itr::SheetRowStreamIterator)
 
     rownode=XML.next(sheetnode)
 
-    while xml_local_name(XML.tag(rownode)) != "row" # Check for at least one `row`
+    while XML.tag(rownode) != wb.tag_dict["row"] # Check for at least one `row`
         rownode = XML.next(rownode)
         rownode === nothing && return nothing # no rows found
     end

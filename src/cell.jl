@@ -178,7 +178,7 @@ _extra_attrs(d::Dict) = isempty(d) ? nothing : d
 function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothing}=nothing)::Union{Cell,EmptyCell}
     wb = get_workbook(ws)
 
-    XML.tag(c) == "c" || throw(XLSXError("`Cell` expects a `c` (cell) XML node."))
+    XML.tag(c) == wb.tag_dict["c"] || throw(XLSXError("`Cell` expects a `c` (cell) XML node."))
 
     a = XML.attributes(c)
     chn = XML.children(c)
@@ -198,8 +198,8 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
 
     if t == "inlineStr"
         for child in chn
-            XML.tag(child) == "is" || continue
-            uft = unformatted_text(child)
+            XML.tag(child) == wb.tag_dict["is"] || continue
+            uft = unformatted_text(wb, child)
             if !isempty(uft)
                 ft = _build_si_xml(child)
                 datatype = CT_STRING
@@ -210,14 +210,14 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
     else
         for child in chn
             tag = XML.tag(child)
-            if tag == "v"
+            if tag == wb.tag_dict["v"]
                 ch = XML.children(child)
                 isempty(ch) && continue
                 v = XLSX.unescape(XML.value(ch[1]))
                 datatype, value = process_tv(wb, t, v, num_style; mylock)
-            elseif tag == "f"
+            elseif tag == wb.tag_dict["f"]
                 if get_xlsxfile(wb).is_writable
-                    f = parse_formula_from_element(child)
+                    f = parse_formula_from_element(wb,child)
                     wb.formulas[SheetCellRef(combine_sheet_ref(ws, ref))] = f
                 end
                 formula = true
@@ -228,8 +228,8 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
     return Cell(ref, value, style, meta, datatype, formula)
 end
 
-function parse_formula_from_element(c_child_element)::AbstractFormula
-    XML.tag(c_child_element) == "f" ||
+function parse_formula_from_element(wb, c_child_element)::AbstractFormula
+    XML.tag(c_child_element) == wb.tag_dict["f"] ||
         throw(XLSXError("Expected nodename `f`. Found: `$(XML.tag(c_child_element))`"))
 
     # Extract formula string
@@ -305,6 +305,26 @@ function process_tv(wb::Workbook, t::String, v::String, num_style::Int; mylock::
     elseif t == "s"
         datatype = CT_STRING
         value = reinterpret(UInt64, parse(Int64, v))
+
+    elseif t == "d" # ISO 8601 date/datetime/time string
+        if occursin("T", v) && !startswith(v, "T")
+            dt = Dates.DateTime(replace(rstrip(v, 'Z'), r"(\.\d{3})\d+$" => s"\1"), Dates.dateformat"yyyy-mm-ddTHH:MM:SS.sss")
+            serial = datetime_to_excel_value(dt, wb.date1904)
+            datatype = CT_DATETIME
+        elseif occursin("-", v)
+            d = Dates.Date(v, Dates.dateformat"yyyy-mm-dd")
+            serial = date_to_excel_value(d, wb.date1904)
+            datatype = CT_DATE
+        else
+            # Time-only: parse HH:MM:SS.fractional directly to fractional day
+            parts = split(rstrip(v, 'Z'), ":")
+            seconds = parse(Float64, parts[1]) * 3600.0 +
+                      parse(Float64, parts[2]) * 60.0 +
+                      parse(Float64, parts[3])
+            serial = seconds / 86400.0
+            datatype = CT_TIME
+        end
+        value = reinterpret(UInt64, serial)
 
     elseif t == "str"
         datatype = CT_STRING
@@ -388,6 +408,7 @@ function datetime_to_excel_value(dt::Dates.DateTime, is1904::Bool)::Float64
     return date_part + time_part
 end
 
+#=
 # Shared helper for parsing a raw Excel datetime string into a value and CellValueType.
 function _parse_excel_datetime(v::AbstractString, is1904::Bool)
     isempty(v) && throw(XLSXError("Cannot convert an empty string into a datetime value."))
@@ -401,6 +422,7 @@ function _parse_excel_datetime(v::AbstractString, is1904::Bool)
         return excel_value_to_date(parse(Int64, v), is1904), CT_DATE
     end
 end
+=#
 
 @inline getdata(ws::Worksheet, empty::EmptyCell) = missing
 

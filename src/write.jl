@@ -232,7 +232,7 @@ function unlink(node::XML.Node, att::Tuple{String,String})
         end
     end
     for child in XML.children(node) # Copy any child nodes with tags that are not att[2] across to new node
-        if xml_local_name(XML.tag(child)) != last(att)
+        if XML.tag(child) != last(att)
             push!(new_node, child)
         end
     end
@@ -241,19 +241,19 @@ end
 
 # Remove all children with tag given by att[2] from a parent XML node with a tag given by att[1].
 function get_idces(doc::XML.Node, t, b)
-    match_tag(tag, name) = contains(name, ':') ? tag == name : xml_local_name(tag) == name
+#    match_tag(tag, name) = contains(name, ':') ? tag == name : xml_local_name(tag) == name
     
     i = 1
     j = 1
     chn = XML.children(doc)
     l = length(chn)
-    while !match_tag(XML.tag(chn[i]), t)
+    while XML.tag(chn[i]) !== t
         i += 1
         i > l && return nothing, nothing
     end
     chn = XML.children(chn[i])
     l = length(chn)
-    while !match_tag(XML.tag(chn[j]), b)
+    while XML.tag(chn[j]) !== b
         j += 1
         j > l && return i, nothing
     end
@@ -311,12 +311,12 @@ function update_single_sheet!(wb::Workbook, sheet_no::Int, full::Bool)::Union{No
     spreadsheet_ns_declared = SPREADSHEET_NAMESPACE_XPATH_ARG in values(ns_map)
     spreadsheet_ns_declared ||
         throw(XLSXError("Unsupported Spreadsheet XML namespace."))
-    xml_local_name(XML.tag(xroot)) != "worksheet" && throw(XLSXError("Malformed Excel file. Expected root node named `worksheet` in worksheet XML file."))
+    XML.tag(xroot) != wb.tag_dict["worksheet"] && throw(XLSXError("Malformed Excel file. Expected root node named `worksheet` in worksheet XML file."))
 
     if full # need to reconstruct row and cell data from cache
 
         # update worksheet dimension
-        i, j = get_idces(doc, "worksheet", "dimension")
+        i, j = get_idces(doc, wb.tag_dict["worksheet"], wb.tag_dict["dimension"])
         if !isnothing(j)
             dimension_node = doc[i][j]
             dimension_node["ref"] = string(get_dimension(sheet))
@@ -330,7 +330,7 @@ function update_single_sheet!(wb::Workbook, sheet_no::Int, full::Bool)::Union{No
 
         # create <sheetData> with any attributes
         print(new_doc, "<sheetData")
-        i, j = get_idces(doc, "worksheet", "sheetData")
+        i, j = get_idces(doc, wb.tag_dict["worksheet"], wb.tag_dict["sheetData"])
         a = XML.attributes(doc[i][j])
         if !isnothing(a)
             for (k, v) in a
@@ -554,23 +554,23 @@ function update_workbook_xml!(xl::XLSXFile) # Need to update <sheets> and <defin
     wbdoc = xmlroot(xl, "xl/workbook.xml") # find the workbook's xml file
 
     #update calcPr to force update on loaded
-    i, j = get_idces(wbdoc, "workbook", "calcPr")
+    i, j = get_idces(wbdoc, wb.tag_dict["workbook"], wb.tag_dict["calcPr"])
     if !isnothing(j)
         wbdoc[i][j] = XML.Element("calcPr", fullCalcOnLoad="1", calcMode="auto")
     end
 
     #update defined names
     if length(wb.workbook_names) > 0 || length(wb.worksheet_names) > 0 # skip if no defined names present
-        i, j = get_idces(wbdoc, "workbook", "definedNames")
+        i, j = get_idces(wbdoc, wb.tag_dict["workbook"], wb.tag_dict["definedNames"])
         if isnothing(j)
             # there is no <definedNames> block in the workbook's xml file, so we'll need to create one
             # The <definedNames> block goes after the <sheets> block. Need to move everything down one to make room.    
-            m, n = get_idces(wbdoc, "workbook", "sheets")
+            m, n = get_idces(wbdoc, wb.tag_dict["workbook"], wb.tag_dict["sheets"])
             definedNames = XML.Element("definedNames")
             insert!(wbdoc[m].children, n+1, definedNames)
             j = n + 1
         else
-            definedNames = unlink(wbdoc[i][j], ("definedNames", "definedName")) # Remove old defined names
+            definedNames = unlink(wbdoc[i][j], (wb.tag_dict["definedNames"], wb.tag_dict["definedName"])) # Remove old defined names
         end
         for (k, v) in wb.workbook_names
             if typeof(v.value) <: DefinedNameRangeTypes
@@ -595,8 +595,8 @@ function update_workbook_xml!(xl::XLSXFile) # Need to update <sheets> and <defin
 
     #update sheets
     doc = xmlroot(xl, "xl/workbook.xml")
-    i, j = get_idces(doc, "workbook", "sheets")
-    unlink(doc[i][j], ("sheets", "sheet"))
+    i, j = get_idces(doc, wb.tag_dict["workbook"], wb.tag_dict["sheets"])
+    unlink(doc[i][j], (wb.tag_dict["sheets"], wb.tag_dict["sheet"]))
     sheets_element = XML.Element("sheets")
     for s in wb.sheets
         sheet_element = XML.Element("sheet"; name=XLSX.escape(s.name))
@@ -1127,8 +1127,9 @@ function renamesheet!(ws::Worksheet, name::AbstractString)
 
     # updates XML
     xroot = xmlroot(xf, "xl/workbook.xml")[end]
+    wb = get_workbook(ws)
     for node in XML.children(xroot)
-        if xml_local_name(XML.tag(node)) == "sheets"
+        if XML.tag(node) == wb.tag_dict["sheets"]
 
             for sheet_node in XML.children(node)
                 if sheet_node["name"] == ws.name
@@ -1384,9 +1385,10 @@ function insertsheet!(wb::Workbook, xdoc::XML.Node, new_cache::WorksheetCache, s
 end
 
 add_override!(wb::Workbook, part::String, content::String) = add_override!(get_xlsxfile(wb), part, content)
-function add_override!(xf::XLSXFile, part::String, content::String) 
+function add_override!(xf::XLSXFile, part::String, content::String)
+    wb = get_workbook(xf) 
     ctype_root = xmlroot(xf, "[Content_Types].xml")[end]
-    xml_local_name(XML.tag(ctype_root)) != "Types" && throw(XLSXError("Something wrong here!"))
+    XML.tag(ctype_root) != wb.tag_dict["Types"] && throw(XLSXError("Something wrong here!"))
     override_node = XML.Element("Override";
         PartName=part,
         ContentType=content
@@ -1400,11 +1402,11 @@ function renumber_files!(xf::XLSXFile, rId::String)
 
     # update active tab
     wbdoc = xmlroot(xf, "xl/workbook.xml")
-    i, j = get_idces(wbdoc, "workbook", "bookViews")
+    i, j = get_idces(wbdoc, wb.tag_dict["workbook"], wb.tag_dict["bookViews"])
     w = XML.children(wbdoc[i][j])
     if length(w) > 0
         for c in w
-            if xml_local_name(XML.tag(c)) == "workbookView"
+            if XML.tag(c) == wb.tag_dict["workbookView"]
                 a = XML.attributes(c)
                 if haskey(a, "activeTab")
                     at = parse(Int64, a["activeTab"])
@@ -1574,7 +1576,7 @@ function deletesheet!(wb::Workbook, name::AbstractString)::XLSXFile
 
     # update [Content_Types].xml
     ctype_root = xmlroot(get_xlsxfile(wb), "[Content_Types].xml")[end]
-    xml_local_name(XML.tag(ctype_root)) != "Types" && throw(XLSXError("Something wrong here!"))
+    XML.tag(ctype_root) != wb.tag_dict["Types"] && throw(XLSXError("Something wrong here!"))
     cont = XML.children(ctype_root)
     let idx = 0
         for (i, c) in enumerate(cont)
