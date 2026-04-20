@@ -6882,17 +6882,17 @@ end
         XLSX.setFont(sh, "A1"; name="Palatino")
         r = XLSX.getRichTextString(sh, "A1")
         @test r.runs[4].text == "ki"
-        @test r.runs[4].atts == Dict(:bold => true, :size => 11)
+        @test r.runs[4].atts == Dict(:bold => true, :color => "FFFFFFFF", :size => 11)
         @test r.runs[6].text == "ty"
         @test r.runs[6].atts == Dict(:color => "FFFF0000", :size => 11)
         @test XLSX.getFont(sh, "A1").font == Dict("name" => Dict("val" => "Palatino"), "sz" => Dict("val" => "11"), "color" => Dict("theme" => "1"))
         XLSX.setFont(sh, "A1:F2"; name="Palatino")
         r = XLSX.getRichTextString(sh, "B2")
         @test r.runs[4].text == "k"
-        @test r.runs[4].atts == Dict(:bold => true, :size => 11, :under => true)
+        @test r.runs[4].atts == Dict(:bold => true, :color => "FFFFFFFF", :size => 11, :under => true)
         r = XLSX.getRichTextString(sh, "F2")
         @test r.runs[3].text == "lo "
-        @test r.runs[3].atts == Dict(:size => 11)
+        @test r.runs[3].atts == Dict(:color => "FFFFFFFF", :size => 11)
         @test XLSX.getFont(sh, "B2").font["name"] == Dict("val" => "Palatino")
         XLSX.setFont(sh, "B"; under="none")
         @test haskey(XLSX.getFont(sh, "B2").font, "u") == false
@@ -6919,9 +6919,9 @@ end
         @test XLSX.getFont(sh, "C2") === nothing
         r = XLSX.getRichTextString(sh, "C1")
         @test r.runs[3].text == "lo "
-        @test r.runs[3].atts == Dict(:name => "Aptos Narrow", :size => 11)
+        @test r.runs[3].atts == Dict(:color => "FFFFFFFF", :name => "Aptos Narrow", :size => 11)
         @test r.runs[4].text == "ki"
-        @test r.runs[4].atts == Dict(:bold => true, :italic => true, :name => "Aptos Narrow", :size => 11)
+        @test r.runs[4].atts == Dict(:bold => true, :color => "FFFFFFFF", :italic => true, :name => "Aptos Narrow", :size => 11)
 
         XLSX.setUniformFont(sh, :, 3:2:5; color="orange")
         @test XLSX.getFont(sh, "C1").font["sz"] == Dict("val" => "11")
@@ -6947,9 +6947,9 @@ end
         @test XLSX.getFont(sh, "B2") === nothing
         r = XLSX.getRichTextString(sh, "F1")
         @test r.runs[3].text == "lo "
-        @test r.runs[3].atts == Dict(:name => "Calibri", :size => 11)
+        @test r.runs[3].atts == Dict(:color => "FFFFFFFF", :name => "Calibri", :size => 11)
         @test r.runs[8].text == " "
-        @test r.runs[8].atts == Dict(:name => "Aptos Narrow", :size => 11)
+        @test r.runs[8].atts == Dict(:color => "FFFFFFFF", :name => "Aptos Narrow", :size => 11)
         xf = XLSX.opentemplate(joinpath(data_directory, "is.xlsx"))
         sh = xf["Sheet1"]
         XLSX.setFont(sh, "A1"; under="double", color="orange", name="Palatino", size=20, bold=true, italic=true, strike=true)
@@ -7003,8 +7003,8 @@ end
     @testset "RichTextString" begin
         f=XLSX.newxlsx()
         s=f[1]
-        rtf1=XLSX.RichTextRun("Hello", [:vertAlign => "subscript"])
-        rtf2=XLSX.RichTextRun(" Kitty ", [:color => "green", :size => 14, :bold => true, :under => true])
+        rtf1=XLSX.RichTextRun("Hello", (:vertAlign => "subscript"))
+        rtf2=XLSX.RichTextRun(" Kitty ", (:color => "green", :size => 14, :bold => true, :under => true))
         rtf3=XLSX.RichTextRun("Hello", [:color => "green", :size => 14, :under => true])
         s["A1"] = XLSX.RichTextString(rtf1, rtf2, rtf3)
         @test XLSX.getRichTextString(s, "A1").runs[1].atts == Dict(:vertAlign => "subscript")

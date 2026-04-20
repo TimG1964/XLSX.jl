@@ -123,7 +123,83 @@ function do_sheet_names_match(ws::Worksheet, rng::T) where {T<:Union{SheetCellRe
         throw(XLSXError("Worksheet `$(ws.name)` does not match sheet in cell reference: `$(rng.sheet)`"))
     end
 end
+
+function make_child_node(tag::String, name::String)::XML.Node
+    children = tag ∈ ("border", "fill") ? Vector{XML.Node}() : nothing
+    return XML.Node(XML.Element, name, OrderedDict{String,String}(), nothing, children)
+end
+
+function build_font_child!(new_node::XML.Node, tag::String, name::String, attrs::Union{Nothing,Dict{String,String}})
+    cnode = isnothing(attrs) ? XML.Element(name) : make_child_node(tag, name)
+    if !isnothing(attrs)
+        for (k, v) in attrs
+            cnode[k] = v
+        end
+    end
+    push!(new_node, cnode)
+end
+
+function build_border_child!(new_node::XML.Node, tag::String, name::String, attrs::Union{Nothing,Dict{String,String}})
+    cnode = isnothing(attrs) ? XML.Element(name) : make_child_node(tag, name)
+    if !isnothing(attrs)
+        color = XML.Element("color")
+        for (k, v) in attrs
+            if k == "style" && v != "none"
+                cnode[k] = v
+            elseif k == "direction"
+                v ∈ ("up",   "both") && (new_node["diagonalUp"]   = "1")
+                v ∈ ("down", "both") && (new_node["diagonalDown"] = "1")
+            else
+                color[k] = v
+            end
+        end
+        !isempty(XML.attributes(color)) && push!(cnode, color)
+    end
+    push!(new_node, cnode)
+end
+
+function build_fill_child!(new_node::XML.Node, tag::String, name::String, attrs::Union{Nothing,Dict{String,String}})
+    if isnothing(attrs)
+        push!(new_node, XML.Element(name))
+        return
+    end
+    patternfill = XML.Element("patternFill")
+    fgcolor     = XML.Element("fgColor")
+    bgcolor     = XML.Element("bgColor")
+    for (k, v) in attrs
+        if k == "patternType"
+            patternfill[k] = v
+        elseif startswith(k, "fg")
+            fgcolor[k[3:end]] = v
+        elseif startswith(k, "bg")
+            bgcolor[k[3:end]] = v
+        end
+    end
+    haskey(patternfill, "patternType") || throw(XLSXError("No `patternType` attribute found."))
+    !isempty(XML.attributes(fgcolor)) && push!(patternfill, fgcolor)
+    !isempty(XML.attributes(bgcolor)) && push!(patternfill, bgcolor)
+    push!(new_node, patternfill)  # patternfill goes directly onto new_node
+end
+
 function buildNode(tag::String, attributes::Dict{String,Union{Nothing,Dict{String,String}}})::XML.Node
+    attribute_tags, build_child! = if tag == "font"
+        font_tags,   build_font_child!
+    elseif tag == "border"
+        border_tags, build_border_child!
+    elseif tag == "fill"
+        fill_tags,   build_fill_child!
+    else
+        throw(XLSXError("Unknown tag: $tag"))
+    end
+
+    new_node = XML.Element(tag)
+    for name in attribute_tags
+        haskey(attributes, name) && build_child!(new_node, tag, name, attributes[name])
+    end
+    return new_node
+end
+
+#=function buildNode(tag::String, attributes::Dict{String,Union{Nothing,Dict{String,String}}})::XML.Node
     if tag == "font"
         attribute_tags = font_tags
     elseif tag == "border"
@@ -205,6 +281,7 @@ function buildNode(tag::String, attributes::Dict{String,Union{Nothing,Dict{Strin
     end
     return new_node
 end
+=#
 function isInDim(ws::Worksheet, dim::CellRange, rng::CellRange)
     if !issubset(rng, dim)
         throw(XLSXError("Cell range $rng is out of bounds. Worksheet `$(ws.name)` only has dimension `$dim`."))
