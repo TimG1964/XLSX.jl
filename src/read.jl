@@ -502,18 +502,16 @@ function convert_strict_to_transitional!(xf::XLSXFile, pass::Int)
             data = xf.data[filename]
             xroot = data[end]
             attrs = XML.attributes(xroot)
-            new_attrs = Dict{String,String}()
 
             for (k, v) in attrs
                 if k == "conformance" && v == "strict"
                     delete!(attrs, "conformance")
-                elseif (k == "xmlns" || startswith(k, "xmlns:")) && haskey(STRICT_TO_TRANSITIONAL, v)
-                    attrs[k] = STRICT_TO_TRANSITIONAL[v]
-                elseif startswith(v, "http://purl.oclc.org/ooxml") && haskey(STRICT_TO_TRANSITIONAL, v)
-                    # Catches Type= attributes in .rels files
-                    attrs[k] = STRICT_TO_TRANSITIONAL[v]
-                else
-                    attrs[k] = v
+                elseif startswith(v, "http://purl.oclc.org/ooxml")
+                    if haskey(STRICT_TO_TRANSITIONAL, v)
+                        attrs[k] = STRICT_TO_TRANSITIONAL[v]
+                    else
+                        throw(XLSXError("Unsupported strict OOXML namespace or relationship type: \"$v\" in $filename. Please open an issue at https://github.com/JuliaData/XLSX.jl/issues"))
+                    end
                 end
             end
 
@@ -523,8 +521,12 @@ function convert_strict_to_transitional!(xf::XLSXFile, pass::Int)
                 if !isnothing(el_attrs)
                     haskey(el_attrs, "conformance") && delete!(el_attrs, "conformance")
                     type_val = get(el_attrs, "Type", "")
-                    if haskey(STRICT_TO_TRANSITIONAL, type_val)
-                        el_attrs["Type"] = STRICT_TO_TRANSITIONAL[type_val]
+                    if startswith(type_val, "http://purl.oclc.org/ooxml")
+                        if haskey(STRICT_TO_TRANSITIONAL, type_val)
+                            el_attrs["Type"] = STRICT_TO_TRANSITIONAL[type_val]
+                        else
+                            throw(XLSXError("Unsupported strict OOXML relationship type: \"$type_val\" in $filename. Please open an issue at https://github.com/JuliaData/XLSX.jl/issues"))
+                        end
                     end
                 end
             end
@@ -599,49 +601,28 @@ function get_namespaces(r::XML.Node)::Dict{String,String}
     for (key, value) in XML.attributes(r)
         if startswith(key, "xmlns")
             colon_idx = findfirst(':', key)
-            if isnothing(colon_idx)
-                nss[""] = value
-            else
-                nss[SubString(key, colon_idx+1)] = value
-            end
+            nss[isnothing(colon_idx) ? "" : SubString(key, colon_idx+1)] = value
         end
     end
     return nss
 end
+
 function get_default_namespace_prefix(r::XML.Node)::String
-    nss = get_namespaces(r)
-
-    # in case that only one namespace is defined, assume that it is the default one
-    # even if it has a prefix
-    length(nss) == 1 && return first(keys(nss))
-
-    # otherwise, look for the default namespace (without prefix)
-    for (prefix, ns) in nss
-        if prefix == ""
-            return prefix
-        end
-    end
-
-    throw(XLSXError("No default namespace found."))
+    prefix, _ = _get_default_namespace(r)
+    return prefix
 end
 
 function get_default_namespace(r::XML.Node)::String
-    nss = get_namespaces(r)
-
-    # in case that only one namespace is defined, assume that it is the default one
-    # even if it has a prefix
-    length(nss) == 1 && return first(values(nss))
-
-    # otherwise, look for the default namespace (without prefix)
-    for (prefix, ns) in nss
-        if prefix == ""
-            return ns
-        end
-    end
-
-    throw(XLSXError("No default namespace found."))
+    _, ns = _get_default_namespace(r)
+    return ns
 end
 
+function _get_default_namespace(r::XML.Node)::Tuple{String,String}
+    nss = get_namespaces(r)
+    length(nss) == 1 && return first(keys(nss)), first(values(nss))
+    haskey(nss, "") || throw(XLSXError("No default namespace found."))
+    return "", nss[""]
+end
 
 # See section 12.2 - Package Structure
 function check_minimum_requirements(xf::XLSXFile)
@@ -694,145 +675,94 @@ end
 
 # Updates xf.workbook from xf.data[\"xl/workbook.xml\"]
 function parse_workbook!(xf::XLSXFile)
-    xroot = xmlroot(xf,"xl/workbook.xml")[end]
-    chn = XML.children(xroot)
+    xroot = xmlroot(xf, "xl/workbook.xml")[end]
     wb = get_workbook(xf)
+
     XML.tag(xroot) != wb.tag_dict["workbook"] && throw(XLSXError("Malformed xl/workbook.xml. Root node name should be '$(wb.tag_dict["workbook"])'. Got '$(XML.tag(xroot))'."))
 
-    # workbook to be parsed
-    workbook = get_workbook(xf)
-
-    # workbookPr -> date1904
-    # does not have attribute => is not date1904
-    workbook.date1904 = false
-
-    # changes workbook.date1904 if there is a setting in the workbookPr node
-    for node in chn
-        if XML.tag(node) == wb.tag_dict["workbookPr"]
-
-            # read date1904 attribute
-            attributes = XML.attributes(node)
-            if !isnothing(attributes)
-                if haskey(attributes, "date1904")
-                    attribute_value_date1904 = attributes["date1904"]
-                    if attribute_value_date1904 == "1" || attribute_value_date1904 == "true"
-                        workbook.date1904 = true
-                    elseif attribute_value_date1904 == "0" || attribute_value_date1904 == "false"
-                        workbook.date1904 = false
-                    else
-                        throw(XLSXError("Could not parse xl/workbook -> workbookPr -> date1904 = $(attribute_value_date1904)."))
-                    end
-                end
+    # date1904
+    wb.date1904 = false
+    for node in XML.children(xroot)
+        XML.tag(node) != wb.tag_dict["workbookPr"] && continue
+        attrs = XML.attributes(node)
+        if !isnothing(attrs) && haskey(attrs, "date1904")
+            v = attrs["date1904"]
+            if v ∈ ("1", "true")
+                wb.date1904 = true
+            elseif v ∉ ("0", "false")
+                throw(XLSXError("Could not parse xl/workbook -> workbookPr -> date1904 = $v."))
             end
-
-            break
         end
+        break
     end
 
     # sheets
-    sheets = Vector{Worksheet}()
-    for node in chn
-        if XML.tag(node) == wb.tag_dict["sheets"]
-
-            for sheet_node in XML.children(node)
-                XML.tag(sheet_node) != wb.tag_dict["sheet"] && throw(XLSXError("Unsupported node $(XML.tag(sheet_node)) in node $(XML.tag(node)) in 'xl/workbook.xml'."))
-                worksheet = Worksheet(xf, sheet_node)
-                push!(sheets, worksheet)
-            end
-            break
+    wb.sheets = Worksheet[]
+    for node in XML.children(xroot)
+        XML.tag(node) != wb.tag_dict["sheets"] && continue
+        for sheet_node in XML.children(node)
+            XML.tag(sheet_node) != wb.tag_dict["sheet"] && throw(XLSXError("Unsupported node $(XML.tag(sheet_node)) in node $(XML.tag(node)) in 'xl/workbook.xml'."))
+            push!(wb.sheets, Worksheet(xf, sheet_node))
         end
+        break
     end
-    workbook.sheets = sheets
 
     # named ranges
-    for node in chn
-        if XML.tag(node) == wb.tag_dict["definedNames"]
+    for node in XML.children(xroot)
+        XML.tag(node) != wb.tag_dict["definedNames"] && continue
+        for dn_node in XML.children(node)
+            XML.tag(dn_node) != wb.tag_dict["definedName"] && continue
 
-            for defined_name_node in XML.children(node)
+            raw = XML.value(dn_node[1])
+            name = XML.attributes(dn_node)["name"]
 
-                if XML.tag(defined_name_node) == wb.tag_dict["definedName"]
+            defined_value, isabs = parse_defined_name_value(raw)
 
-                    defined_value_string = XML.value(defined_name_node[1])
-                    name = XML.attributes(defined_name_node)["name"]
-
-                    local defined_value::DefinedNameValueTypes
-                    if is_valid_non_contiguous_range(defined_value_string)
-                        el = split(defined_value_string, ',')
-                        rng = String[]
-                        for rf in el
-                            sp = split(rf, '!')
-                            push!(rng, (unquoteit(sp[1])*"!"*sp[2]))
-                        end
-                        defined_value = NonContiguousRange(join(rng, ','))
-                        isabs = Vector{Bool}(undef, length(defined_value.rng))
-                        for (i, d) in enumerate(split(defined_value_string, ","))
-                            isabs[i] = is_valid_fixed_sheet_cellname(d) || is_valid_fixed_sheet_cellrange(d)
-                        end
-                        length(isabs) != length(defined_value.rng) && throw(XLSXError("Error parsing absolute references in non-contiguous range."))
-                    elseif is_valid_fixed_sheet_cellname(defined_value_string)
-                        sp = split(defined_value_string, '!')
-                        defined_value = SheetCellRef(unquoteit(sp[1])*"!"*sp[2])
-                        isabs = true
-                    elseif is_valid_sheet_cellname(defined_value_string)
-                        sp = split(defined_value_string, '!')
-                        defined_value = SheetCellRef(unquoteit(sp[1])*"!"*sp[2])
-                        isabs = false
-                    elseif is_valid_fixed_sheet_cellrange(defined_value_string)
-                        sp = split(defined_value_string, '!')
-                        defined_value = SheetCellRange(unquoteit(sp[1])*"!"*sp[2])
-                        isabs = true
-                    elseif is_valid_sheet_cellrange(defined_value_string)
-                        sp = split(defined_value_string, '!')
-                        defined_value = SheetCellRange(unquoteit(sp[1])*"!"*sp[2])
-                        isabs = false
-                    elseif occursin(r"^\".*\"$", defined_value_string) # is enclosed by quotes
-                        defined_value = defined_value_string[nextind(defined_value_string, begin):prevind(defined_value_string, end)] # remove enclosing quotes
-                        if isempty(defined_value)
-                            defined_value = missing
-                        end
-                        isabs = false
-                    elseif tryparse(Int64, defined_value_string) !== nothing
-                        defined_value = parse(Int64, defined_value_string)
-                        isabs = false
-                    elseif tryparse(Float64, defined_value_string) !== nothing
-                        defined_value = parse(Float64, defined_value_string)
-                        isabs = false
-                    elseif isempty(defined_value_string)
-                        defined_value = missing
-                        isabs = false
-                    else
-
-                        # Couldn't parse definedName. Will silently ignore it, since this is not a critical feature.
-                        # Actually is just interpreted as a string anyway and added to the defined names (is this true?).
-                        defined_value = string(defined_value_string)
-                        isabs = false
-                        #continue
-
-                        # debug - Now more important since we are writing updated defined names to back to output file.
-                        # throw(XLSXError("Could not parse value $(defined_value_string) for definedName $name."))
-                    end
-                    a = XML.attributes(defined_name_node)
-                    if haskey(a, "localSheetId")
-                        # is a Worksheet level name
-
-                        # localSheetId is the 0-based index of the Worksheet in the order
-                        # that it is displayed on screen.
-                        # Which is the order of the elements under <sheets> element in workbook.xml .
-                        localSheetId = parse(Int, a["localSheetId"]) + 1
-                        sheetId = workbook.sheets[localSheetId].sheetId
-                        workbook.worksheet_names[(sheetId, name)] = DefinedNameValue(defined_value, isabs)
-                    else
-                        # is a Workbook level name
-                        workbook.workbook_names[name] = DefinedNameValue(defined_value, isabs)
-                    end
-                end
-
+            attrs = XML.attributes(dn_node)
+            if haskey(attrs, "localSheetId")
+                localSheetId = parse(Int, attrs["localSheetId"]) + 1
+                sheetId = wb.sheets[localSheetId].sheetId
+                wb.worksheet_names[(sheetId, name)] = DefinedNameValue(defined_value, isabs)
+            else
+                wb.workbook_names[name] = DefinedNameValue(defined_value, isabs)
             end
-            break
         end
+        break
+    end
+end
+
+function parse_defined_name_value(s::String)::Tuple{DefinedNameValueTypes, Any}
+    unquote_sheet(str) = let sp = split(str, '!')
+        unquoteit(sp[1]) * "!" * sp[2]
     end
 
-    nothing
+    if is_valid_non_contiguous_range(s)
+        rng = [unquoteit(split(r, '!')[1]) * "!" * split(r, '!')[2] for r in split(s, ',')]
+        defined_value = NonContiguousRange(join(rng, ','))
+        isabs = [is_valid_fixed_sheet_cellname(d) || is_valid_fixed_sheet_cellrange(d) for d in split(s, ',')]
+        length(isabs) != length(defined_value.rng) && throw(XLSXError("Error parsing absolute references in non-contiguous range."))
+    elseif is_valid_fixed_sheet_cellname(s)
+        defined_value, isabs = SheetCellRef(unquote_sheet(s)), true
+    elseif is_valid_sheet_cellname(s)
+        defined_value, isabs = SheetCellRef(unquote_sheet(s)), false
+    elseif is_valid_fixed_sheet_cellrange(s)
+        defined_value, isabs = SheetCellRange(unquote_sheet(s)), true
+    elseif is_valid_sheet_cellrange(s)
+        defined_value, isabs = SheetCellRange(unquote_sheet(s)), false
+    elseif occursin(r"^\".*\"$", s)
+        inner = s[nextind(s, begin):prevind(s, end)]
+        defined_value, isabs = (isempty(inner) ? missing : inner), false
+    elseif tryparse(Int64, s) !== nothing
+        defined_value, isabs = parse(Int64, s), false
+    elseif tryparse(Float64, s) !== nothing
+        defined_value, isabs = parse(Float64, s), false
+    elseif isempty(s)
+        defined_value, isabs = missing, false
+    else
+        defined_value, isabs = string(s), false
+    end
+
+    return defined_value, isabs
 end
 
 # Returns a Dict mapping Workbook <externalReferences>: index => relationship id.
@@ -892,42 +822,42 @@ function strip_bom_and_lf!(bytes::Vector{UInt8})
 end
 
 function skipNode(r::XML.Raw, skipnode::String) # separate rows or ssts to speed up reading of large files
-#    new = Vector{UInt8}() # original data with <sheetData> or <sst> node removed
-#    skipped = Vector{UInt8}() # just the <sheetData> or <sst> node and its children
-    new = IOBuffer() # original data with <sheetData> or <sst> node removed
-    skipped = IOBuffer() # just the <sheetData> or <sst> node and its children
-    n = XML.next(r)
-    write(new, n.data[n.pos:n.pos+n.len])
-
-    while first(XML.get_name(n.data, n.pos)) != skipnode # Retain everything before the <sheetData> or <sst> node
-        n = XML.next(n)
-        write(new, n.data[n.pos:n.pos+n.len])
-    end
-
-    if skipnode == "sheetData" # Add parents for <row> or <sst> elements to the excerpted data
-        write(skipped, "<worksheet>")
-        write(skipped, "<sheetData>")
+    # Resolve wrapper strings once upfront
+    prefix, suffix = if skipnode == "sheetData"
+        "<worksheet><sheetData>", "</sheetData></worksheet>"
     elseif skipnode == "sst"
-        write(skipped, "<sst>")
+        "<sst>", "</sst>"
     else
         throw(XLSXError("Unknown skipnode $skipnode."))
     end
+
+    data_len = length(r.data)
+    new     = IOBuffer(; sizehint=data_len) # original data with <sheetData> or <sst> node removed
+    skipped = IOBuffer(; sizehint=data_len ÷ 2) # just the <sheetData> or <sst> node and its children
+
+    n = XML.next(r)
+    write(new, @view n.data[n.pos:n.pos+n.len])
+
+    while first(XML.get_name(n.data, n.pos)) != skipnode # Retain everything before the <sheetData> or <sst> node
+        n = XML.next(n)
+        write(new, @view n.data[n.pos:n.pos+n.len])
+    end
+
+    write(skipped, prefix) # Add parents for <row> or <sst> elements to the excerpted data
+
     sdepth = n.depth
     n = XML.next(n)
     while n !== nothing && n.depth > sdepth # Put all children of <sheetData> or <sst> into the excerpted data
-        write(skipped, n.data[n.pos:n.pos+n.len])
+        write(skipped, @view n.data[n.pos:n.pos+n.len])
         n = XML.next(n)
     end
     while n !== nothing # Retain everything after the <sheetData> or <sst> node
-        write(new, n.data[n.pos:n.pos+n.len])
+        write(new, @view n.data[n.pos:n.pos+n.len])
         n = XML.next(n)
     end
-    if skipnode == "sheetData"  # close parents for <row> or <sst> elements in the excerpted data
-        write(skipped, "</sheetData>")
-        write(skipped, "</worksheet>")
-    elseif skipnode == "sst"
-        write(skipped, "</sst>")
-    end
+
+    write(skipped, suffix) # close parents for <row> or <sst> elements in the excerpted data
+
     return take!(new), take!(skipped)
 end
 
