@@ -22,7 +22,7 @@ const Workbook_elements = String[
     ]
 =#
     
-EmptyWorkbook() = Workbook(EmptyMSOfficePackage(), Vector{Worksheet}(), false,
+EmptyWorkbook() = Workbook(EmptyMSOfficePackage(), Vector{Worksheet}(), false, 
     Vector{Relationship}(), Dict{SheetCellRef, AbstractFormula}(), SharedStringTable(), Dict{Int,Bool}(), Dict{Int,Bool}(),
     ReentrantLock(), Dict{String,DefinedNameValueTypes}(), Dict{Tuple{Int,String},DefinedNameValueTypes}(), nothing)
 
@@ -127,6 +127,30 @@ function Base.getindex(xl::XLSXFile, s::AbstractString)
     end
 end
 
+function ref_chooser(f::Function, xl::XLSXFile, ref_str::AbstractString)
+    if is_workbook_defined_name(xl, ref_str)
+        v = get_defined_name_value(xl.workbook, ref_str)
+        if is_defined_name_value_a_constant(v)
+            return v
+        elseif is_defined_name_value_a_reference(v)
+            return f(xl, v)
+        else
+            throw(XLSXError("Unexpected Workbook defined name value: $v."))
+        end
+    elseif is_valid_sheet_cellname(ref_str)
+        return f(xl, SheetCellRef(ref_str))
+    elseif is_valid_sheet_cellrange(ref_str)
+        return f(xl, SheetCellRange(ref_str))
+    elseif is_valid_sheet_column_range(ref_str)
+        return f(xl, SheetColumnRange(ref_str))
+    elseif is_valid_sheet_row_range(ref_str)
+        return f(xl, SheetRowRange(ref_str))
+    elseif is_valid_non_contiguous_sheetcellrange(ref_str)
+        return f(xl, NonContiguousRange(ref_str))
+    end
+    throw(XLSXError("`$ref_str` is not a valid SheetCellRef."))
+end
+
 function getdata(xl::XLSXFile, ref::SheetCellRef)
     !hassheet(xl, ref.sheet) && throw(XLSXError("Sheet `$(ref.sheet)` not found."))
     return getdata(getsheet(xl, ref.sheet), ref.cellref)
@@ -153,29 +177,13 @@ function getdata(xl::XLSXFile, rng::NonContiguousRange)
 end
 
 function getdata(xl::XLSXFile, s::AbstractString)
-    if is_workbook_defined_name(xl, s)
-        v = get_defined_name_value(xl.workbook, s)
-        if is_defined_name_value_a_constant(v)
-            return v
-        elseif is_defined_name_value_a_reference(v)
-            return getdata(xl, v)
-        else
-            throw(XLSXError("Unexpected Workbook defined name value: $v."))
-        end
-    elseif is_valid_sheet_cellname(s)
-        return getdata(xl, SheetCellRef(s))
-    elseif is_valid_sheet_cellrange(s)
-        return getdata(xl, SheetCellRange(s))
-    elseif is_valid_sheet_column_range(s)
-        return getdata(xl, SheetColumnRange(s))
-    elseif is_valid_sheet_row_range(s)
-        return getdata(xl, SheetRowRange(s))
-    elseif is_valid_non_contiguous_sheetcellrange(s)
-        return getdata(xl, NonContiguousRange(s))
-    end
-
-    throw(XLSXError("`$s` is not a valid sheetname, workbook definedName or cell/range reference."))
+    return ref_chooser(getdata, xl, s)
 end
+
+getcell(xl::XLSXFile, rng::SheetCellRange) = getcellrange(xl::XLSXFile, rng::SheetCellRange)
+getcell(xl::XLSXFile, rng::SheetRowRange) = getcellrange(xl::XLSXFile, rng::SheetRowRange)
+getcell(xl::XLSXFile, rng::SheetColumnRange) = getcellrange(xl::XLSXFile, rng::SheetColumnRange)
+getcell(xl::XLSXFile, rng::NonContiguousRange) = getcellrange(xl::XLSXFile, rng::NonContiguousRange)
 
 function getcell(xl::XLSXFile, ref::SheetCellRef)
     !hassheet(xl, ref.sheet) && throw(XLSXError("Sheet `$(ref.sheet)` not found."))
@@ -183,25 +191,7 @@ function getcell(xl::XLSXFile, ref::SheetCellRef)
 end
 
 function getcell(xl::XLSXFile, ref_str::AbstractString)
-    if is_workbook_defined_name(xl, ref_str)
-        v = get_defined_name_value(xl.workbook, ref_str)
-        if is_defined_name_value_a_reference(v)
-            return isa(v, SheetCellRef) ? getcell(xl, v) : getcellrange(xl, v)
-        else
-            throw(XLSXError("`$ref_str` is not a valid Workbook definedName reference."))
-        end
-    elseif is_valid_sheet_cellname(ref_str)
-        return getcell(xl, SheetCellRef(ref_str))
-    elseif is_valid_sheet_cellrange(ref_str)
-        return getcellrange(xl, SheetCellRange(ref_str))
-    elseif is_valid_sheet_column_range(ref_str)
-        return getcellrange(xl, SheetColumnRange(ref_str))
-    elseif is_valid_sheet_row_range(ref_str)
-        return getcellrange(xl, SheetRowRange(ref_str))
-    elseif is_valid_non_contiguous_range(ref_str)
-        return getcellrange(xl, NonContiguousRange(ref_str))
-    end
-    throw(XLSXError("`$ref_str` is not a valid SheetCellRef."))
+    return ref_chooser(getcell, xl, ref_str)
 end
 
 function getcellrange(xl::XLSXFile, rng::SheetCellRange)
@@ -225,24 +215,7 @@ function getcellrange(xl::XLSXFile, rng::NonContiguousRange)
 end
 
 function getcellrange(xl::XLSXFile, rng_str::AbstractString)
-    wb = get_workbook(xl)
-    if is_workbook_defined_name(wb, rng_str)
-        v = get_defined_name_value(wb, rng_str)
-        if is_defined_name_value_a_reference(v)
-            return getcellrange(xl, v)
-        else
-            throw(XLSXError("`$rng_str` is not a valid Workbook definedName reference."))
-        end
-    elseif is_valid_sheet_cellrange(rng_str)
-        return getcellrange(xl, SheetCellRange(rng_str))
-    elseif is_valid_sheet_column_range(rng_str)
-        return getcellrange(xl, SheetColumnRange(rng_str))
-    elseif is_valid_sheet_row_range(rng_str)
-        return getcellrange(xl, SheetRowRange(rng_str))
-    elseif is_valid_non_contiguous_range(rng_str)
-        return getcellrange(xl, NonContiguousRange(rng_str))
-    end
-    throw(XLSXError("`$rng_str` is not a valid SheetCellRange."))
+    return ref_chooser(getcellrange, xl, rng_str)
 end
 
 # Defined names are case-insensitive in Excel. Need to check on this basis (haskey is insufficient).

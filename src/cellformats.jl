@@ -1894,6 +1894,8 @@ function setColumnWidth(ws::Worksheet, rng::CellRange; width::Union{Nothing,Real
     # Validate and resolve width before any XML work
     isnothing(width) && return 0
     width < 0 && throw(XLSXError("Invalid width: $width. Must be >= 0."))
+
+    wb=get_workbook(ws)
     padded_width = width + EXCEL_COLUMN_WIDTH_PADDING
 
     left  = rng.start.column_number

@@ -43,6 +43,7 @@ function allCfs(ws::Worksheet)::Vector{XML.Node}
     return find_all_nodes("/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":worksheet/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":conditionalFormatting", sheetdoc)
 end
 function add_cf_to_XML(ws, new_cf) # Add a new conditional formatting to the worksheet XML.
+    wb = get_workbook(ws)
     sheetdoc = xmlroot(ws.package, "xl/worksheets/sheet" * string(ws.sheetId) * ".xml") # The <conditionalFormatting> blocks come after the <sheetData>
     k, l = get_idces(sheetdoc, "worksheet", "sheetData")
     len = length(sheetdoc[k])
@@ -71,6 +72,7 @@ end
 # --- Conditional formats relying on Excel 2010 extensions
 #
 function allExtCfs(ws::Worksheet)::Vector{XML.Node}
+    wb = get_workbook(ws)
     sheetdoc = xmlroot(ws.package, "xl/worksheets/sheet" * string(ws.sheetId) * ".xml")
     i, j = get_idces(sheetdoc, "worksheet", "extLst")
     if isnothing(j)
@@ -104,6 +106,7 @@ function make_extCfsBlock()
     return extCf
 end
 function update_worksheet_ext_cfx!(allcfs, cfx, ws, rng)
+    wb = get_workbook(ws)
     sheetdoc = xmlroot(ws.package, "xl/worksheets/sheet" * string(ws.sheetId) * ".xml")
     i, j = get_idces(sheetdoc, "worksheet", "extLst")
     if isnothing(j)

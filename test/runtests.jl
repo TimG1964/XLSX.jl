@@ -1297,6 +1297,139 @@ function check_test_data(data::Vector{S}, test_data::Vector{T}) where {S,T}
     nothing
 end
 
+@testset "Strict formats" begin
+    XLSX.openxlsx(joinpath(data_directory, "strict.xlsx")) do f
+        show(IOBuffer(), f)
+        sheet = f["general"]
+        @test sheet["A1"] == "text"
+        @test sheet["B1"] == "regular text"
+        @test sheet["A2"] == "integer"
+        @test sheet["B2"] == 102
+        @test sheet["A3"] == "float"
+        @test isapprox(sheet["B3"], 102.2)
+        @test sheet["A4"] == "date"
+        @test sheet["B4"] == Date(1983, 4, 16)
+        @test sheet["A5"] == "hour"
+        @test sheet["B5"] == Dates.Time(Dates.Hour(19), Dates.Minute(45))
+        @test sheet["A6"] == "datetime"
+        @test sheet["B6"] == Date(2018, 4, 16) + Dates.Time(Dates.Hour(19), Dates.Minute(19), Dates.Second(51))
+        @test f["general!B7"] == -220.0
+        @test f["general!B8"] == -2000
+        @test f["general!B9"] == 100000000000000
+        @test f["general!B10"] == -100000000000000
+    end
+
+    XLSX.openxlsx(joinpath(data_directory, "strict.xlsx")) do xf
+        empty_sheet = XLSX.getsheet(xf, "empty")
+        @test_throws XLSX.XLSXError XLSX.gettable(empty_sheet)
+        itr = XLSX.eachrow(empty_sheet)
+        @test_throws XLSX.XLSXError XLSX.find_row(itr, 1)
+        @test_throws XLSX.XLSXError XLSX.getsheet(xf, "invalid_sheet")
+    end
+
+    f = XLSX.readxlsx(joinpath(data_directory, "strict.xlsx"))
+    tb5 = f["table5"]
+    test_data = Vector{Any}(undef, 1)
+    test_data[1] = [1, 2, 3, 4, 5]
+    dtable = XLSX.gettable(tb5)
+    data, col_names = dtable.data, dtable.column_labels
+    @test col_names == [:HEADER]
+    check_test_data(data, test_data)
+    tb6 = f["table6"]
+    dtable = XLSX.gettable(tb6, first_row=3)
+    data, col_names = dtable.data, dtable.column_labels
+    @test col_names == [:HEADER]
+    check_test_data(data, test_data)
+    tb7 = f["table7"]
+    dtable = XLSX.gettable(tb7, first_row=3)
+    data, col_names = dtable.data, dtable.column_labels
+    @test col_names == [:HEADER]
+    check_test_data(data, test_data)
+
+    sheet_lookup = f["lookup"]
+    test_data = Vector{Any}(undef, 3)
+    test_data[1] = [10, 20, 30]
+    test_data[2] = ["name1", "name2", "name3"]
+    test_data[3] = [100, 200, 300]
+    dtable = XLSX.gettable(sheet_lookup)
+    data, col_names = dtable.data, dtable.column_labels
+    @test col_names == [:ID, :NAME, :VALUE]
+    check_test_data(data, test_data)
+
+    header_error_sheet = f["header_error"]
+    dtable = XLSX.gettable(header_error_sheet, "B:E")
+    data, col_names = dtable.data, dtable.column_labels
+    @test col_names == [:COLUMN_A, :COLUMN_B, Symbol("COLUMN_A_2"), Symbol("#Empty")]
+
+    XLSX.writexlsx("mytest.xlsx", XLSX.openxlsx(joinpath(data_directory, "strict.xlsx"); mode="rw"), overwrite=true)
+
+    XLSX.openxlsx("mytest.xlsx") do f
+        show(IOBuffer(), f)
+        sheet = f["general"]
+        @test sheet["A1"] == "text"
+        @test sheet["B1"] == "regular text"
+        @test sheet["A2"] == "integer"
+        @test sheet["B2"] == 102
+        @test sheet["A3"] == "float"
+        @test isapprox(sheet["B3"], 102.2)
+        @test sheet["A4"] == "date"
+        @test sheet["B4"] == Date(1983, 4, 16)
+        @test sheet["A5"] == "hour"
+        @test sheet["B5"] == Dates.Time(Dates.Hour(19), Dates.Minute(45))
+        @test sheet["A6"] == "datetime"
+        @test sheet["B6"] == Date(2018, 4, 16) + Dates.Time(Dates.Hour(19), Dates.Minute(19), Dates.Second(51))
+        @test f["general!B7"] == -220.0
+        @test f["general!B8"] == -2000
+        @test f["general!B9"] == 100000000000000
+        @test f["general!B10"] == -100000000000000
+    end
+
+    XLSX.openxlsx("mytest.xlsx") do xf
+        empty_sheet = XLSX.getsheet(xf, "empty")
+        @test_throws XLSX.XLSXError XLSX.gettable(empty_sheet)
+        itr = XLSX.eachrow(empty_sheet)
+        @test_throws XLSX.XLSXError XLSX.find_row(itr, 1)
+        @test_throws XLSX.XLSXError XLSX.getsheet(xf, "invalid_sheet")
+    end
+
+    f = XLSX.readxlsx("mytest.xlsx")
+    tb5 = f["table5"]
+    test_data = Vector{Any}(undef, 1)
+    test_data[1] = [1, 2, 3, 4, 5]
+    dtable = XLSX.gettable(tb5)
+    data, col_names = dtable.data, dtable.column_labels
+    @test col_names == [:HEADER]
+    check_test_data(data, test_data)
+    tb6 = f["table6"]
+    dtable = XLSX.gettable(tb6, first_row=3)
+    data, col_names = dtable.data, dtable.column_labels
+    @test col_names == [:HEADER]
+    check_test_data(data, test_data)
+    tb7 = f["table7"]
+    dtable = XLSX.gettable(tb7, first_row=3)
+    data, col_names = dtable.data, dtable.column_labels
+    @test col_names == [:HEADER]
+    check_test_data(data, test_data)
+
+    sheet_lookup = f["lookup"]
+    test_data = Vector{Any}(undef, 3)
+    test_data[1] = [10, 20, 30]
+    test_data[2] = ["name1", "name2", "name3"]
+    test_data[3] = [100, 200, 300]
+    dtable = XLSX.gettable(sheet_lookup)
+    data, col_names = dtable.data, dtable.column_labels
+    @test col_names == [:ID, :NAME, :VALUE]
+    check_test_data(data, test_data)
+
+    header_error_sheet = f["header_error"]
+    dtable = XLSX.gettable(header_error_sheet, "B:E")
+    data, col_names = dtable.data, dtable.column_labels
+    @test col_names == [:COLUMN_A, :COLUMN_B, Symbol("COLUMN_A_2"), Symbol("#Empty")]
+
+    isfile("mytest.xlsx") && rm("mytest.xlsx")
+
+end
+
 @testset "Table" begin
 
     @test Tables.istable(XLSX.DataTable)
@@ -6749,17 +6882,17 @@ end
         XLSX.setFont(sh, "A1"; name="Palatino")
         r = XLSX.getRichTextString(sh, "A1")
         @test r.runs[4].text == "ki"
-        @test r.runs[4].atts == Dict(:bold => true, :size => 11)
+        @test r.runs[4].atts == Dict(:bold => true, :color => "FFFFFFFF", :size => 11)
         @test r.runs[6].text == "ty"
         @test r.runs[6].atts == Dict(:color => "FFFF0000", :size => 11)
         @test XLSX.getFont(sh, "A1").font == Dict("name" => Dict("val" => "Palatino"), "sz" => Dict("val" => "11"), "color" => Dict("theme" => "1"))
         XLSX.setFont(sh, "A1:F2"; name="Palatino")
         r = XLSX.getRichTextString(sh, "B2")
         @test r.runs[4].text == "k"
-        @test r.runs[4].atts == Dict(:bold => true, :size => 11, :under => true)
+        @test r.runs[4].atts == Dict(:bold => true, :color => "FFFFFFFF", :size => 11, :under => true)
         r = XLSX.getRichTextString(sh, "F2")
         @test r.runs[3].text == "lo "
-        @test r.runs[3].atts == Dict(:size => 11)
+        @test r.runs[3].atts == Dict(:color => "FFFFFFFF", :size => 11)
         @test XLSX.getFont(sh, "B2").font["name"] == Dict("val" => "Palatino")
         XLSX.setFont(sh, "B"; under="none")
         @test haskey(XLSX.getFont(sh, "B2").font, "u") == false
@@ -6786,9 +6919,9 @@ end
         @test XLSX.getFont(sh, "C2") === nothing
         r = XLSX.getRichTextString(sh, "C1")
         @test r.runs[3].text == "lo "
-        @test r.runs[3].atts == Dict(:name => "Aptos Narrow", :size => 11)
+        @test r.runs[3].atts == Dict(:color => "FFFFFFFF", :name => "Aptos Narrow", :size => 11)
         @test r.runs[4].text == "ki"
-        @test r.runs[4].atts == Dict(:bold => true, :italic => true, :name => "Aptos Narrow", :size => 11)
+        @test r.runs[4].atts == Dict(:bold => true, :color => "FFFFFFFF", :italic => true, :name => "Aptos Narrow", :size => 11)
 
         XLSX.setUniformFont(sh, :, 3:2:5; color="orange")
         @test XLSX.getFont(sh, "C1").font["sz"] == Dict("val" => "11")
@@ -6814,9 +6947,9 @@ end
         @test XLSX.getFont(sh, "B2") === nothing
         r = XLSX.getRichTextString(sh, "F1")
         @test r.runs[3].text == "lo "
-        @test r.runs[3].atts == Dict(:name => "Calibri", :size => 11)
+        @test r.runs[3].atts == Dict(:color => "FFFFFFFF", :name => "Calibri", :size => 11)
         @test r.runs[8].text == " "
-        @test r.runs[8].atts == Dict(:name => "Aptos Narrow", :size => 11)
+        @test r.runs[8].atts == Dict(:color => "FFFFFFFF", :name => "Aptos Narrow", :size => 11)
         xf = XLSX.opentemplate(joinpath(data_directory, "is.xlsx"))
         sh = xf["Sheet1"]
         XLSX.setFont(sh, "A1"; under="double", color="orange", name="Palatino", size=20, bold=true, italic=true, strike=true)
@@ -6870,14 +7003,14 @@ end
     @testset "RichTextString" begin
         f=XLSX.newxlsx()
         s=f[1]
-        rtf1=XLSX.RichTextRun("Hello", [:vertAlign => "subscript"])
-        rtf2=XLSX.RichTextRun(" Kitty ", [:color => "green", :size => 14, :bold => true, :under => true])
+        rtf1=XLSX.RichTextRun("Hello", (:vertAlign => "subscript"))
+        rtf2=XLSX.RichTextRun(" Kitty ", (:color => "green", :size => 14, :bold => true, :under => true))
         rtf3=XLSX.RichTextRun("Hello", [:color => "green", :size => 14, :under => true])
         s["A1"] = XLSX.RichTextString(rtf1, rtf2, rtf3)
         @test XLSX.getRichTextString(s, "A1").runs[1].atts == Dict(:vertAlign => "subscript")
         @test XLSX.getRichTextString(s, "A1") == XLSX.RichTextString(rtf1, rtf2, rtf3)
 
-        rtf4=XLSX.RichTextRun("Hell", [:color => "red", :size => 18, :name => "Times New Roman"])
+        rtf4=XLSX.RichTextRun("Hell", (color = "red", size = 18, name = "Times New Roman"))
         rtf5=XLSX.RichTextRun("o", [:color => "green", :size => 24, :vertAlign => "superscript", :name => "Arial"])
         rtf6=XLSX.RichTextRun(" Kitt", [:color => "blue", :size => 12, :name => "Consolas"])
         rtf7=XLSX.RichTextRun("y", [:color => "green", :size => 14, :vertAlign => "subscript"])
@@ -6914,6 +7047,21 @@ end
         @test String(take!(io1)) == rts_expected_result
         show(io1, XLSX.getRichTextString(s, "A2").runs[1])
         @test String(take!(io1)) == rtr_expected_result
+
+        rt1 = XLSX.RichTextRun("Water is H")
+        rt2 = XLSX.RichTextRun("2", :vertAlign => "subscript")
+        rt3 = XLSX.RichTextRun("O!")
+        rts_expected_result = "RichTextString: \"Water is H2O!\" \n" *
+                               " containing 3 runs:\n" *
+                               " Run text                 Run attributes\n" *
+                               " -------------------------------------------------------------------------------------------\n" *
+                               " \"Water is H\"             [ ]                                                               \n" *
+                               " \"2\"                      [:vertAlign => \"subscript\"]                                       \n" *
+                               " \"O!\"                     [ ]                                                               \n"
+        io1 = IOBuffer()
+        show(io1, XLSX.RichTextString(rt1, rt2, rt3))
+        @test String(take!(io1)) == rts_expected_result
+
     end
 end
 

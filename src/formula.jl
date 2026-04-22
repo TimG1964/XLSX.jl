@@ -633,10 +633,11 @@ end
 
 # Lookup an external file reference from its index in the workbook's externalReferences
 function get_external_workbook_path(xf::XLSXFile, id::Int)
+    wb = get_workbook(xf)
     extRef = get_wb_ext_refs(xf)
-    rel = get_relationship_target_by_id("xl", get_workbook(xf), extRef[id])
+    rel = get_relationship_target_by_id("xl", wb, extRef[id])
     extXml = xmlroot(xf, rel)
-    i, j = get_idces(extXml, "externalLink", "externalBook") # we are looking for ExternalBook to find an external filename
+    i, j = get_idces(extXml,    "externalLink",    "externalBook") # we are looking for ExternalBook to find an external filename
     isnothing(i) && throw(XLSXError("Malformed external reference in workbook. Missing externalLink node."))
     isnothing(j) && throw(XLSXError("Malformed external reference in workbook. Missing externalBook node."))
     k, l = get_idces(extXml[i], "externalBook", "externalBookPr")

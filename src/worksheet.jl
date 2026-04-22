@@ -1,12 +1,12 @@
 
 function Worksheet(xf::XLSXFile, sheet_element::XML.Node)
-    XML.tag(sheet_element) != "sheet" && throw(XLSXError("Something wrong here!"))
+    wb = get_workbook(xf)
+    XML.tag(sheet_element) !=   "sheet" && throw(XLSXError("Something wrong here!"))
     a = XML.attributes(sheet_element)
     sheetId = parse(Int, a["sheetId"])
     relationship_id = a["r:id"]
     name = XLSX.unescape(a["name"])
     is_hidden = haskey(a, "state") && a["state"] in ["hidden", "veryHidden"]
-#    dim = read_worksheet_dimension(xf, relationship_id, name)
 
     return Worksheet(xf, sheetId, relationship_id, name, nothing, is_hidden)
 end
@@ -91,6 +91,50 @@ function set_dimension!(ws::Worksheet, rng::CellRange)
     nothing
 end
 
+function ref_chooser(f::Function, ws::Worksheet, ref::AbstractString)
+    if is_worksheet_defined_name(ws, ref)
+        v = get_defined_name_value(ws, ref)
+        if is_defined_name_value_a_constant(v)
+            return v
+        elseif is_defined_name_value_a_reference(v)
+            return f(ws, v)
+        else
+            throw(XLSXError("`$ref` is not a valid cell or range reference."))
+        end
+    elseif is_workbook_defined_name(get_workbook(ws), ref)
+        wb = get_workbook(ws)
+        v = get_defined_name_value(wb, ref)
+        if is_defined_name_value_a_constant(v)
+            return v
+        elseif is_defined_name_value_a_reference(v)
+            return f(get_xlsxfile(ws), v)
+        else
+            throw(XLSXError("`$ref` is not a valid cell or range reference."))
+        end
+    elseif is_valid_cellname(ref)
+        return f(ws, CellRef(ref))
+    elseif is_valid_sheet_cellname(ref)
+        return f(ws, SheetCellRef(ref))
+    elseif is_valid_cellrange(ref)
+        return f(ws, CellRange(ref))
+    elseif is_valid_column_range(ref)
+        return f(ws, ColumnRange(ref))
+    elseif is_valid_row_range(ref)
+        return f(ws, RowRange(ref))
+    elseif is_valid_non_contiguous_range(ref)
+        return f(ws, NonContiguousRange(ws, ref))
+    elseif is_valid_sheet_cellrange(ref)
+        return f(ws, SheetCellRange(ref))
+    elseif is_valid_sheet_column_range(ref)
+        return f(ws, SheetColumnRange(ref))
+    elseif is_valid_sheet_row_range(ref)
+        return f(ws, SheetRowRange(ref))
+    elseif is_valid_non_contiguous_range(ref)
+        return f(ws, NonContiguousRange(ws, ref))
+    end
+    throw(XLSXError("`$ref` is not a valid cell or range reference."))
+end
+
 """
     getdata(sheet, ref)
     getdata(sheet, row, column)
@@ -142,12 +186,16 @@ julia> scalar = sheet[2, 2] # Cell "B2"
 
 See also [`XLSX.readdata`](@ref).
 """
+function getdata(ws::Worksheet, ref::AbstractString)
+    return ref_chooser(getdata, ws, ref)
+end
 getdata(ws::Worksheet, single::CellRef) = getdata(ws, getcell(ws, single))
 getdata(ws::Worksheet, row::Integer, col::Integer) = getdata(ws, CellRef(row, col))
 getdata(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}) = [getdata(ws, a, b) for a in row, b in col]
 getdata(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}) = [getdata(ws, a, b) for a in row, b in col]
 getdata(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}) = [getdata(ws, a, b) for a in row, b in col]
 getdata(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}) = getdata(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))))
+getdata(ws::Worksheet) = getdata(ws, get_dimension(ws))
 getdata(ws::Worksheet, ::Colon, ::Colon) = getdata(ws)
 function getdata(ws::Worksheet, ::Colon)
     dim = get_dimension(ws)
@@ -171,7 +219,6 @@ function getdata(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Inte
     row = dim.start.row_number:dim.stop.row_number
     return getdata(ws, row, col)
 end
-
 function getdata(ws::Worksheet, rng::CellRange)::Array{Any,2}
     result = Array{Any,2}(undef, size(rng))
     fill!(result, missing)
@@ -200,7 +247,6 @@ function getdata(ws::Worksheet, rng::CellRange)::Array{Any,2}
 
     return result
 end
-
 function getdata(ws::Worksheet, rng::ColumnRange)::Array{Any,2}
     dim = get_dimension(ws)
     start = CellRef(dim.start.row_number, rng.start)
@@ -213,7 +259,6 @@ function getdata(ws::Worksheet, rng::RowRange)::Array{Any,2}
     stop = CellRef(rng.stop, dim.stop.column_number)
     return getdata(ws, CellRange(start, stop))
 end
-
 function getdata(ws::Worksheet, rng::NonContiguousRange)::Vector{Array{Any,2}}
     do_sheet_names_match(ws, rng)
     results = Vector{Array{Any,2}}()
@@ -233,53 +278,6 @@ getdata(ws::Worksheet, s::SheetCellRange) = do_sheet_names_match(ws, s) && getda
 getdata(ws::Worksheet, s::SheetColumnRange) = do_sheet_names_match(ws, s) && getdata(ws, s.colrng)
 getdata(ws::Worksheet, s::SheetRowRange) = do_sheet_names_match(ws, s) && getdata(ws, s.rowrng)
 
-function getdata(ws::Worksheet, ref::AbstractString)
-    if is_worksheet_defined_name(ws, ref)
-        v = get_defined_name_value(ws, ref)
-        if is_defined_name_value_a_constant(v)
-            return v
-        elseif is_defined_name_value_a_reference(v)
-            return getdata(ws, v)
-        else
-            throw(XLSXError("Unexpected defined name value: $v."))
-        end
-    elseif is_workbook_defined_name(get_workbook(ws), ref)
-        wb = get_workbook(ws)
-        v = get_defined_name_value(wb, ref)
-        if is_defined_name_value_a_constant(v)
-            return v
-        elseif is_defined_name_value_a_reference(v)
-            return getdata(get_xlsxfile(ws), v)
-        else
-            throw(XLSXError("Unexpected defined name value: $v."))
-        end
-    elseif is_valid_cellname(ref)
-        return getdata(ws, CellRef(ref))
-    elseif is_valid_cellrange(ref)
-        return getdata(ws, CellRange(ref))
-    elseif is_valid_column_range(ref)
-        return getdata(ws, ColumnRange(ref))
-    elseif is_valid_row_range(ref)
-        return getdata(ws, RowRange(ref))
-    elseif is_valid_sheet_cellname(ref)
-        return getdata(ws, SheetCellRef(ref))
-    elseif is_valid_sheet_cellrange(ref)
-        return getdata(ws, SheetCellRange(ref))
-    elseif is_valid_sheet_column_range(ref)
-        return getdata(ws, SheetColumnRange(ref))
-    elseif is_valid_sheet_row_range(ref)
-        return getdata(ws, SheetRowRange(ref))
-    elseif is_valid_non_contiguous_cellrange(ref)
-        return getdata(ws, NonContiguousRange(ws, ref))
-    elseif is_valid_non_contiguous_sheetcellrange(ref)
-        nc = NonContiguousRange(ref)
-        return do_sheet_names_match(ws, nc) && getdata(ws, nc)
-    else
-        throw(XLSXError("`$ref` is not a valid cell or range reference."))
-    end
-end
-
-getdata(ws::Worksheet) = getdata(ws, get_dimension(ws))
 
 Base.getindex(ws::Worksheet, r) = getdata(ws, r)
 Base.getindex(ws::Worksheet, r, c) = getdata(ws, r, c)
@@ -362,8 +360,9 @@ getcell(ws::Worksheet, s::SheetCellRange) = do_sheet_names_match(ws, s) && getce
 getcell(ws::Worksheet, s::SheetColumnRange) = do_sheet_names_match(ws, s) && getcellrange(ws, s.colrng)
 getcell(ws::Worksheet, s::SheetRowRange) = do_sheet_names_match(ws, s) && getcellrange(ws, s.rowrng)
 getcell(ws::Worksheet, s::CellRange) = getcellrange(ws, s)
-getcell(ws::Worksheet, s::ColumnRange) = getcellrange(ws, s.colrng)
-getcell(ws::Worksheet, s::RowRange) = getcellrange(ws, s.rowrng)
+getcell(ws::Worksheet, s::ColumnRange) = getcellrange(ws, s)
+getcell(ws::Worksheet, s::RowRange) = getcellrange(ws, s)
+getcell(ws::Worksheet, s::NonContiguousRange) = getcellrange(ws, s)
 
 getcell(ws::Worksheet, row::Integer, col::Integer) = getcell(ws, CellRef(row, col))
 getcell(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}) = getcellrange(ws, row, col)
@@ -383,43 +382,7 @@ function getcell(ws::Worksheet, ::Colon)
 end
 
 function getcell(ws::Worksheet, ref::AbstractString)
-    if is_worksheet_defined_name(ws, ref)
-        v = get_defined_name_value(ws, ref)
-        if is_defined_name_value_a_reference(v)
-            return getcell(ws, v)
-        else
-            throw(XLSXError("`$ref` is not a valid cell or range reference."))
-        end
-    elseif is_workbook_defined_name(get_workbook(ws), ref)
-        wb = get_workbook(ws)
-        v = get_defined_name_value(wb, ref)
-        if is_defined_name_value_a_reference(v)
-            return isa(v, SheetCellRef) ? getcell(get_xlsxfile(ws), v) : getcellrange(get_xlsxfile(ws), v)
-        else
-            throw(XLSXError("`$ref` is not a valid cell or range reference."))
-        end
-    elseif is_valid_cellname(ref)
-        return getcell(ws, CellRef(ref))
-    elseif is_valid_sheet_cellname(ref)
-        return getcell(ws, SheetCellRef(ref))
-    elseif is_valid_cellrange(ref)
-        return getcellrange(ws, CellRange(ref))
-    elseif is_valid_column_range(ref)
-        return getcellrange(ws, ColumnRange(ref))
-    elseif is_valid_row_range(ref)
-        return getcellrange(ws, RowRange(ref))
-    elseif is_valid_non_contiguous_range(ref)
-        return getcellrange(ws, NonContiguousRange(ws, ref))
-    elseif is_valid_sheet_cellrange(ref)
-        return getcellrange(ws, SheetCellRange(ref))
-    elseif is_valid_sheet_column_range(ref)
-        return getcellrange(ws, SheetColumnRange(ref))
-    elseif is_valid_sheet_row_range(ref)
-        return getcellrange(ws, SheetRowRange(ref))
-    elseif is_valid_non_contiguous_range(ref)
-        return getcellrange(ws, NonContiguousRange(ref))
-    end
-    throw(XLSXError("`$ref` is not a valid cell or range reference."))
+    return ref_chooser(getcell, ws, ref)
 end
 
 """
@@ -545,38 +508,5 @@ function getcellrange(ws::Worksheet, rng::NonContiguousRange)::Vector{Array{Abst
 end
 
 function getcellrange(ws::Worksheet, rng::AbstractString)
-    if is_worksheet_defined_name(ws, rng)
-        v = get_defined_name_value(ws, rng)
-        if is_defined_name_value_a_reference(v)
-            return getcellrange(ws, v)
-        else
-            throw(XLSXError("$rng is not a valid cell range."))
-        end
-    elseif is_workbook_defined_name(get_workbook(ws), rng)
-        wb = get_workbook(ws)
-        v = get_defined_name_value(wb, rng)
-        if is_defined_name_value_a_reference(v)
-            isa(v, SheetCellRef) && throw(XLSXError("`$rng` is not a valid cell range."))
-            return getcellrange(get_xlsxfile(ws), v)
-        else
-            throw(XLSXError("`$rng` is not a valid cell range."))
-        end
-    elseif is_valid_cellrange(rng)
-        return getcellrange(ws, CellRange(rng))
-    elseif is_valid_column_range(rng)
-        return getcellrange(ws, ColumnRange(rng))
-    elseif is_valid_row_range(rng)
-        return getcellrange(ws, RowRange(rng))
-    elseif is_valid_non_contiguous_range(rng)
-        return getcellrange(ws, NonContiguousRange(ws, rng))
-    elseif is_valid_sheet_cellrange(rng)
-        return getcellrange(ws, SheetCellRange(rng))
-    elseif is_valid_sheet_column_range(rng)
-        return getcellrange(ws, SheetColumnRange(rng))
-    elseif is_valid_sheet_row_range(rng)
-        return getcellrange(ws, SheetRowRange(rng))
-    elseif is_valid_non_contiguous_range(rng)
-        return getcellrange(ws, NonContiguousRange(rng))
-    end
-    throw(XLSXError("`$rng` is not a valid cell range."))
+    return ref_chooser(getcellrange, ws, rng)
 end

@@ -1,6 +1,6 @@
 
-function Relationship(e::XML.Node)::Relationship
-    XML.tag(e) != "Relationship" && throw(XLSXError("Unexpected XML Element: $(XML.tag(e)). Expected: \"Relationship\"."))
+function Relationship(wb::Workbook, e::XML.Node)::Relationship
+    XML.tag(e) !=   "Relationship" && throw(XLSXError("Unexpected XML Element: $(XML.tag(e)). Expected: \"Relationship\"."))
     a = XML.attributes(e)
     return Relationship(
         a["Id"],

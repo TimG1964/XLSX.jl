@@ -30,6 +30,7 @@ Returns the filepath of the written file if a filename is supplied, or `nothing`
 If `overwrite=true`, `output_source` (when a filepath) will be overwritten if it exists.
 
 See also [`savexlsx`](@ref).
+
 """
 function writexlsx(output_source::Union{AbstractString,IO}, xf::XLSXFile; overwrite::Bool=false)
 
@@ -49,12 +50,12 @@ function writexlsx(output_source::Union{AbstractString,IO}, xf::XLSXFile; overwr
 
         # write XML files not in cache
         for f in keys(xf.files)
-            if !occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", f) # will be generated from cache below
+            if !occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", f)
                 ZipArchives.zip_newfile(xlsx, f; compress=true)
-                write(xlsx, XML.write(xf.data[f]))
+                xml_str = XML.write(xf.data[f])
+                write(xlsx, xml_str)
             end
         end
-
         # write worksheet files from cache (cache must be enabled in write mode)
         for sheet_no in 1:sheetcount(wb)
             doc = update_single_sheet!(wb, sheet_no, true)
@@ -226,23 +227,20 @@ end
 
 # Remove all children with tag given by att[2] from a parent XML node with a tag given by att[1].
 function get_idces(doc::XML.Node, t, b)
+    
     i = 1
     j = 1
-    chn=XML.children(doc)
-    l=length(chn)
-    while XML.tag(chn[i]) != t
+    chn = XML.children(doc)
+    l = length(chn)
+    while XML.tag(chn[i]) !== t
         i += 1
-        if i > l
-            return nothing, nothing
-        end
+        i > l && return nothing, nothing
     end
-    chn=XML.children(chn[i])
-    l=length(chn)
-    while XML.tag(chn[j]) != b
+    chn = XML.children(chn[i])
+    l = length(chn)
+    while XML.tag(chn[j]) !== b
         j += 1
-        if j > l
-            return i, nothing
-        end
+        j > l && return i, nothing
     end
     return i, j
 end
@@ -263,15 +261,18 @@ function update_worksheets_xml!(xl::XLSXFile; full=false)
     end
     return nothing
 end
-
 function update_single_sheet!(wb::Workbook, sheet_no::Int, full::Bool)::Union{Nothing,Vector{UInt8}}
     sheet = getsheet(wb, sheet_no)
     doc = copynode(get_worksheet_xml_document(sheet))
     xroot = doc[end]
 
     # check namespace and root node name
-    get_default_namespace(xroot) != SPREADSHEET_NAMESPACE_XPATH_ARG && throw(XLSXError("Unsupported Spreadsheet XML namespace $(get_default_namespace(xroot))."))
-    XML.tag(xroot) != "worksheet" && throw(XLSXError("Malformed Excel file. Expected root node named `worksheet` in worksheet XML file."))
+    # get_default_namespace(xroot) != SPREADSHEET_NAMESPACE_XPATH_ARG && throw(XLSXError("Unsupported Spreadsheet XML namespace $(get_default_namespace(xroot))."))
+    ns_map = get_namespaces(xroot)
+    spreadsheet_ns_declared = SPREADSHEET_NAMESPACE_XPATH_ARG in values(ns_map)
+    spreadsheet_ns_declared ||
+        throw(XLSXError("Unsupported Spreadsheet XML namespace."))
+    XML.tag(xroot) !=   "worksheet" && throw(XLSXError("Malformed Excel file. Expected root node named `worksheet` in worksheet XML file."))
 
     if full # need to reconstruct row and cell data from cache
 
@@ -282,8 +283,8 @@ function update_single_sheet!(wb::Workbook, sheet_no::Int, full::Bool)::Union{No
             dimension_node["ref"] = string(get_dimension(sheet))
         end
 
-        empty_doc=XML.write(doc)
-        idx=findfirst("<sheetData/>", empty_doc)
+        empty_doc = XML.write(doc)
+        idx = findfirst("<sheetData/>", empty_doc)
         idx === nothing && throw(XLSXError("<sheetData/> placeholder not found"))
         new_doc=IOBuffer()
         print(new_doc, empty_doc[begin:first(idx)-1])
@@ -815,9 +816,6 @@ function setdata!(ws::Worksheet, ref::AbstractString, value)
         return setdata!(ws, SheetRowRange(ref), value)
     elseif is_valid_non_contiguous_cellrange(ref)
         return setdata!(ws, NonContiguousRange(ws, ref), value)
-    elseif is_valid_non_contiguous_sheetcellrange(ref)
-        nc = NonContiguousRange(ref)
-        return do_sheet_names_match(ws, nc) && setdata!(ws, nc, value)
     end
     throw(XLSXError("`$ref` is not a valid cell or range reference."))
 end
@@ -841,6 +839,7 @@ function setdata!(ws::Worksheet, rng::ColumnRange, value)
     setdata!(ws, CellRange(start, stop), value)
 end
 function setdata!(ws::Worksheet, rng::NonContiguousRange, value)
+    do_sheet_names_match(ws, rng)
     for r in rng.rng
         setdata!(ws, r, value) # r may be a single Cell or a CellRange
     end
@@ -1089,6 +1088,7 @@ function renamesheet!(ws::Worksheet, name::AbstractString)
 
     # updates XML
     xroot = xmlroot(xf, "xl/workbook.xml")[end]
+    wb = get_workbook(ws)
     for node in XML.children(xroot)
         if XML.tag(node) == "sheets"
 
@@ -1346,7 +1346,8 @@ function insertsheet!(wb::Workbook, xdoc::XML.Node, new_cache::WorksheetCache, s
 end
 
 add_override!(wb::Workbook, part::String, content::String) = add_override!(get_xlsxfile(wb), part, content)
-function add_override!(xf::XLSXFile, part::String, content::String) 
+function add_override!(xf::XLSXFile, part::String, content::String)
+    wb = get_workbook(xf) 
     ctype_root = xmlroot(xf, "[Content_Types].xml")[end]
     XML.tag(ctype_root) != "Types" && throw(XLSXError("Something wrong here!"))
     override_node = XML.Element("Override";
