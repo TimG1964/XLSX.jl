@@ -570,11 +570,6 @@ function get_namespaces(r::XML.Node)::Dict{String,String}
     return nss
 end
 
-function get_default_namespace_prefix(r::XML.Node)::String
-    prefix, _ = _get_default_namespace(r)
-    return prefix
-end
-
 function get_default_namespace(r::XML.Node)::String
     _, ns = _get_default_namespace(r)
     return ns
