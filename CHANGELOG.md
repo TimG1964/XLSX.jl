@@ -5,7 +5,7 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
-- Add `iserror` and `geterror` functions ([#327](https://github.com/JuliaData/XLSX.jl/issues/327))
+- 
 
 ## [v0.11.4](https://github.com/JuliaData/XLSX.jl/tree/v0.11.4) - 2026-04-22
 - Add `iserror` and `geterror` functions ([#327](https://github.com/JuliaData/XLSX.jl/issues/327))
