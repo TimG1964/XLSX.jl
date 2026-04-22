@@ -1,17 +1,4 @@
-const SPREADSHEET_ELEMENT_NAMES = Set{String}([
-    "worksheet", "workbook", "sheetData", "row", "c", "v", "f", "d",
-    "dimension", "sheetView", "sheetViews", "selection", "sheets",
-    "sheet", "definedNames", "definedName", "sheetFormatPr",
-    "pageMargins", "sst", "si", "t", "rPh", "phoneticPr",
-    "Relationship", "cfRule", "numFmt", "workbookPr", 
-    "styleSheet", "Types", "calcPr", "extLst", "dxfs", "dxf", 
-    "cellXfs", "is", "externalReferences", "externalLink", 
-    "externalBook", "externalBookPr", "bookViews", "workbookView", 
-    "cols", "col", "alignment", "ext", "r", "rPr", "b", "i", 
-    "strike", "u", "sz", "color", "rFont", "vertAlign"
-    # ...
-])
-
+# Name space conversion map for converting Strict OOXML files (ISO/IEC 29500) to Transitional format (ECMA-376)
 const STRICT_TO_TRANSITIONAL = Dict(
     # core markup
     "http://purl.oclc.org/ooxml/spreadsheetml/main" =>
@@ -179,21 +166,6 @@ function check_for_xlsx_file_format(filepath::AbstractString)
     end
 end
 
-# Build a lookup dictionary for element names, qualified with the default namespace prefix if it exists.
-function build_tag_dict!(xf::XLSXFile)
-    xroot = xmlroot(xf,"xl/workbook.xml")[end]
-    prefix=get_default_namespace_prefix(xroot)
-    wb = get_workbook(xf)
-    qualify(name) = isempty(prefix) ? name : "$(prefix):$(name)"
-    wb.tag_dict = Dict(name => qualify(name) for name in SPREADSHEET_ELEMENT_NAMES)
-    return nothing
-end
-function get_prefix(wb::Workbook)
-    s = first(values(wb.tag_dict))
-    i = findfirst(':', s)
-    return i === nothing ? "" : SubString(s, 1, i-1)
-end
-
 # Determine if the file is a Strict OOXML file.
 function is_strict_ooxml(xf::XLSXFile)::Bool
     wb = get_workbook(xf)
@@ -216,7 +188,7 @@ function is_strict_ooxml(xf::XLSXFile)::Bool
     if haskey(files, "_rels/.rels")
         rels = files["_rels/.rels"][end]
         for el in XML.children(rels)
-            if XML.tag(el) == wb.tag_dict["Relationship"]
+            if XML.tag(el) == "Relationship"
                 if occursin("purl.oclc.org/ooxml", get(XML.attributes(el), "Type", ""))
                     return true
                 end
@@ -553,7 +525,6 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
 
 
     load_files!(xf, zip_io; pass=1) # multi-threaded file load
-    build_tag_dict!(xf::XLSXFile)
     strict = is_strict_ooxml(xf)
     if strict
         convert_strict_to_transitional!(xf, 1)
@@ -587,14 +558,6 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
 
     return xf
 end
-
-# Returns the local name of an XML tag, stripping any namespace prefix.
-# e.g. "x:worksheet" -> "worksheet", "worksheet" -> "worksheet"
-@inline xml_local_name(tag::AbstractString) =
-    let i = findfirst(':', tag)
-        isnothing(i) ? tag : SubString(tag, i+1)
-    end
-@inline xml_local_name(::Nothing) = nothing
 
 function get_namespaces(r::XML.Node)::Dict{String,String}
     nss = Dict{String,String}()
@@ -678,12 +641,12 @@ function parse_workbook!(xf::XLSXFile)
     xroot = xmlroot(xf, "xl/workbook.xml")[end]
     wb = get_workbook(xf)
 
-    XML.tag(xroot) != wb.tag_dict["workbook"] && throw(XLSXError("Malformed xl/workbook.xml. Root node name should be '$(wb.tag_dict["workbook"])'. Got '$(XML.tag(xroot))'."))
+    XML.tag(xroot) != "workbook" && throw(XLSXError("Malformed xl/workbook.xml. Root node name should be 'workbook'. Got '$(XML.tag(xroot))'."))
 
     # date1904
     wb.date1904 = false
     for node in XML.children(xroot)
-        XML.tag(node) != wb.tag_dict["workbookPr"] && continue
+        XML.tag(node) != "workbookPr" && continue
         attrs = XML.attributes(node)
         if !isnothing(attrs) && haskey(attrs, "date1904")
             v = attrs["date1904"]
@@ -699,9 +662,9 @@ function parse_workbook!(xf::XLSXFile)
     # sheets
     wb.sheets = Worksheet[]
     for node in XML.children(xroot)
-        XML.tag(node) != wb.tag_dict["sheets"] && continue
+        XML.tag(node) != "sheets" && continue
         for sheet_node in XML.children(node)
-            XML.tag(sheet_node) != wb.tag_dict["sheet"] && throw(XLSXError("Unsupported node $(XML.tag(sheet_node)) in node $(XML.tag(node)) in 'xl/workbook.xml'."))
+            XML.tag(sheet_node) != "sheet" && throw(XLSXError("Unsupported node $(XML.tag(sheet_node)) in node $(XML.tag(node)) in 'xl/workbook.xml'."))
             push!(wb.sheets, Worksheet(xf, sheet_node))
         end
         break
@@ -709,9 +672,9 @@ function parse_workbook!(xf::XLSXFile)
 
     # named ranges
     for node in XML.children(xroot)
-        XML.tag(node) != wb.tag_dict["definedNames"] && continue
+        XML.tag(node) != "definedNames" && continue
         for dn_node in XML.children(node)
-            XML.tag(dn_node) != wb.tag_dict["definedName"] && continue
+            XML.tag(dn_node) != "definedName" && continue
 
             raw = XML.value(dn_node[1])
             name = XML.attributes(dn_node)["name"]
@@ -770,7 +733,7 @@ function get_wb_ext_refs(xf::XLSXFile)
     wb = get_workbook(xf)
     ext_refs = Dict{Int, String}()
     xroot = xmlroot(xf, "xl/workbook.xml")
-    i, j = get_idces(xroot, wb.tag_dict["workbook"], wb.tag_dict["externalReferences"])
+    i, j = get_idces(xroot, "workbook", "externalReferences")
     if !isnothing(j)
         for (i, ref) in enumerate(XML.children(xroot[i][j]))
             ext_refs[i] = ref["r:id"]

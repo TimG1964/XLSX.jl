@@ -83,7 +83,7 @@ function styles_xmlroot(workbook::Workbook)
             if get_default_namespace(styles_root[end]) != SPREADSHEET_NAMESPACE_XPATH_ARG
                 throw(XLSXError("Unsupported styles XML namespace $(get_default_namespace(styles_root[end]))."))
             end
-            XML.tag(styles_root[end]) != workbook.tag_dict["styleSheet"] && throw(XLSXError("Malformed package. Expected root node named `styleSheet` in `styles.xml`."))
+            XML.tag(styles_root[end]) != "styleSheet" && throw(XLSXError("Malformed package. Expected root node named `styleSheet` in `styles.xml`."))
             workbook.styles_xroot = styles_root
         else
             throw(XLSXError("Styles not found for this workbook."))
@@ -291,7 +291,7 @@ end
 
 function styles_add_cell_xf(wb::Workbook, new_xf::XML.Node)::CellDataFormat
     xroot = styles_xmlroot(wb)
-    i, j = get_idces(xroot, wb.tag_dict["styleSheet"], wb.tag_dict["cellXfs"])
+    i, j = get_idces(xroot, "styleSheet", "cellXfs")
     existing_cellxf_elements_count = length(XML.children(xroot[i][j]))
     if parse(Int, xroot[i][j]["count"]) != existing_cellxf_elements_count
         throw(XLSXError("Wrong number of xf elements found: $existing_cellxf_elements_count. Expected $(parse(Int, xroot[i][j]["count"]))."))

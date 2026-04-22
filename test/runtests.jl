@@ -7047,6 +7047,21 @@ end
         @test String(take!(io1)) == rts_expected_result
         show(io1, XLSX.getRichTextString(s, "A2").runs[1])
         @test String(take!(io1)) == rtr_expected_result
+
+        rt1 = XLSX.RichTextRun("Water is H")
+        rt2 = XLSX.RichTextRun("2", :vertAlign => "subscript")
+        rt3 = XLSX.RichTextRun("O!")
+        rts_expected_result = "RichTextString: \"Water is H2O!\" \n" *
+                               " containing 3 runs:\n" *
+                               " Run text                 Run attributes\n" *
+                               " -------------------------------------------------------------------------------------------\n" *
+                               " \"Water is H\"             [ ]                                                               \n" *
+                               " \"2\"                      [:vertAlign => \"subscript\"]                                       \n" *
+                               " \"O!\"                     [ ]                                                               \n"
+        io1 = IOBuffer()
+        show(io1, XLSX.RichTextString(rt1, rt2, rt3))
+        @test String(take!(io1)) == rts_expected_result
+
     end
 end
 

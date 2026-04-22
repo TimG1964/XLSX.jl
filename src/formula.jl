@@ -637,10 +637,10 @@ function get_external_workbook_path(xf::XLSXFile, id::Int)
     extRef = get_wb_ext_refs(xf)
     rel = get_relationship_target_by_id("xl", wb, extRef[id])
     extXml = xmlroot(xf, rel)
-    i, j = get_idces(extXml, wb.tag_dict["externalLink"], wb.tag_dict["externalBook"]) # we are looking for ExternalBook to find an external filename
+    i, j = get_idces(extXml,    "externalLink",    "externalBook") # we are looking for ExternalBook to find an external filename
     isnothing(i) && throw(XLSXError("Malformed external reference in workbook. Missing externalLink node."))
     isnothing(j) && throw(XLSXError("Malformed external reference in workbook. Missing externalBook node."))
-    k, l = get_idces(extXml[i], wb.tag_dict["externalBook"], wb.tag_dict["externalBookPr"])
+    k, l = get_idces(extXml[i], "externalBook", "externalBookPr")
     k == j || throw(XLSXError("Something wrong here!"))
 
     # find the file name directly, if present, searching in order:
@@ -653,7 +653,7 @@ function get_external_workbook_path(xf::XLSXFile, id::Int)
         atts = XML.attributes(extXml[i][k][l])
         haskey(atts, "filename") && return atts["filename"] # externalBookPr filename attribute
     end
-    k, l = get_idces(extXml[i], wb.tag_dict["externalBook"], "xxl21:alternateUrls")
+    k, l = get_idces(extXml[i], "externalBook", "xxl21:alternateUrls")
     if !isnothing(l)
         atts = XML.attributes(extXml[i][k][l][1]) # prefer the first alternateUrls r:id if multiple
         haskey(atts, "r:id") || throw(XLSXError("Something wrong here!"))

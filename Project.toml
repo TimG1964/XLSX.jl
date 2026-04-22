@@ -26,7 +26,7 @@ StyledStringsSstsExt = "StyledStrings"
 
 [compat]
 CSV = "0.10.15"
-Colors = "0.13.0"
+Colors = "0.12, 0.13"
 Distributions = "0.25.0"
 OrderedCollections = "1"
 PrecompileTools = "1"

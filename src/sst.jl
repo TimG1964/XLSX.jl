@@ -25,7 +25,7 @@ function create_new_sst(wb::Workbook, sst::SharedStringTable)
 
         # add Content Type <Override ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml" PartName="/xl/sharedStrings.xml"/>
         ctype_root = xmlroot(get_xlsxfile(wb), "[Content_Types].xml")[end]
-        XML.tag(ctype_root) != wb.tag_dict["Types"] && throw(XLSXError("Something wrong here!"))
+        XML.tag(ctype_root) != "Types" && throw(XLSXError("Something wrong here!"))
         override_node = XML.Element("Override";
             ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",
             PartName = "/xl/sharedStrings.xml"
@@ -158,7 +158,7 @@ function process_sst(wb, sst::SstToken)
     i = sst.idx
 
     if XML.nodetype(el) != XML.Text
-        XML.tag(el) != wb.tag_dict["si"] && throw(XLSXError("Unsupported node $(XML.tag(el)) in sst table."))
+        XML.tag(el) != "si" && throw(XLSXError("Unsupported node $(XML.tag(el)) in sst table."))
         sst = Sst(XML.write(el), i)
         return sst
 
@@ -227,7 +227,7 @@ function gather_strings!(wb::Workbook, io::IOBuffer, e::XML.LazyNode)
     # Skip phonetic hints entirely
     tag == "rPh" && return nothing
     
-    if tag == wb.tag_dict["t"]
+    if tag == "t"
         children = XML.children(e)
         n = length(children)
         
@@ -689,7 +689,7 @@ function getRichTextString(wb::Workbook, xml_string::String)::Union{RichTextStri
     si = doc[end]
     
     # Check for rich text runs <r> elements
-    runs = [child for child in XML.children(si) if XML.tag(child) == wb.tag_dict["r"]]
+    runs = [child for child in XML.children(si) if XML.tag(child) == "r"]
     
     # No rich text runs — plain string, return nothing
     isempty(runs) && return nothing
@@ -699,13 +699,13 @@ function getRichTextString(wb::Workbook, xml_string::String)::Union{RichTextStri
     for run in runs
         children = XML.children(run)
         
-        t_node = findfirst(c -> XML.tag(c) == wb.tag_dict["t"], children)
+        t_node = findfirst(c -> XML.tag(c) == "t", children)
         isnothing(t_node) && continue
 
         text = XML.is_simple(children[t_node]) ? XML.simple_value(children[t_node]) : XML.value(children[t_node][1])
         isempty(text) && continue
         
-        rpr = findfirst(c -> XML.tag(c) == wb.tag_dict["rPr"], children)
+        rpr = findfirst(c -> XML.tag(c) == "rPr", children)
         atts = if isnothing(rpr)
             nothing
         else
@@ -713,15 +713,15 @@ function getRichTextString(wb::Workbook, xml_string::String)::Union{RichTextStri
             rpr_children = XML.children(rpr_node)
             pairs = Pair{Symbol, Any}[]
             
-            any(c -> XML.tag(c) == wb.tag_dict["b"],      rpr_children) && push!(pairs, :bold      => true)
-            any(c -> XML.tag(c) == wb.tag_dict["i"],      rpr_children) && push!(pairs, :italic    => true)
-            any(c -> XML.tag(c) == wb.tag_dict["strike"], rpr_children) && push!(pairs, :strike    => true)
-            any(c -> XML.tag(c) == wb.tag_dict["u"],      rpr_children) && push!(pairs, :under     => true)
+            any(c -> XML.tag(c) == "b",      rpr_children) && push!(pairs, :bold      => true)
+            any(c -> XML.tag(c) == "i",      rpr_children) && push!(pairs, :italic    => true)
+            any(c -> XML.tag(c) == "strike", rpr_children) && push!(pairs, :strike    => true)
+            any(c -> XML.tag(c) == "u",      rpr_children) && push!(pairs, :under     => true)
             
-            sz_node = findfirst(c -> XML.tag(c) == wb.tag_dict["sz"], rpr_children)
+            sz_node = findfirst(c -> XML.tag(c) == "sz", rpr_children)
             !isnothing(sz_node) && push!(pairs, :size => parse(Int, XML.attributes(rpr_children[sz_node])["val"]))
             
-            color_node = findfirst(c -> XML.tag(c) == wb.tag_dict["color"], rpr_children)
+            color_node = findfirst(c -> XML.tag(c) == "color", rpr_children)
             if !isnothing(color_node)
                 atts = XML.attributes(rpr_children[color_node])
 
@@ -741,10 +741,10 @@ function getRichTextString(wb::Workbook, xml_string::String)::Union{RichTextStri
                     push!(pairs, :color => "000000")  # Excel default
                 end
             end            
-            font_node = findfirst(c -> XML.tag(c) == wb.tag_dict["rFont"], rpr_children)
+            font_node = findfirst(c -> XML.tag(c) == "rFont", rpr_children)
             !isnothing(font_node) && push!(pairs, :name => XML.attributes(rpr_children[font_node])["val"])
             
-            va_node = findfirst(c -> XML.tag(c) == wb.tag_dict["vertAlign"], rpr_children)
+            va_node = findfirst(c -> XML.tag(c) == "vertAlign", rpr_children)
             !isnothing(va_node) && push!(pairs, :vertAlign => XML.attributes(rpr_children[va_node])["val"])
             
             isempty(pairs) ? nothing : pairs

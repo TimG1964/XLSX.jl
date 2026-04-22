@@ -73,11 +73,11 @@ function Base.iterate(itr::SheetRowStreamIterator)
     sheetnode = open_internal_file_stream(get_xlsxfile(ws), target_file) # worksheet target files are LazyNodes
 
     length(sheetnode) <= 0 && throw(XLSXError("Couldn't open reader for Worksheet $(ws.name)."))
-    XML.tag(sheetnode[end]) != wb.tag_dict["worksheet"] && throw(XLSXError("Expecting to find a worksheet node: Found a $(XML.tag(sheetnode[end]))."))
+    XML.tag(sheetnode[end]) !=  "worksheet"  && throw(XLSXError("Expecting to find a worksheet node: Found a $(XML.tag(sheetnode[end]))."))
 
     sheetnode=XML.next(sheetnode)
 
-    while XML.tag(sheetnode) != wb.tag_dict["sheetData"] # Check for `sheetData`
+    while XML.tag(sheetnode) != "sheetData" # Check for `sheetData`
         sheetnode = XML.next(sheetnode)
         sheetnode === nothing && throw(XLSXError("No `sheetData` node found in worksheet"))
     end
@@ -86,7 +86,7 @@ function Base.iterate(itr::SheetRowStreamIterator)
 
     rownode=XML.next(sheetnode)
 
-    while XML.tag(rownode) != wb.tag_dict["row"] # Check for at least one `row`
+    while XML.tag(rownode) != "row" # Check for at least one `row`
         rownode = XML.next(rownode)
         rownode === nothing && return nothing # no rows found
     end

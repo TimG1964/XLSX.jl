@@ -555,7 +555,7 @@ function styles_add_cell_attribute(wb::Workbook, new_att::XML.Node, att::String)
 
     # Check new_att doesn't duplicate any existing att. If yes, use that rather than create new.
     for (k, node) in enumerate(XML.children(xroot[i][j]))
-        if XML.tag(new_att) == wb.tag_dict["numFmt"] # mustn't compare numFmtId attribute for formats
+        if XML.tag(new_att) == "numFmt" # mustn't compare numFmtId attribute for formats
             if node["formatCode"] == new_att["formatCode"]
                 return k - 1 # CellDataFormat is zero-indexed
             end

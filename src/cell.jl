@@ -178,7 +178,7 @@ _extra_attrs(d::Dict) = isempty(d) ? nothing : d
 function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothing}=nothing)::Union{Cell,EmptyCell}
     wb = get_workbook(ws)
 
-    XML.tag(c) == wb.tag_dict["c"] || throw(XLSXError("`Cell` expects a `c` (cell) XML node."))
+    XML.tag(c) == "c" || throw(XLSXError("`Cell` expects a `c` (cell) XML node."))
 
     a = XML.attributes(c)
     chn = XML.children(c)
@@ -198,7 +198,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
 
     if t == "inlineStr"
         for child in chn
-            XML.tag(child) == wb.tag_dict["is"] || continue
+            XML.tag(child) == "is" || continue
             uft = unformatted_text(wb, child)
             if !isempty(uft)
                 ft = _build_si_xml(child)
@@ -210,12 +210,12 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
     else
         for child in chn
             tag = XML.tag(child)
-            if tag == wb.tag_dict["v"]
+            if tag == "v"
                 ch = XML.children(child)
                 isempty(ch) && continue
                 v = XLSX.unescape(XML.value(ch[1]))
                 datatype, value = process_tv(wb, t, v, num_style; mylock)
-            elseif tag == wb.tag_dict["f"]
+            elseif tag == "f"
                 if get_xlsxfile(wb).is_writable
                     f = parse_formula_from_element(wb,child)
                     wb.formulas[SheetCellRef(combine_sheet_ref(ws, ref))] = f
@@ -229,7 +229,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
 end
 
 function parse_formula_from_element(wb, c_child_element)::AbstractFormula
-    XML.tag(c_child_element) == wb.tag_dict["f"] ||
+    XML.tag(c_child_element) == "f" ||
         throw(XLSXError("Expected nodename `f`. Found: `$(XML.tag(c_child_element))`"))
 
     # Extract formula string

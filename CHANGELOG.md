@@ -5,7 +5,11 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
+
+## [v0.11.4](https://github.com/JuliaData/XLSX.jl/tree/v0.11.4) - 2026-04-22
 - Add `iserror` and `geterror` functions ([#327](https://github.com/JuliaData/XLSX.jl/issues/327))
+- Add support for strict (ISO/IEC 29500) .xlsx files ([#328](https://github.com/JuliaData/XLSX.jl/issues/328), [#233](https://github.com/JuliaData/XLSX.jl/issues/233))
+- Widen Compat on Colors.jl to "0.12, 0.13" ([[#370](https://github.com/JuliaData/XLSX.jl/issues/370)])
 
 ## [v0.11.3](https://github.com/JuliaData/XLSX.jl/tree/v0.11.3) - 2026-04-14
 - Bake in relocatable data (issue [#351](https://github.com/JuliaData/XLSX.jl/issues/351))

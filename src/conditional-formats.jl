@@ -472,7 +472,7 @@ function getConditionalFormats(ws::Worksheet, allcfnodes::Vector{XML.Node})::Vec
     allcfs = Vector{Pair{CellRange,NamedTuple{(:type, :priority),Tuple{String,Int64}}}}()
     for cf in allcfnodes
         for child in XML.children(cf)
-            if XML.tag(child) == wb.tag_dict["cfRule"]
+            if XML.tag(child) ==    "cfRule"
                 push!(allcfs, CellRange(cf["sqref"]) => (type=child["type"], priority=parse(Int, child["priority"])))
             end
         end
