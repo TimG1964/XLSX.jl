@@ -231,6 +231,7 @@ function get_dx(dxStyle::Union{Nothing,String}, format::Union{Nothing,Vector{Pai
     end
     return dx
 end
+
 function get_new_dx(wb::Workbook, dx::Dict{String,Dict{String,String}})::XML.Node
     new_dx = XML.Element("dxf")
     for k in ["font", "format", "fill", "border"] # Order seems to be important to Excel.
