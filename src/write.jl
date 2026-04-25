@@ -31,6 +31,14 @@ If `overwrite=true`, `output_source` (when a filepath) will be overwritten if it
 
 See also [`savexlsx`](@ref).
 
+!!! note
+
+    XLSX.jl can now read strict (ISO/IEC 29500) XLSX files, and converts them eagerly on read 
+    to transitional (ECMA 376) format. On write, XLSX.jl will always write in the transitional 
+    format, which is the Excel default. Excel itself can convert between strict and 
+    transitional formats. Use Excel directly to convert a transitional file to strict format, 
+    if needed.
+
 """
 function writexlsx(output_source::Union{AbstractString,IO}, xf::XLSXFile; overwrite::Bool=false)
 
@@ -640,7 +648,6 @@ function xlsx_encode(ws::Worksheet, val::AbstractString)
         return (CT_EMPTY, UInt64(0))
     end
     sst_ind = add_shared_string!(get_workbook(ws), strip_illegal_chars(val))
-#    sst_ind = add_shared_string!(get_workbook(ws), val)
     ws.sst_count+=1
 
     return (CT_STRING, UInt64(sst_ind))
@@ -690,7 +697,7 @@ function setdata!(ws::Worksheet, ref::CellRef, val::CellFormula)
     setdata!(ws, cell)
 end
 function setdata!(ws::Worksheet, ref::CellRef, val::CellValue, convert_to_string::Bool)
-    # Convert Float64 values NaN, Inf and -Inf to strings. Excel can's handle them as floats
+    # Convert Float64 values NaN, Inf and -Inf to strings. Excel can't handle them as floats
     # Addresses #179 & #342
     @assert convert_to_string == true "Converting values other than NaN, -Inf, Inf is not permitted"
     val = CellValue(string(val.value), val.styleid)

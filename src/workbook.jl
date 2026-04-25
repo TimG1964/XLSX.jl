@@ -38,6 +38,7 @@ is_writable(xl::XLSXFile) = xl.is_writable
     sheetnames(wb::Workbook)
 
 Return a vector with Worksheet names for this Workbook.
+
 """
 sheetnames(wb::Workbook) = [s.name for s in wb.sheets]
 @inline sheetnames(xl::XLSXFile) = sheetnames(xl.workbook)
@@ -47,6 +48,7 @@ sheetnames(wb::Workbook) = [s.name for s in wb.sheets]
     hassheet(xl::XLSXFile, sheetname::AbstractString)
 
 Return `true` if `wb` contains a sheet named `sheetname`.
+
 """
 function hassheet(wb::Workbook, sheetname::AbstractString)::Bool
     for s in wb.sheets
@@ -63,6 +65,12 @@ end
     sheetcount(xlsfile) :: Int
 
 Count the number of sheets in the Workbook.
+
+!!! note
+
+    XLSX.jl does not (yet) support charts and so will exclude any chartsheets from the list of sheetnames.
+    This will allow you to iterate over the sheets in a workbook without having to worry about chartsheets.
+
 """
 @inline sheetcount(wb::Workbook) = length(wb.sheets)
 @inline sheetcount(xl::XLSXFile) = sheetcount(xl.workbook)

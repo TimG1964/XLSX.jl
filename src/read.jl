@@ -39,6 +39,10 @@ const STRICT_TO_TRANSITIONAL = Dict(
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
     "http://purl.oclc.org/ooxml/officeDocument/relationships/extendedProperties" =>
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/customProperties" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/printerSettings" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/printerSettings",
     "http://purl.oclc.org/ooxml/officeDocument/relationships/calcChain" =>
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain",
 
@@ -47,6 +51,8 @@ const STRICT_TO_TRANSITIONAL = Dict(
         "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
     "http://purl.oclc.org/ooxml/officeDocument/docPropsVTypes" =>
         "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
+    "http://purl.oclc.org/ooxml/officeDocument/customProperties" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties",
 
     # customXml, math, bibliography
     "http://purl.oclc.org/ooxml/officeDocument/customXml" =>
