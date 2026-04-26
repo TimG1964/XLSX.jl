@@ -66,6 +66,9 @@ function writexlsx(output_source::Union{AbstractString,IO}, xf::XLSXFile; overwr
         end
         # write worksheet files from cache (cache must be enabled in write mode)
         for sheet_no in 1:sheetcount(wb)
+            if is_chartsheet(wb, getsheet(wb, sheet_no).name)
+                continue
+            end
             doc = update_single_sheet!(wb, sheet_no, true)
             f = get_relationship_target_by_id("xl", wb, getsheet(wb, sheet_no).relationship_id)
             ZipArchives.zip_newfile(xlsx, f; compress=true)
@@ -265,6 +268,9 @@ worksheet xml files are not stored.
 function update_worksheets_xml!(xl::XLSXFile; full=false)
     wb = get_workbook(xl)
     for sheet_no in 1:sheetcount(wb)
+        if is_chartsheet(wb, getsheet(wb, sheet_no).name)
+            continue
+        end
         update_single_sheet!(wb, sheet_no, full)
     end
     return nothing

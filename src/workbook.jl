@@ -120,7 +120,11 @@ function Base.show(io::IO, xf::XLSXFile)
             _size = size(rg) |> x -> string(x[1], "x", x[2])
             @printf(io, "%21s %-13s %-13s\n", sheetname, _size, rg)
         else
-            @printf(io, "%21s size unknown\n", sheetname)
+            if is_chartsheet(wb, sheetname)
+                @printf(io, "%21s Chartsheet\n", sheetname)
+            else
+                @printf(io, "%21s size unknown\n", sheetname)
+            end
         end
     end
 end

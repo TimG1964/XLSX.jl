@@ -832,7 +832,7 @@ function stream_files(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int, ch
             # ignore xl/calcChain.xml in any case (#31)
             if f != "xl/calcChain.xml"
 
-                if pass==1 && !startswith(f, "customXml") && (endswith(f, ".xml") || endswith(f, ".rels"))
+                if pass==1 && (endswith(f, ".xml") || endswith(f, ".rels"))
                     # Identify usable xml files in XLSXFile
                     internal_xml_file_add!(xf, f)
                 end
@@ -921,7 +921,7 @@ function process_file(zip_io::ZipArchives.ZipReader, filename::String)
 
     try
         bytes = ZipArchives.zip_readentry(zip_io, filename)
-        if !startswith(filename, "customXml") && (endswith(filename, ".xml") || endswith(filename, ".rels"))
+        if (endswith(filename, ".xml") || endswith(filename, ".rels"))
             if occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", filename)
                 strip_bom_and_lf!(bytes)
                 skipnode = filename == "xl/sharedStrings.xml" ? "sst" : "sheetData"
