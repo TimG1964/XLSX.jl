@@ -181,17 +181,27 @@ end
 
 # Build a lookup dictionary for element names, qualified with the default namespace prefix if it exists.
 function build_tag_dict!(xf::XLSXFile)
-    xroot = xmlroot(xf,"xl/workbook.xml")[end]
-    prefix=get_default_namespace_prefix(xroot)
-    wb = get_workbook(xf)
-    qualify(name) = isempty(prefix) ? name : "$(prefix):$(name)"
-    wb.tag_dict = Dict(name => qualify(name) for name in SPREADSHEET_ELEMENT_NAMES)
+    ns = xf.namespace   # existing dict, do NOT replace
+#    println(xf.files)
+#    println(xf.namespace)
+    for (file_name, is_read) in xf.files
+        if is_read
+            xroot = xmlroot(xf, file_name)[end]
+            prefix = get_default_namespace_prefix(xroot)
+
+            # merge: update or insert
+            ns[file_name] = prefix
+        end
+    end
+
     return nothing
 end
-function get_prefix(wb::Workbook)
-    s = first(values(wb.tag_dict))
-    i = findfirst(':', s)
-    return i === nothing ? "" : SubString(s, 1, i-1)
+function get_prefix(file_name::String, xf::XLSXFile)::Union{Nothing,AbstractString}
+#    println(file_name)
+#    println(xf.namespace)
+    ns = get(xf.namespace, file_name, nothing)
+#    isnothing(ns) && return ""
+    return ns
 end
 
 # Determine if the file is a Strict OOXML file.
@@ -215,8 +225,10 @@ function is_strict_ooxml(xf::XLSXFile)::Bool
     # Fallback: check relationship types in _rels/.rels
     if haskey(files, "_rels/.rels")
         rels = files["_rels/.rels"][end]
+        pfx = get_prefix("_rels/.rels", xf)
+        pfx_tag = isnothing(pfx) ? "Relationship" : "$pfx:Relationship"
         for el in XML.children(rels)
-            if XML.tag(el) == wb.tag_dict["Relationship"]
+            if XML.tag(el) == pfx_tag
                 if occursin("purl.oclc.org/ooxml", get(XML.attributes(el), "Type", ""))
                     return true
                 end
@@ -554,6 +566,7 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
 
     load_files!(xf, zip_io; pass=1) # multi-threaded file load
     build_tag_dict!(xf::XLSXFile)
+
     strict = is_strict_ooxml(xf)
     if strict
         convert_strict_to_transitional!(xf, 1)
@@ -567,16 +580,20 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
     remove_calcChain!(xf)
 
     load_files!(xf, zip_io; pass=2) # Need to load sst before worksheets
+    build_tag_dict!(xf::XLSXFile)
+#    println(xf.namespace)
 
     if strict
         convert_strict_to_transitional!(xf, 2)
     end
 
     load_files!(xf, zip_io; pass=3) # load worksheets last so inlineStrings go after existing ssts
+    build_tag_dict!(xf::XLSXFile)
 
     if strict
         convert_strict_to_transitional!(xf, 3)
     end
+
 
 
     for sheet in get_workbook(xf).sheets
@@ -590,31 +607,43 @@ end
 
 # Returns the local name of an XML tag, stripping any namespace prefix.
 # e.g. "x:worksheet" -> "worksheet", "worksheet" -> "worksheet"
-@inline xml_local_name(tag::AbstractString) =
+#=@inline xml_local_name(tag::AbstractString) =
     let i = findfirst(':', tag)
         isnothing(i) ? tag : SubString(tag, i+1)
     end
-@inline xml_local_name(::Nothing) = nothing
+@inline xml_local_name(::Nothing) = nothing=#
 
 function get_namespaces(r::XML.Node)::Dict{String,String}
     nss = Dict{String,String}()
+println(r)
     for (key, value) in XML.attributes(r)
-        if startswith(key, "xmlns")
-            colon_idx = findfirst(':', key)
-            nss[isnothing(colon_idx) ? "" : SubString(key, colon_idx+1)] = value
+        if key == "xmlns"
+            # default namespace
+            nss[""] = value
+        elseif startswith(key, "xmlns:")
+            prefix = key[7:end]   # after "xmlns:"
+            nss[prefix] = value
         end
     end
+
     return nss
 end
 
-function get_default_namespace_prefix(r::XML.Node)::String
-    prefix, _ = _get_default_namespace(r)
-    return prefix
-end
+function get_default_namespace_prefix(r::XML.Node)
 
-function get_default_namespace(r::XML.Node)::String
-    _, ns = _get_default_namespace(r)
-    return ns
+#function get_spreadsheetml_prefix(r::XML.Node)::Union{String,Nothing}
+    nss = get_namespaces(r)
+    for (prefix, uri) in nss
+        if uri == SPREADSHEET_NAMESPACE_XPATH_ARG
+            return prefix=="" ? nothing : prefix   # may be "" (default) or "x" or anything
+        end
+    end
+
+    return nothing
+end
+function get_default_namespace(r::XML.Node)::Union{String,Nothing}
+    nss = get_namespaces(r)
+    return get(nss, "", nothing)
 end
 
 function _get_default_namespace(r::XML.Node)::Tuple{String,String}
@@ -676,14 +705,18 @@ end
 # Updates xf.workbook from xf.data[\"xl/workbook.xml\"]
 function parse_workbook!(xf::XLSXFile)
     xroot = xmlroot(xf, "xl/workbook.xml")[end]
+    pfx = get_prefix("xl/workbook.xml", xf)
+    println("Workbook namespace prefix: ", isnothing(pfx) ? "none" : "\"$pfx\"")
+    pfx_tag = isnothing(pfx) ? "workbook" : "$pfx:workbook"
     wb = get_workbook(xf)
 
-    XML.tag(xroot) != wb.tag_dict["workbook"] && throw(XLSXError("Malformed xl/workbook.xml. Root node name should be '$(wb.tag_dict["workbook"])'. Got '$(XML.tag(xroot))'."))
+    XML.tag(xroot) != pfx_tag && throw(XLSXError("Malformed xl/workbook.xml. Root node name should be '$pfx_tag'. Got '$(XML.tag(xroot))'."))
 
     # date1904
     wb.date1904 = false
+    pfx_tag = isnothing(pfx) ? "workbookPr" : "$pfx:workbookPr"
     for node in XML.children(xroot)
-        XML.tag(node) != wb.tag_dict["workbookPr"] && continue
+        XML.tag(node) != pfx_tag && continue
         attrs = XML.attributes(node)
         if !isnothing(attrs) && haskey(attrs, "date1904")
             v = attrs["date1904"]
@@ -698,10 +731,12 @@ function parse_workbook!(xf::XLSXFile)
 
     # sheets
     wb.sheets = Worksheet[]
+    pfx_tag = isnothing(pfx) ? "sheets" : "$pfx:sheets"
     for node in XML.children(xroot)
-        XML.tag(node) != wb.tag_dict["sheets"] && continue
+        XML.tag(node) != pfx_tag && continue
         for sheet_node in XML.children(node)
-            XML.tag(sheet_node) != wb.tag_dict["sheet"] && throw(XLSXError("Unsupported node $(XML.tag(sheet_node)) in node $(XML.tag(node)) in 'xl/workbook.xml'."))
+            pfx_tag2 = isnothing(pfx) ? "sheet" : "$pfx:sheet"
+            XML.tag(sheet_node) != pfx_tag2 && throw(XLSXError("Unsupported node $(XML.tag(sheet_node)) in node $(XML.tag(node)) in 'xl/workbook.xml'."))
             push!(wb.sheets, Worksheet(xf, sheet_node))
         end
         break
@@ -709,9 +744,10 @@ function parse_workbook!(xf::XLSXFile)
 
     # named ranges
     for node in XML.children(xroot)
-        XML.tag(node) != wb.tag_dict["definedNames"] && continue
+        pfx_tag = isnothing(pfx) ? "definedNames" : "$pfx:definedNames"
+        XML.tag(node) != pfx_tag && continue
         for dn_node in XML.children(node)
-            XML.tag(dn_node) != wb.tag_dict["definedName"] && continue
+            XML.tag(dn_node) != pfx_tag && continue
 
             raw = XML.value(dn_node[1])
             name = XML.attributes(dn_node)["name"]
@@ -770,7 +806,9 @@ function get_wb_ext_refs(xf::XLSXFile)
     wb = get_workbook(xf)
     ext_refs = Dict{Int, String}()
     xroot = xmlroot(xf, "xl/workbook.xml")
-    i, j = get_idces(xroot, wb.tag_dict["workbook"], wb.tag_dict["externalReferences"])
+    pfx = get_prefix("xl/workbook.xml", xf)
+    pfx_tag = isnothing(pfx) ? "" : pfx
+    i, j = get_idces(xroot, pfx_tag*"workbook", pfx_tag*"externalReferences")
     if !isnothing(j)
         for (i, ref) in enumerate(XML.children(xroot[i][j]))
             ext_refs[i] = ref["r:id"]
@@ -821,16 +859,25 @@ function strip_bom_and_lf!(bytes::Vector{UInt8})
     end
 end
 
-function skipNode(r::XML.Raw, skipnode::String) # separate rows or ssts to speed up reading of large files
+function skipNode(r::XML.Raw, skipnode::String, xf::XLSXFile) # separate rows or ssts to speed up reading of large files
     # Resolve wrapper strings once upfront
-    prefix, suffix = if skipnode == "sheetData"
-        "<worksheet><sheetData>", "</sheetData></worksheet>"
+    if skipnode == "sheetData"
+        prefix =  "<worksheet><sheetData>"
+        suffix = "</sheetData></worksheet>"
+        pfx = get_default_namespace_prefix(XML.Node(r)[end])
     elseif skipnode == "sst"
-        "<sst>", "</sst>"
+        prefix =  "<sst>"
+        suffix = "</sst>"
+        pfx = get_default_namespace_prefix(XML.Node(r)[end])
+        println("Here!  ", pfx)
+#    prefix, suffix = if skipnode == "sheetData"
+#        "<worksheet><sheetData>", "</sheetData></worksheet>"
+#    elseif skipnode == "sst"
+#        "<sst>", "</sst>"
     else
         throw(XLSXError("Unknown skipnode $skipnode."))
     end
-
+    pfx_tag = isnothing(pfx) ? skipnode : "$pfx:$skipnode"
     data_len = length(r.data)
     new     = IOBuffer(; sizehint=data_len) # original data with <sheetData> or <sst> node removed
     skipped = IOBuffer(; sizehint=data_len ÷ 2) # just the <sheetData> or <sst> node and its children
@@ -838,8 +885,9 @@ function skipNode(r::XML.Raw, skipnode::String) # separate rows or ssts to speed
     n = XML.next(r)
     write(new, @view n.data[n.pos:n.pos+n.len])
 
-    while first(XML.get_name(n.data, n.pos)) != skipnode # Retain everything before the <sheetData> or <sst> node
+    while first(XML.get_name(n.data, n.pos)) != pfx_tag # Retain everything before the <sheetData> or <sst> node
         n = XML.next(n)
+        println(pfx, "  ",pfx_tag, "  ",n)
         write(new, @view n.data[n.pos:n.pos+n.len])
     end
 
@@ -909,9 +957,12 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
 
     consumer = @async begin
         for file in read_files
+            println(pass, " ", file)
             if !isnothing(file.node)
+                println(file.name)
                 xf.data[file.name] = file.node
                 xf.files[file.name] = true
+                build_tag_dict!(xf)
             end
             if !isnothing(file.raw)
                 if xf.is_writable || pass==2
@@ -939,7 +990,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
     @sync for _ in 1:Threads.nthreads()
         Threads.@spawn begin
             for file in filtered_files
-                readfile = process_file(zip_io, file)
+                readfile = process_file(zip_io, file, xf)
                 put!(read_files, readfile)
             end
         end
@@ -947,9 +998,10 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
    
     close(read_files)
     wait(consumer)
+
 end
 
-function process_file(zip_io::ZipArchives.ZipReader, filename::String)
+function process_file(zip_io::ZipArchives.ZipReader, filename::String, xf::XLSXFile)
 
     node=nothing
     raw=nothing
@@ -961,7 +1013,7 @@ function process_file(zip_io::ZipArchives.ZipReader, filename::String)
             if occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", filename)
                 strip_bom_and_lf!(bytes)
                 skipnode = filename == "xl/sharedStrings.xml" ? "sst" : "sheetData"
-                f, s = skipNode(XML.Raw(bytes), skipnode) # <row> and <sst> elements can be very numerous in large files, so split out and keep as Raw XML data for speed
+                f, s = skipNode(XML.Raw(bytes), skipnode, xf) # <row> and <sst> elements can be very numerous in large files, so split out and keep as Raw XML data for speed
                 node = XML.Node(XML.Raw(f))
                 raw = XML.Raw(s)
             else
@@ -995,7 +1047,7 @@ function internal_xml_file_read(xf::XLSXFile, zip_io::Union{Nothing,ZipArchives.
             strip_bom_and_lf!(bytes)
             if occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", filename)
                 skipnode = filename == "xl/sharedStrings.xml" ? "sst" : "sheetData"
-                f, _ = skipNode(XML.Raw(bytes), skipnode) # <row> and <sst> elements can be very numerous in large files, so split out and keep as Raw XML data for speed
+                f, _ = skipNode(XML.Raw(bytes), skipnode, xf) # <row> and <sst> elements can be very numerous in large files, so split out and keep as Raw XML data for speed
                 xf.data[filename] = XML.Node(XML.Raw(f))
             else
                 xf.data[filename] = XML.Node(XML.Raw(bytes))

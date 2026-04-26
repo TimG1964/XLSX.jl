@@ -18,6 +18,8 @@ end
 function create_new_sst(wb::Workbook, sst::SharedStringTable)
     if !sst.is_loaded
         sst.is_loaded = true
+        pfx = get_prefix("xl/sharedStrings.xml", get_xlsxfile(wb))
+        pfx_tag = isnothing(pfx) ? "Types" : pfx * ":Types"
 
         # add relationship
         #<Relationship Id="rId16" Target="sharedStrings.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings"/>
@@ -25,7 +27,7 @@ function create_new_sst(wb::Workbook, sst::SharedStringTable)
 
         # add Content Type <Override ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml" PartName="/xl/sharedStrings.xml"/>
         ctype_root = xmlroot(get_xlsxfile(wb), "[Content_Types].xml")[end]
-        XML.tag(ctype_root) != wb.tag_dict["Types"] && throw(XLSXError("Something wrong here!"))
+        XML.tag(ctype_root) != pfx_tag && throw(XLSXError("Something wrong here!"))
         override_node = XML.Element("Override";
             ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",
             PartName = "/xl/sharedStrings.xml"
@@ -156,9 +158,11 @@ end
 function process_sst(wb, sst::SstToken)
     el = sst.n
     i = sst.idx
+    pfx = get_prefix("xl/sharedStrings.xml", get_xlsxfile(wb))
+    pfx_tag = isnothing(pfx) ? "si" : pfx * ":si"
 
     if XML.nodetype(el) != XML.Text
-        XML.tag(el) != wb.tag_dict["si"] && throw(XLSXError("Unsupported node $(XML.tag(el)) in sst table."))
+        XML.tag(el) != pfx_tag && throw(XLSXError("Unsupported node $(XML.tag(el)) in sst table."))
         sst = Sst(XML.write(el), i)
         return sst
 
@@ -227,7 +231,9 @@ function gather_strings!(wb::Workbook, io::IOBuffer, e::XML.LazyNode)
     # Skip phonetic hints entirely
     tag == "rPh" && return nothing
     
-    if tag == wb.tag_dict["t"]
+    pfx = get_prefix("xl/sharedStrings.xml", get_xlsxfile(wb))
+    pfx_tag = isnothing(pfx) ? "t" : pfx * ":t"
+    if tag == pfx_tag
         children = XML.children(e)
         n = length(children)
         

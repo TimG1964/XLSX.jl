@@ -1,7 +1,9 @@
 
 function Worksheet(xf::XLSXFile, sheet_element::XML.Node)
-    wb = get_workbook(xf)
-    XML.tag(sheet_element) != wb.tag_dict["sheet"] && throw(XLSXError("Something wrong here!"))
+#    wb = get_workbook(xf)
+    pfx = get_prefix("xl/workbook.xml", xf)
+    tag = isnothing(pfx) ? "sheet" : pfx * ":sheet"
+    XML.tag(sheet_element) != tag && throw(XLSXError("Something wrong here!"))
     a = XML.attributes(sheet_element)
     sheetId = parse(Int, a["sheetId"])
     relationship_id = a["r:id"]
@@ -43,10 +45,12 @@ function read_worksheet_dimension(xf::XLSXFile, relationship_id, name)::Union{No
     target_file = get_relationship_target_by_id("xl", wb, relationship_id)
     doc = open_internal_file_stream(xf, target_file)
     reader = iterate(doc)
+    pfx = get_prefix(target_file, xf)
+    pfx_tag = isnothing(pfx) ? "dimension" : "$pfx:dimension"
     # Now let's look for a row element, if it exists
     while reader !== nothing # go next node
         (sheet_row, state) = reader
-        if XML.nodetype(sheet_row) == XML.Element && XML.tag(sheet_row) == wb.tag_dict["dimension"]
+        if XML.nodetype(sheet_row) == XML.Element && XML.tag(sheet_row) == pfx_tag
 
             XML.depth(sheet_row) != 2 && throw(XLSXError("Malformed Worksheet \"$name\": unexpected node depth for dimension node: $(XML.depth(sheet_row))."))
 
