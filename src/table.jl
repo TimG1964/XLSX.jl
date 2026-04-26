@@ -643,6 +643,8 @@ function gettable(sheet::Worksheet, cols::Union{ColumnRange,AbstractString};
     missing_strings::Union{AbstractString, AbstractVector{<:AbstractString}, Nothing}=nothing
 )
 
+    is_chartsheet(get_workbook(sheet), sheet.name) && throw(XLSXError("Can't read a table from a chartsheet."))
+
     itr = eachtablerow(sheet, cols; first_row, column_labels, header,
                         stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames, missing_strings)
     return gettable(itr; infer_eltypes)
@@ -655,6 +657,8 @@ function gettable(sheet::Worksheet;
     keep_empty_rows::Bool=false, normalizenames::Bool=false,
     missing_strings::Union{AbstractString, AbstractVector{<:AbstractString}, Nothing}=nothing
 )
+
+    is_chartsheet(get_workbook(sheet), sheet.name) && throw(XLSXError("Can't read a table from a chartsheet."))
 
     itr = eachtablerow(sheet; first_row, column_labels, header,
                         stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames, missing_strings)

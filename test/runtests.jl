@@ -1444,6 +1444,8 @@ end
         @test sprint(show, f[2]) == "Chartsheet: [\"Diagramm1\"] "
         @test_throws XLSX.XLSXError XLSX.copysheet!(f["Diagramm1"], "Diagramm1_copy")
         @test_throws XLSX.XLSXError XLSX.deletesheet!(f["Diagramm1"])
+        @test_throws XLSX.XLSXError XLSX.gettable(f["Diagramm1"])
+        @test_throws XLSX.XLSXError XLSX.gettable(f["Diagramm1"], "A:B")
         XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
 
         XLSX.openxlsx("mytest.xlsx") do f
