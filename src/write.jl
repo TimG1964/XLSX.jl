@@ -1223,6 +1223,7 @@ XLSXFile("C:\\...\\general.xlsx") containing 14 Worksheets
 """
 function copysheet!(ws::Worksheet, name::AbstractString="")::Worksheet
     wb = get_workbook(ws)
+    is_chartsheet(wb, ws.name) && throw(XLSXError("Cannot copy a Chartsheet."))
     xl = get_xlsxfile(ws)
     !is_writable(get_xlsxfile(ws)) && throw(XLSXError("XLSXFile instance is not writable."))
     dim = get_dimension(ws)
@@ -1490,6 +1491,8 @@ deletesheet!(xl::XLSXFile, name::AbstractString) = deletesheet!(get_workbook(xl)
 function deletesheet!(wb::Workbook, name::AbstractString)::XLSXFile
     hassheet(wb, name) || throw(XLSXError("Worksheet `$name` not found in workbook."))
     sheetcount(wb) > 1 || throw(XLSXError("`$name` is this workbook's only sheet. Cannot delete the only sheet!"))
+    is_chartsheet(wb, name) && throw(XLSXError("Cannot delete a Chartsheet."))
+
 
     xf = get_xlsxfile(wb)
 

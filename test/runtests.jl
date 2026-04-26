@@ -1442,6 +1442,8 @@ end
         @test after == Expected
         @test sprint(show, f[1]) == "13×4 XLSX.Worksheet: [\"Tabelle1\"](A2:D14) "
         @test sprint(show, f[2]) == "Chartsheet: [\"Diagramm1\"] "
+        @test_throws XLSX.XLSXError XLSX.copysheet!(f["Diagramm1"], "Diagramm1_copy")
+        @test_throws XLSX.XLSXError XLSX.deletesheet!(f["Diagramm1"])
         XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
 
         XLSX.openxlsx("mytest.xlsx") do f
