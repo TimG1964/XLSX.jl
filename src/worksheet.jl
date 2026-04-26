@@ -285,6 +285,10 @@ Base.getindex(ws::Worksheet, ::Colon) = getdata(ws)
 
 function Base.show(io::IO, ws::Worksheet)
     hidden_string = ws.is_hidden ? "(hidden)" : ""
+    if is_chartsheet(get_workbook(ws), ws.name)
+        @printf(io, "Chartsheet: [\"%s\"] %s", ws.name, hidden_string)
+        return
+    end
     rg = get_dimension(ws)
     if rg !== nothing
         nrow, ncol = size(rg)

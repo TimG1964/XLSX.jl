@@ -39,6 +39,10 @@ const STRICT_TO_TRANSITIONAL = Dict(
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
     "http://purl.oclc.org/ooxml/officeDocument/relationships/extendedProperties" =>
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/customProperties" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/printerSettings" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/printerSettings",
     "http://purl.oclc.org/ooxml/officeDocument/relationships/calcChain" =>
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain",
 
@@ -47,6 +51,8 @@ const STRICT_TO_TRANSITIONAL = Dict(
         "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
     "http://purl.oclc.org/ooxml/officeDocument/docPropsVTypes" =>
         "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
+    "http://purl.oclc.org/ooxml/officeDocument/customProperties" =>
+        "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties",
 
     # customXml, math, bibliography
     "http://purl.oclc.org/ooxml/officeDocument/customXml" =>
@@ -826,7 +832,7 @@ function stream_files(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int, ch
             # ignore xl/calcChain.xml in any case (#31)
             if f != "xl/calcChain.xml"
 
-                if pass==1 && !startswith(f, "customXml") && (endswith(f, ".xml") || endswith(f, ".rels"))
+                if pass==1 && (endswith(f, ".xml") || endswith(f, ".rels"))
                     # Identify usable xml files in XLSXFile
                     internal_xml_file_add!(xf, f)
                 end
@@ -915,7 +921,7 @@ function process_file(zip_io::ZipArchives.ZipReader, filename::String)
 
     try
         bytes = ZipArchives.zip_readentry(zip_io, filename)
-        if !startswith(filename, "customXml") && (endswith(filename, ".xml") || endswith(filename, ".rels"))
+        if (endswith(filename, ".xml") || endswith(filename, ".rels"))
             if occursin(r"xl/worksheets/sheet\d+\.xml|xl/sharedStrings\.xml", filename)
                 strip_bom_and_lf!(bytes)
                 skipnode = filename == "xl/sharedStrings.xml" ? "sst" : "sheetData"

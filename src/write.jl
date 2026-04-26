@@ -31,6 +31,14 @@ If `overwrite=true`, `output_source` (when a filepath) will be overwritten if it
 
 See also [`savexlsx`](@ref).
 
+!!! note
+
+    XLSX.jl can now read strict (ISO/IEC 29500) XLSX files, and converts them eagerly on read 
+    to transitional (ECMA 376) format. On write, XLSX.jl will always write in the transitional 
+    format, which is the Excel default. Excel itself can convert between strict and 
+    transitional formats. Use Excel directly to convert a transitional file to strict format, 
+    if needed.
+
 """
 function writexlsx(output_source::Union{AbstractString,IO}, xf::XLSXFile; overwrite::Bool=false)
 
@@ -58,6 +66,9 @@ function writexlsx(output_source::Union{AbstractString,IO}, xf::XLSXFile; overwr
         end
         # write worksheet files from cache (cache must be enabled in write mode)
         for sheet_no in 1:sheetcount(wb)
+            if is_chartsheet(wb, getsheet(wb, sheet_no).name)
+                continue
+            end
             doc = update_single_sheet!(wb, sheet_no, true)
             f = get_relationship_target_by_id("xl", wb, getsheet(wb, sheet_no).relationship_id)
             ZipArchives.zip_newfile(xlsx, f; compress=true)
@@ -257,6 +268,9 @@ worksheet xml files are not stored.
 function update_worksheets_xml!(xl::XLSXFile; full=false)
     wb = get_workbook(xl)
     for sheet_no in 1:sheetcount(wb)
+        if is_chartsheet(wb, getsheet(wb, sheet_no).name)
+            continue
+        end
         update_single_sheet!(wb, sheet_no, full)
     end
     return nothing
@@ -640,7 +654,6 @@ function xlsx_encode(ws::Worksheet, val::AbstractString)
         return (CT_EMPTY, UInt64(0))
     end
     sst_ind = add_shared_string!(get_workbook(ws), strip_illegal_chars(val))
-#    sst_ind = add_shared_string!(get_workbook(ws), val)
     ws.sst_count+=1
 
     return (CT_STRING, UInt64(sst_ind))
@@ -690,7 +703,7 @@ function setdata!(ws::Worksheet, ref::CellRef, val::CellFormula)
     setdata!(ws, cell)
 end
 function setdata!(ws::Worksheet, ref::CellRef, val::CellValue, convert_to_string::Bool)
-    # Convert Float64 values NaN, Inf and -Inf to strings. Excel can's handle them as floats
+    # Convert Float64 values NaN, Inf and -Inf to strings. Excel can't handle them as floats
     # Addresses #179 & #342
     @assert convert_to_string == true "Converting values other than NaN, -Inf, Inf is not permitted"
     val = CellValue(string(val.value), val.styleid)
@@ -1210,6 +1223,7 @@ XLSXFile("C:\\...\\general.xlsx") containing 14 Worksheets
 """
 function copysheet!(ws::Worksheet, name::AbstractString="")::Worksheet
     wb = get_workbook(ws)
+    is_chartsheet(wb, ws.name) && throw(XLSXError("Cannot copy a Chartsheet."))
     xl = get_xlsxfile(ws)
     !is_writable(get_xlsxfile(ws)) && throw(XLSXError("XLSXFile instance is not writable."))
     dim = get_dimension(ws)
@@ -1477,6 +1491,8 @@ deletesheet!(xl::XLSXFile, name::AbstractString) = deletesheet!(get_workbook(xl)
 function deletesheet!(wb::Workbook, name::AbstractString)::XLSXFile
     hassheet(wb, name) || throw(XLSXError("Worksheet `$name` not found in workbook."))
     sheetcount(wb) > 1 || throw(XLSXError("`$name` is this workbook's only sheet. Cannot delete the only sheet!"))
+    is_chartsheet(wb, name) && throw(XLSXError("Cannot delete a Chartsheet."))
+
 
     xf = get_xlsxfile(wb)
 

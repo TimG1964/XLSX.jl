@@ -213,7 +213,8 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
             if tag == "v"
                 ch = XML.children(child)
                 isempty(ch) && continue
-                v = XLSX.unescape(XML.value(ch[1]))
+                raw = XML.value(ch[1])
+                v = occursin('&', raw) ? XLSX.unescape(raw) : raw
                 datatype, value = process_tv(wb, t, v, num_style; mylock)
             elseif tag == "f"
                 if get_xlsxfile(wb).is_writable
