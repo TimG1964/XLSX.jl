@@ -66,11 +66,6 @@ end
 
 Count the number of sheets in the Workbook.
 
-!!! note
-
-    XLSX.jl does not (yet) support charts and so will exclude any chartsheets from the list of sheetnames.
-    This will allow you to iterate over the sheets in a workbook without having to worry about chartsheets.
-
 """
 @inline sheetcount(wb::Workbook) = length(wb.sheets)
 @inline sheetcount(xl::XLSXFile) = sheetcount(xl.workbook)

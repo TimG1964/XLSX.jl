@@ -1170,6 +1170,7 @@ To copy worksheets, the `XLSXFile` must be writable (opened with `mode="rw"` or 
 See also [`XLSX.openxlsx`](@ref) and [XLSX.opentemplate](@ref).
 
 !!! warning "Experimental"
+
     This function is experimental is not guaranteed to work with all XLSX files, 
     especially those with complex features. However, cell formats, conditional formats 
     and worksheet defined names should all copy OK. Please report any issues.
@@ -1405,6 +1406,7 @@ Delete the given worksheet, the worksheet with the given name or the worksheet w
 (`sheetId` is a 1-based integer representing the order in which worksheet tabs are displayed in Excel).
 
 !!! note "Caution"
+
     Cells in the other sheets that have references to the deleted sheet will fail when the sheet is deleted.
     The formulae are updated to contain a `#Ref!` error in place of each sheetcell reference.
     
