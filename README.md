@@ -17,8 +17,8 @@
 [docs-dev-url]: https://juliadata.github.io/XLSX.jl/dev
 [docs-stable-img]: https://img.shields.io/badge/docs-stable-blue.svg?style=flat-square
 [docs-stable-url]: https://juliadata.github.io/XLSX.jl/stable
-[doi-img]: https://zenodo.org/badge/DOI/10.5281/zenodo.19894704.svg
-[doi-url]: https://doi.org/10.5281/zenodo.19894704
+[doi-img]: https://zenodo.org/badge/DOI/10.5281/zenodo.19894703.svg
+[doi-url]: https://doi.org/10.5281/zenodo.19894703
 
 Excel file reader/writer for the Julia language.
 
