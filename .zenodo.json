@@ -2,14 +2,14 @@
     "title": "XLSX.jl: Excel file reader and writer for Julia",
     "creators": [
         {
-            "name": "Gebbels, Tim",
-            "type": "ProjectLeader"
-        }
+            "name": "Noronha Tavares, Felipe",
+            "type": "ProjectMember"
+         }
     ],
     "contributors": [
         {
-            "name": "Noronha Tavares, Felipe",
-            "type": "Other"
+            "name": "Gebbels, Tim",
+            "type": "ProjectLeader"
         }
     ],
     "description": "XLSX.jl is a Julia package to read and write Excel spreadsheet files in the XLSX format.",
