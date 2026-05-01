@@ -83,7 +83,7 @@ function allExtCfs(ws::Worksheet)::Vector{XML.Node}
     let cfs = nothing
         for ext in exts
             for c in XML.children(ext)
-                if XML.tag(c)=="x14:conditionalFormattings"
+                if XML.tag(c) == "x14:conditionalFormattings"
                     cfs = c
                     break
                 end

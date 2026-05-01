@@ -83,7 +83,7 @@ function styles_xmlroot(workbook::Workbook)
             if get_default_namespace(styles_root[end]) != SPREADSHEET_NAMESPACE_XPATH_ARG
                 throw(XLSXError("Unsupported styles XML namespace $(get_default_namespace(styles_root[end]))."))
             end
-            XML.tag(styles_root[end]) != "styleSheet" && throw(XLSXError("Malformed package. Expected root node named `styleSheet` in `styles.xml`."))
+            localname(styles_root[end]) != "styleSheet" && throw(XLSXError("Malformed package. Expected root node named `styleSheet` in `styles.xml`."))
             workbook.styles_xroot = styles_root
         else
             throw(XLSXError("Styles not found for this workbook."))

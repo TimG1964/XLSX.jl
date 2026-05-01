@@ -204,7 +204,7 @@ end
 function get_node_paths!(xpaths::Vector{xpath}, node::XML.Node, default_ns, path)
     for c in XML.children(node)
         if XML.nodetype(c) ∉ [XML.Declaration, XML.Comment, XML.Text]
-            node_tag = XML.tag(c)
+            node_tag = localname(c)
             if !occursin(":", node_tag)
                 node_tag = default_ns * ":" * node_tag
             end
@@ -229,11 +229,16 @@ function unlink(node::XML.Node, att::Tuple{String,String})
         end
     end
     for child in XML.children(node) # Copy any child nodes with tags that are not att[2] across to new node
-        if XML.tag(child) != last(att)
+        if localname(child) != last(att)
             push!(new_node, child)
         end
     end
     return new_node
+end
+
+function keep_prefix(node, pfx)
+    pfx && return XML.tag(node)
+    return localname(node)
 end
 
 # Remove all children with tag given by att[2] from a parent XML node with a tag given by att[1].
@@ -243,16 +248,22 @@ function get_idces(doc::XML.Node, t, b)
     j = 1
     chn = XML.children(doc)
     l = length(chn)
-    while XML.tag(chn[i]) !== t
+    pfx = occursin(":", t)
+    ln = keep_prefix(chn[i], pfx)
+    while ln !== t
         i += 1
         i > l && return nothing, nothing
+        ln = keep_prefix(chn[i], pfx)
     end
     chn = XML.children(chn[i])
     l = length(chn)
-    while XML.tag(chn[j]) !== b
+    pfx = occursin(":", b)
+    ln = keep_prefix(chn[j], pfx)
+    while ln !== b
         j += 1
         j > l && return i, nothing
-    end
+        ln = keep_prefix(chn[j], pfx)
+   end
     return i, j
 end
 
@@ -286,7 +297,7 @@ function update_single_sheet!(wb::Workbook, sheet_no::Int, full::Bool)::Union{No
     spreadsheet_ns_declared = SPREADSHEET_NAMESPACE_XPATH_ARG in values(ns_map)
     spreadsheet_ns_declared ||
         throw(XLSXError("Unsupported Spreadsheet XML namespace."))
-    XML.tag(xroot) !=   "worksheet" && throw(XLSXError("Malformed Excel file. Expected root node named `worksheet` in worksheet XML file."))
+    localname(xroot) !=   "worksheet" && throw(XLSXError("Malformed Excel file. Expected root node named `worksheet` in worksheet XML file."))
 
     if full # need to reconstruct row and cell data from cache
 
@@ -299,7 +310,7 @@ function update_single_sheet!(wb::Workbook, sheet_no::Int, full::Bool)::Union{No
 
         empty_doc = XML.write(doc)
         idx = findfirst("<sheetData/>", empty_doc)
-        idx === nothing && throw(XLSXError("<sheetData/> placeholder not found"))
+        idx === nothing && throw(XLSXError("<sheetData/> placeholder not found when reconstructing worksheet '$(sheet.name)'"))
         new_doc=IOBuffer()
         print(new_doc, empty_doc[begin:first(idx)-1])
 
@@ -1103,7 +1114,7 @@ function renamesheet!(ws::Worksheet, name::AbstractString)
     xroot = xmlroot(xf, "xl/workbook.xml")[end]
     wb = get_workbook(ws)
     for node in XML.children(xroot)
-        if XML.tag(node) == "sheets"
+        if localname(node) == "sheets"
 
             for sheet_node in XML.children(node)
                 if sheet_node["name"] == ws.name
@@ -1364,7 +1375,7 @@ add_override!(wb::Workbook, part::String, content::String) = add_override!(get_x
 function add_override!(xf::XLSXFile, part::String, content::String)
     wb = get_workbook(xf) 
     ctype_root = xmlroot(xf, "[Content_Types].xml")[end]
-    XML.tag(ctype_root) != "Types" && throw(XLSXError("Something wrong here!"))
+    localname(ctype_root) != "Types" && throw(XLSXError("Something wrong here!"))
     override_node = XML.Element("Override";
         PartName=part,
         ContentType=content
@@ -1382,7 +1393,7 @@ function renumber_files!(xf::XLSXFile, rId::String)
     w = XML.children(wbdoc[i][j])
     if length(w) > 0
         for c in w
-            if XML.tag(c) == "workbookView"
+            if localname(c) == "workbookView"
                 a = XML.attributes(c)
                 if haskey(a, "activeTab")
                     at = parse(Int64, a["activeTab"])
@@ -1555,7 +1566,7 @@ function deletesheet!(wb::Workbook, name::AbstractString)::XLSXFile
 
     # update [Content_Types].xml
     ctype_root = xmlroot(get_xlsxfile(wb), "[Content_Types].xml")[end]
-    XML.tag(ctype_root) != "Types" && throw(XLSXError("Something wrong here!"))
+    localname(ctype_root) != "Types" && throw(XLSXError("Something wrong here!"))
     cont = XML.children(ctype_root)
     let idx = 0
         for (i, c) in enumerate(cont)

@@ -172,6 +172,34 @@ function check_for_xlsx_file_format(filepath::AbstractString)
     end
 end
 
+#@inline localname(node::XML.Node) = split(XML.tag(node), ":")[end]
+@inline function localname(node)
+    t = XML.tag(node)
+    isnothing(t) && return nothing
+    return String(split(XML.tag(node), ":")[end])
+end
+@inline localname(tag::String) = String(split(tag, ":")[end])
+
+# Build a lookup dictionary for element names, qualified with the default namespace prefix if it exists.
+function build_ns_dict!(xf::XLSXFile)
+    ns = xf.namespace   # existing dict, do NOT replace
+    for (file_name, is_read) in xf.files
+        if is_read
+            xroot = xmlroot(xf, file_name)[end]
+            prefix = get_default_namespace_prefix(xroot)
+
+            # merge: update or insert
+            ns[file_name] = prefix
+        end
+    end
+
+    return nothing
+end
+function get_prefix(file_name::String, xf::XLSXFile)::Union{Nothing,AbstractString}
+    ns = get(xf.namespace, file_name, nothing)
+    return ns
+end
+
 # Determine if the file is a Strict OOXML file.
 function is_strict_ooxml(xf::XLSXFile)::Bool
     wb = get_workbook(xf)
@@ -194,7 +222,7 @@ function is_strict_ooxml(xf::XLSXFile)::Bool
     if haskey(files, "_rels/.rels")
         rels = files["_rels/.rels"][end]
         for el in XML.children(rels)
-            if XML.tag(el) == "Relationship"
+            if localname(el) == "Relationship"
                 if occursin("purl.oclc.org/ooxml", get(XML.attributes(el), "Type", ""))
                     return true
                 end
@@ -562,8 +590,35 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
         end
     end
 
+    build_ns_dict!(xf)
+
     return xf
 end
+
+function get_default_namespace_prefix(r::XML.Node)
+
+#function get_spreadsheetml_prefix(r::XML.Node)::Union{String,Nothing}
+    nss = get_namespaces(r)
+    for (prefix, uri) in nss
+        if uri == SPREADSHEET_NAMESPACE_XPATH_ARG
+            return prefix=="" ? nothing : prefix   # may be "" (default) or "x" or anything
+        end
+    end
+
+    return nothing
+end
+function get_default_namespace(r::XML.Node)::Union{String,Nothing}
+    nss = get_namespaces(r)
+    return get(nss, "", nothing)
+end
+
+function _get_default_namespace(r::XML.Node)::Tuple{String,String}
+    nss = get_namespaces(r)
+    length(nss) == 1 && return first(keys(nss)), first(values(nss))
+    haskey(nss, "") || throw(XLSXError("No default namespace found."))
+    return "", nss[""]
+end
+
 
 function get_namespaces(r::XML.Node)::Dict{String,String}
     nss = Dict{String,String}()
@@ -575,7 +630,7 @@ function get_namespaces(r::XML.Node)::Dict{String,String}
     end
     return nss
 end
-
+#=
 function get_default_namespace(r::XML.Node)::String
     _, ns = _get_default_namespace(r)
     return ns
@@ -587,6 +642,7 @@ function _get_default_namespace(r::XML.Node)::Tuple{String,String}
     haskey(nss, "") || throw(XLSXError("No default namespace found."))
     return "", nss[""]
 end
+=#
 
 # See section 12.2 - Package Structure
 function check_minimum_requirements(xf::XLSXFile)
@@ -642,12 +698,12 @@ function parse_workbook!(xf::XLSXFile)
     xroot = xmlroot(xf, "xl/workbook.xml")[end]
     wb = get_workbook(xf)
 
-    XML.tag(xroot) != "workbook" && throw(XLSXError("Malformed xl/workbook.xml. Root node name should be 'workbook'. Got '$(XML.tag(xroot))'."))
+    localname(xroot) != "workbook" && throw(XLSXError("Malformed xl/workbook.xml. Root node name should be 'workbook'. Got '$(localname(xroot))'."))
 
     # date1904
     wb.date1904 = false
     for node in XML.children(xroot)
-        XML.tag(node) != "workbookPr" && continue
+        localname(node) != "workbookPr" && continue
         attrs = XML.attributes(node)
         if !isnothing(attrs) && haskey(attrs, "date1904")
             v = attrs["date1904"]
@@ -663,9 +719,9 @@ function parse_workbook!(xf::XLSXFile)
     # sheets
     wb.sheets = Worksheet[]
     for node in XML.children(xroot)
-        XML.tag(node) != "sheets" && continue
+        localname(node) != "sheets" && continue
         for sheet_node in XML.children(node)
-            XML.tag(sheet_node) != "sheet" && throw(XLSXError("Unsupported node $(XML.tag(sheet_node)) in node $(XML.tag(node)) in 'xl/workbook.xml'."))
+            localname(sheet_node) != "sheet" && throw(XLSXError("Unsupported node $(localname(sheet_node)) in node $(localname(node)) in 'xl/workbook.xml'."))
             push!(wb.sheets, Worksheet(xf, sheet_node))
         end
         break
@@ -673,9 +729,9 @@ function parse_workbook!(xf::XLSXFile)
 
     # named ranges
     for node in XML.children(xroot)
-        XML.tag(node) != "definedNames" && continue
+        localname(node) != "definedNames" && continue
         for dn_node in XML.children(node)
-            XML.tag(dn_node) != "definedName" && continue
+            localname(dn_node) != "definedName" && continue
 
             raw = XML.value(dn_node[1])
             name = XML.attributes(dn_node)["name"]
@@ -802,7 +858,7 @@ function skipNode(r::XML.Raw, skipnode::String) # separate rows or ssts to speed
     n = XML.next(r)
     write(new, @view n.data[n.pos:n.pos+n.len])
 
-    while first(XML.get_name(n.data, n.pos)) != skipnode # Retain everything before the <sheetData> or <sst> node
+    while localname(first(XML.get_name(n.data, n.pos))) != skipnode # Retain everything before the <sheetData> or <sst> node
         n = XML.next(n)
         write(new, @view n.data[n.pos:n.pos+n.len])
     end

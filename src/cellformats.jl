@@ -336,10 +336,10 @@ function getFont(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellFont}
         font_atts = Dict{String,Union{Dict{String,String},Nothing}}()
         for c in XML.children(current_font)
             if isnothing(XML.attributes(c)) || length(XML.attributes(c)) == 0
-                font_atts[XML.tag(c)] = nothing
+                font_atts[localname(c)] = nothing
             else
 #                for (k, v) in XML.attributes(c)
-                    font_atts[XML.tag(c)] = Dict(XML.attributes(c))
+                    font_atts[localname(c)] = Dict(XML.attributes(c))
 #                end
             end
         end
@@ -442,27 +442,27 @@ function getBorder(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellBorder
         border_atts = Dict{String,Union{Dict{String,String},Nothing}}()
         for side in XML.children(current_border)
             if isnothing(XML.attributes(side)) || length(XML.attributes(side)) == 0
-                border_atts[XML.tag(side)] = nothing
+                border_atts[localname(side)] = nothing
             else
                 if length(XML.attributes(side)) != 1
-                    throw(XLSXError("Too many border attributes found for $(XML.tag(side)) Expected 1, found $(length(XML.attributes(side)))."))
+                    throw(XLSXError("Too many border attributes found for $(localname(side)) Expected 1, found $(length(XML.attributes(side)))."))
                 end
                 for (k, v) in XML.attributes(side) # style is the only possible attribute of a side
-                    border_atts[XML.tag(side)] = Dict(k => v)
-                    if XML.tag(side) == "diagonal" && !isnothing(diag_atts)
+                    border_atts[localname(side)] = Dict(k => v)
+                    if localname(side) == "diagonal" && !isnothing(diag_atts)
                         if haskey(diag_atts, "diagonalUp") && haskey(diag_atts, "diagonalDown")
-                            border_atts[XML.tag(side)]["direction"] = "both"
+                            border_atts[localname(side)]["direction"] = "both"
                         elseif haskey(diag_atts, "diagonalUp")
-                            border_atts[XML.tag(side)]["direction"] = "up"
+                            border_atts[localname(side)]["direction"] = "up"
                         elseif haskey(diag_atts, "diagonalDown")
-                            border_atts[XML.tag(side)]["direction"] = "down"
+                            border_atts[localname(side)]["direction"] = "down"
                         else
                             throw(XLSXError("No direction set for `diagonal` border"))
                         end
                     end
                     for subc in XML.children(side) # color is a child of a border element
                         for (k, v) in XML.attributes(subc)
-                            border_atts[XML.tag(side)][k] = v
+                            border_atts[localname(side)][k] = v
                         end
                     end
                 end
@@ -942,7 +942,7 @@ function getFill(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellFill}
     fill_atts    = Dict{String,Union{Dict{String,String},Nothing}}()
 
     for pattern in filter(n -> XML.nodetype(n) == XML.Element, XML.children(current_fill))
-        tag = XML.tag(pattern)
+        tag = localname(pattern)
         a   = XML.attributes(pattern)
         if isnothing(a) || isempty(a)
             fill_atts[tag] = nothing
@@ -1231,7 +1231,7 @@ function getAlignment(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellAli
 
     # alignment is an optional child element of the cell xf node
     children = filter(n -> XML.nodetype(n) == XML.Element, XML.children(cell_style))
-    alignment_node = findfirst(n -> XML.tag(n) == "alignment", children)
+    alignment_node = findfirst(n -> localname(n) == "alignment", children)
     isnothing(alignment_node) && return nothing
 
     atts = Dict{String,String}(XML.attributes(children[alignment_node]))
@@ -1508,7 +1508,7 @@ function getFormat(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellFormat
         current_format = format_nodes[idx]
 
         atts = Dict{String,String}(k => XLSX.unescape(v) for (k, v) in XML.attributes(current_format))
-        format_atts[XML.tag(current_format)] = atts
+        format_atts[localname(current_format)] = atts
 
     else
         # Built-in format — validate it falls in a known range

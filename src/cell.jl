@@ -178,7 +178,7 @@ _extra_attrs(d::Dict) = isempty(d) ? nothing : d
 function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothing}=nothing)::Union{Cell,EmptyCell}
     wb = get_workbook(ws)
 
-    XML.tag(c) == "c" || throw(XLSXError("`Cell` expects a `c` (cell) XML node."))
+    localname(c) == "c" || throw(XLSXError("`Cell` expects a `c` (cell) XML node."))
 
     a = XML.attributes(c)
     chn = XML.children(c)
@@ -198,7 +198,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
 
     if t == "inlineStr"
         for child in chn
-            XML.tag(child) == "is" || continue
+            localname(child) == "is" || continue
             uft = unformatted_text(wb, child)
             if !isempty(uft)
                 ft = _build_si_xml(child)
@@ -209,7 +209,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
         end
     else
         for child in chn
-            tag = XML.tag(child)
+            tag = localname(child)
             if tag == "v"
                 ch = XML.children(child)
                 isempty(ch) && continue
@@ -230,8 +230,8 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
 end
 
 function parse_formula_from_element(wb, c_child_element)::AbstractFormula
-    XML.tag(c_child_element) == "f" ||
-        throw(XLSXError("Expected nodename `f`. Found: `$(XML.tag(c_child_element))`"))
+    localname(c_child_element) == "f" ||
+        throw(XLSXError("Expected nodename `f`. Found: `$(localname(c_child_element))`"))
 
     # Extract formula string
     formula_string = if XML.is_simple(c_child_element)
@@ -552,14 +552,14 @@ function get_rowcells!(rowcells::Dict{Int,Cell}, row::XML.LazyNode, ws::Workshee
     cellnode = XML.next(row)
 
     while !isnothing(cellnode) && cellnode.depth > d
-        if cellnode.tag == "c" # This is a cell
+        if localname(cellnode) == "c" # This is a cell
             cell = Cell(cellnode, ws; mylock) # construct an XLSX.Cell from an XML.LazyNode
             sst_count += cell.datatype == CT_STRING ? 1 : 0
             rowcells[column_number(cell)] = cell
         end
         cellnode = XML.next(cellnode)
     end
-    if !isnothing(cellnode) && cellnode.tag == "row" # have reached the beginning of next row
+    if !isnothing(cellnode) && localname(cellnode) == "row" # have reached the beginning of next row
         return cellnode, sst_count
     else                                             # no more rows
         return nothing, sst_count
