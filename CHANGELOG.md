@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v0.11.6](https://github.com/JuliaData/XLSX.jl/tree/v0.11.6) - 2026-04-29
+- Correct citation details
+
 ## [v0.11.5](https://github.com/JuliaData/XLSX.jl/tree/v0.11.5) - 2026-04-29
 - Add basic support for Chartsheets (read/write)
 - Modestly widen support for strict format files
