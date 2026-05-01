@@ -68,11 +68,12 @@ end
 # Creates an iterator for row elements in the Worksheet's XML.
 function Base.iterate(itr::SheetRowStreamIterator)
     ws = get_worksheet(itr)
+    wb = get_workbook(ws)
     target_file = get_relationship_target_by_id("xl", get_workbook(ws), ws.relationship_id)
     sheetnode = open_internal_file_stream(get_xlsxfile(ws), target_file) # worksheet target files are LazyNodes
 
     length(sheetnode) <= 0 && throw(XLSXError("Couldn't open reader for Worksheet $(ws.name)."))
-    XML.tag(sheetnode[end]) != "worksheet" && throw(XLSXError("Expecting to find a worksheet node.: Found a $(XML.tag(sheetnode[end]))."))
+    XML.tag(sheetnode[end]) !=  "worksheet"  && throw(XLSXError("Expecting to find a worksheet node: Found a $(XML.tag(sheetnode[end]))."))
 
     sheetnode=XML.next(sheetnode)
 

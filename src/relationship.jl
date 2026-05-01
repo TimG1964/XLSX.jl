@@ -1,6 +1,6 @@
 
-function Relationship(e::XML.Node)::Relationship
-    XML.tag(e) != "Relationship" && throw(XLSXError("Unexpected XML Element: $(XML.tag(e)). Expected: \"Relationship\"."))
+function Relationship(wb::Workbook, e::XML.Node)::Relationship
+    XML.tag(e) !=   "Relationship" && throw(XLSXError("Unexpected XML Element: $(XML.tag(e)). Expected: \"Relationship\"."))
     a = XML.attributes(e)
     return Relationship(
         a["Id"],
@@ -125,4 +125,21 @@ function delete_relationships!(xf::XLSXFile, rel::Relationship)
     xroot[end]=new_rels
     xf.data["xl/_rels/workbook.xml.rels"]=xroot
 
+end
+
+#is_chartsheet(wb::Workbook, rid::String) = any(r.Id == rid && occursin("chartsheet", r.Type) for r in wb.relationships)
+function is_chartsheet(wb::Workbook, sheetname::AbstractString)::Bool
+    name = unquoteit(sheetname)
+    xroot = get_xlsxfile(wb).data["xl/workbook.xml"][end]
+    for node in XML.children(xroot)
+        XML.tag(node) != "sheets" && continue
+        for sheet_node in XML.children(node)
+            attrs = XML.attributes(sheet_node)
+            isnothing(attrs) && continue
+            get(attrs, "name", "") == name || continue
+            rid = get(attrs, "r:id", "")
+            return any(r.Id == rid && occursin("chartsheet", r.Type) for r in wb.relationships)
+        end
+    end
+    return false
 end

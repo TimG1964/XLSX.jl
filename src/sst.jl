@@ -153,7 +153,7 @@ function stream_ssts(n::XML.LazyNode, chunksize::Int; channel_size::Int=1 << 8)
     end
 end
 
-function process_sst(sst::SstToken)
+function process_sst(wb, sst::SstToken)
     el = sst.n
     i = sst.idx
 
@@ -195,7 +195,7 @@ end
         Threads.@spawn begin
             for ssts in chan
                 # ssts is already a chunk - just process it
-                processed = [process_sst(tok) for tok in ssts]
+                processed = [process_sst(wb, tok) for tok in ssts]
                 put!(sst_results, processed)
             end
         end
@@ -214,14 +214,14 @@ end
 # Helper function to gather unformatted text from Excel data files.
 # It looks at all children of `el` for tag name `t` and returns
 # a join of all the strings found.
-function unformatted_text(el::XML.LazyNode) :: String
+function unformatted_text(wb::Workbook, el::XML.LazyNode) :: String
     io = IOBuffer()
-    gather_strings!(io, el)
+    gather_strings!(wb, io, el)
     s = XLSX.unescape(String(take!(io)))
     return s
 end
 
-function gather_strings!(io::IOBuffer, e::XML.LazyNode)
+function gather_strings!(wb::Workbook, io::IOBuffer, e::XML.LazyNode)
     tag = XML.tag(e)
     
     # Skip phonetic hints entirely
@@ -244,7 +244,7 @@ function gather_strings!(io::IOBuffer, e::XML.LazyNode)
         # Recurse into children for all other tags
         children = XML.children(e)
         for ch in children
-            gather_strings!(io, ch)
+            gather_strings!(wb,io, ch)
         end
     end
     
@@ -256,7 +256,7 @@ end
 @inline function sst_unformatted_string(wb::Workbook, index::Int64)::String
     sst_load!(wb)
     uss = get_sst(wb).shared_strings[index+1]
-    return unformatted_text(parse(XML.LazyNode, uss))
+    return unformatted_text(wb, parse(XML.LazyNode, uss))
 end
 
 @inline sst_unformatted_string(xl::XLSXFile, index::Int64) :: String = sst_unformatted_string(get_workbook(xl), index)
@@ -307,13 +307,13 @@ function richTextRunToXML!(io::IO, run::RichTextRun)
         if (v = get(atts, :name, nothing)) !== nothing
             write(props, "<rFont val=\"", v, "\"/>")
         end
-        if get(atts, :bold, false) === true
+        if get(atts, :bold, false)  in (true, 1)
             write(props, "<b/>")
         end
-        if get(atts, :italic, false) === true
+        if get(atts, :italic, false)  in (true, 1)
             write(props, "<i/>")
         end
-        if get(atts, :strike, false) === true
+        if get(atts, :strike, false)  in (true, 1)
             write(props, "<strike/>")
         end
         if (v = get(atts, :color, nothing)) !== nothing
@@ -321,9 +321,8 @@ function richTextRunToXML!(io::IO, run::RichTextRun)
         end
         if (v = get(atts, :size, nothing)) !== nothing
             write(props, "<sz val=\"", string(v), "\"/>") # size read as a float, output rounded to nearest half point.
-#            write(props, "<sz val=\"", v, "\"/>")
         end
-        if get(atts, :under, false) === true
+        if get(atts, :under, false)  in (true, 1)
             write(props, "<u/>")
         end
         if (v = get(atts, :vertAlign, nothing)) !== nothing
@@ -523,15 +522,25 @@ end
 
 RichTextString(runs::RichTextRun...) = RichTextString(collect(runs))
 
-RichTextRun(text::String, atts::Dict{Symbol, Any}) = RichTextRun(text, collect(pairs(atts)))
-function RichTextRun(text::String, pairs::Vector{Pair{Symbol,String}})
-    isempty(text) && throw(XLSXError("Cannot create a RichTextRun with no text."))
-    for (k, _) in pairs
-        in(k, ValidRichTextAttributes) || throw(XLSXError("Unknown Rich Text Attribute: ':$x'. Valid attributes are :bold, :italic, :under, :strike, :vertAlign, :color, :size, :name."))
-    end
-    atts=Dict{Symbol, Any}(pairs)
-    return RichTextRun(text, atts)
-end
+# Normalize any attribute input into Vector{Pair{Symbol,Any}}
+_to_pairs(::Nothing) = nothing
+
+_to_pairs(nt::NamedTuple) =
+    [Pair{Symbol,Any}(k, v) for (k, v) in pairs(nt)]
+
+_to_pairs(p::Pair) =
+    [Pair{Symbol,Any}(p.first, p.second)]
+
+_to_pairs(v::Vector{<:Pair}) =
+    [Pair{Symbol,Any}(p.first, p.second) for p in v]
+
+_to_pairs(d::Dict{Symbol,Any}) =
+    [Pair{Symbol,Any}(k, v) for (k, v) in d]
+
+_to_pairs(t::Tuple{Vararg{Pair}}) =
+    [Pair{Symbol,Any}(p.first, p.second) for p in t]
+
+RichTextRun(text::String, atts) = RichTextRun(text, _to_pairs(atts))
 
 """
     getRichTextString(ws::Worksheet, cr::String)                 -> Union{RichTextString, Nothing}
@@ -628,11 +637,54 @@ function getRichTextString(s::Worksheet, c::CellRef)::Union{RichTextString, Noth
     cell.datatype == CT_STRING || return nothing
     sst_load!(get_workbook(s))
     uss = get_sst(get_workbook(s)).shared_strings[reinterpret(Int64, cell.value)+1]
-    return getRichTextString(uss)
+    return getRichTextString(get_workbook(s), uss)
 end
 
+const INDEXED_PALETTE = [
+    "000000", "FFFFFF", "FF0000", "00FF00", "0000FF", "FFFF00", "FF00FF", "00FFFF",
+    "000000", "FFFFFF", "FF0000", "00FF00", "0000FF", "FFFF00", "FF00FF", "00FFFF",
+    "800000", "008000", "000080", "808000", "800080", "008080", "C0C0C0", "808080",
+    "9999FF", "993366", "FFFFCC", "CCFFFF", "660066", "FF8080", "0066CC", "CCCCFF",
+    "000080", "FF00FF", "FFFF00", "00FFFF", "800080", "800000", "008080", "0000FF",
+    "00CCFF", "CCFFFF", "CCFFCC", "FFFF99", "99CCFF", "FF99CC", "CC99FF", "FFCC99",
+    "3366FF", "33CCCC", "99CC00", "FFCC00", "FF9900", "FF6600", "666699", "969696",
+    "003366", "339966", "003300", "333300", "993300", "993366", "333399", "333333"
+]
+
+# Excel tint algorithm
+@inline function apply_tint(channel::UInt8, tint::Float64)::UInt8
+    c = Float64(channel)
+    if tint > 0
+        c = c + (255 - c) * tint
+    else
+        c = c * (1 + tint)
+    end
+    return UInt8(clamp(round(Int, c), 0, 255))
+end
+
+# Convert theme + tint to RGB
+function resolve_theme_color(theme_index::Int, tint::Float64)
+    # Default Excel theme colors - assume these are never customised.
+    theme = [
+        0x000000, 0xFFFFFF, 0x1F497D, 0xEEECE1,
+        0x4F81BD, 0xC0504D, 0x9BBB59, 0x8064A2,
+        0x4BACC6, 0xF79646
+    ]
+
+    base = theme[theme_index + 1]
+    r = apply_tint(UInt8(base >> 16), tint)
+    g = apply_tint(UInt8((base >> 8) & 0xFF), tint)
+    b = apply_tint(UInt8(base & 0xFF), tint)
+
+   buf = IOBuffer()
+    print(buf, "FF")
+    print(buf, uppercase(string(r, base=16, pad=2)))
+    print(buf, uppercase(string(g, base=16, pad=2)))
+    print(buf, uppercase(string(b, base=16, pad=2)))
+    return String(take!(buf))end
+
 # Create a RichTextString from a shared string with multiple runs (or nothing if a simple text)
-function getRichTextString(xml_string::String)::Union{RichTextString, Nothing}
+function getRichTextString(wb::Workbook, xml_string::String)::Union{RichTextString, Nothing}
     doc = parse(XML.Node, xml_string)
     si = doc[end]
     
@@ -671,10 +723,24 @@ function getRichTextString(xml_string::String)::Union{RichTextString, Nothing}
             
             color_node = findfirst(c -> XML.tag(c) == "color", rpr_children)
             if !isnothing(color_node)
-                atts_dict = XML.attributes(rpr_children[color_node])
-                haskey(atts_dict, "rgb") && push!(pairs, :color => atts_dict["rgb"])
-            end
-            
+                atts = XML.attributes(rpr_children[color_node])
+
+                if haskey(atts, "rgb")
+                    push!(pairs, :color => atts["rgb"])
+                elseif haskey(atts, "theme")
+                    theme = parse(Int, atts["theme"])
+                    tint  = haskey(atts, "tint") ? parse(Float64, atts["tint"]) : 0.0
+                    rgb = resolve_theme_color(theme, tint)
+                    push!(pairs, :color => rgb)
+                elseif haskey(atts, "indexed")
+                    idx = parse(Int, atts["indexed"])
+                    idx = clamp(idx, 0, length(INDEXED_PALETTE)-1)
+                    rgb = INDEXED_PALETTE[idx + 1]
+                    push!(pairs, :color => "FF" * rgb)
+                elseif haskey(atts, "auto")
+                    push!(pairs, :color => "000000")  # Excel default
+                end
+            end            
             font_node = findfirst(c -> XML.tag(c) == "rFont", rpr_children)
             !isnothing(font_node) && push!(pairs, :name => XML.attributes(rpr_children[font_node])["val"])
             

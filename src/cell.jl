@@ -1,8 +1,6 @@
 
 @inline Base.isempty(::EmptyCell) = true
 @inline Base.isempty(::AbstractCell) = false
-@inline iserror(c::Cell) = c.datatype == CT_ERROR
-@inline iserror(::AbstractCell) = false
 @inline row_number(c::EmptyCell) = row_number(c.ref)
 @inline column_number(c::EmptyCell) = column_number(c.ref)
 @inline row_number(c::Cell) = row_number(c.ref)
@@ -41,8 +39,6 @@ function get_error_type(v::AbstractString)::UInt64
     end
 end
 
-#=
-# Only needed if ever cells containing error return something other than missing!
 function get_error_string(e::UInt64)::String
     if e == UInt64(XL_NULL)
         return "#NULL!"
@@ -63,6 +59,103 @@ function get_error_string(e::UInt64)::String
      else
         throw(XLSXError("Unknown error code: $e"))
     end
+end
+get_error_string(::Nothing) = ""
+
+
+"""
+    iserror(s::Worksheet, ref::AbstractString)
+    iserror(s::Worksheet, rows, cols)
+
+Returns `true` if the cell(s) at the given reference contain an error, `false` otherwise.
+An `EmptyCell` is not considered an error and returns `false`.
+
+The return type depends on the type of `ref` and is the same shape as the return 
+type of `getcell` for the same `ref`:
+- If `ref` or (`row`, `col`) refers to a single cell, returns a single Bool.
+- If `ref` or (`rows`, `cols`) refers to a range of cells, returns a matrix of Bools.
+- If `ref` or (`rows`, `cols`) refers to a non-contiguous range of cells, returns a vector of matrices of Bools.
+
+# Examples
+```julia
+julia> XLSX.iserror(sh, "A1") # Cell
+true
+
+julia> XLSX.iserror(sh, "I1") # EmptyCell
+false
+
+julia> XLSX.iserror(sh, "A1:I1") # CellRange - note that I1 is an EmptyCell, which is not an error
+1×9 Matrix{Bool}:
+ 1  1  1  1  1  1  1  1  0
+
+julia> XLSX.iserror(sh, "A1:B1,D1:E1") # non-contiguous range
+2-element Vector{Matrix{Bool}}:
+ [1 1]
+ [1 1]
+```
+
+See also [`XLSX.geterror`](@ref), [`XLSX.getcell`](@ref).
+"""
+iserror(s::Worksheet, ref::AbstractString) = iserror(getcell(s, ref))
+iserror(s::Worksheet, ::Colon) = iserror(getcell(s, :))
+iserror(s::Worksheet, r, c) = iserror(getcell(s, r, c))
+iserror(c::AbstractVector) = collect(iserror.(c))
+iserror(c::AbstractMatrix) = collect(iserror.(c))
+iserror(c::AbstractVector{<:AbstractMatrix}) = [collect(iserror.(M)) for M in c]
+@inline iserror(c::Cell) = c.datatype == CT_ERROR
+@inline iserror(::EmptyCell) = false
+
+getval(x) = hasproperty(x, :datatype) && x.datatype == CT_ERROR && hasproperty(x, :value) ? x.value : nothing
+
+"""
+    geterror(s::Worksheet, ref::AbstractString)
+    geterror(s::Worksheet, rows, cols)
+
+Returns the error value (e.g. `#DIV/0!`) for the cell(s) at the given reference, if any. 
+If there is no error, returns an empty string.
+
+The return type depends on the type of `ref` and is the same shape as the return 
+type of `getcell` for the same `ref`:
+- If `ref` or (`row`, `col`) refers to a single cell, returns a single Bool.
+- If `ref` or (`rows`, `cols`) refers to a range of cells, returns a matrix of Bools.
+- If `ref` or (`rows`, `cols`) refers to a non-contiguous range of cells, returns a vector of matrices of Bools.
+
+# Examples
+```julia
+julia> XLSX.geterror(sh, "A1") # Cell
+"#NULL!"
+
+julia> XLSX.geterror(sh, "I1") # EmptyCell
+""
+
+julia> XLSX.geterror(sh, "A1:I1") # CellRange - note that I1 is an EmptyCell, which returns an empty string
+1×9 Matrix{String}:
+ "#NULL!"  "#DIV/0!"  "#VALUE!"  "#REF!"  "#NAME?"  "#NUM!"  "#N/A"  "#VALUE!"  ""
+
+julia> XLSX.geterror(sh, "A1:B1,D1:E1") # non-contiguous range
+2-element Vector{Matrix{String}}:
+ ["#NULL!" "#DIV/0!"]
+ ["#REF!" "#NAME?"]
+```
+
+See also [`XLSX.iserror`](@ref), [`XLSX.getcell`](@ref).
+"""
+geterror(s::Worksheet, ref::AbstractString) = geterror(getcell(s, ref))
+geterror(s::Worksheet, ::Colon) = geterror(getcell(s, :))
+geterror(s::Worksheet, r, c) = geterror(getcell(s, r, c))
+geterror(c::AbstractVector) = collect(geterror.(c))
+geterror(c::AbstractMatrix) = collect(geterror.(c))
+geterror(c::AbstractVector{<:AbstractMatrix}) = [collect(geterror.(M)) for M in c]
+geterror(c::AbstractCell) = get_error_string(getval(c))
+#=
+# Returns the enums directly rather than the strings:
+# julia> XLSX.geterror(s, "A1")
+# XL_NULL::CellErrorType = 0x0000000000000001
+#
+function geterror(c::AbstractCell)
+    c = getval(c)
+    isnothing(c) && return ""
+    return CellErrorType(c)
 end
 =#
 
@@ -106,7 +199,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
     if t == "inlineStr"
         for child in chn
             XML.tag(child) == "is" || continue
-            uft = unformatted_text(child)
+            uft = unformatted_text(wb, child)
             if !isempty(uft)
                 ft = _build_si_xml(child)
                 datatype = CT_STRING
@@ -120,11 +213,12 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
             if tag == "v"
                 ch = XML.children(child)
                 isempty(ch) && continue
-                v = XLSX.unescape(XML.value(ch[1]))
+                raw = XML.value(ch[1])
+                v = occursin('&', raw) ? XLSX.unescape(raw) : raw
                 datatype, value = process_tv(wb, t, v, num_style; mylock)
             elseif tag == "f"
                 if get_xlsxfile(wb).is_writable
-                    f = parse_formula_from_element(child)
+                    f = parse_formula_from_element(wb,child)
                     wb.formulas[SheetCellRef(combine_sheet_ref(ws, ref))] = f
                 end
                 formula = true
@@ -135,7 +229,7 @@ function Cell(c::XML.LazyNode, ws::Worksheet; mylock::Union{ReentrantLock,Nothin
     return Cell(ref, value, style, meta, datatype, formula)
 end
 
-function parse_formula_from_element(c_child_element)::AbstractFormula
+function parse_formula_from_element(wb, c_child_element)::AbstractFormula
     XML.tag(c_child_element) == "f" ||
         throw(XLSXError("Expected nodename `f`. Found: `$(XML.tag(c_child_element))`"))
 
@@ -212,6 +306,26 @@ function process_tv(wb::Workbook, t::String, v::String, num_style::Int; mylock::
     elseif t == "s"
         datatype = CT_STRING
         value = reinterpret(UInt64, parse(Int64, v))
+
+    elseif t == "d" # ISO 8601 date/datetime/time string
+        if occursin("T", v) && !startswith(v, "T")
+            dt = Dates.DateTime(replace(rstrip(v, 'Z'), r"(\.\d{3})\d+$" => s"\1"), Dates.dateformat"yyyy-mm-ddTHH:MM:SS.sss")
+            serial = datetime_to_excel_value(dt, wb.date1904)
+            datatype = CT_DATETIME
+        elseif occursin("-", v)
+            d = Dates.Date(v, Dates.dateformat"yyyy-mm-dd")
+            serial = date_to_excel_value(d, wb.date1904)
+            datatype = CT_DATE
+        else
+            # Time-only: parse HH:MM:SS.fractional directly to fractional day
+            parts = split(rstrip(v, 'Z'), ":")
+            seconds = parse(Float64, parts[1]) * 3600.0 +
+                      parse(Float64, parts[2]) * 60.0 +
+                      parse(Float64, parts[3])
+            serial = seconds / 86400.0
+            datatype = CT_TIME
+        end
+        value = reinterpret(UInt64, serial)
 
     elseif t == "str"
         datatype = CT_STRING
@@ -295,6 +409,7 @@ function datetime_to_excel_value(dt::Dates.DateTime, is1904::Bool)::Float64
     return date_part + time_part
 end
 
+#=
 # Shared helper for parsing a raw Excel datetime string into a value and CellValueType.
 function _parse_excel_datetime(v::AbstractString, is1904::Bool)
     isempty(v) && throw(XLSXError("Cannot convert an empty string into a datetime value."))
@@ -308,6 +423,7 @@ function _parse_excel_datetime(v::AbstractString, is1904::Bool)
         return excel_value_to_date(parse(Int64, v), is1904), CT_DATE
     end
 end
+=#
 
 @inline getdata(ws::Worksheet, empty::EmptyCell) = missing
 

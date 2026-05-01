@@ -476,7 +476,7 @@ infer_eltype(v::Vector{T}) where T = T
 
 
 # Address issue 225
-#Tables.columnaccess(::Type{<:XLSX.TableRowIterator}) = true # Not needed, it seems.
+#Tables.columnaccess(::Type{<:TableRowIterator}) = true # Not needed, it seems.
 function typed_column(v::Vector{Any})
     T = XLSX.infer_eltype(v)
     result = Vector{T}(undef, length(v))
@@ -485,7 +485,7 @@ function typed_column(v::Vector{Any})
     end
     return result
 end
-function Tables.columns(tr::XLSX.TableRowIterator)
+function Tables.columns(tr::TableRowIterator)
     schema = Tables.schema(tr)
     names = schema.names
     rows = Tables.rows(tr)
@@ -643,6 +643,8 @@ function gettable(sheet::Worksheet, cols::Union{ColumnRange,AbstractString};
     missing_strings::Union{AbstractString, AbstractVector{<:AbstractString}, Nothing}=nothing
 )
 
+    is_chartsheet(get_workbook(sheet), sheet.name) && throw(XLSXError("Can't read a table from a chartsheet."))
+
     itr = eachtablerow(sheet, cols; first_row, column_labels, header,
                         stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames, missing_strings)
     return gettable(itr; infer_eltypes)
@@ -655,6 +657,8 @@ function gettable(sheet::Worksheet;
     keep_empty_rows::Bool=false, normalizenames::Bool=false,
     missing_strings::Union{AbstractString, AbstractVector{<:AbstractString}, Nothing}=nothing
 )
+
+    is_chartsheet(get_workbook(sheet), sheet.name) && throw(XLSXError("Can't read a table from a chartsheet."))
 
     itr = eachtablerow(sheet; first_row, column_labels, header,
                         stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames, missing_strings)
