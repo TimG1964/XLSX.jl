@@ -6883,6 +6883,59 @@ end
     end
 end
 
+# issues #380, #362, #267, #170
+@testset "no default namespace" begin
+
+    f = XLSX.openxlsx(joinpath(data_directory, "No-Default_NameSpace.xlsx"), mode="rw")
+    @test XLSX.get_dimension(f[2])==XLSX.CellRange("A1:N15")
+
+    df = XLSX.readto(joinpath(data_directory, "No-Default_NameSpace.xlsx"), 2, DataFrames.DataFrame)
+    @test DataFrames.names(df) == String[
+        "NR ",
+        "LC ",
+        "LC-title ",
+        "X [m]",
+        "Xi ",
+        "MNR ",
+        "SIGU [MPa]",
+        "DL [m]",
+        "node1 ",
+        "X [m]_2",
+        "Y [m]",
+        "Z [m]",
+        "node2 ",
+        "NREF "
+    ]
+    @test DataFrames.nrow(df) == 14
+
+    f2 = XLSX.openxlsx(joinpath(data_directory, "No-Default_NameSpace2.xlsx"), mode="rw")
+    @test XLSX.get_dimension(f2[1])==XLSX.CellRange("A1:R1001")
+
+    df2 = XLSX.readto(joinpath(data_directory, "No-Default_NameSpace2.xlsx"), DataFrames.DataFrame; first_row=3)
+    @test DataFrames.names(df2) == String[
+        "Stock Code",
+        "Name of Securities",
+        "Category",
+        "Sub-Category",
+        "Board Lot",
+        "ISIN",
+        "Expiry Date",
+        "Subject to Stamp Duty",
+        "Shortsell Eligible",
+        "CAS Eligible",
+        "VCM Eligible",
+        "Admitted to CCASS",
+        "Debt Securities Board Lot (Nominal)",
+        "Debt Securities Investor Type",
+        "POS Eligible",
+        "Spread Table\r\n1 = Part A\r\n3 = Part B\r\n5 = Part D\r\n4 & 6 = Part E",
+        "Trading Currency",
+        "RMB Counter"
+        ]
+    @test DataFrames.nrow(df2) == 998
+
+end
+
 # issues #62, #71
 @testset "windows compatibility" begin
     xf = XLSX.open_xlsx_template(joinpath(data_directory, "issue62_71.xlsx"))

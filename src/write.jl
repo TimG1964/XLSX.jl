@@ -195,7 +195,7 @@ end
 
 function get_node_paths(node::XML.Node)
     XML.nodetype(node) != XML.Document && throw(XLSXError("Something wrong here!"))
-    default_ns = get_default_namespace(node[end])
+    (_, default_ns) = get_default_namespace(node[end])
     xpaths = Vector{xpath}()
     get_node_paths!(xpaths, node, default_ns, "")
     return xpaths
@@ -205,7 +205,7 @@ function get_node_paths!(xpaths::Vector{xpath}, node::XML.Node, default_ns, path
     for c in XML.children(node)
         if XML.nodetype(c) ∉ [XML.Declaration, XML.Comment, XML.Text]
             node_tag = localname(c)
-            if !occursin(":", node_tag)
+            if !occursin(":", node_tag) && !isnothing(default_ns)
                 node_tag = default_ns * ":" * node_tag
             end
             npath = path * "/" * node_tag

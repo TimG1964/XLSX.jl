@@ -182,13 +182,11 @@ end
 
 # Build a lookup dictionary for element names, qualified with the default namespace prefix if it exists.
 function build_ns_dict!(xf::XLSXFile)
-    ns = xf.namespace   # existing dict, do NOT replace
+    ns = xf.namespace
     for (file_name, is_read) in xf.files
         if is_read
             xroot = xmlroot(xf, file_name)[end]
             prefix = get_default_namespace_prefix(xroot)
-
-            # merge: update or insert
             ns[file_name] = prefix
         end
     end
@@ -557,7 +555,6 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
 #       zip_io = ZipArchives.ZipReader(Mmap.mmap(abspath(source))) # but Mmap is unreliable : https://discourse.julialang.org/t/struggling-to-use-mmap-with-ziparchives/129839
     end
 
-
     load_files!(xf, zip_io; pass=1) # multi-threaded file load
     strict = is_strict_ooxml(xf)
     if strict
@@ -583,7 +580,6 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
         convert_strict_to_transitional!(xf, 3)
     end
 
-
     for sheet in get_workbook(xf).sheets
         if isnothing(sheet.dimension)
             sheet.dimension = read_worksheet_dimension(xf, sheet.relationship_id, sheet.name)
@@ -596,18 +592,27 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
 end
 
 function get_default_namespace_prefix(r::XML.Node)
+    ns = get_default_namespace(r)
+    isnothing(ns) && return nothing
+    (prefix, _) = ns
+    return prefix=="" ? nothing : prefix   # may be "" (default) or "x" or anything
+end
+
+function get_default_namespace(r::XML.Node)
 
 #function get_spreadsheetml_prefix(r::XML.Node)::Union{String,Nothing}
     nss = get_namespaces(r)
-    for (prefix, uri) in nss
-        if uri == SPREADSHEET_NAMESPACE_XPATH_ARG
-            return prefix=="" ? nothing : prefix   # may be "" (default) or "x" or anything
+    length(nss) == 1 && return first(keys(nss)), first(values(nss))
+    haskey(nss, "") && return "", nss[""]
+    for (k, v) in nss
+        if v == SPREADSHEET_NAMESPACE_XPATH_ARG
+            return k, v
         end
     end
 
     return nothing
 end
-function get_default_namespace(r::XML.Node)::Union{String,Nothing}
+#=function get_default_namespace(r::XML.Node)::Union{String,Nothing}
     nss = get_namespaces(r)
     return get(nss, "", nothing)
 end
@@ -618,7 +623,7 @@ function _get_default_namespace(r::XML.Node)::Tuple{String,String}
     haskey(nss, "") || throw(XLSXError("No default namespace found."))
     return "", nss[""]
 end
-
+=#
 
 function get_namespaces(r::XML.Node)::Dict{String,String}
     nss = Dict{String,String}()
