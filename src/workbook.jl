@@ -1,5 +1,4 @@
-#=
-const Workbook_elements = String[
+const WORKBOOK_ORDER = String[
     "fileVersion",
     "fileSharing",
     "workbookPr",
@@ -19,8 +18,8 @@ const Workbook_elements = String[
     "fileRecoveryPr",
     "webPublishObjects",
     "extLst"
-    ]
-=#
+]
+
     
 EmptyWorkbook() = Workbook(EmptyMSOfficePackage(), Vector{Worksheet}(), false, 
     Vector{Relationship}(), Dict{SheetCellRef, AbstractFormula}(), SharedStringTable(), Dict{Int,Bool}(), Dict{Int,Bool}(),
@@ -299,7 +298,7 @@ function addDefName(ws::Worksheet, name::AbstractString, value::DefinedNameValue
     else
         abs = absolute ? true : false
     end
-    wb.worksheet_names[(ws.sheetId, name)] = DefinedNameValue(value, abs)
+    wb.worksheet_names[(ordinal_sheet_number(wb, ws.name), name)] = DefinedNameValue(value, abs)
 end
 addDefName(ws::Worksheet, name::AbstractString, value::Integer; absolute=true) = addDefName(ws, name, Int64(value); absolute)
 

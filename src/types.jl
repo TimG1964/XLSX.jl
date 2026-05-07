@@ -579,6 +579,7 @@ mutable struct XLSXFile <: MSOfficePackage
     use_cache_for_sheet_data::Bool # indicates whether Worksheet.cache will be fed while reading worksheet cells.
     files::Dict{String, Bool} # maps filename => isread bool
     data::Dict{String, XML.Node} # maps filename => XMLDocument (with row/sst elements removed)
+    namespace::Dict{String, Union{String, Nothing}} # maps filename => prefix for each read xml file
     binary_data::Dict{String, Vector{UInt8}} # maps filename => file content in bytes
     workbook::Workbook
     relationships::Vector{Relationship} # contains package level relationships
@@ -587,11 +588,12 @@ mutable struct XLSXFile <: MSOfficePackage
 
     function XLSXFile(source::Union{AbstractString, IO}, use_cache::Bool, is_writable::Bool)
         check_for_xlsx_file_format(source)
-        xl = new(source, use_cache, Dict{String, Bool}(), Dict{String, XML.Node}(), Dict{String, Vector{UInt8}}(), EmptyWorkbook(), Vector{Relationship}(), is_writable, Random.Xoshiro(2468))
+        xl = new(source, use_cache, Dict{String, Bool}(), Dict{String, XML.Node}(), Dict{String, String}(), Dict{String, Vector{UInt8}}(), EmptyWorkbook(), Vector{Relationship}(), is_writable, Random.Xoshiro(2468))
         xl.workbook.package = xl
         return xl
     end
 end
+
 
 
 struct ReadFile

@@ -36,13 +36,6 @@ It's state is the SheetRowStreamIteratorState.
 The iterator element is a SheetRow.
 =#
 
-# strip off namespace prefix of nodename
-function nodename(x::XML.LazyNode)
-    t = XML.tag(x)
-    i = findlast(==(':'), t)
-    return isnothing(i) ? t : t[i+1:end]
-end
-
 @inline get_worksheet(itr::SheetRowIterator) = itr.sheet
 @inline row_number(state::SheetRowStreamIteratorState) = state.row
 
@@ -73,11 +66,11 @@ function Base.iterate(itr::SheetRowStreamIterator)
     sheetnode = open_internal_file_stream(get_xlsxfile(ws), target_file) # worksheet target files are LazyNodes
 
     length(sheetnode) <= 0 && throw(XLSXError("Couldn't open reader for Worksheet $(ws.name)."))
-    XML.tag(sheetnode[end]) !=  "worksheet"  && throw(XLSXError("Expecting to find a worksheet node: Found a $(XML.tag(sheetnode[end]))."))
+    localname(sheetnode[end]) !=  "worksheet"  && throw(XLSXError("Expecting to find a worksheet node: Found a $(localname(sheetnode[end]))."))
 
     sheetnode=XML.next(sheetnode)
 
-    while XML.tag(sheetnode) != "sheetData" # Check for `sheetData`
+    while localname(sheetnode) != "sheetData" # Check for `sheetData`
         sheetnode = XML.next(sheetnode)
         sheetnode === nothing && throw(XLSXError("No `sheetData` node found in worksheet"))
     end
@@ -86,7 +79,7 @@ function Base.iterate(itr::SheetRowStreamIterator)
 
     rownode=XML.next(sheetnode)
 
-    while XML.tag(rownode) != "row" # Check for at least one `row`
+    while localname(rownode) != "row" # Check for at least one `row`
         rownode = XML.next(rownode)
         rownode === nothing && return nothing # no rows found
     end
@@ -310,7 +303,7 @@ Base.length(r::WorksheetCache)=length(r.cells)
 function produce_rowchunks!(out, n, rows, chunksize)
     pos=0
     while !isnothing(n)
-        if _is_tag(n.tag, "row")
+        if _is_tag(localname(n), "row")
             pos += 1
             rows[pos] = n
         end
@@ -334,25 +327,25 @@ end
 
 function process_row(row::XML.LazyNode, handled_attributes::Set{String}, ws::Worksheet, mylock::ReentrantLock)
     unhandled_attributes = Dict{String,String}()
+    current_row_ht = nothing   # initialise here
+    row_num = nothing          # initialise here
 
     atts = XML.attributes(row)
-    if !isnothing(atts)
-        current_row_ht = haskey(atts, "ht") ? parse(Float64, atts["ht"]) : nothing
-        row_num = haskey(atts, "r") ? parse(Int, atts["r"]) : nothing
-        row_num === nothing && throw(XLSXError("Row without 'r' attribute encountered in worksheet $(ws.name)."))
-        unhandled_attributes = Dict(filter(attr -> !in(first(attr), handled_attributes), atts))
-    end
+    isnothing(atts) && return nothing   # skip rows with no attributes
 
-    # Process cells
+    current_row_ht = haskey(atts, "ht") ? parse(Float64, atts["ht"]) : nothing
+    row_num = haskey(atts, "r") ? parse(Int, atts["r"]) : nothing
+    row_num === nothing && throw(XLSXError("Row without 'r' attribute encountered in worksheet $(ws.name)."))
+    unhandled_attributes = Dict(filter(attr -> !in(first(attr), handled_attributes), atts))
+
     rowcells = Dict{Int,Cell}()
     _, sst_count = get_rowcells!(rowcells, row, ws; mylock)
 
     return sst_count, SheetRow(ws, row_num, current_row_ht, rowcells), unhandled_attributes
-
 end
 
 function first_cache_fill!(ws::Worksheet, lznode::XML.LazyNode, nthreads::Int)
-    chunksize = 1000
+    chunksize = ROW_CHUNKSIZE
     handled_attributes = Set{String}(["r", "spans", "ht", "customHeight"])
     unhandled_attributes = Dict{Int,Dict{String,String}}()
    
@@ -386,7 +379,8 @@ function first_cache_fill!(ws::Worksheet, lznode::XML.LazyNode, nthreads::Int)
         Threads.@spawn begin
             for rows in streamed_rows
                 # rows is already a chunk - just process it
-                processed = [process_row(row, handled_attributes, ws, mylock) for row in rows]
+                processed = filter!(!isnothing, [process_row(row, handled_attributes, ws, mylock) for row in rows])
+#                processed = [process_row(row, handled_attributes, ws, mylock) for row in rows]
                 put!(sheet_rows, processed)
             end
         end
@@ -414,7 +408,7 @@ function match_rows(ws::Worksheet, rows_to_match::Vector{Int})::Vector{SheetRow}
     n = XML.next(lznode)
     mylock=ReentrantLock()
     while !isnothing(n)
-        if n.tag == "row" # find each row
+        if localname(n) == "row" # find each row
             atts = XML.attributes(n)
             if !isnothing(atts)
                 row_num = haskey(atts, "r") ? parse(Int, atts["r"]) : nothing

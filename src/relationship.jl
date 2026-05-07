@@ -1,6 +1,6 @@
 
 function Relationship(wb::Workbook, e::XML.Node)::Relationship
-    XML.tag(e) !=   "Relationship" && throw(XLSXError("Unexpected XML Element: $(XML.tag(e)). Expected: \"Relationship\"."))
+    localname(e) !=   "Relationship" && throw(XLSXError("Unexpected XML Element: $(localname(e)). Expected: \"Relationship\"."))
     a = XML.attributes(e)
     return Relationship(
         a["Id"],
@@ -59,7 +59,7 @@ end
 
 function get_package_relationship_root(xf::XLSXFile)::XML.Node
     xroot = xmlroot(xf, "_rels/.rels")[end]
-    XML.tag(xroot) != "Relationships" && throw(XLSXError("Malformed XLSX file $(xf.source). _rels/.rels root node name should be `Relationships`. Found $(XML.tag(xroot))."))
+    localname(xroot) != "Relationships" && throw(XLSXError("Malformed XLSX file $(xf.source). _rels/.rels root node name should be `Relationships`. Found $(XML.tag(xroot))."))
     if ("" => "http://schemas.openxmlformats.org/package/2006/relationships") ∉ get_namespaces(xroot)
         throw(XLSXError("Unexpected namespace at workbook relationship file: `$(get_namespaces(xroot))`."))
     end
@@ -68,7 +68,7 @@ end
 
 function get_workbook_relationship_root(xf::XLSXFile)::XML.Node
     xroot = xmlroot(xf, "xl/_rels/workbook.xml.rels")[end]
-    XML.tag(xroot) != "Relationships" && throw(XLSXError("Malformed XLSX file $(xf.source). xl/_rels/workbook.xml.rels root node name should be `Relationships`. Found $(XML.tag(xroot))."))
+    localname(xroot) != "Relationships" && throw(XLSXError("Malformed XLSX file $(xf.source). xl/_rels/workbook.xml.rels root node name should be `Relationships`. Found $(localname(xroot))."))
     if ("" => "http://schemas.openxmlformats.org/package/2006/relationships") ∉ get_namespaces(xroot)
         throw(XLSXError("Unexpected namespace at workbook relationship file: `$(get_namespaces(xroot))`."))
     end
@@ -132,7 +132,7 @@ function is_chartsheet(wb::Workbook, sheetname::AbstractString)::Bool
     name = unquoteit(sheetname)
     xroot = get_xlsxfile(wb).data["xl/workbook.xml"][end]
     for node in XML.children(xroot)
-        XML.tag(node) != "sheets" && continue
+        localname(node) != "sheets" && continue
         for sheet_node in XML.children(node)
             attrs = XML.attributes(sheet_node)
             isnothing(attrs) && continue
