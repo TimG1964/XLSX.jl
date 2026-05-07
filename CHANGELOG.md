@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v0.11.7](https://github.com/JuliaData/XLSX.jl/tree/v0.11.7) - 2026-05-07
+- Fix issue [#368](https://github.com/JuliaData/XLSX.jl/issues/368) for both reading and writing
+
 ## [v0.11.6](https://github.com/JuliaData/XLSX.jl/tree/v0.11.6) - 2026-04-29
 - Correct citation details
 
