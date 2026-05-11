@@ -7,13 +7,22 @@ overwriting original content.
 
 A new `XLSXFile` created with `XLSX.newxlsx` (or using `openxlsx` without specifying a filename) will 
 have `source` set to `"blank.xlsx"` and cannot be saved with this function. Use [`writexlsx`](@ref) instead 
-to specify a file name for the saved file.
+to specify a new file name for the saved file.
+
+An `XLSXFile` created from a native Excel template (`.xltx`) file cannot be saved with this function. 
+Use [`writexlsx`](@ref) instead to specify a new file name for the saved file.
 
 Returns the filepath of the written file if a filename is supplied, or `nothing` if writing to an `IO`.
 
 """
 function savexlsx(f::XLSXFile)
-    f.source == "blank.xlsx" && throw(XLSXError("Can't save to a blank `XLSXFile` instance. Use `writexlsx` instead to specify a file name."))
+    if isa(f.source, AbstractString)
+        if f.source == "blank.xlsx"
+            throw(XLSXError("Can't save to a blank `XLSXFile` instance. Use `writexlsx` instead to specify a file name."))
+        elseif f.is_xltx
+            throw(XLSXError("Can't save to a back to an Excel template file. Use `writexlsx` instead to specify a file name."))
+        end
+    end
     return writexlsx(f.source, f; overwrite=true)
 end
 
@@ -33,7 +42,7 @@ See also [`savexlsx`](@ref).
 
 !!! note
 
-    XLSX.jl can now read strict (ISO/IEC 29500) XLSX files, and converts them eagerly on read 
+    When XLSX.jl reads strict (ISO/IEC 29500) XLSX files, it converts them eagerly on 
     to transitional (ECMA 376) format. On write, XLSX.jl will always write in the transitional 
     format, which is the Excel default. Excel itself can convert between strict and 
     transitional formats. Use Excel directly to convert a transitional file to strict format, 
@@ -218,18 +227,15 @@ end
 
 # Remove all children with tag given by att[2] from a parent XML node with a tag given by att[1].
 function unlink(node::XML.Node, att::Tuple{String,String}, pfx::String)
-    new_node = XML.Element(pfx*first(att))
+    new_node = XML.Element(pfx * first(att))
+    
     atts = XML.attributes(node)
-    if !isnothing(atts) # Copy attributes across to new node
-        for (k, v) in atts
-            new_node[k] = v
-        end
+    isnothing(atts) || foreach(((k, v),) -> new_node[k] = v, atts)
+    
+    for child in XML.children(node)
+        localname(child) != last(att) && push!(new_node, child)
     end
-    for child in XML.children(node) # Copy any child nodes with tags that are not att[2] across to new node
-        if localname(child) != last(att)
-            push!(new_node, child)
-        end
-    end
+    
     return new_node
 end
 
@@ -238,29 +244,17 @@ function keep_prefix(node, pfx)
     return localname(node)
 end
 
-# Find the index location ofatt[1] and att[2] in a parent XML node.
+# Find the index location of child and grandchild in a parent XML node.
+function find_child_index(children, target)
+    pfx = occursin(":", target)
+    findfirst(c -> keep_prefix(c, pfx) === target, children)
+end
 function get_idces(doc::XML.Node, t, b)
-    
-    i = 1
-    j = 1
     chn = XML.children(doc)
-    l = length(chn)
-    pfx = occursin(":", t)
-    ln = keep_prefix(chn[i], pfx)
-    while ln !== t
-        i += 1
-        i > l && return nothing, nothing
-        ln = keep_prefix(chn[i], pfx)
-    end
-    chn = XML.children(chn[i])
-    l = length(chn)
-    pfx = occursin(":", b)
-    ln = keep_prefix(chn[j], pfx)
-    while ln !== b
-        j += 1
-        j > l && return i, nothing
-        ln = keep_prefix(chn[j], pfx)
-   end
+    i = find_child_index(chn, t)
+    i === nothing && return nothing, nothing
+
+    j = find_child_index(XML.children(chn[i]), b)
     return i, j
 end
 
