@@ -571,6 +571,51 @@ function anchor_spill_refs(formula::String)
     return replace(formula, SPILL_REF_RE => s -> "ANCHORARRAY($(s[1:end-1]))")
 end
 
+function split_quoted(s::String)
+    parts = String[]
+    i = 1
+    n = lastindex(s)
+
+    while i <= n
+        if s[i] == '"'
+            # start of quoted segment
+            j = i + 1
+            while j <= n && s[j] != '"'
+                j += 1
+            end
+            # include the quotes
+            push!(parts, s[i:j])
+            i = j + 1
+        else
+            # unquoted segment
+            j = i
+            while j <= n && s[j] != '"'
+                j += 1
+            end
+            push!(parts, s[i:j-1])
+            i = j
+        end
+    end
+
+    return parts
+end
+
+function prefix_excel_functions(formula::String, prefixes::Dict{String,String})
+    parts = split_quoted(formula)
+
+    for idx in 1:2:length(parts)   # only unquoted segments
+        seg = parts[idx]
+        for (k, v) in prefixes
+            r = Regex("(?i)\\b" * k * "\\b")
+            seg = replace(seg, r => v * k)
+        end
+        parts[idx] = seg
+    end
+
+    return join(parts)
+end
+
+
 function process_dynamic_array_functions(xf::XLSXFile, cellref::CellRef, val::String; raw::Bool, spill::Union{Nothing,Bool})
 
     t = ""
@@ -606,10 +651,7 @@ function process_dynamic_array_functions(xf::XLSXFile, cellref::CellRef, val::St
             end
         end
 
-        for (k, v) in EXCEL_FUNCTION_PREFIX # add prefixes to any array functions
-            r = "(?i)\\b" * k
-            formula = replace(formula, Regex(r) => v * k) # replace any dynamic array function name with its prefixed name
-        end
+        formula = prefix_excel_functions(formula, EXCEL_FUNCTION_PREFIX)
     end
 
     iaf = is_array_formula(formula)
