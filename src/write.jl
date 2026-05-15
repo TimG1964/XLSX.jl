@@ -1289,6 +1289,57 @@ function copysheet!(ws::Worksheet, name::AbstractString="")::Worksheet
     # insert the copied sheet into the workbook
     new_ws = insertsheet!(wb, xdoc, new_cache, ws.sst_count, pfx, name; dim)
 
+    # Copy images if the sheet has a drawing
+    sheet_path = get_relationship_target_by_id("xl", wb, ws.relationship_id)
+    drawing_path = _drawing_path_for_sheet(xl, sheet_path)
+
+    if drawing_path !== nothing
+        src_drawing_file = rsplit(drawing_path, "/"; limit=2)[2]
+        src_drawing_rels = "xl/drawings/_rels/$src_drawing_file.rels"
+
+        # Pick a fresh drawing file name
+        i = 1
+        while haskey(xl.data, "xl/drawings/drawing$i.xml"); i += 1; end
+        new_drawing_file = "drawing$i.xml"
+        new_drawing_path = "xl/drawings/$new_drawing_file"
+        new_drawing_rels = "xl/drawings/_rels/$new_drawing_file.rels"
+
+        # Copy drawing XML and rels verbatim
+        xl.data[new_drawing_path]  = copynode(xl.data[drawing_path])
+        xl.files[new_drawing_path] = true
+        xl.data[new_drawing_rels]  = copynode(xl.data[src_drawing_rels])
+        xl.files[new_drawing_rels] = true
+
+        # Register content types for drawing and any media it references
+        register_content_type!(xl, "[Content_Types].xml";
+                            tag="Override", key="PartName", val="/$new_drawing_path",
+                            content_type=MIME_DRAWING)
+        for img in _images_for_drawing(xl, drawing_path, ws.name)
+            ext = detect_image_ext(xl.binary_data["xl/media/$(img.media_name)"])
+            ext_no_dot = String(lstrip(ext, '.'))
+            register_content_type!(xl, "[Content_Types].xml";
+                                tag="Default", key="Extension", val=ext_no_dot,
+                                content_type=get(EXT_MIME, ext, "image/$ext_no_dot"))
+        end
+
+        # Link drawing to new sheet using existing helpers
+        new_sheet_path = get_relationship_target_by_id("xl", wb, new_ws.relationship_id)
+        new_rels_path  = let (d, f) = rsplit(new_sheet_path, "/"; limit=2)
+            "$d/_rels/$f.rels"
+        end
+        if !haskey(xl.data, new_rels_path)
+            xl.data[new_rels_path]  = empty_rels_doc()
+            xl.files[new_rels_path] = true
+        end
+        new_rels_root = root_element(xl.data[new_rels_path])
+        rid = new_relationship_id(new_rels_root)
+        pfx = get_prefix(new_rels_path, xl)
+        push!(new_rels_root, XML.Element(prefixed_tag(pfx, "Relationship");
+            Id=rid, Type=REL_DRAWING, Target="../drawings/$new_drawing_file",
+        ))
+        ensure_drawing_element!(xl, xl.data[new_sheet_path], new_sheet_path, rid)
+    end
+
     # copy defined names from the original worksheet to the new worksheet
     ws_keys = [x for x in keys(wb.worksheet_names) if first(x) == ws.sheetId]
     for k in ws_keys
@@ -1566,6 +1617,46 @@ function deletesheet!(wb::Workbook, name::AbstractString)::XLSXFile
     for (oldkey, newkey) in renumber_keys
         wb.worksheet_names[newkey] = wb.worksheet_names[oldkey]
         delete!(wb.worksheet_names, oldkey)
+    end
+
+    # Drawing and image cleanup
+    sheet_path   = "xl/worksheets/sheet" * rId[4:end] * ".xml"
+    drawing_path = _drawing_path_for_sheet(xf, sheet_path)
+
+    if drawing_path !== nothing
+        drawing_file     = rsplit(drawing_path, "/"; limit=2)[2]
+        drawing_rels     = "xl/drawings/_rels/$drawing_file.rels"
+
+        # Remove media — but only if no other sheet references it
+        all_images = getImages(xf)
+        deleted_images = _images_for_drawing(xf, drawing_path, name)
+        deleted_names  = Set(img.media_name for img in deleted_images)
+        still_used     = Set(img.media_name for img in all_images
+                            if img.sheet != name)
+        for media_name in deleted_names
+            if media_name ∉ still_used
+                delete!(xf.binary_data, "xl/media/$media_name")
+            end
+        end
+
+        # Remove drawing XML and rels
+        for path in (drawing_path, drawing_rels)
+            delete!(xf.files, path)
+            delete!(xf.data, path)
+        end
+
+        # Remove drawing Override from [Content_Types].xml
+        ctype_root = xmlroot(xf, "[Content_Types].xml")[end]
+        cont = XML.children(ctype_root)
+        idx = findfirst(i -> haskey(cont[i], "PartName") &&
+                            cont[i]["PartName"] == "/$drawing_path", eachindex(cont))
+        idx !== nothing && deleteat!(cont, idx)
+
+        # Remove sheet rels file (contains the drawing relationship)
+        sheet_dir, sheet_file = rsplit(sheet_path, "/"; limit=2)
+        sheet_rels = "$sheet_dir/_rels/$sheet_file.rels"
+        delete!(xf.files, sheet_rels)
+        delete!(xf.data,  sheet_rels)
     end
 
     # Files

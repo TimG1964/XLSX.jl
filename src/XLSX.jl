@@ -23,6 +23,7 @@ export
     writexlsx, savexlsx,
     Worksheet, sheetnames, sheetcount, hassheet, 
     addsheet!, renamesheet!, copysheet!, deletesheet!, 
+    addImage,
     # Cells & data
     CellRef, row_number, column_number, eachtablerow,
     readdata, getdata, gettable, readtable, readto, 
@@ -60,6 +61,7 @@ include("cellformat-helpers.jl") # must load before cellformats.jl
 include("cellformats.jl")
 include("conditional-format-helpers.jl") # must load before conditional-formats.jl
 include("conditional-formats.jl")
+include("images.jl")
 include("write.jl")
 include("fileArray.jl")
 
