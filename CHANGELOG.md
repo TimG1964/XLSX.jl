@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-## [v0.11.9](https://github.com/JuliaData/XLSX.jl/tree/v0.11.9) - 2026-05-25
+## [v0.11.9](https://github.com/JuliaData/XLSX.jl/tree/v0.11.9) - 2026-05-26
 - fix bug in `setFormula` when a function name occured inside a quoted string
 - fix issue [#395](https://github.com/JuliaData/XLSX.jl/issues/395)(@mathieu17g)
 - add tests for multi-threaded reading formulas and shared strings
