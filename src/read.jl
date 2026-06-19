@@ -528,11 +528,12 @@ function openxlsx(source::Union{AbstractString,IO};
 end
 
 function parse_file_mode(mode::AbstractString)::Tuple{Bool,Bool}
-    if mode == "r"
+    m = lowercase(mode)
+    if m == "r"
         return (true, false)
-    elseif mode == "w"
+    elseif m == "w"
         return (false, true)
-    elseif mode == "rw" || mode == "wr"
+    elseif m == "rw" || m == "wr"
         return (true, true)
     else
         throw(XLSXError("Couldn't parse file mode $mode."))
@@ -553,35 +554,35 @@ function convert_strict_to_transitional!(xf::XLSXFile, pass::Int)
             occursin(r"xl/worksheets/sheet\d+\.xml", filename)
         end
            
-        if should_process
-            data = xf.data[filename]
-            xroot = data[end]
-            attrs = XML.attributes(xroot)
+        should_process || continue
 
-            for (k, v) in attrs
-                if k == "conformance" && v == "strict"
-                    delete!(attrs, "conformance")
-                elseif startswith(v, "http://purl.oclc.org/ooxml")
-                    if haskey(STRICT_TO_TRANSITIONAL, v)
-                        attrs[k] = STRICT_TO_TRANSITIONAL[v]
-                    else
-                        throw(XLSXError("Unsupported strict OOXML namespace or relationship type: \"$v\" in $filename. Please open an issue at https://github.com/JuliaData/XLSX.jl/issues"))
-                    end
+        data = xf.data[filename]
+        xroot = data[end]
+        attrs = XML.attributes(xroot)
+
+        for (k, v) in attrs
+            if k == "conformance" && v == "strict"
+                delete!(attrs, "conformance")
+            elseif startswith(v, "http://purl.oclc.org/ooxml")
+                if haskey(STRICT_TO_TRANSITIONAL, v)
+                    attrs[k] = STRICT_TO_TRANSITIONAL[v]
+                else
+                    throw(XLSXError("Unsupported strict OOXML namespace or relationship type: \"$v\" in $filename. Please open an issue at https://github.com/JuliaData/XLSX.jl/issues"))
                 end
             end
+        end
 
-            # For .rels files, also patch Type= on child Relationship elements
-            for el in XML.children(xroot)
-                el_attrs = XML.attributes(el)
-                if !isnothing(el_attrs)
-                    haskey(el_attrs, "conformance") && delete!(el_attrs, "conformance")
-                    type_val = get(el_attrs, "Type", "")
-                    if startswith(type_val, "http://purl.oclc.org/ooxml")
-                        if haskey(STRICT_TO_TRANSITIONAL, type_val)
-                            el_attrs["Type"] = STRICT_TO_TRANSITIONAL[type_val]
-                        else
-                            throw(XLSXError("Unsupported strict OOXML relationship type: \"$type_val\" in $filename. Please open an issue at https://github.com/JuliaData/XLSX.jl/issues"))
-                        end
+        # For .rels files, also patch Type= on child Relationship elements
+        for el in XML.children(xroot)
+            el_attrs = XML.attributes(el)
+            if !isnothing(el_attrs)
+                haskey(el_attrs, "conformance") && delete!(el_attrs, "conformance")
+                type_val = get(el_attrs, "Type", "")
+                if startswith(type_val, "http://purl.oclc.org/ooxml")
+                    if haskey(STRICT_TO_TRANSITIONAL, type_val)
+                        el_attrs["Type"] = STRICT_TO_TRANSITIONAL[type_val]
+                    else
+                        throw(XLSXError("Unsupported strict OOXML relationship type: \"$type_val\" in $filename. Please open an issue at https://github.com/JuliaData/XLSX.jl/issues"))
                     end
                 end
             end
@@ -935,11 +936,11 @@ function skipNode(r::XML.Raw, skipnode::String) # separate rows or ssts to speed
 end
 
 # list of filename prefixes to pass through as binary files.
-const BINARY_PREFIXES = ["customXml"]
+const BINARY_PREFIXES = ["customxml"]
+is_binary_path(filename) = any(p -> startswith(lowercase(filename), p), BINARY_PREFIXES)
 
 function stream_files(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
-                      channel_size::Int=1 << 8,
-                      binary_prefixes::Vector{String}=BINARY_PREFIXES)
+                      channel_size::Int=1 << 8)
 
         Channel{String}(channel_size) do out
         for f in ZipArchives.zip_names(zip_io)
@@ -947,7 +948,7 @@ function stream_files(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
             # ignore xl/calcChain.xml in any case (#31)
             if f != "xl/calcChain.xml"
 
-                if pass==1 && (!any(p -> startswith(f, p), binary_prefixes) && (endswith(f, ".xml") || endswith(f, ".rels")))
+                if pass==1 && !is_binary_path(f) && (endswith(f, ".xml") || endswith(f, ".rels"))
                     # Identify usable xml files in XLSXFile
                     internal_xml_file_add!(xf, f)
                 end
@@ -957,22 +958,17 @@ function stream_files(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
     end
 end
 
-# list of filename prefixes to pass through as binary files.
-const BINARY_PREFIXES = ["customXml"]
-
-
 # Read xml files in three passes
 # pass 1 - read all but worksheets and sharedStrings
 # pass 2 - only read sharedStrings (needed before worksheets)
 # pass 3 - only read worksheets
-function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
-                     binary_prefixes::Vector{String}=BINARY_PREFIXES)
+function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int)
 
     (pass < 1 || pass > 3) && throw(XLSXError("Unknown pass to read files."))
     wb = get_workbook(xf)
 
     read_files = Channel{ReadFile}(1 << 8)
-    all_files = stream_files(xf, zip_io; pass, binary_prefixes)
+    all_files = stream_files(xf, zip_io; pass)
    
     # Filter files based on pass BEFORE parallel processing
     filtered_files = Channel{String}(1 << 8) do out
@@ -1004,7 +1000,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
                         if has_sst(wb)
                             sst_load!(wb)
                         end
-                    elseif xf.use_cache_for_sheet_data && !occursin(r"^xl/sharedStrings\.xml$", file.name)
+                    elseif xf.use_cache_for_sheet_data# && !occursin(r"^xl/sharedStrings\.xml$", file.name)
                         rid = get_relationship_id_by_target(wb, file.name)
                         for sheet in wb.sheets
                             if sheet.relationship_id == rid
@@ -1024,7 +1020,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
     @sync for _ in 1:Threads.nthreads()
         Threads.@spawn begin
             for file in filtered_files
-                readfile = process_file(zip_io, file; binary_prefixes)
+                readfile = process_file(zip_io, file)
                 put!(read_files, readfile)
             end
         end
@@ -1034,18 +1030,15 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
     wait(consumer)
 end
 
-function process_file(zip_io::ZipArchives.ZipReader, filename::String;
-                      binary_prefixes::Vector{String}=BINARY_PREFIXES)
+function process_file(zip_io::ZipArchives.ZipReader, filename::String)
 
     node = nothing
     raw  = nothing
     bin  = nothing
 
-    is_binary_path = any(p -> startswith(filename, p), binary_prefixes)
-
     try
         bytes = ZipArchives.zip_readentry(zip_io, filename)
-        if !is_binary_path && (endswith(filename, ".xml") || endswith(filename, ".rels"))
+        if !is_binary_path(filename) && (endswith(filename, ".xml") || endswith(filename, ".rels"))
             is_sst = occursin(r"^xl/sharedStrings\.xml$", filename)
             if is_sst || occursin(r"^xl/worksheets/[^/]+\.xml$", filename)
                 strip_bom_and_lf!(bytes)
@@ -1526,3 +1519,4 @@ function unescape(x::AbstractString)
     end
     return result
 end
+
