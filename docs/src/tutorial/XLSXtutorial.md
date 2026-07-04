@@ -1,9 +1,9 @@
 
-# Tutorial
+# XLSX Tutorial
 
 ## Setup
 
-First, make sure you have **XLSX.jl** package installed.
+First, make sure you have the **XLSX.jl** package installed.
 
 ```julia
 julia> using Pkg
@@ -27,7 +27,7 @@ XLSXFile("myfile.xlsx") containing 3 Worksheets
                 named 1x1           B4:B4
 
 julia> XLSX.sheetnames(xf)
-3-element Array{String,1}:
+3-element Vector{String}:
  "mysheet"
  "othersheet"
  "named"
@@ -42,39 +42,46 @@ julia> sh["B2"] # you can also use the cell name
 "first"
 
 julia> sh["A2:B4"] # or a cell range
-3×2 Array{Any,2}:
+3×2 Matrix{Any}:
  1  "first"
  2  "second"
  3  "third"
 
 julia> XLSX.readdata("myfile.xlsx", "mysheet", "A2:B4") # shorthand for all above
-3×2 Array{Any,2}:
+3×2 Matrix{Any}:
  1  "first"
  2  "second"
  3  "third"
 
 julia> sh[:] # all data inside worksheet's dimension
-4×2 Array{Any,2}:
+4×2 Matrix{Any}:
   "HeaderA"  "HeaderB"
  1           "first"
  2           "second"
  3           "third"
 
 julia> xf["mysheet!A2:B4"] # you can also query values using a sheet reference
-3×2 Array{Any,2}:
+3×2 Matrix{Any}:
  1  "first"
  2  "second"
  3  "third"
 
-julia> xf["NAMED_CELL"] # you can even read named ranges
-"B4 is a named cell from sheet \"named\""
-
 julia> xf["mysheet!A:B"] # Column ranges are also supported
-4×2 Array{Any,2}:
+4×2 Matrix{Any}:
   "HeaderA"  "HeaderB"
  1           "first"
  2           "second"
  3           "third"
+
+julia> xf["mysheet!2:4"] # And so are row ranges
+3×2 Matrix{Any}:
+ 1  "first"
+ 2  "second"
+ 3  "third"
+ 
+ julia> xf["NAMED_CELL"] # you can even read named ranges
+"B4 is a named cell from sheet \"named\""
+
 ```
 
 To inspect the internal representation of each cell, use the `getcell` or `getcellrange` methods.

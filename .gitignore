@@ -5,3 +5,7 @@ Manifest.toml
 docs/Manifest.toml
 .vscode
 *.gz
+.claude
+bench/fixtures/
+bench/results/
+tests/data/output_files/
