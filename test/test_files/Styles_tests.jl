@@ -1788,4 +1788,297 @@
         @test XLSX.getBorder(s, "J45").border == Dict("left" => Dict("indexed" => "64", "style" => "thin"), "bottom" => Dict("indexed" => "64", "style" => "thin"), "right" => Dict("indexed" => "64", "style" => "thin"), "top" => Dict("indexed" => "64", "style" => "thin"), "diagonal" => nothing)
         SAVE_FILES && save_outfile(f)
     end
+    @testset "Styles caching (issue #426)" begin
+
+        # Builds a workbook with K rows in column 1, each holding a numeric value.
+        # `distinct=true` gives every row its own custom numFmt (K distinct cell
+        # styles); `distinct=false` gives every row the same custom numFmt (1 style).
+        function build_styled_workbook(K::Int; distinct::Bool)
+            path = tempname() * ".xlsx"
+            f = XLSX.newxlsx()
+            sh = f[1]
+            for i in 1:K
+                sh[i, 1] = 1.5
+                fmt = distinct ? "\"v$(i)\"0.00" : "0.00"
+                XLSX.setFormat(sh, i, 1; format=fmt)
+            end
+            XLSX.writexlsx(path, f; overwrite=true)
+            return path
+        end
+
+        @testset "correctness with many distinct custom formats" begin
+            K = 60
+            path = build_styled_workbook(K; distinct=true)
+            try
+                XLSX.openxlsx(path) do xf
+                    sh = xf[1]
+                    for i in 1:K
+                        @test XLSX.getdata(sh, i, 1) isa Float64
+                        fmt = XLSX.getFormat(sh, i, 1)
+                        @test fmt.format["numFmt"]["formatCode"] == "\"v$(i)\"0.00"
+                    end
+                end
+            finally
+                rm(path; force=true)
+            end
+        end
+        @testset "cellXfs/numFmt caches behave like caches" begin
+            K = 20
+            path = build_styled_workbook(K; distinct=true)
+            try
+                XLSX.openxlsx(path) do xf
+                    wb = XLSX.get_workbook(xf)
+
+                    nodes1 = XLSX.get_cellXfs_nodes(wb)
+                    nodes2 = XLSX.get_cellXfs_nodes(wb)
+                    @test nodes1 === nodes2                     # same object: not rebuilt on 2nd call
+                    @test length(nodes1) >= K                    # at least one xf per distinct style
+
+                    cache1 = XLSX.get_numFmt_cache(wb)
+                    cache2 = XLSX.get_numFmt_cache(wb)
+                    @test cache1 === cache2
+                    @test length(cache1) >= K
+                end
+            finally
+                rm(path; force=true)
+            end
+        end
+
+        @testset "regression: numFmt cache stays in sync across both write paths" begin
+            # styles_add_numFmt creates the first <numFmts> node.
+            # styles_add_cell_attribute(wb, ..., "numFmts") is the *separate* path
+            # used once <numFmts> already exists (e.g. via conditional formatting).
+            # Both must keep wb.numFmt_cache correct — this reproduces the
+            # "numFmtId ... not found" bug from testing the original patch.
+            path = tempname() * ".xlsx"
+            f = XLSX.newxlsx()
+            sh = f[1]
+            sh["A1"] = 1.5
+            sh["A2"] = 2.5
+
+            XLSX.setFormat(sh, 1, 1; format="0.00")               # -> styles_add_numFmt path
+            wb = XLSX.get_workbook(sh)
+            XLSX.get_numFmt_cache(wb)                              # force-build the cache now,
+                                                                    # so the *next* addition must
+                                                                    # go through the update path,
+                                                                    # not just a fresh build.
+            @test XLSX.setConditionalFormat(sh, "A2", :cellIs;
+                operator="greaterThan", value="2",
+                format=["format" => "0.0"]) == 0
+
+            XLSX.writexlsx(path, f; overwrite=true)
+            try
+                XLSX.openxlsx(path) do xf
+                    @test length(XLSX.getConditionalFormats(xf[1])) == 1
+                end
+            finally
+                rm(path; force=true)
+            end
+        end
+
+        @testset "reading distinct styles scales ~linearly, not quadratically" begin
+            function time_read(path)
+                XLSX.openxlsx(x -> XLSX.getdata(x[1]), path)  # warm-up
+                times = [@elapsed(XLSX.openxlsx(x -> XLSX.getdata(x[1]), path)) for _ in 1:9]
+                sort!(times)
+                return times[5]  # median of 9, more robust to one slow outlier than min-of-5
+            end
+
+            Ks = (200, 400, 800, 1600)
+            times = Float64[]
+            for K in Ks
+                path = build_styled_workbook(K; distinct=true)
+                try
+                    push!(times, time_read(path))
+                finally
+                    rm(path; force=true)
+                end
+            end
+
+            ratios = [times[i+1] / times[i] for i in 1:length(times)-1]
+            @test all(r -> r < 3.5, ratios)
+        end
+        @testset "cellXfs/numFmt caches are built exactly once regardless of K" begin
+            K = 50
+            path = build_styled_workbook(K; distinct=true)
+            try
+                XLSX.openxlsx(path) do xf
+                    wb = XLSX.get_workbook(xf)
+                    nodes_a = XLSX.get_cellXfs_nodes(wb)
+                    for i in 1:K
+                        XLSX.getFormat(xf[1], i, 1)   # would previously re-walk cellXfs each time
+                    end
+                    nodes_b = XLSX.get_cellXfs_nodes(wb)
+                    @test nodes_a === nodes_b   # same object: never rebuilt mid-loop
+                end
+            finally
+                rm(path; force=true)
+            end
+        end
+    end
+    @testset "Font/Border/Fill caching" begin
+
+        # Builds a workbook with K rows in column 1, each holding a numeric value.
+        # `distinct=true` gives every row its own font/border/fill (K distinct
+        # style attributes); `distinct=false` gives every row the same attribute.
+        function build_font_workbook(K::Int; distinct::Bool)
+            path = tempname() * ".xlsx"
+            f = XLSX.newxlsx()
+            sh = f[1]
+            for i in 1:K
+                sh[i, 1] = 1.5
+                if distinct
+                    col = "FF" * uppercase(lpad(string(i % 0x1000000, base=16), 6, '0'))
+                    XLSX.setFont(sh, i, 1; size=12, color=col)
+                else
+                    XLSX.setFont(sh, i, 1; size=12)
+                end
+            end
+            XLSX.writexlsx(path, f; overwrite=true)
+            return path
+        end
+
+        function build_border_workbook(K::Int; distinct::Bool)
+            path = tempname() * ".xlsx"
+            f = XLSX.newxlsx()
+            sh = f[1]
+            for i in 1:K
+                sh[i, 1] = 1.5
+                col = distinct ? "FF" * uppercase(lpad(string(i % 0x1000000, base=16), 6, '0')) : "FFFF0000"
+                XLSX.setBorder(sh, i, 1; allsides=["style"=>"thin", "color"=>col])
+            end
+            XLSX.writexlsx(path, f; overwrite=true)
+            return path
+        end
+
+        function build_fill_workbook(K::Int; distinct::Bool)
+            path = tempname() * ".xlsx"
+            f = XLSX.newxlsx()
+            sh = f[1]
+            for i in 1:K
+                sh[i, 1] = 1.5
+                col = distinct ? "FF" * uppercase(lpad(string(i % 0x1000000, base=16), 6, '0')) : "FF00FF00"
+                XLSX.setFill(sh, i, 1; pattern="solid", fgColor=col)
+            end
+            XLSX.writexlsx(path, f; overwrite=true)
+            return path
+        end
+
+        @testset "correctness with many distinct fonts" begin
+            K = 60
+            path = build_font_workbook(K; distinct=true)
+            try
+                XLSX.openxlsx(path) do xf
+                    sh = xf[1]
+                    for i in 1:K
+                        @test XLSX.getdata(sh, i, 1) isa Float64
+                        col = "FF" * uppercase(lpad(string(i % 0x1000000, base=16), 6, '0'))
+                        font = XLSX.getFont(sh, i, 1)
+                        @test font.font["color"]["rgb"] == col
+                    end
+                end
+            finally
+                rm(path; force=true)
+            end
+        end
+        @testset "fonts/borders/fills caches behave like caches" begin
+            K = 20
+            fpath = build_font_workbook(K; distinct=true)
+            bpath = build_border_workbook(K; distinct=true)
+            gpath = build_fill_workbook(K; distinct=true)
+            try
+                XLSX.openxlsx(fpath) do xf
+                    wb = XLSX.get_workbook(xf)
+                    nodes1 = XLSX.get_fonts_nodes(wb)
+                    nodes2 = XLSX.get_fonts_nodes(wb)
+                    @test nodes1 === nodes2   # same object: not rebuilt on 2nd call
+                    @test length(nodes1) >= K
+                end
+                XLSX.openxlsx(bpath) do xf
+                    wb = XLSX.get_workbook(xf)
+                    nodes1 = XLSX.get_borders_nodes(wb)
+                    nodes2 = XLSX.get_borders_nodes(wb)
+                    @test nodes1 === nodes2
+                    @test length(nodes1) >= K
+                end
+                XLSX.openxlsx(gpath) do xf
+                    wb = XLSX.get_workbook(xf)
+                    nodes1 = XLSX.get_fills_nodes(wb)
+                    nodes2 = XLSX.get_fills_nodes(wb)
+                    @test nodes1 === nodes2
+                    @test length(nodes1) >= K
+                end
+            finally
+                rm(fpath; force=true); rm(bpath; force=true); rm(gpath; force=true)
+            end
+        end
+
+        @testset "regression: style_table_cache stays in sync across writes" begin
+            # Mirrors the numFmt_cache regression test: force-build the cache,
+            # then write a *new* distinct font — the addition must go through the
+            # push!-sync path in styles_add_cell_attribute, not just a fresh build.
+            path = tempname() * ".xlsx"
+            f = XLSX.newxlsx()
+            sh = f[1]
+            sh["A1"] = 1.5
+            sh["A2"] = 2.5
+
+            XLSX.setFont(sh, 1, 1; size=14)
+            wb = XLSX.get_workbook(sh)
+            XLSX.get_fonts_nodes(wb)          # force-build the cache now
+            XLSX.setFont(sh, 2, 1; size=16)   # distinct font -> new <font> element
+
+            XLSX.writexlsx(path, f; overwrite=true)
+            try
+                XLSX.openxlsx(path) do xf
+                    sh2 = xf[1]
+                    @test parse(Int, XLSX.getFont(sh2, 1, 1).font["sz"]["val"]) == 14
+                    @test parse(Int, XLSX.getFont(sh2, 2, 1).font["sz"]["val"]) == 16
+                end
+            finally
+                rm(path; force=true)
+            end
+        end
+
+        @testset "reading distinct fonts scales ~linearly, not quadratically" begin
+            function time_read(path)
+                XLSX.openxlsx(x -> XLSX.getdata(x[1]), path)  # warm-up
+                times = [@elapsed(XLSX.openxlsx(x -> XLSX.getdata(x[1]), path)) for _ in 1:9]
+                sort!(times)
+                return times[5]
+            end
+
+            Ks = (200, 400, 800, 1600)
+            times = Float64[]
+            for K in Ks
+                path = build_font_workbook(K; distinct=true)
+                try
+                    push!(times, time_read(path))
+                finally
+                    rm(path; force=true)
+                end
+            end
+
+            ratios = [times[i+1] / times[i] for i in 1:length(times)-1]
+            @test all(r -> r < 3.5, ratios)
+        end
+
+        @testset "fonts/borders/fills caches are built exactly once regardless of K" begin
+            K = 50
+            path = build_font_workbook(K; distinct=true)
+            try
+                XLSX.openxlsx(path) do xf
+                    wb = XLSX.get_workbook(xf)
+                    nodes_a = XLSX.get_fonts_nodes(wb)
+                    for i in 1:K
+                        XLSX.getFont(xf[1], i, 1)   # would previously re-walk fonts each time
+                    end
+                    nodes_b = XLSX.get_fonts_nodes(wb)
+                    @test nodes_a === nodes_b   # same object: never rebuilt mid-loop
+                end
+            finally
+                rm(path; force=true)
+            end
+        end
+    end
 end
