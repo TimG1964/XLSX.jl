@@ -1044,3 +1044,31 @@ struct DrawingColor
     rgb::String
     alpha::Float64
 end
+
+"""
+    DrawingFill
+
+A DrawingML fill: `<a:solidFill>`, `<a:noFill>`, `<a:gradFill>`, `<a:pattFill>`
+or `<a:blipFill>`.
+
+A solid fill resolves to one colour in `fgcolor`. A pattern fill resolves to
+two, `fgcolor` and `bgcolor`, with the pattern itself in `preset` - matching
+how cell fills are exposed. Gradient and picture fills are identified by `kind`
+but not modelled further: `raw` holds the element as read, so nothing is lost
+on write.
+
+# Fields
+- `kind::Symbol` - `:none`, `:solid`, `:gradient`, `:pattern`, `:blip` or `:group`.
+- `fgcolor` - the colour of a solid fill, or a pattern's foreground.
+- `bgcolor` - a pattern's background; `nothing` otherwise.
+- `preset::Union{Nothing,String}` - a pattern's `prst` attribute, e.g. `"pct25"`,
+  `"ltUpDiag"`.
+- `raw::XML.Node` - the element as read.
+"""
+struct DrawingFill
+    kind::Symbol
+    fgcolor::Union{Nothing,DrawingColor}
+    bgcolor::Union{Nothing,DrawingColor}
+    preset::Union{Nothing,String}
+    raw::XML.Node
+end

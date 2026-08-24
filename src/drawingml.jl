@@ -148,3 +148,63 @@ function Base.show(io::IO, ::MIME"text/plain", c::DrawingColor)
         println(io, "  transforms: ",
                 join(("$k=$(v/1000)%" for (k, v) in c.transforms), ", "))
 end
+
+const DML_FILL_TAGS = Dict(
+    "noFill"   => :none,
+    "solidFill"=> :solid,
+    "gradFill" => :gradient,
+    "pattFill" => :pattern,
+    "blipFill" => :blip,
+    "grpFill"  => :group,
+)
+
+"""
+The fill element among the children of `node`, or `nothing` where there is
+none. An `spPr` holds at most one.
+"""
+function first_fill_element(node::Union{Nothing,XML.Node})::Union{Nothing,XML.Node}
+    isnothing(node) && return nothing
+    for child in XML.eachelement(node)
+        haskey(DML_FILL_TAGS, localname(child)) && return child
+    end
+    return nothing
+end
+
+"""
+    parse_drawing_fill(wb, node) -> Union{Nothing,DrawingFill}
+
+Parse the fill held by `node`, or `nothing` where it holds none. Pass the fill
+element itself or its parent.
+"""
+function parse_drawing_fill(wb::Workbook, node::Union{Nothing,XML.Node})::Union{Nothing,DrawingFill}
+    isnothing(node) && return nothing
+    el = haskey(DML_FILL_TAGS, localname(node)) ? node : first_fill_element(node)
+    isnothing(el) && return nothing
+    kind = DML_FILL_TAGS[localname(el)]
+
+    if kind === :solid
+        return DrawingFill(kind, parse_drawing_color(wb, el), nothing, nothing, el)
+
+    elseif kind === :pattern
+        fg = parse_drawing_color(wb, first_element_with_tag(el, "fgClr"))
+        bg = parse_drawing_color(wb, first_element_with_tag(el, "bgClr"))
+        prst = get_attr(el, "prst")
+        return DrawingFill(kind, fg, bg, isempty(prst) ? nothing : prst, el)
+    end
+
+    return DrawingFill(kind, nothing, nothing, nothing, el)
+end
+
+Base.show(io::IO, fl::DrawingFill) =
+    print(io, "XLSX.DrawingFill(", fl.kind,
+          isnothing(fl.fgcolor) ? "" : ", #" * fl.fgcolor.rgb,
+          isnothing(fl.bgcolor) ? "" : " on #" * fl.bgcolor.rgb, ")")
+
+function Base.show(io::IO, ::MIME"text/plain", fl::DrawingFill)
+    println(io, "XLSX.DrawingFill ", fl.kind)
+    isnothing(fl.preset)  || println(io, "  pattern: ", fl.preset)
+    isnothing(fl.fgcolor) || println(io, "  foreground: #", fl.fgcolor.rgb)
+    isnothing(fl.bgcolor) || println(io, "  background: #", fl.bgcolor.rgb)
+    fl.kind in (:gradient, :blip, :group) &&
+        println(io, "  (not modelled; preserved on write)")
+end

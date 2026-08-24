@@ -122,4 +122,75 @@
         c = XLSX.parse_drawing_color(wb, XLSX.xml_root_element(doc))
         @test c.rgb == "ABCDEF"
     end
+
+    fill_of(xml) = XLSX.parse_drawing_fill(wb, XLSX.xml_root_element(XML.parse(xml, XML.Node)))
+
+    @testset "solid fill" begin
+        fl = fill_of("""
+            <a:solidFill xmlns:a="$(XLSX.NS_A)"><a:srgbClr val="FF0000"/></a:solidFill>""")
+        @test fl.kind === :solid
+        @test fl.fgcolor.rgb == "FF0000"
+        @test isnothing(fl.bgcolor)
+        @test isnothing(fl.preset)
+    end
+
+    @testset "no fill" begin
+        fl = fill_of("""<a:noFill xmlns:a="$(XLSX.NS_A)"/>""")
+        @test fl.kind === :none
+        @test isnothing(fl.fgcolor)
+    end
+
+    @testset "pattern fill exposes both colours" begin
+        fl = fill_of("""
+            <a:pattFill xmlns:a="$(XLSX.NS_A)" prst="pct25">
+                <a:fgClr><a:srgbClr val="112233"/></a:fgClr>
+                <a:bgClr><a:schemeClr val="bg1"/></a:bgClr>
+            </a:pattFill>""")
+        @test fl.kind === :pattern
+        @test fl.preset == "pct25"
+        @test fl.fgcolor.rgb == "112233"
+        @test fl.bgcolor.val == "bg1"
+        @test fl.bgcolor.rgb == uppercase(XLSX.get_theme_color_map(wb)["bg1"])
+    end
+
+    @testset "gradient is identified but not modelled" begin
+        fl = fill_of("""
+            <a:gradFill xmlns:a="$(XLSX.NS_A)">
+                <a:gsLst>
+                    <a:gs pos="0"><a:srgbClr val="FFFFFF"/></a:gs>
+                    <a:gs pos="100000"><a:srgbClr val="000000"/></a:gs>
+                </a:gsLst>
+            </a:gradFill>""")
+        @test fl.kind === :gradient
+        @test isnothing(fl.fgcolor)          # not the first stop, which would mislead
+        @test XLSX.localname(fl.raw) == "gradFill"
+    end
+
+    @testset "parent element is searched for its fill child" begin
+        fl = fill_of("""
+            <c:spPr xmlns:c="$(XLSX.NS_C)" xmlns:a="$(XLSX.NS_A)">
+                <a:solidFill><a:srgbClr val="ABCDEF"/></a:solidFill>
+            </c:spPr>""")
+        @test fl.fgcolor.rgb == "ABCDEF"
+    end
+
+    @testset "no fill child" begin
+        doc = XML.parse("""<c:spPr xmlns:c="$(XLSX.NS_C)"/>""", XML.Node)
+        @test isnothing(XLSX.parse_drawing_fill(wb, XLSX.xml_root_element(doc)))
+        @test isnothing(XLSX.parse_drawing_fill(wb, nothing))
+    end
+    
+    @testset "parent element is searched for its fill child" begin
+        fl = fill_of("""
+            <a:spPr xmlns:a="$(XLSX.NS_A)">
+                <a:solidFill><a:srgbClr val="ABCDEF"/></a:solidFill>
+            </a:spPr>""")
+        @test fl.fgcolor.rgb == "ABCDEF"
+    end
+
+    @testset "no fill child" begin
+        doc = XML.parse("""<a:spPr xmlns:a="$(XLSX.NS_A)"/>""", XML.Node)
+        @test isnothing(XLSX.parse_drawing_fill(wb, XLSX.xml_root_element(doc)))
+        @test isnothing(XLSX.parse_drawing_fill(wb, nothing))
+    end
 end
