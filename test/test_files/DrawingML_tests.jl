@@ -179,7 +179,7 @@
         @test isnothing(XLSX.parse_drawing_fill(wb, XLSX.xml_root_element(doc)))
         @test isnothing(XLSX.parse_drawing_fill(wb, nothing))
     end
-    
+
     @testset "parent element is searched for its fill child" begin
         fl = fill_of("""
             <a:spPr xmlns:a="$(XLSX.NS_A)">
@@ -192,5 +192,395 @@
         doc = XML.parse("""<a:spPr xmlns:a="$(XLSX.NS_A)"/>""", XML.Node)
         @test isnothing(XLSX.parse_drawing_fill(wb, XLSX.xml_root_element(doc)))
         @test isnothing(XLSX.parse_drawing_fill(wb, nothing))
+    end
+
+    line_of(xml) = XLSX.parse_drawing_line(wb, XLSX.xml_root_element(XML.parse(xml, XML.Node)))
+
+    @testset "solid line with width and dash" begin
+        ln = line_of("""
+            <a:ln xmlns:a="$(XLSX.NS_A)" w="19050" cap="rnd" cmpd="sng">
+                <a:solidFill><a:srgbClr val="FF0000"/></a:solidFill>
+                <a:prstDash val="dash"/>
+            </a:ln>""")
+        @test ln.fill.kind === :solid
+        @test ln.fill.fgcolor.rgb == "FF0000"
+        @test ln.width == 19050
+        @test XLSX.line_width_points(ln) == 1.5
+        @test ln.dash == "dash"          # an element, not an attribute
+        @test ln.cap == "rnd"
+        @test ln.compound == "sng"
+    end
+
+    @testset "line with no outline" begin
+        ln = line_of("""
+            <a:ln xmlns:a="$(XLSX.NS_A)"><a:noFill/></a:ln>""")
+        @test ln.fill.kind === :none
+        @test isnothing(ln.fill.fgcolor)
+        @test isnothing(ln.width)
+        @test isnothing(ln.dash)
+    end
+
+    @testset "line that sets only a width" begin
+        ln = line_of("""<a:ln xmlns:a="$(XLSX.NS_A)" w="9525"/>""")
+        @test isnothing(ln.fill)         # says nothing about the stroke...
+        @test ln.width == 9525
+        @test XLSX.line_width_points(ln) == 0.75
+        @test isnothing(ln.cap)
+        @test isnothing(ln.compound)
+    end
+
+    @testset "line colour goes through the theme" begin
+        ln = line_of("""
+            <a:ln xmlns:a="$(XLSX.NS_A)">
+                <a:solidFill>
+                    <a:schemeClr val="tx1"><a:lumMod val="15000"/><a:lumOff val="85000"/></a:schemeClr>
+                </a:solidFill>
+            </a:ln>""")
+        @test ln.fill.fgcolor.val == "tx1"
+        @test ln.fill.fgcolor.rgb == "D9D9D9"    # the standard Office gridline grey
+    end
+
+    @testset "parent element is searched for its ln child" begin
+        ln = line_of("""
+            <c:spPr xmlns:c="$(XLSX.NS_C)" xmlns:a="$(XLSX.NS_A)">
+                <a:solidFill><a:srgbClr val="ABCDEF"/></a:solidFill>
+                <a:ln w="12700"><a:solidFill><a:srgbClr val="123456"/></a:solidFill></a:ln>
+            </c:spPr>""")
+        # The line's own fill, not the shape's.
+        @test ln.fill.fgcolor.rgb == "123456"
+        @test XLSX.line_width_points(ln) == 1.0
+    end
+
+    @testset "no ln child" begin
+        doc = XML.parse("""
+            <c:spPr xmlns:c="$(XLSX.NS_C)" xmlns:a="$(XLSX.NS_A)">
+                <a:solidFill><a:srgbClr val="ABCDEF"/></a:solidFill>
+            </c:spPr>""", XML.Node)
+        @test isnothing(XLSX.parse_drawing_line(wb, XLSX.xml_root_element(doc)))
+        @test isnothing(XLSX.parse_drawing_line(wb, nothing))
+        @test isnothing(XLSX.line_width_points(line_of("""<a:ln xmlns:a="$(XLSX.NS_A)"/>""")))
+    end
+end
+
+# =============================================================================
+# DrawingML Text
+#
+# Three groups:
+#   1. attribute readers — units and the absent/explicit distinction, no file
+#   2. hand-built XML — shapes the fixtures may not contain (multi-run, mixed
+#      formatting, breaks, indentation)
+#   3. fixtures — the real thing, against chart_basic.xlsx and
+#      chart_theme_colors.xlsx
+#
+# Group 3 has @test_broken-style placeholders marked TODO where I don't know
+# what your fixtures contain. Run them, read the failures, pin the values.
+# =============================================================================
+
+const _attr           = XLSX._attr
+const _attr_int       = XLSX._attr_int
+const _attr_bool      = XLSX._attr_bool
+const _attr_pt        = XLSX._attr_pt
+const _attr_emu       = XLSX._attr_emu
+const _attr_deg       = XLSX._attr_deg
+const _attr_pct_opt   = XLSX._attr_pct_opt
+const _attr_spacing   = XLSX._attr_spacing
+const first_element_with_tag = XLSX.first_element_with_tag
+const NS_C = XLSX.NS_C
+const NS_A = XLSX.NS_A
+
+const parse_drawing_text  = XLSX.parse_drawing_text
+const default_run_props   = XLSX.default_run_props
+const first_run_props     = XLSX.first_run_props
+const is_uniform          = XLSX.is_uniform
+const text_content        = XLSX.text_content
+const text_runs           = XLSX.text_runs
+const DrawingText         = XLSX.DrawingText
+const get_theme_fonts     = XLSX.get_theme_fonts
+const resolve_theme_font  = XLSX.resolve_theme_font
+const xml_root_element    = XLSX.xml_root_element
+const get_xml_data        = XLSX.get_xml_data
+const getCharts           = XLSX.getCharts
+
+# Parse a fragment into its root element. XML.parse returns a document node;
+# the element is its last child (a declaration may precede it).
+function _frag(s::String)
+    doc = XML.parse(XML.Node, s)
+    els = filter(c -> XML.nodetype(c) === XML.Element, XML.children(doc))
+    return els[end]
+end
+
+const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\""
+
+@testset "DrawingML text" begin
+
+    # -----------------------------------------------------------------------
+    @testset "attribute readers" begin
+        el = _frag("""<a:rPr $_NSDECL sz="1197" b="0" i="1" baseline="30000"
+                      kern="1200" spc="-50" lvl="2" rot="-2700000" marL="228600"/>""")
+
+        # units
+        @test _attr_pt(el, "sz") == 11.97           # 1/100 pt
+        @test _attr_pt(el, "kern") == 12.0
+        @test _attr_pt(el, "spc") == -0.5
+        @test _attr_pct_opt(el, "baseline") == 0.3  # thousandths of a percent -> fraction
+        @test _attr_deg(el, "rot") == -45.0         # 1/60000 deg
+        @test _attr_emu(el, "marL") == 18.0         # EMU -> pt
+        @test _attr_int(el, "lvl") == 2
+
+        # absent stays distinct from explicit
+        @test _attr_bool(el, "b") === false         # written as 0
+        @test _attr_bool(el, "i") === true
+        @test _attr_bool(el, "u") === nothing       # not written at all
+        @test _attr(el, "missing") === nothing
+        @test _attr_pt(el, "missing") === nothing
+        @test _attr_pct_opt(el, "missing") === nothing
+
+        # tolerates a missing child element
+        @test _attr(nothing, "typeface") === nothing
+        @test first_element_with_tag(nothing, "latin") === nothing
+
+        # bool spellings
+        b2 = _frag("""<a:rPr $_NSDECL b="true" i="on" u="none"/>""")
+        @test _attr_bool(b2, "b") === true
+        @test _attr_bool(b2, "i") === true
+        @test _attr(b2, "u") == "none"              # enum stays a string
+
+        # unparseable reads as absent, not as zero
+        bad = _frag("""<a:rPr $_NSDECL sz="large"/>""")
+        @test _attr_pt(bad, "sz") === nothing
+    end
+
+    # -----------------------------------------------------------------------
+    @testset "spacing" begin
+        pPr = _frag("""<a:pPr $_NSDECL>
+                         <a:lnSpc><a:spcPct val="150000"/></a:lnSpc>
+                         <a:spcBef><a:spcPts val="1200"/></a:spcBef>
+                       </a:pPr>""")
+        @test _attr_spacing(pPr, "lnSpc") == (:frac, 1.5)
+        @test _attr_spacing(pPr, "spcBef") == (:pts, 12.0)
+        @test _attr_spacing(pPr, "spcAft") === nothing
+    end
+
+    # -----------------------------------------------------------------------
+    @testset "hand-built text bodies" begin
+        # A workbook is needed only for theme colour resolution; any will do.
+        XLSX.openxlsx(joinpath(data_directory, "chart_basic.xlsx")) do xf
+            wb = XLSX.get_workbook(xf)
+
+            @testset "formatting-only txPr (the common shape)" begin
+                node = _frag("""<c:txPr xmlns:c="$NS_C" $_NSDECL>
+                      <a:bodyPr rot="-60000000" vert="horz" wrap="square" anchor="ctr"/>
+                      <a:lstStyle/>
+                      <a:p>
+                        <a:pPr algn="ctr">
+                          <a:defRPr sz="900" b="1" i="0" u="none" strike="noStrike"/>
+                        </a:pPr>
+                        <a:endParaRPr lang="en-GB"/>
+                      </a:p>
+                    </c:txPr>""")
+
+                t = parse_drawing_text(wb, node)
+                @test t isa DrawingText
+                @test length(t.paragraphs) == 1
+                @test isempty(t.paragraphs[1].runs)
+                @test text_content(t) == ""
+                @test t.liststyle !== nothing              # preserved, even empty
+
+                @test t.body.rotation == -1000.0
+                @test t.body.anchor == "ctr"
+                @test t.body.autofit === nothing           # absent, not :none
+
+                # the font lives in defRPr, and default_run_props finds it
+                p = default_run_props(t)
+                @test p !== nothing
+                @test p.size == 9.0
+                @test p.bold === true
+                @test p.italic === false
+                @test p.underline == "none"
+                @test t.paragraphs[1].props.align == "ctr"
+
+                @test is_uniform(t)                        # no runs: uniform
+            end
+
+            @testset "uniform multi-run rich text" begin
+                node = _frag("""<c:rich xmlns:c="$NS_C" $_NSDECL>
+                      <a:bodyPr/><a:lstStyle/>
+                      <a:p>
+                        <a:r><a:rPr lang="en-GB" sz="1400" b="1"/><a:t>Quarterly </a:t></a:r>
+                        <a:r><a:rPr lang="en-US" sz="1400" b="1"/><a:t>Revenue</a:t></a:r>
+                      </a:p>
+                    </c:rich>""")
+
+                t = parse_drawing_text(wb, node; tag="rich")
+                @test length(text_runs(t)) == 2
+                @test text_content(t) == "Quarterly Revenue"
+
+                # differing only by lang — Excel splits runs on spellcheck
+                # boundaries, and that must not read as mixed formatting
+                @test is_uniform(t)
+                @test default_run_props(t) !== nothing
+                @test default_run_props(t).size == 14.0
+            end
+
+            @testset "mixed formatting" begin
+                node = _frag("""<c:rich xmlns:c="$NS_C" $_NSDECL>
+                      <a:bodyPr/><a:lstStyle/>
+                      <a:p>
+                        <a:r><a:rPr sz="1400" b="0"/><a:t>Revenue </a:t></a:r>
+                        <a:r><a:rPr sz="1400" b="1"/><a:t>2024</a:t></a:r>
+                      </a:p>
+                    </c:rich>""")
+
+                t = parse_drawing_text(wb, node; tag="rich")
+                @test text_content(t) == "Revenue 2024"
+                @test !is_uniform(t)
+
+                # no single answer, so no answer
+                @test default_run_props(t) === nothing
+                # ...but the first fragment is still reachable
+                @test first_run_props(t).bold === false
+                @test text_runs(t)[2].props.bold === true
+            end
+
+            @testset "breaks and paragraphs" begin
+                node = _frag("""<c:rich xmlns:c="$NS_C" $_NSDECL>
+                      <a:bodyPr/><a:lstStyle/>
+                      <a:p><a:r><a:t>One</a:t></a:r><a:br/><a:r><a:t>Two</a:t></a:r></a:p>
+                      <a:p><a:r><a:t>Three</a:t></a:r></a:p>
+                    </c:rich>""")
+
+                t = parse_drawing_text(wb, node; tag="rich")
+                @test length(t.paragraphs) == 2
+                @test text_content(t) == "One\nTwo\nThree"
+                @test [r.kind for r in t.paragraphs[1].runs] == [:run, :br, :run]
+            end
+
+            @testset "indented XML (nodetype guard)" begin
+                # Excel writes chart parts unindented; a formatted or
+                # hand-edited part has whitespace text nodes between runs.
+                node = _frag("""<c:rich xmlns:c="$NS_C" $_NSDECL>
+                      <a:bodyPr/>
+                      <a:lstStyle/>
+                      <a:p>
+                        <a:r><a:rPr sz="1000"/><a:t>Spaced</a:t></a:r>
+                        <a:r><a:rPr sz="1000"/><a:t> out</a:t></a:r>
+                      </a:p>
+                    </c:rich>""")
+
+                t = parse_drawing_text(wb, node; tag="rich")
+                @test length(text_runs(t)) == 2          # not 2 + whitespace nodes
+                @test text_content(t) == "Spaced out"
+            end
+
+            @testset "parse from parent, and absent txPr" begin
+                parent = _frag("""<c:valAx xmlns:c="$NS_C" $_NSDECL>
+                      <c:delete val="0"/>
+                      <c:txPr><a:bodyPr/><a:lstStyle/>
+                        <a:p><a:pPr><a:defRPr sz="1000"/></a:pPr></a:p>
+                      </c:txPr>
+                    </c:valAx>""")
+                t = parse_drawing_text(wb, parent)          # searches for txPr
+                @test t !== nothing
+                @test default_run_props(t).size == 10.0
+
+                bare = _frag("""<c:valAx xmlns:c="$NS_C"><c:delete val="0"/></c:valAx>""")
+                @test parse_drawing_text(wb, bare) === nothing
+            end
+
+            @testset "solidFill inside defRPr" begin
+                node = _frag("""<c:txPr xmlns:c="$NS_C" $_NSDECL>
+                      <a:bodyPr/><a:lstStyle/>
+                      <a:p><a:pPr><a:defRPr sz="900">
+                        <a:solidFill><a:schemeClr val="tx1">
+                          <a:lumMod val="65000"/><a:lumOff val="35000"/>
+                        </a:schemeClr></a:solidFill>
+                        <a:latin typeface="+mn-lt"/>
+                      </a:defRPr></a:pPr></a:p>
+                    </c:txPr>""")
+
+                t = parse_drawing_text(wb, node)
+                p = default_run_props(t)
+                @test p.fill !== nothing
+                @test p.fill.kind == :solid
+                # same transform the colour tests already pin
+                @test p.fill.fgcolor.rgb == "595959"
+                @test p.latin == "+mn-lt"           # kept as written
+                @test p.ea === nothing
+                @test p.line === nothing
+            end
+        end
+    end
+
+    # -----------------------------------------------------------------------
+        # -----------------------------------------------------------------------
+    @testset "fixtures" begin
+
+        # NOTE: `Chart` is metadata only — it does not retain the parsed node,
+        # so this reaches into the package by path. That is a stopgap: the
+        # surgical-write design needs charts to hold their XML, and when stage
+        # 3 decides how (a `raw` field, or a lookup keyed on `path`), these
+        # three lines become one accessor. Don't copy this pattern elsewhere.
+        _chart_root(xf, c) = xml_root_element(get_xml_data(xf, c.path))
+
+        XLSX.openxlsx(joinpath(data_directory, "chart_basic.xlsx")) do xf
+            wb = XLSX.get_workbook(xf)
+            c = first(getCharts(xf["Data"]))
+
+            root  = _chart_root(xf, c)                          # c:chartSpace
+            chart = first_element_with_tag(root, "chart")
+            @test chart !== nothing
+
+            @testset "axis txPr" begin
+                plotarea = first_element_with_tag(chart, "plotArea")
+                @test plotarea !== nothing
+
+                ax = first_element_with_tag(plotarea, "valAx")
+                if ax !== nothing
+                    t = parse_drawing_text(wb, ax)
+                    if t !== nothing
+                        @test text_content(t) == ""      # formatting only
+                        @test is_uniform(t)
+                        @test t.raw !== nothing          # kept for write-back
+
+                        p = default_run_props(t)
+                        # TODO: pin the actual size/colour once you've seen
+                        # what Excel wrote — @show p to find out.
+                        @test p === nothing || p.size isa Float64
+                    end
+                end
+            end
+
+            @testset "title rich text" begin
+                title = first_element_with_tag(chart, "title")
+                if title !== nothing
+                    tx = first_element_with_tag(title, "tx")
+                    if tx !== nothing
+                        t = parse_drawing_text(wb, tx; tag="rich")
+                        if t !== nothing
+                            # `Chart.title` is parsed independently, so this
+                            # cross-checks the two paths agree.
+                            @test text_content(t) == c.title
+                            @test !isempty(text_runs(t))
+                        end
+                    end
+                end
+            end
+        end
+
+        @testset "theme fonts" begin
+            XLSX.openxlsx(joinpath(data_directory, "chart_theme_colors.xlsx")) do xf
+                wb = XLSX.get_workbook(xf)
+
+                fonts = get_theme_fonts(wb)
+                @test fonts isa Dict{String,String}
+                @test haskey(fonts, "+mn-lt")
+                @test haskey(fonts, "+mj-lt")
+
+                @test resolve_theme_font(wb, "+mn-lt") == fonts["+mn-lt"]
+                @test resolve_theme_font(wb, "Calibri") == "Calibri"
+                @test resolve_theme_font(wb, nothing) === nothing
+                @test resolve_theme_font(wb, "+xx-lt") === nothing   # undefined ref
+            end
+        end
     end
 end

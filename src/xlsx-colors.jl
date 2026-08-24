@@ -60,21 +60,37 @@ function _theme_color_value(node::XML.Node)::Union{String,Nothing}
     return nothing
 end
 
-# The theme's <a:clrScheme> element. Shared by the index-ordered
-# `get_theme_colors` and the name-keyed `get_theme_color_map`.
-function _clrscheme_element(wb::Workbook)::XML.Node
-    xroot = xml_root_element(theme_xmlroot(wb))
+"""
+    _themeelements_element(wb::Workbook) -> XML.Node
 
-    theme_els_idx = findfirst(c -> localname(c) == "themeElements", xml_elements(xroot))
+The theme's `<a:themeElements>`. Throws if the workbook's theme is malformed.
+Shared by the colour and font scheme lookups.
+"""
+function _themeelements_element(wb::Workbook)::XML.Node
+    xroot = xml_root_element(theme_xmlroot(wb))
+    els = xml_elements(xroot)
+
+    theme_els_idx = findfirst(c -> localname(c) == "themeElements", els)
     isnothing(theme_els_idx) &&
         throw(XLSXError("Malformed theme: no `themeElements` found in theme1.xml."))
-    theme_els = xml_elements(xroot)[theme_els_idx]
+    return els[theme_els_idx]
+end
 
-    clrscheme_idx = findfirst(c -> localname(c) == "clrScheme", xml_elements(theme_els))
+function _clrscheme_element(wb::Workbook)::XML.Node
+    theme_els = _themeelements_element(wb)
+    els = xml_elements(theme_els)
+
+    clrscheme_idx = findfirst(c -> localname(c) == "clrScheme", els)
     isnothing(clrscheme_idx) &&
         throw(XLSXError("Malformed theme: no `clrScheme` found in theme1.xml."))
-    return xml_elements(theme_els)[clrscheme_idx]
+    return els[clrscheme_idx]
 end
+
+# Unlike `clrScheme`, a missing `fontScheme` is not fatal: nothing downstream
+# needs a font the way `resolveColor` needs a palette, and `get_theme_fonts`
+# reads an absent scheme as "no theme fonts" rather than a broken workbook.
+_fontscheme_element(wb::Workbook) =
+    first_element_with_tag(_themeelements_element(wb), "fontScheme")
 
 # Read and cache the 12 theme colors for a workbook, in OOXML theme-index order
 # (see `THEME_COLOR_ORDER`). Reads the actual `xl/theme/theme1.xml` clrScheme, so this
@@ -268,8 +284,54 @@ function get_theme_color_map(wb::Workbook)::Dict{String,String}
     return wb.theme_color_map
 end
 
-# DrawingML transform values are in thousandths of a percent: 60000 == 60%.
-@inline _pct(v::Int) = v / 100_000
+
+"""
+    get_theme_fonts(wb::Workbook) -> Dict{String,String}
+
+The workbook theme's font scheme, keyed by the reference tokens as they appear
+in DrawingML: `"+mj-lt"`, `"+mn-lt"`, `"+mj-ea"`, `"+mn-ea"`, `"+mj-cs"`,
+`"+mn-cs"` (major/minor × latin/east-asian/complex-script). Cached on
+`Workbook.theme_font_map`.
+
+Empty typefaces are omitted rather than stored as `""`. Excel writes
+`<a:ea typeface=""/>` to mean "no specific east-asian font, fall back", and a
+missing key expresses that better than an empty string a caller has to test for.
+
+Script-specific `<a:font script="Jpan" .../>` entries under each font are not
+modelled; they are in the theme node if ever needed.
+
+Distinct from `get_theme_color_map` only in what it reads — same theme part,
+same caching, same name-keyed contract.
+"""
+function get_theme_fonts(wb::Workbook)::Dict{String,String}
+    if wb.theme_font_map === nothing
+        m = Dict{String,String}()
+        for (tag, prefix) in (("majorFont", "+mj"), ("minorFont", "+mn"))
+            group = first_element_with_tag(_fontscheme_element(wb), tag)
+            for (child, suffix) in (("latin", "lt"), ("ea", "ea"), ("cs", "cs"))
+                tf = _attr(first_element_with_tag(group, child), "typeface")
+                isnothing(tf) || (m["$prefix-$suffix"] = tf)
+            end
+        end
+        wb.theme_font_map = m
+    end
+    return wb.theme_font_map
+end
+
+"""
+    resolve_theme_font(wb::Workbook, typeface) -> Union{Nothing,String}
+
+Resolve a DrawingML typeface reference. `"+mn-lt"` and friends look up the
+theme; any other string is a literal font name and passes through unchanged;
+`nothing` (the attribute was absent) stays `nothing`, meaning "inherit".
+
+Returns `nothing` for a theme reference the theme doesn't define, which is not
+the same as the caller's font being unset — check `startswith(tf, '+')` first
+if the distinction matters.
+"""
+resolve_theme_font(::Workbook, ::Nothing) = nothing
+resolve_theme_font(wb::Workbook, typeface::AbstractString) =
+    startswith(typeface, '+') ? get(get_theme_fonts(wb), typeface, nothing) : typeface
 
 """
 Apply the DrawingML colour transforms to an "RRGGBB" hex string, in document

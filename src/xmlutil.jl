@@ -14,6 +14,7 @@ function first_element_with_tag(node::Union{Nothing,XML.Node}, tag::AbstractStri
     end
     return nothing
 end
+first_element_with_tag(::Nothing, ::AbstractString) = nothing
 
 elements_with_tag(node::XML.Node, tag::AbstractString) =
     XML.Node[n for n in XML.eachelement(node) if has_localname(n, tag)]
@@ -49,6 +50,26 @@ child_text(node::Union{Nothing,XML.Node}, tag::AbstractString)::Union{Nothing,St
 # ── attributes ───────────────────────────────────────────────────────────────
 get_attr(node::XML.Node, key::AbstractString, default::AbstractString="") =
     get(node, key, default)
+
+"""
+    _attr(node, key) -> Union{Nothing,String}
+
+Read an attribute, normalising absence to `nothing`. `get_attr` returns `""`
+for a missing attribute, which is fine where a default is being applied but
+loses information wherever absent and explicitly-empty must stay distinct —
+throughout DrawingML, where an absent attribute means "inherit".
+
+Accepts `nothing` as the node, so an optional child element can be passed
+straight through: `_attr(first_element_with_tag(el, "latin"), "typeface")`.
+"""
+_attr(node::XML.Node, key::AbstractString) = (v = get_attr(node, key); isempty(v) ? nothing : v)
+_attr(::Nothing, ::AbstractString) = nothing
+
+# DrawingML percentage attributes are in thousandths of a percent. Returns a
+# fraction, not a percentage: 60000 -> 0.6. Used for colour transforms
+# (lumMod, satMod, shade, tint), text baseline, normAutofit scaling and line
+# spacing — anything reading `_attr_pct` or `_attr_pct_opt` lands here.
+@inline _pct(v::Int) = v / 100_000
 
 """Value of a *namespace-prefixed* attribute matched by local name (`r:id`, `x:id`, …).
 Unprefixed attributes are skipped deliberately: a bare `id` on `<c:chart>` or `embed`

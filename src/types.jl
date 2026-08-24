@@ -658,6 +658,7 @@ mutable struct Workbook
     theme_xroot::Union{XML.Node, Nothing}
     theme_colors::Union{Vector{String}, Nothing}
     theme_color_map::Union{Nothing,Dict{String,String}}
+    theme_font_map::Union{Nothing,Dict{String,String}}
     cellXfs_cache::Union{Vector{XML.Node}, Nothing}   # cache for get_cellXfs_nodes
     numFmt_cache::Union{Dict{Int, String}, Nothing}   # cache for get_numFmt_cache
     style_table_cache::Dict{String, Vector{XML.Node}} # cache for fonts/borders/fills, keyed by tag ("fonts","borders","fills")
@@ -1071,4 +1072,157 @@ struct DrawingFill
     bgcolor::Union{Nothing,DrawingColor}
     preset::Union{Nothing,String}
     raw::XML.Node
+end
+
+"""
+    DrawingLine
+
+A DrawingML outline: `<a:ln>`.
+
+The stroke colour lives in `fill`, since a line is filled the same way a shape
+is - solid, gradient, pattern or none. `width` is in EMU, where 12700 EMU is
+one point.
+
+# Fields
+- `fill::Union{Nothing,DrawingFill}` - the stroke; `nothing` where the element
+  says nothing about it, `kind === :none` where it explicitly has no outline.
+- `width::Union{Nothing,Int}` - the `w` attribute, in EMU.
+- `dash::Union{Nothing,String}` - `"solid"`, `"dash"`, `"sysDot"`, and so on.
+- `cap::Union{Nothing,String}` - `"rnd"`, `"sq"`, `"flat"`.
+- `compound::Union{Nothing,String}` - the `cmpd` attribute: `"sng"`, `"dbl"`, …
+- `raw::XML.Node` - the element as read.
+"""
+struct DrawingLine
+    fill::Union{Nothing,DrawingFill}
+    width::Union{Nothing,Int}
+    dash::Union{Nothing,String}
+    cap::Union{Nothing,String}
+    compound::Union{Nothing,String}
+    raw::XML.Node
+end
+
+# =============================================================================
+# Every optional field is Union{Nothing,T}: absent means "inherit from the
+# theme or the parent list style", which is not the same as an explicit value,
+# and the difference has to survive a round trip.
+# =============================================================================
+
+"""
+    DrawingRunProps
+
+Character-level properties: `a:rPr`, `a:defRPr` or `a:endParaRPr`.
+
+Sizes are points (the file stores 1/100 pt), `baseline` is a percentage, and
+`underline` / `strike` / `caps` keep the DrawingML vocabulary as written
+(`"sng"`, `"noStrike"`, `"small"`). Typefaces may be theme references —
+`"+mn-lt"` for the minor latin font, `"+mj-lt"` for major.
+"""
+struct DrawingRunProps
+    lang::Union{Nothing,String}
+    size::Union{Nothing,Float64}        # sz, points
+    bold::Union{Nothing,Bool}           # b
+    italic::Union{Nothing,Bool}         # i
+    underline::Union{Nothing,String}    # u
+    strike::Union{Nothing,String}
+    caps::Union{Nothing,String}         # cap
+    baseline::Union{Nothing,Float64}    # fraction of the font size
+    kern::Union{Nothing,Float64}        # points
+    spacing::Union{Nothing,Float64}     # spc, points
+    fill::Union{Nothing,DrawingFill}
+    line::Union{Nothing,DrawingLine}    # a:ln — text outline
+    latin::Union{Nothing,String}
+    ea::Union{Nothing,String}
+    cs::Union{Nothing,String}
+    raw::Union{Nothing,XML.Node}
+end
+
+"""
+    DrawingParaProps
+
+Paragraph properties (`a:pPr`). Margins and indent are points; spacing fields
+are `(:pct, percent)` or `(:pts, points)`. `defprops` is the nested `a:defRPr`,
+which in a chart `txPr` is usually the only place the font is specified.
+"""
+struct DrawingParaProps
+    align::Union{Nothing,String}        # algn
+    level::Union{Nothing,Int}           # lvl
+    marginleft::Union{Nothing,Float64}  # marL, points
+    marginright::Union{Nothing,Float64} # marR, points
+    indent::Union{Nothing,Float64}      # points
+    rtl::Union{Nothing,Bool}
+    linespacing::Union{Nothing,Tuple{Symbol,Float64}}   # lnSpc
+    spacebefore::Union{Nothing,Tuple{Symbol,Float64}}   # spcBef
+    spaceafter::Union{Nothing,Tuple{Symbol,Float64}}    # spcAft
+    defprops::Union{Nothing,DrawingRunProps}
+    raw::Union{Nothing,XML.Node}
+end
+
+"""
+    DrawingRun
+
+One `a:r`, `a:br` or `a:fld`, distinguished by `kind` (`:run`, `:br`, `:fld`).
+A break carries `"\\n"` as its text so `text_content` needs no special case.
+"""
+struct DrawingRun
+    kind::Symbol
+    text::Union{Nothing,String}
+    props::Union{Nothing,DrawingRunProps}
+    raw::Union{Nothing,XML.Node}
+end
+
+"""
+    DrawingParagraph
+
+One `a:p`: properties, runs in document order, and the trailing
+`a:endParaRPr`, which is what Excel writes when a paragraph has no runs.
+"""
+struct DrawingParagraph
+    props::Union{Nothing,DrawingParaProps}
+    runs::Vector{DrawingRun}
+    endprops::Union{Nothing,DrawingRunProps}
+    raw::Union{Nothing,XML.Node}
+end
+
+"""
+    DrawingBodyProps
+
+Text-body properties (`a:bodyPr`). `rotation` is degrees (stored as 1/60000),
+insets are points, and `autofit` is `:none`, `:normal` or `:shape` — parsed
+from a child element, with `fontscale` and `linespacereduction` populated only
+for `:normal`.
+"""
+struct DrawingBodyProps
+    rotation::Union{Nothing,Float64}           # rot, degrees
+    vertical::Union{Nothing,String}            # vert
+    wrap::Union{Nothing,String}
+    anchor::Union{Nothing,String}
+    anchorctr::Union{Nothing,Bool}
+    upright::Union{Nothing,Bool}
+    spcfirstlastpara::Union{Nothing,Bool}
+    vertoverflow::Union{Nothing,String}
+    horzoverflow::Union{Nothing,String}
+    insetleft::Union{Nothing,Float64}
+    insettop::Union{Nothing,Float64}
+    insetright::Union{Nothing,Float64}
+    insetbottom::Union{Nothing,Float64}
+    autofit::Union{Nothing,Symbol}
+    fontscale::Union{Nothing,Float64}          # fraction of the font size
+    linespacereduction::Union{Nothing,Float64} # fraction of the font size
+    raw::Union{Nothing,XML.Node}
+end
+
+"""
+    DrawingText
+
+A DrawingML text body (`CT_TextBody`): `c:txPr`, `c:rich`, or the cx: equivalent.
+
+`liststyle` is kept as an unparsed node — it is empty in most chart parts and
+carries list-level defaults we don't model. `raw` is the text body element
+itself, for surgical write-back.
+"""
+struct DrawingText
+    body::Union{Nothing,DrawingBodyProps}
+    liststyle::Union{Nothing,XML.Node}
+    paragraphs::Vector{DrawingParagraph}
+    raw::Union{Nothing,XML.Node}
 end

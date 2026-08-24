@@ -36,7 +36,7 @@ The DrawingML colour element among the children of `node`, or `nothing`.
 A fill, line or run-property element holds at most one colour child, so this
 returns the first match rather than a list.
 """
-function first_color_element(node::Union{Nothing,XML.Node})::Union{Nothing,XML.Node}
+function color_element(node::Union{Nothing,XML.Node})::Union{Nothing,XML.Node}
     isnothing(node) && return nothing
     for child in XML.eachelement(node)
         localname(child) in DML_COLOR_TAGS && return child
@@ -107,6 +107,7 @@ end
     return isnothing(v) ? default : v / 100_000.0
 end
 
+
 """
     parse_drawing_color(wb, node) -> Union{Nothing,DrawingColor}
 
@@ -118,7 +119,7 @@ colour child.
 """
 function parse_drawing_color(wb::Workbook, node::Union{Nothing,XML.Node})::Union{Nothing,DrawingColor}
     isnothing(node) && return nothing
-    el = localname(node) in DML_COLOR_TAGS ? node : first_color_element(node)
+    el = localname(node) in DML_COLOR_TAGS ? node : color_element(node)
     isnothing(el) && return nothing
 
     kind = DML_COLOR_KIND[localname(el)]
@@ -162,7 +163,7 @@ const DML_FILL_TAGS = Dict(
 The fill element among the children of `node`, or `nothing` where there is
 none. An `spPr` holds at most one.
 """
-function first_fill_element(node::Union{Nothing,XML.Node})::Union{Nothing,XML.Node}
+function fill_element(node::Union{Nothing,XML.Node})::Union{Nothing,XML.Node}
     isnothing(node) && return nothing
     for child in XML.eachelement(node)
         haskey(DML_FILL_TAGS, localname(child)) && return child
@@ -178,7 +179,7 @@ element itself or its parent.
 """
 function parse_drawing_fill(wb::Workbook, node::Union{Nothing,XML.Node})::Union{Nothing,DrawingFill}
     isnothing(node) && return nothing
-    el = haskey(DML_FILL_TAGS, localname(node)) ? node : first_fill_element(node)
+    el = haskey(DML_FILL_TAGS, localname(node)) ? node : fill_element(node)
     isnothing(el) && return nothing
     kind = DML_FILL_TAGS[localname(el)]
 
@@ -195,6 +196,34 @@ function parse_drawing_fill(wb::Workbook, node::Union{Nothing,XML.Node})::Union{
     return DrawingFill(kind, nothing, nothing, nothing, el)
 end
 
+
+"""
+    parse_drawing_line(wb, node) -> Union{Nothing,DrawingLine}
+
+Parse the outline held by `node`, or `nothing` where it holds none. Pass the
+`a:ln` element itself or its parent.
+"""
+function parse_drawing_line(wb::Workbook, node::Union{Nothing,XML.Node})::Union{Nothing,DrawingLine}
+    isnothing(node) && return nothing
+    el = localname(node) == "ln" ? node : first_element_with_tag(node, "ln")
+    isnothing(el) && return nothing
+
+    w = tryparse(Int, get_attr(el, "w"))
+    dash = first_element_with_tag(el, "prstDash")
+
+    return DrawingLine(
+        parse_drawing_fill(wb, el),
+        w,
+        _attr(dash, "val"),
+        _attr(el, "cap"),
+        _attr(el, "cmpd"),
+        el,
+    )
+end
+
+"Line width in points. `nothing` where the element does not set one."
+line_width_points(ln::DrawingLine) = isnothing(ln.width) ? nothing : ln.width / 12700
+
 Base.show(io::IO, fl::DrawingFill) =
     print(io, "XLSX.DrawingFill(", fl.kind,
           isnothing(fl.fgcolor) ? "" : ", #" * fl.fgcolor.rgb,
@@ -207,4 +236,395 @@ function Base.show(io::IO, ::MIME"text/plain", fl::DrawingFill)
     isnothing(fl.bgcolor) || println(io, "  background: #", fl.bgcolor.rgb)
     fl.kind in (:gradient, :blip, :group) &&
         println(io, "  (not modelled; preserved on write)")
+end
+
+# Inheritance. Every field on DrawingRunProps is Union{Nothing,T}: absent means
+# "inherit", not "default", because a run's a:rPr sets only what differs from
+# what it inherits. The cascade, innermost first:
+#
+#   1. the run's own a:rPr
+#   2. the paragraph's a:pPr/a:defRPr
+#   3. the body's a:lstStyle/a:lvl<n>pPr/a:defRPr (n from a:pPr/@lvl)
+#   4. the c:txPr of the enclosing element (axis, series, data labels, legend)
+#   5. c:chartSpace/c:txPr
+#   6. the theme font scheme for +mj-*/+mn-* typefaces — get_theme_fonts —
+#      and Excel's built-in defaults for everything else
+#
+# Levels 4 and 5 need a parent chain that doesn't exist until stage 3, and the
+# rules differ by site (a data label does not inherit like an axis title), so
+# the resolver is stage 4 work. Until then nothing user-facing should promise a
+# resolved value: parsers return what is written, and `default_run_props`
+# returns the nearest as-written properties, not the effective ones.
+
+# =============================================================================
+# DrawingML text: CT_TextBody
+#
+# The same content model serves `c:txPr` (formatting-only: axes, data labels,
+# legend), `c:rich` (text with content: titles), and the cx: equivalent. One
+# set of parsers; the caller says which child tag to look for.
+#
+# Two shapes to keep in mind, because they read differently:
+#
+#   txPr  — no runs at all. Font lives in `a:pPr/a:defRPr`, and Excel writes an
+#           empty `a:endParaRPr` after it. `default_run_props` resolves this.
+#   rich  — one or more `a:r`, each with its own `a:rPr` setting only what
+#           differs from `defRPr`. May be uniform or mixed; see `is_uniform`.
+#
+# As with `prstDash`, several things that look like attributes are elements:
+# autofit (`a:noAutofit`/`a:normAutofit`/`a:spAutoFit`), line spacing
+# (`a:lnSpc/a:spcPct`), and the typefaces (`a:latin`, `a:ea`, `a:cs`).
+#
+# Write-back note for stage 4: `a:rPr` is an xsd:sequence — ln, fill,
+# effectLst, highlight, uLn*, uFill*, latin, ea, cs, sym, hlink*, rtl, extLst.
+# Splice into `raw`; never regenerate.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Attribute readers
+# ---------------------------------------------------------------------------
+
+const EMU_PER_POINT = 12700
+
+_attr_int(node, key) = (s = _attr(node, key); s === nothing ? nothing : tryparse(Int, s))
+
+_attr_bool(node, key) =
+    (s = _attr(node, key); s === nothing ? nothing : (s == "1" || s == "true" || s == "on"))
+
+# 1/100 pt -> pt   (sz, kern, spc)
+_attr_pt(node, key) = (n = _attr_int(node, key); n === nothing ? nothing : n / 100)
+
+# EMU -> pt        (marL, marR, indent, insets)
+_attr_emu(node, key) = (n = _attr_int(node, key); n === nothing ? nothing : n / EMU_PER_POINT)
+
+# 1/60000 deg -> deg  (rot)
+_attr_deg(node, key) = (n = _attr_int(node, key); n === nothing ? nothing : n / 60_000)
+
+# As `_attr_pct`, but returns `nothing` rather than a default when the
+# attribute is absent — DrawingML text needs absent and explicit to stay
+# distinct. Same units: thousandths of a percent in, fraction out (60000 -> 0.6).
+_attr_pct_opt(node, key) = (n = _attr_int(node, key); n === nothing ? nothing : _pct(n))
+
+
+"""
+    _attr_spacing(parent, tag) -> Union{Nothing,Tuple{Symbol,Float64}}
+
+`a:lnSpc`, `a:spcBef` and `a:spcAft` each wrap either `a:spcPct` (1/1000 %) or
+`a:spcPts` (1/100 pt). Returns `(:pct, 150.0)` or `(:pts, 12.0)`.
+"""
+function _attr_spacing(parent::XML.Node, tag::AbstractString)
+    el = first_element_with_tag(parent, tag)
+    el === nothing && return nothing
+    pct = first_element_with_tag(el, "spcPct")
+    pct === nothing || return (:frac, _attr_pct_opt(pct, "val"))
+    pts = first_element_with_tag(el, "spcPts")
+    pts === nothing || return (:pts, _attr_pt(pts, "val"))
+    return nothing
+end
+
+# ---------------------------------------------------------------------------
+# a:rPr / a:defRPr / a:endParaRPr
+# ---------------------------------------------------------------------------
+
+"""
+    parse_drawing_run_props(wb, node; tag="rPr") -> Union{Nothing,DrawingRunProps}
+
+Parse a run-properties element. `node` may be the element itself or its parent;
+`tag` selects `rPr`, `defRPr` or `endParaRPr` when searching a parent.
+
+Fields left `nothing` are absent from the file, which means "inherit" — not
+"default". Resolving the cascade is `effective_run_props`' job, not this one's.
+"""
+function parse_drawing_run_props(wb::Workbook, node::XML.Node; tag::AbstractString="rPr")
+    el = localname(node) == tag ? node : first_element_with_tag(node, tag)
+    el === nothing && return nothing
+
+    return DrawingRunProps(
+        _attr(el, "lang"),
+        _attr_pt(el, "sz"),
+        _attr_bool(el, "b"),
+        _attr_bool(el, "i"),
+        _attr(el, "u"),          # none | sng | dbl | heavy | dotted | ...
+        _attr(el, "strike"),     # noStrike | sngStrike | dblStrike
+        _attr(el, "cap"),        # none | small | all
+        _attr_pct_opt(el, "baseline"),
+        _attr_pt(el, "kern"),
+        _attr_pt(el, "spc"),
+        parse_drawing_fill(wb, el),
+        parse_drawing_line(wb, el),
+        _attr(first_element_with_tag(el, "latin"), "typeface"),
+        _attr(first_element_with_tag(el, "ea"), "typeface"),
+        _attr(first_element_with_tag(el, "cs"), "typeface"),
+        el,
+    )
+end
+
+# ---------------------------------------------------------------------------
+# a:pPr
+# ---------------------------------------------------------------------------
+
+"""
+    parse_drawing_paragraph_props(wb, node; tag="pPr") -> Union{Nothing,DrawingParaProps}
+
+Parse paragraph properties. The nested `a:defRPr` is parsed into a full
+`DrawingRunProps` — in a chart `txPr` it is the only place the font appears.
+"""
+function parse_drawing_paragraph_props(wb::Workbook, node::XML.Node; tag::AbstractString="pPr")
+    el = localname(node) == tag ? node : first_element_with_tag(node, tag)
+    el === nothing && return nothing
+
+    return DrawingParaProps(
+        _attr(el, "algn"),       # l | ctr | r | just | justLow | dist | thaiDist
+        _attr_int(el, "lvl"),
+        _attr_emu(el, "marL"),
+        _attr_emu(el, "marR"),
+        _attr_emu(el, "indent"),
+        _attr_bool(el, "rtl"),
+        _attr_spacing(el, "lnSpc"),
+        _attr_spacing(el, "spcBef"),
+        _attr_spacing(el, "spcAft"),
+        parse_drawing_run_props(wb, el; tag="defRPr"),
+        el,
+    )
+end
+
+# ---------------------------------------------------------------------------
+# a:bodyPr
+# ---------------------------------------------------------------------------
+
+"""
+    parse_drawing_body_props(node; tag="bodyPr") -> Union{Nothing,DrawingBodyProps}
+
+Parse text-body properties. Autofit is an element, not an attribute:
+`a:noAutofit` -> `:none`, `a:normAutofit` -> `:normal` (with `fontscale` and
+`linespacereduction`), `a:spAutoFit` -> `:shape`. Absent means "inherit".
+"""
+function parse_drawing_body_props(node::XML.Node; tag::AbstractString="bodyPr")
+    el = localname(node) == tag ? node : first_element_with_tag(node, tag)
+    el === nothing && return nothing
+
+    autofit = nothing
+    fontscale = nothing
+    lnspcred = nothing
+    if first_element_with_tag(el, "noAutofit") !== nothing
+        autofit = :none
+    elseif (na = first_element_with_tag(el, "normAutofit")) !== nothing
+        autofit = :normal
+        fontscale = _attr_pct_opt(na, "fontScale")
+        lnspcred = _attr_pct_opt(na, "lnSpcReduction")
+    elseif first_element_with_tag(el, "spAutoFit") !== nothing
+        autofit = :shape
+    end
+
+    return DrawingBodyProps(
+        _attr_deg(el, "rot"),
+        _attr(el, "vert"),          # horz | vert | vert270 | wordArtVert | ...
+        _attr(el, "wrap"),          # none | square
+        _attr(el, "anchor"),        # t | ctr | b | just | dist
+        _attr_bool(el, "anchorCtr"),
+        _attr_bool(el, "upright"),
+        _attr_bool(el, "spcFirstLastPara"),
+        _attr(el, "vertOverflow"),  # overflow | ellipsis | clip
+        _attr(el, "horzOverflow"),  # overflow | clip
+        _attr_emu(el, "lIns"),
+        _attr_emu(el, "tIns"),
+        _attr_emu(el, "rIns"),
+        _attr_emu(el, "bIns"),
+        autofit,
+        fontscale,
+        lnspcred,
+        el,
+    )
+end
+
+# ---------------------------------------------------------------------------
+# a:p and its runs
+# ---------------------------------------------------------------------------
+
+"""
+    parse_drawing_paragraph(wb, p) -> DrawingParagraph
+
+`a:r`, `a:br` and `a:fld` interleave in document order, so this walks children
+rather than using `elements_with_tag`. Non-element children (whitespace in a
+formatted part, comments) are skipped — Excel writes chart parts unindented,
+but a part that has been through a formatter or hand-edited will have them.
+
+`a:fld` (page numbers and the like) is kept as a run with its cached `a:t` text
+and `kind == :fld`; anything richer stays in `raw`.
+"""
+function parse_drawing_paragraph(wb::Workbook, p::XML.Node)
+    runs = DrawingRun[]
+    for c in XML.children(p)
+        XML.nodetype(c) === XML.Element || continue
+        ln = localname(c)
+        if ln == "r"
+            push!(runs, DrawingRun(:run, child_text(c, "t"), parse_drawing_run_props(wb, c), c))
+        elseif ln == "br"
+            push!(runs, DrawingRun(:br, "\n", parse_drawing_run_props(wb, c), c))
+        elseif ln == "fld"
+            push!(runs, DrawingRun(:fld, child_text(c, "t"), parse_drawing_run_props(wb, c), c))
+        end
+    end
+
+    return DrawingParagraph(
+        parse_drawing_paragraph_props(wb, p),
+        runs,
+        parse_drawing_run_props(wb, p; tag="endParaRPr"),
+        p,
+    )
+end
+
+# ---------------------------------------------------------------------------
+# CT_TextBody
+# ---------------------------------------------------------------------------
+
+"""
+    parse_drawing_text(wb, node; tag="txPr") -> Union{Nothing,DrawingText}
+
+Parse a DrawingML text body. `node` may be the text body itself (`c:txPr`,
+`c:rich`, `cx:txPr`) or its parent, in which case `tag` selects the child.
+
+    parse_drawing_text(wb, axis_node)                 # c:txPr
+    parse_drawing_text(wb, tx_node; tag = "rich")     # title text
+
+`a:lstStyle` is preserved as a node only: in chart parts it is either empty or
+carries list-level defaults we do not model, and dropping it would change how
+Excel renders inherited text.
+"""
+function parse_drawing_text(wb::Workbook, node::XML.Node; tag::AbstractString="txPr")
+    el = if localname(node) == tag || _is_text_body(node)
+        node
+    else
+        first_element_with_tag(node, tag)
+    end
+    el === nothing && return nothing
+
+    paragraphs = [parse_drawing_paragraph(wb, p) for p in elements_with_tag(el, "p")]
+
+    return DrawingText(
+        parse_drawing_body_props(el),
+        first_element_with_tag(el, "lstStyle"),
+        paragraphs,
+        el,
+    )
+end
+
+_is_text_body(node::XML.Node) =
+    first_element_with_tag(node, "bodyPr") !== nothing && localname(node) != "spPr"
+
+# ---------------------------------------------------------------------------
+# Reading the text back out
+# ---------------------------------------------------------------------------
+
+"""
+    text_content(t::DrawingText) -> String
+
+Concatenate run text, one line per paragraph. Empty for a formatting-only
+`txPr`; the visible string for a `c:rich` title.
+
+Excel splits runs on language and spellcheck boundaries, so a title typed as
+one string may arrive as several runs with identical properties. This
+reassembles it; editing does not — replacing whole text means collapsing to a
+single run, preserving the first run's `rPr`.
+"""
+function text_content(t::DrawingText)
+    io = IOBuffer()
+    for (i, p) in enumerate(t.paragraphs)
+        i > 1 && print(io, "\n")
+        for r in p.runs
+            r.text !== nothing && print(io, r.text)
+        end
+    end
+    return String(take!(io))
+end
+
+text_runs(t::DrawingText) = [r for p in t.paragraphs for r in p.runs]
+
+# Comparable identity for run properties, ignoring `lang` and `raw`: two runs
+# that differ only by spellcheck language are the same formatting. Colours
+# compare on their resolved value, not on the node that produced it.
+_color_key(c) = c === nothing ? nothing : (c.rgb, c.alpha)
+_fill_key(f) = f === nothing ? nothing : (f.kind, _color_key(f.fgcolor), _color_key(f.bgcolor), f.preset)
+_line_key(l) = l === nothing ? nothing : (_fill_key(l.fill), l.width, l.dash, l.cap, l.compound)
+
+_props_key(::Nothing) = nothing
+_props_key(p::DrawingRunProps) = (
+    p.size, p.bold, p.italic, p.underline, p.strike, p.caps,
+    p.baseline, p.kern, p.spacing,
+    _fill_key(p.fill), _line_key(p.line),
+    p.latin, p.ea, p.cs,
+)
+
+"""
+    is_uniform(t::DrawingText) -> Bool
+
+Whether every run in `t` carries the same formatting, comparing only what is
+written on each `a:rPr` (a run with no `rPr` falls back to its paragraph's
+`defRPr`). Text with no runs is uniform by definition.
+
+This compares *as written*, not as resolved — two runs reaching the same
+appearance by different inheritance paths compare as different. That is the
+conservative direction: it can report mixed where a full cascade would report
+uniform, but never the reverse.
+"""
+function is_uniform(t::DrawingText)
+    key = nothing
+    seen = false
+    for p in t.paragraphs
+        fallback = p.props === nothing ? nothing : p.props.defprops
+        for r in p.runs
+            k = _props_key(r.props === nothing ? fallback : r.props)
+            if !seen
+                key = k
+                seen = true
+            elseif k != key
+                return false
+            end
+        end
+    end
+    return true
+end
+
+"""
+    default_run_props(t::DrawingText) -> Union{Nothing,DrawingRunProps}
+
+The run properties describing this text body's appearance as a whole: the
+first paragraph's `a:defRPr` if present, else the first run's `a:rPr`, else the
+first `a:endParaRPr`.
+
+Returns `nothing` for text whose runs disagree — a mixed-format title has no
+single answer, and returning the first run's properties would quietly describe
+only its opening fragment. Use `first_run_props` if you want that value anyway,
+or `is_uniform` to test first.
+"""
+function default_run_props(t::DrawingText)
+    is_uniform(t) || return nothing
+    return first_run_props(t)
+end
+
+"""
+    first_run_props(t::DrawingText) -> Union{Nothing,DrawingRunProps}
+
+The first run properties found, in `defRPr` -> `rPr` -> `endParaRPr` order,
+regardless of whether later runs agree. For a formatting-only `txPr` this is
+the whole story; for mixed text it describes only the first fragment.
+"""
+function first_run_props(t::DrawingText)
+    for p in t.paragraphs
+        p.props !== nothing && p.props.defprops !== nothing && return p.props.defprops
+        !isempty(p.runs) && p.runs[1].props !== nothing && return p.runs[1].props
+        p.endprops !== nothing && return p.endprops
+    end
+    return nothing
+end
+
+function Base.show(io::IO, t::DrawingText)
+    s = text_content(t)
+    np = length(t.paragraphs)
+    nr = sum(length(p.runs) for p in t.paragraphs; init=0)
+    if isempty(s)
+        print(io, "DrawingText($np paragraph(s), formatting only)")
+    else
+        mixed = is_uniform(t) ? "" : ", mixed"
+        print(io, "DrawingText(", repr(first(s, 40)), ", $np paragraph(s), $nr run(s)$mixed)")
+    end
 end
