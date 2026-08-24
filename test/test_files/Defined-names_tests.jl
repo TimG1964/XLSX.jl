@@ -481,3 +481,156 @@
         @test occursin("…", out)
     end
 end
+@testset "system defined names" begin
+
+    @testset "hidden survives a round trip" begin
+        f = XLSX.opentemplate(joinpath(data_directory, "chart_ex.xlsx"))
+        before = XLSX.getAllDefinedNames(f; include_system=true)
+        @test length(before) == 9
+        @test all(dn -> dn.hidden, before)
+
+        g = XLSX.writexlsx("myfile.xlsx", f, overwrite=true)   # your usual save_outfile helper
+        h = XLSX.readxlsx(g)
+        after = XLSX.getAllDefinedNames(h; include_system=true)
+        isfile("myfile.xlsx") && rm("myfile.xlsx")
+
+        @test length(after) == 9
+        @test all(dn -> dn.hidden, after)
+        @test Set(dn.name for dn in after) == Set(dn.name for dn in before)
+        # values survive too, not just the flag
+        @test Dict(dn.name => string(dn.value) for dn in after) ==
+              Dict(dn.name => string(dn.value) for dn in before)
+    end
+
+    @testset "hidden from the user-facing accessors" begin
+        f = XLSX.readxlsx(joinpath(data_directory, "chart_ex.xlsx"))
+        @test isempty(XLSX.getDefinedNames(f))
+        @test length(XLSX.getDefinedNames(f; include_system=true)) == 9
+        @test isempty(XLSX.getAllDefinedNames(f))
+        @test length(XLSX.getAllDefinedNames(f; include_system=true)) == 9
+        # sheet scope is unaffected — these are workbook-scoped
+        @test isempty(XLSX.getDefinedNames(f["Data"]; include_system=true))
+    end
+
+    @testset "internal lookups still see system names" begin
+        f = XLSX.readxlsx(joinpath(data_directory, "chart_ex.xlsx"))
+        @test XLSX.is_workbook_defined_name(f, "_xlchart.v1.0")
+        @test XLSX.get_defined_name_value(XLSX.get_workbook(f), "_xlchart.v1.0") isa XLSX.SheetCellRange
+    end
+
+    @testset "system names are protected from deletion" begin
+        f = XLSX.opentemplate(joinpath(data_directory, "chart_ex.xlsx"))
+        @test_throws XLSX.XLSXError XLSX.deleteDefinedName(f, "_xlchart.v1.0")
+        @test XLSX.is_workbook_defined_name(f, "_xlchart.v1.0")   # not deleted
+
+        XLSX.deleteDefinedName(f, "_xlchart.v1.0"; force=true)
+        @test !XLSX.is_workbook_defined_name(f, "_xlchart.v1.0")
+    end
+
+    @testset "the delete-everything idiom spares system names" begin
+        f = XLSX.opentemplate(joinpath(data_directory, "chart_ex.xlsx"))
+        XLSX.addDefinedName(f, "MY_NAME", "Data!A1:A5")
+
+        XLSX.deleteDefinedName(f, XLSX.getDefinedNames(f))
+        @test isempty(XLSX.getDefinedNames(f))
+        @test length(XLSX.getAllDefinedNames(f; include_system=true)) == 9
+
+        XLSX.deleteAllDefinedNames(f)
+        @test length(XLSX.getAllDefinedNames(f; include_system=true)) == 9
+
+        XLSX.deleteAllDefinedNames(f; force=true)
+        @test isempty(XLSX.getAllDefinedNames(f; include_system=true))
+    end
+
+    @testset "the guard is all-or-nothing" begin
+        f = XLSX.opentemplate(joinpath(data_directory, "chart_ex.xlsx"))
+        XLSX.addDefinedName(f, "MY_NAME", "Data!A1:A5")
+        @test_throws XLSX.XLSXError XLSX.deleteDefinedName(f, ["MY_NAME", "_xlchart.v1.0"])
+        @test XLSX.is_workbook_defined_name(f, "MY_NAME")   # validation precedes deletion
+    end
+
+    @testset "hidden survives a sheet rename" begin
+        f = XLSX.opentemplate(joinpath(data_directory, "chart_ex.xlsx"))
+        XLSX.renamesheet!(f["Data"], "Renamed")
+        dns = XLSX.getAllDefinedNames(f; include_system=true)
+        @test length(dns) == 9
+        @test all(dn -> dn.hidden, dns)
+        @test all(dn -> startswith(string(dn.value), "Renamed!"), dns)
+    end
+
+    @testset "_xlnm built-ins are system names" begin
+        f = XLSX.opentemplate(joinpath(data_directory, "customXml.xlsx"))
+        ws = f["Mock-up"]
+
+        # Workbook scope: four user names, no built-ins.
+        wb_names = XLSX.getDefinedNames(f)
+        @test Set(dn.name for dn in wb_names) ==
+            Set(["Contiguous", "Location", "Short_Description", "ID"])
+        @test length(XLSX.getDefinedNames(f; include_system=true)) == 4
+
+        # Worksheet scope: only the built-in, and only when asked for.
+        @test isempty(XLSX.getDefinedNames(ws))
+        sheet_names = XLSX.getDefinedNames(ws; include_system=true)
+        @test length(sheet_names) == 1
+        @test sheet_names[1].name == "_xlnm.Print_Area"
+        @test sheet_names[1].hidden == false      # prefix, not the hidden flag
+
+        # Across scopes.
+        @test length(XLSX.getAllDefinedNames(f)) == 4
+        @test length(XLSX.getAllDefinedNames(f; include_system=true)) == 5
+
+        # Protected from deletion at worksheet scope.
+        @test_throws XLSX.XLSXError XLSX.deleteDefinedName(ws, "_xlnm.Print_Area")
+        @test XLSX.is_worksheet_defined_name(ws, "_xlnm.Print_Area")
+
+        # User names delete normally, built-in survives the idiom.
+        XLSX.deleteDefinedName(f, XLSX.getDefinedNames(f))
+        @test isempty(XLSX.getDefinedNames(f))
+        @test length(XLSX.getAllDefinedNames(f; include_system=true)) == 1
+
+        XLSX.deleteAllDefinedNames(f)
+        @test length(XLSX.getAllDefinedNames(f; include_system=true)) == 1
+        XLSX.deleteAllDefinedNames(f; force=true)
+        @test isempty(XLSX.getAllDefinedNames(f; include_system=true))
+
+        @test_throws XLSX.XLSXError XLSX.addDefinedName(f["Data"], "_xlnm.Print_Area", "A1:B2")
+        err = @test_throws XLSX.XLSXError XLSX.addDefinedName(f, "_xlchart.v1.99", "Data!A1:A5")
+        @test occursin("reserved", err.value.msg)
+
+    end
+
+    @testset "_xlnm survives a round trip without gaining hidden" begin
+        f = XLSX.opentemplate(joinpath(data_directory, "customXml.xlsx"))
+        g = XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
+        h = XLSX.readxlsx(g)
+        dns = XLSX.getAllDefinedNames(h; include_system=true)
+        @test length(dns) == 5
+        pa = only(filter(dn -> dn.name == "_xlnm.Print_Area", dns))
+        @test pa.hidden == false
+        @test pa.scope == "Mock-up"          # localSheetId round-tripped
+        @test string(pa.value) == "'Mock-up'!A1:K116"
+        isfile("mytest.xlsx") && rm("mytest.xlsx")
+    end
+    @testset "copysheet! clones chart defined names" begin
+        f = XLSX.opentemplate(joinpath(data_directory, "chart_ex.xlsx"))
+        before = XLSX.getAllDefinedNames(f; include_system=true)
+        XLSX.copysheet!(f["Data"], "Copy")
+        after = XLSX.getAllDefinedNames(f; include_system=true)
+
+        # A chartEx chart's sources are hidden defined names, so the copy needs
+        # its own set pointing at the copied sheet.
+        @test length(before) == 9
+        @test length(after) == 11
+        @test all(dn -> isnothing(dn.scope), after)   # all workbook-scoped
+        @test all(dn -> dn.hidden, after)             # and all still hidden
+        @test isempty(XLSX.getDefinedNames(f))        # none user-visible
+
+        # The originals are unchanged; the new ones point at the copy.
+        added = setdiff(Set(dn.name for dn in after), Set(dn.name for dn in before))
+        @test added == Set(["_xlchart.v2.0", "_xlchart.v2.1"])
+        @test all(dn -> startswith(string(dn.value), "Copy!"),
+                filter(dn -> dn.name in added, after))
+        @test all(dn -> startswith(string(dn.value), "Data!"),
+                filter(dn -> dn.name ∉ added, after))
+    end    
+end

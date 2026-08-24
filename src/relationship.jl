@@ -230,3 +230,166 @@ function make_relative_target(base_dir::AbstractString, target_path::AbstractStr
     ups = length(base_parts) - n
     return join(vcat(fill("..", ups), target_parts[n+1:end]), "/")
 end
+
+# The final path segment of a relationship Target, swapped for a new filename.
+# Avoids relative-path arithmetic: a clone always sits beside its original.
+function _retarget(target::AbstractString, new_fname::AbstractString)::String
+    i = findlast('/', target)
+    return isnothing(i) ? String(new_fname) : target[1:i] * new_fname
+end
+
+# chart1.xml -> chart2.xml, chartEx1.xml -> chartEx2.xml, style1.xml -> style2.xml
+function _next_part_name(xl::XLSXFile, dir::AbstractString, fname::AbstractString)::String
+    stem = replace(fname, r"\d*\.xml$" => "")
+    i = 1
+    while haskey(xl.data, "$dir/$stem$i.xml"); i += 1; end
+    return "$stem$i.xml"
+end
+
+function content_type_for_part(xf::XLSXFile, path::AbstractString)::Union{Nothing,String}
+    haskey(xf.data, "[Content_Types].xml") || return nothing
+    for n in elements_with_tag(xml_root_element(xf.data["[Content_Types].xml"]), "Override")
+        String(lstrip(get_attr(n, "PartName"), '/')) == path && return get_attr(n, "ContentType")
+    end
+    return nothing
+end
+
+"""
+Clone `path` and every part it exclusively owns, returning the clone's package
+path.
+
+Used when copying a sheet: a chart part belongs to exactly one drawing, so the
+copy needs its own. The chart's own relationships (style, colors, theme
+override) are owned the same way and are cloned with it. Images are not — media
+is shared across drawings — so image relationships are left pointing at the
+original.
+"""
+function clone_owned_part!(xl::XLSXFile, path::String)::String
+    dir, fname = _split_zip_path(path)
+    new_fname = _next_part_name(xl, dir, fname)
+    new_path  = "$dir/$new_fname"
+
+    xl.data[new_path]  = copynode(xl.data[path])
+    xl.files[new_path] = true
+
+    ct = content_type_for_part(xl, path)
+    isnothing(ct) || register_content_type!(xl, "[Content_Types].xml";
+                        tag="Override", key="PartName", val="/$new_path",
+                        content_type=ct)
+
+    old_rels = "$dir/_rels/$fname.rels"
+    haskey(xl.data, old_rels) || return new_path
+
+    new_rels = "$dir/_rels/$new_fname.rels"
+    xl.data[new_rels]  = copynode(xl.data[old_rels])
+    xl.files[new_rels] = true
+
+    for n in elements_with_tag(xml_root_element(xl.data[new_rels]), "Relationship")
+        get_attr(n, "TargetMode") == "External" && continue
+        endswith(get_attr(n, "Type"), "/image") && continue
+        target = get_attr(n, "Target")
+        old_t  = resolve_relative_target(dir, target)
+        haskey(xl.data, old_t) || continue
+        new_t  = clone_owned_part!(xl, old_t)
+        n["Target"] = _retarget(target, last(_split_zip_path(new_t)))
+    end
+
+    return new_path
+end
+
+"""
+Repoint every source reference in a chart part from `old_sheet` to `new_sheet`.
+
+Used when copying a sheet: the cloned chart part still names the original
+sheet, so without this the copy plots the original's data. References to other
+sheets and to external workbooks are left alone.
+
+The cached values are deliberately not touched: immediately after a copy they
+are correct for both sheets, and clearing them would leave `getChartData`
+empty for the copy.
+"""
+function repoint_chart_refs!(xl::XLSXFile, chart_path::String,
+                             old_sheet::String, new_sheet::String)
+    haskey(xl.data, chart_path) || return nothing
+    _repoint_refs!(xml_root_element(xl.data[chart_path]),
+                   quoteit(old_sheet) * "!", quoteit(new_sheet) * "!")
+    return nothing
+end
+
+# Any element named `f` in a chart part is a formula reference — series data,
+# titles, data labels in extLst, trendlines. Walking the whole tree rather than
+# enumerating paths means the extLst cases are covered too.
+function _repoint_refs!(node::XML.Node, old_prefix::String, new_prefix::String)
+    for child in XML.eachelement(node)
+        if localname(child) == "f"
+            s = XML.is_simple_value(child)
+            isnothing(s) && continue
+            s = String(s)
+            occursin('[', s) && continue            # external workbook
+            occursin(old_prefix, s) || continue
+            child[end] = XML.Text(replace(s, old_prefix => new_prefix))
+        else
+            _repoint_refs!(child, old_prefix, new_prefix)
+        end
+    end
+    return nothing
+end
+
+"""
+Repoint a cloned `chartEx` part's source references at `new_sheet`.
+
+Unlike a `c:` chart, a chartEx chart does not name its ranges directly: each
+`cx:f` holds a hidden defined name (`_xlchart.v1.0`) that resolves to the
+range. Cloning the part alone therefore leaves the copy plotting the original
+sheet, so each referenced name is cloned under a fresh series index with its
+value repointed, and the `cx:f` rewritten to the new name.
+
+References to other sheets, and anything that is not a resolvable workbook
+defined name, are left alone.
+"""
+function repoint_chartex_refs!(xl::XLSXFile, chart_path::String,
+                               old_sheet::String, new_sheet::String)
+    haskey(xl.data, chart_path) || return nothing
+    wb = get_workbook(xl)
+    series = _next_xlchart_series(wb)
+    counter = Ref(0)
+    _repoint_cx_refs!(xml_root_element(xl.data[chart_path]), wb,
+                      old_sheet, new_sheet, series, counter)
+    return nothing
+end
+
+function _repoint_cx_refs!(node::XML.Node, wb::Workbook, old_sheet::String,
+                           new_sheet::String, series::Int, counter::Ref{Int})
+    for child in XML.eachelement(node)
+        if localname(child) == "f"
+            s = XML.is_simple_value(child)
+            isnothing(s) && continue
+            new_name = _clone_xlchart_name!(wb, String(s), old_sheet, new_sheet,
+                                            series, counter)
+            isnothing(new_name) || (child[end] = XML.Text(new_name))
+        else
+            _repoint_cx_refs!(child, wb, old_sheet, new_sheet, series, counter)
+        end
+    end
+    return nothing
+end
+
+# `nothing` when the reference is not a workbook defined name pointing at
+# `old_sheet`, so the caller leaves it untouched.
+function _clone_xlchart_name!(wb::Workbook, ref::String, old_sheet::String,
+                              new_sheet::String, series::Int, counter::Ref{Int})
+    k = find_workbook_defined_name(wb, ref)
+    isnothing(k) && return nothing
+    dnv = wb.workbook_names[k]
+    is_defined_name_value_a_reference(dnv.value) || return nothing
+    dnv.value.sheet == old_sheet || return nothing
+
+    new_name = "_xlchart.v$series.$(counter[])"
+    counter[] += 1
+    # Written straight into the store: addDefinedName refuses reserved
+    # prefixes, and rightly so — this is the package generating a system
+    # name, not a user creating one.
+    wb.workbook_names[new_name] =
+        DefinedNameValue(rename_sheet(dnv.value, new_sheet), dnv.isabs, dnv.hidden)
+    return new_name
+end

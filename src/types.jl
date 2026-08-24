@@ -594,6 +594,7 @@ const DefinedNameRangeTypes = Union{SheetCellRef, SheetCellRange, NonContiguousR
 struct DefinedNameValue
     value::DefinedNameValueTypes
     isabs::Union{Bool, Vector{Bool}}
+    hidden::Bool
 end
 
 """
@@ -611,9 +612,11 @@ A defined name and its definition, as returned by [`getDefinedNames`](@ref) and
 - `absolute::Union{Bool,Vector{Bool}}` — whether the reference is written as an
   absolute one (`\$A\$1` rather than `A1`); a vector, one entry per part, for a
   `NonContiguousRange`. Always `false` for a constant.
+- `hidden::Bool` - whether the reference is hidden (system defined).
 
-Together these are enough to recreate the name:
-`addDefinedName(x, dn.name, dn.value; absolute=dn.absolute)`.
+Together these are enough to recreate the name: addDefinedName(x, dn.name, dn.value; absolute=dn.absolute). 
+This holds for the names getDefinedNames returns; names Excel generates for itself cannot be recreated, 
+and are excluded from that result.
 
 This is a snapshot of the definition at the time it was read, not a live handle:
 it does not track later edits, and renaming a worksheet does not update the
@@ -624,6 +627,7 @@ struct DefinedName
     scope::Union{Nothing,String}
     value::DefinedNameValueTypes
     absolute::Union{Bool,Vector{Bool}}
+    hidden::Bool
 end
 
 # Workbook is the result of parsing file `xl/workbook.xml`.
@@ -885,6 +889,8 @@ format Excel recorded for it, and the cached values themselves.
 Excel only caches the error values `#N/A` in the chart data cache. Others are written 
 a 0 and become indistinguishable from real zero in the chart cache.
 
+`ChartRef` only applies to `c:` charts and not `cx:` charts.
+
 
 !!! note
     For `kind == :multiLvlStr` each element of `data` is itself a level vector,
@@ -897,6 +903,19 @@ struct ChartRef
     ptCount::Int
     data::Vector
     errors::Dict{Int,UInt64}
+end
+
+# chart part path => (sheet name, from, to, rId)
+const ChartAnchor = NamedTuple{
+    (:sheet, :from, :to, :rId),
+    Tuple{String,Union{Nothing,String},Union{Nothing,String},String},
+}
+
+# Internal: one discovered chart part, before parsing.
+struct ChartLocation
+    path::String
+    anchor::Union{Nothing,ChartAnchor}
+    schema::Symbol   # :c or :cx
 end
 
 """
@@ -919,6 +938,27 @@ struct ChartSeries
     bubble_sizes::Union{Nothing,ChartRef}
 end
 
+const ChartRange = Union{Nothing,SheetCellRef,SheetCellRange,SheetRowRange,SheetColumnRange,NonContiguousRange}
+
+const ChartRanges = @NamedTuple{
+    idx::Int,
+    name::Union{Nothing,String},
+    categories::ChartRange,
+    values::ChartRange,
+    bubble_sizes::ChartRange,
+}
+
+
+"""
+    AbstractChart
+
+Supertype for charts read from a workbook. Two concrete subtypes exist:
+[`Chart`](@ref) for the standard `c:` schema, and [`ChartEx`](@ref) for the
+newer `cx:` schema used by waterfall, funnel, treemap, sunburst, histogram,
+Pareto, box & whisker and region map charts.
+"""
+abstract type AbstractChart end
+
 """
     Chart
 
@@ -934,7 +974,7 @@ Metadata for one chart part, plus its series.
 - `charttypes` - e.g. `[:barChart]`, or several for a combo chart.
 - `series` - `Vector{ChartSeries}` in document order.
 """
-struct Chart
+struct Chart <: AbstractChart
     path::String
     name::String
     rId::Union{Nothing,String}
@@ -944,4 +984,36 @@ struct Chart
     title::Union{Nothing,String}
     charttypes::Vector{Symbol}
     series::Vector{ChartSeries}
+end
+
+"""
+    ChartEx
+
+Metadata for one `chartEx` part. These use the newer `cx:` schema - waterfall,
+funnel, treemap, sunburst, histogram, Pareto, box & whisker, region map - and
+are currently read for discovery only: chart type, title and source ranges are
+available; cached values and appearance are not.
+
+Fields shared with [`Chart`](@ref) have the same meaning.
+
+# Fields
+- `layouts` - raw `cx:series/@layoutId` values in document order. Prefer
+  [`XLSX.chartType`](@ref), which normalises these.
+- `refs` - `cx:f` formulae from `cx:chartData`. `cx` dimensions are shared
+  across series rather than owned by one, so this is a flat list.
+- `binning` - whether any series carries `cx:binning`, which distinguishes a
+  histogram from a plain clustered column chart.
+"""
+struct ChartEx <: AbstractChart
+    path::String
+    name::String
+    rId::Union{Nothing,String}
+    sheet::Union{Nothing,String}
+    from::Union{Nothing,String}
+    to::Union{Nothing,String}
+    title::Union{Nothing,String}
+    layouts::Vector{String}
+    refs::Vector{String}
+    ranges::Vector{ChartRange}
+    binning::Bool
 end

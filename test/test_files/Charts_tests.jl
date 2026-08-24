@@ -269,15 +269,43 @@
         @test c.series[1].values.data == [10.0, 20.0, 15.0, 5.0]
     end
 
-    @testset "chartEx is not read" begin  # chart_ex.xlsx
-        f = XLSX.readxlsx(joinpath(data_directory, "chart_ex.xlsx"))
+    @testset "chartEx is read for discovery" begin
+        f = XLSX.readxlsx(joinpath(data_directory, "chart_ex.xlsx"))   # your path
 
-        # The part exists but uses the cx: schema, so nothing is returned - and
-        # the user is told why rather than left with a bare empty vector.
-        charts = @test_logs (:warn, r"chartEx") match_mode = :any XLSX.getCharts(f)
-        @test isempty(charts)
+        charts = @test_nowarn XLSX.getCharts(f)
+        @test length(charts) == 1
+
+        c = charts[1]
+        @test c isa XLSX.ChartEx
+        @test XLSX.chartSchema(c) === :cx
+        @test XLSX.chartType(c) === :waterfall
+        @test c.name == "chartEx1"
+        @test c.sheet == "Data"
+        @test c.from == "G9"
+        @test length(c.refs) == 2
+        @test c.refs == ["_xlchart.v1.0", "_xlchart.v1.1"]
+        ranges = XLSX.getChartRanges(c)
+        @test length(ranges) == 2
+        @test all(!isnothing, ranges)
+        @test string(ranges[1]) == "Data!A2:A5"
+        @test string(ranges[2]) == "Data!B2:B5"        
+
+        # Ranges resolve; cached values do not exist.
+        ranges = XLSX.getChartRanges(c)
+        @test length(ranges) == 2
+        @test all(!isnothing, ranges)
+
+        err = @test_throws XLSX.XLSXError XLSX.getChartData(c)
+        @test occursin("waterfall", err.value.msg)
+        @test occursin("chartEx", err.value.msg)
+
+        # Reachable by name and by rId, like a c: chart.
+        @test XLSX.getChart(f, "chartEx1") isa XLSX.ChartEx
+        @test XLSX.getChart(f, "chartEx1.xml") isa XLSX.ChartEx
+
+        # Sheet-scoped discovery finds it too.
+        @test length(XLSX.getCharts(f["Data"])) == 1
     end
-
     @testset "external reference" begin  # chart_external.xlsx
         f = XLSX.readxlsx(joinpath(data_directory, "chart_external.xlsx"))
         c = XLSX.getCharts(f)[1]
@@ -476,6 +504,45 @@
         i = findfirst(x -> x.chart == bub.name, all_f)
         @test !isnothing(i)
         @test all_f[i].ranges == rb
+     
+    end
 
+    @testset "mixed c: and cx: on one sheet" begin
+        f = XLSX.readxlsx(joinpath(data_directory, "chart_mixed.xlsx"))
+        charts = XLSX.getCharts(f)
+
+        @test length(charts) == 2
+        @test count(c -> c isa XLSX.Chart, charts) == 1
+        @test count(c -> c isa XLSX.ChartEx, charts) == 1
+        @test issetequal(XLSX.chartSchema.(charts), [:c, :cx])
+
+        # Each chart keeps its own anchor — the risk is one anchor's from/to
+        # being attributed to the other chart's frame.
+        @test all(c -> !isnothing(c.sheet), charts)
+
+        c  = only(filter(x -> x isa XLSX.Chart,   charts))
+        cx = only(filter(x -> x isa XLSX.ChartEx, charts))
+
+        @test cx.from == "F1"
+        @test c.from  == "F17"
+        @test XLSX.chartType(c)  === :barChart      # adjust to what you inserted
+        @test XLSX.chartType(cx) === :waterfall
+
+        # Data works for one, throws for the other; ranges work for both.
+        @test XLSX.getChartData(c) isa XLSX.DataTable
+        @test_throws XLSX.XLSXError XLSX.getChartData(cx)
+        @test !isempty(XLSX.getChartRanges(c))
+        @test all(!isnothing, XLSX.getChartRanges(cx))
+
+        # Lookup by name reaches both.
+        @test XLSX.getChart(f, c.name)  isa XLSX.Chart
+        @test XLSX.getChart(f, cx.name) isa XLSX.ChartEx
+
+        # Sheet-scoped discovery finds both.
+        @test length(XLSX.getCharts(f[c.sheet])) == 2
+
+        # Document order within the drawing, not schema order.
+        @test charts[1] isa XLSX.ChartEx
+        @test charts[2] isa XLSX.Chart
     end
 end

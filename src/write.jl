@@ -708,12 +708,11 @@ function update_workbook_xml!(xl::XLSXFile) # Need to update <sheets> and <defin
         end
 
         for (k, v) in wb.workbook_names
-            if typeof(v.value) <: DefinedNameRangeTypes
-                v = make_absolute(v)
-            else
-                v = string(v.value)
+            txt = v.value isa DefinedNameRangeTypes ? make_absolute(v) : string(v.value)
+            dn_node = XML.Element("$(pfx)definedName", name=k, XML.Text(txt))
+            if v.hidden
+                dn_node["hidden"] = "1"
             end
-            dn_node = XML.Element("$(pfx)definedName", name=k, XML.Text(v))
             push!(definedNames, dn_node)
         end
 
@@ -723,15 +722,14 @@ function update_workbook_xml!(xl::XLSXFile) # Need to update <sheets> and <defin
             ordinal = get(sheet_ordinals, first(k), nothing)
             isnothing(ordinal) &&
                 throw(XLSXError("Defined name `$(last(k))` is scoped to sheetId $(first(k)), which is not in the workbook."))
-            if typeof(v.value) <: DefinedNameRangeTypes
-                v = make_absolute(v)
-            else
-                v = string(v.value)
+            txt = v.value isa DefinedNameRangeTypes ? make_absolute(v) : string(v.value)
+            dn_node = XML.Element("$(pfx)definedName", name=last(k),
+                                localSheetId=string(ordinal - 1), XML.Text(txt))
+            if v.hidden
+                dn_node["hidden"] = "1"
             end
-            dn_node = XML.Element("$(pfx)definedName", name=last(k), localSheetId=string(ordinal - 1), XML.Text(v))
             push!(definedNames, dn_node)
         end
-
         wbdoc[i][j] = definedNames # Add the new definedNames block to the workbook's xml file
     end
 
@@ -1526,6 +1524,22 @@ function copysheet!(ws::Worksheet, name::AbstractString="")::Worksheet
         xl.data[new_drawing_rels]  = copynode(xl.data[src_drawing_rels])
         xl.files[new_drawing_rels] = true
 
+        # A chart part belongs to one drawing, unlike media, so the copy needs
+        # its own. Clone each and repoint the copied rels at the clone;
+        # otherwise both sheets render the same chart part and editing either
+        # changes both.
+        for n in elements_with_tag(xml_root_element(xl.data[new_drawing_rels]), "Relationship")
+            t = get_attr(n, "Type")
+            (t == REL_CHART || t == REL_CHARTEX) || continue
+            get_attr(n, "TargetMode") == "External" && continue
+            target = get_attr(n, "Target")
+            old_t  = resolve_relative_target("xl/drawings", target)
+            haskey(xl.data, old_t) || continue
+            new_t  = clone_owned_part!(xl, old_t)
+            t == REL_CHART   && repoint_chart_refs!(xl, new_t, ws.name, new_ws.name)
+            t == REL_CHARTEX && repoint_chartex_refs!(xl, new_t, ws.name, new_ws.name)
+            n["Target"] = _retarget(target, last(_split_zip_path(new_t)))        end
+        
         # Register content types for drawing and any media it references
         register_content_type!(xl, "[Content_Types].xml";
                             tag="Override", key="PartName", val="/$new_drawing_path",
@@ -1890,6 +1904,18 @@ function deletesheet!(wb::Workbook, name::AbstractString)::XLSXFile
         for media_name in deleted_names
             if media_name ∉ still_used
                 delete!(xf.binary_data, "xl/media/$media_name")
+            end
+        end
+        # Everything else the drawing references — chart and chartEx parts and
+        # their own clusters (style, colors, themeOverride) — belongs to this
+        # drawing alone, so it goes with it. Media is excluded: it is shared
+        # across drawings and handled by the dedup above.
+        if haskey(xf.data, drawing_rels)
+            for n in elements_with_tag(xml_root_element(xf.data[drawing_rels]), "Relationship")
+                get_attr(n, "Type") == REL_IMAGE && continue
+                get_attr(n, "TargetMode") == "External" && continue
+                target = resolve_relative_target("xl/drawings", get_attr(n, "Target"))
+                delete_part_and_orphans!(xf, target)
             end
         end
 

@@ -83,7 +83,8 @@ export
            getConditionalFormats, getColumnWidth, getRowHeight,
            getFormat, getFont, getBorder, getFill, getAlignment,
            DataTable, Table, TableStyleInfo, table, tables,
-           getCharts, getChart, getChartData, Chart, ChartSeries, ChartRef,
+           AbstractChart, Chart, ChartEx, chartSchema, chartType,
+           getCharts, getChart, getChartData, getChartRanges, ChartSeries, ChartRef,
            getDefinedNames, getAllDefinedNames,
            Workbook
     """))

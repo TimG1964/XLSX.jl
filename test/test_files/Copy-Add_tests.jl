@@ -365,4 +365,138 @@
         end
 
     end
+    @testset "deletesheet! removes chart parts (issue #427)" begin
+        f = XLSX.opentemplate(joinpath(data_directory, "chart_basic.xlsx"))
+        XLSX.addsheet!(f, "Keep")
+        XLSX.deletesheet!(f, "Data")
+
+        @test isempty(XLSX.getCharts(f))
+        @test isempty(XLSX.chart_parts(f))
+        @test !haskey(f.data, "xl/charts/chart1.xml")
+        @test !haskey(f.data, "xl/drawings/drawing1.xml")
+    end
+
+    @testset "deletesheet! with a chartEx chart" begin
+        f = XLSX.opentemplate(joinpath(data_directory, "chart_ex.xlsx"))
+        XLSX.addsheet!(f, "Keep")
+
+        XLSX.deletesheet!(f, "Data")
+        @test !XLSX.hassheet(f, "Data")
+        @test isempty(XLSX.getCharts(f))
+
+        # The chartEx cluster and the drawing must all go.
+        for p in ("xl/charts/chartEx1.xml", "xl/charts/style1.xml",
+                "xl/charts/colors1.xml", "xl/drawings/drawing1.xml")
+            @test !haskey(f.data, p)
+        end
+        @test isempty(XLSX.chartex_parts(f))
+
+        # And the file must still be writable and readable.
+        g = XLSX.writexlsx("mytest.xlsx", f, overwrite=true)          # your save_outfile helper
+        h = XLSX.readxlsx(g)
+        @test isempty(XLSX.getCharts(h))
+    end
+
+    @testset "copysheet! clones and repoints c: chart parts" begin
+        f = XLSX.opentemplate(joinpath(data_directory, "chart_basic.xlsx"))
+        XLSX.copysheet!(f["Data"], "Copy")
+
+        charts = XLSX.getCharts(f)
+        @test length(charts) == 2
+        @test allunique(c.path for c in charts)
+        @test issetequal((c.sheet for c in charts), ["Data", "Copy"])
+
+        cp   = only(filter(c -> c.sheet == "Copy", charts))
+        orig = only(filter(c -> c.sheet == "Data", charts))
+
+        # The copy plots the copied sheet. getChartRanges returns one named
+        # tuple per series for a `c:` chart, so the ranges are in its fields.
+        cp_ranges = XLSX.getChartRanges(cp)
+        @test [string(r.categories) for r in cp_ranges] == ["Copy!A2:A5", "Copy!A2:A5"]
+        @test [string(r.values)     for r in cp_ranges] == ["Copy!B2:B5", "Copy!C2:C5"]
+
+        # Series name refs are repointed too, not just categories and values.
+        @test all(s -> startswith(s.name_ref.ref, "Copy!"), cp.series)
+
+        # The original is untouched — catches copynode aliasing the two trees.
+        orig_ranges = XLSX.getChartRanges(orig)
+        @test [string(r.categories) for r in orig_ranges] == ["Data!A2:A5", "Data!A2:A5"]
+        @test [string(r.values)     for r in orig_ranges] == ["Data!B2:B5", "Data!C2:C5"]
+        @test all(s -> startswith(s.name_ref.ref, "Data!"), orig.series)
+
+        # The cache is deliberately left alone, so the copy still reads.
+        @test XLSX.getChartData(cp) isa XLSX.DataTable
+
+        # And it survives a round trip.
+        g = XLSX.writexlsx("mytest.xlsx", f; overwrite=true)
+        h = XLSX.readxlsx(g)
+        cp2 = only(filter(c -> c.sheet == "Copy", XLSX.getCharts(h)))
+        @test [string(r.values) for r in XLSX.getChartRanges(cp2)] ==
+              ["Copy!B2:B5", "Copy!C2:C5"]
+    end
+    @testset "copysheet! with a chartEx chart" begin
+        f = XLSX.opentemplate(joinpath(data_directory, "chart_ex.xlsx"))
+        XLSX.copysheet!(f["Data"], "Copy")
+
+        charts = XLSX.getCharts(f)
+        @test length(charts) == 2
+        @test all(c -> c isa XLSX.ChartEx, charts)
+        @test issetequal((c.sheet for c in charts), ["Data", "Copy"])
+        @test allunique(c.path for c in charts)
+        @test all(c -> XLSX.chartType(c) === :waterfall, charts)
+
+        cp = only(filter(c -> c.sheet == "Copy", charts))
+
+        # The copy gets its own hidden defined names, pointing at the copy.
+        @test cp.refs == ["_xlchart.v2.0", "_xlchart.v2.1"]
+        @test all(r -> startswith(string(r), "Copy!"), XLSX.getChartRanges(cp))
+
+        # The original's names and ranges are untouched.
+        orig = only(filter(c -> c.sheet == "Data", charts))
+        @test orig.refs == ["_xlchart.v1.0", "_xlchart.v1.1"]
+        @test all(r -> startswith(string(r), "Data!"), XLSX.getChartRanges(orig))
+
+        # Two names added, all still hidden and none user-visible.
+        all_names = XLSX.getAllDefinedNames(f; include_system=true)
+        @test length(all_names) == 11
+        @test all(dn -> dn.hidden, all_names)
+        @test isempty(XLSX.getDefinedNames(f))
+        
+        g = XLSX.writexlsx("mytest.xlsx", f; overwrite=true)
+        h = XLSX.readxlsx(g)
+        @test length(XLSX.getCharts(h)) == 2
+        @test allunique(c.path for c in XLSX.getCharts(h))
+    end
+    @testset "copysheet! clones chart parts for both schemas" begin
+        f = XLSX.opentemplate(joinpath(data_directory, "chart_mixed.xlsx"))
+        XLSX.copysheet!(f["Data"], "Copy")
+
+        charts = XLSX.getCharts(f)
+        @test length(charts) == 4
+        @test allunique(c.path for c in charts)
+        @test count(c -> c.sheet == "Copy", charts) == 2
+        @test issetequal((XLSX.chartType(c) for c in charts if c.sheet == "Copy"),
+                        [:waterfall, :barChart])
+
+        # Stems are handled per family: chart1 -> chart2, chartEx1 -> chartEx2.
+        @test issetequal((c.name for c in charts),
+                        ["chart1", "chart2", "chartEx1", "chartEx2"])
+
+        # Anchors come across with the drawing.
+        @test issetequal((c.from for c in charts), ["F1", "F17"])
+
+        # The c: chart is repointed at the copy; the cx: one is not yet.
+        bar = only(filter(c -> c.sheet == "Copy" && c isa XLSX.Chart, charts))
+        @test all(r -> startswith(string(r.values), "Copy!"), XLSX.getChartRanges(bar))
+
+        wf = only(filter(c -> c.sheet == "Copy" && c isa XLSX.ChartEx, charts))
+        @test all(r -> startswith(string(r), "Copy!"), XLSX.getChartRanges(wf))
+
+        g = XLSX.writexlsx("mytest.xlsx", f; overwrite=true)
+        h = XLSX.readxlsx(g)
+        @test length(XLSX.getCharts(h)) == 4
+        @test allunique(c.path for c in XLSX.getCharts(h))
+    end
+
+    isfile("mytest.xlsx") && rm("mytest.xlsx")
 end

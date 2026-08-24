@@ -11,14 +11,19 @@
 # never re-read from the worksheet, so it reflects the values as of the last time
 # Excel saved the file.
 #
+# Two schemas are handled. The original `c:` schema covers the sixteen classic
+# plot types and is read in full. The newer `cx:` schema (waterfall, funnel,
+# treemap, sunburst, histogram, Pareto, box & whisker, region map) is read for
+# discovery only: type, title and source ranges, but no cached values.
+#
 
-const REL_CHART =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart"
+const REL_CHART   = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart"
+const REL_CHARTEX = "http://schemas.microsoft.com/office/2014/relationships/chartEx"
 
-const CT_CHART = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
-
+const CT_CHART   = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
 const CT_CHARTEX = "application/vnd.ms-office.chartex+xml"
 
+const MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 
 # The <c:plotArea> children that group series. Series live one level below these.
 const CHART_GROUP_TAGS = Set([
@@ -28,85 +33,130 @@ const CHART_GROUP_TAGS = Set([
     "bubbleChart",
 ])
 
-# chart part path => (sheet name, from, to, rId)
-const ChartAnchor = NamedTuple{
-    (:sheet, :from, :to, :rId),
-    Tuple{String,Union{Nothing,String},Union{Nothing,String},String},
-}
+# Drawing anchor children that can hold a graphic frame, directly or nested.
+const SHAPE_TAGS = ("graphicFrame", "pic", "sp", "grpSp", "cxnSp", "contentPart")
 
-const ChartRange = Union{Nothing,SheetCellRef,SheetCellRange,SheetRowRange,SheetColumnRange,NonContiguousRange}
 
-const ChartRanges = @NamedTuple{
-    idx::Int,
-    name::Union{Nothing,String},
-    categories::ChartRange,
-    values::ChartRange,
-    bubble_sizes::ChartRange,
-}
-
-#=
 # ===========================================================================
 # Traversal helpers
 # ===========================================================================
 
-# First-match, `nothing`-tolerant counterpart of `elements_with_tag`, which
-# collects every match. Iterates `XML.eachelement` (a lazy filter) rather than
-# `element_children`, so nothing is allocated to find one child. The manual loop
-# in `_parse_cell_marker` (images.jl) could be replaced by this.
-function first_element_with_tag(node::Union{Nothing,XML.Node}, tag::String)::Union{Nothing,XML.Node}
-    isnothing(node) && return nothing
-    for n in XML.eachelement(node)
-        localname(n) == tag && return n
-    end
-    return nothing
-end
-
-# Text of a simple child element, e.g. <c:f>Sheet1!$A$1</c:f>. `XML.is_simple_value`
-# returns the text of an element with no attributes and a single Text/CData child,
-# or `nothing`, which is precisely the shape of every element read here.
-function child_text(node::Union{Nothing,XML.Node}, tag::String)::Union{Nothing,String}
-    el = first_element_with_tag(node, tag)
-    isnothing(el) && return nothing
-    v = XML.is_simple_value(el)
-    return isnothing(v) ? nothing : String(v)
-end
-
-# `val` attribute of an optional child element, e.g. <c:order val="1"/>.
-function child_val(node::Union{Nothing,XML.Node}, tag::String, default::Int)::Int
-    el = first_element_with_tag(node, tag)
-    isnothing(el) && return default
-    return something(tryparse(Int, get_attr(el, "val")), default)
-end
-
-# Attribute lookup ignoring any namespace prefix (`r:id`, `id`, ...).
-function get_prefixed_attr(node::XML.Node, key::AbstractString)::Union{Nothing,String}
-    atts = XML.attributes(node)
-    isnothing(atts) && return nothing
-    for (k, v) in atts
-        occursin(':', k) || continue     # unprefixed => no namespace, never a match
-        localname(k) == key && return v
-    end
-    return nothing
-end
-=#
-
 """
-Id => resolved target path for the relationships of `part_path`, filtered by
-relationship type. Targets are resolved against the part's own directory, so
-`../charts/chart1.xml` from `xl/drawings/drawing1.xml` gives `xl/charts/chart1.xml`.
+Id => (resolved target path, relationship type) for the relationships of
+`part_path` whose type is in `reltypes`. Targets are resolved against the part's
+own directory, so `../charts/chart1.xml` from `xl/drawings/drawing1.xml` gives
+`xl/charts/chart1.xml`.
 """
-function rid_to_target(xf::XLSXFile, part_path::String, reltype::String)::Dict{String,String}
+function rid_to_target(xf::XLSXFile, part_path::String, reltypes)::Dict{String,Tuple{String,String}}
     dir, fname = _split_zip_path(part_path)
     rels_path = isempty(dir) ? "_rels/$fname.rels" : "$dir/_rels/$fname.rels"
-    targets = Dict{String,String}()
+    targets = Dict{String,Tuple{String,String}}()
     haskey(xf.data, rels_path) || return targets
     for n in elements_with_tag(xml_root_element(xf.data[rels_path]), "Relationship")
-        get_attr(n, "Type") == reltype && get_attr(n, "TargetMode") != "External" || continue
+        rt = get_attr(n, "Type")
+        rt in reltypes && get_attr(n, "TargetMode") != "External" || continue
         id = get_attr(n, "Id")
         isempty(id) && continue
-        targets[id] = resolve_relative_target(dir, get_attr(n, "Target"))
+        targets[id] = (resolve_relative_target(dir, get_attr(n, "Target")), rt)
     end
     return targets
+end
+
+"Child elements of `node` whose local name is in `tags`."
+function elements_with_tags(node::XML.Node, tags)::Vector{XML.Node}
+    out = XML.Node[]
+    for child in XML.eachelement(node)
+        localname(child) in tags && push!(out, child)
+    end
+    return out
+end
+
+"""
+The effective shape elements of a drawing anchor, transparently unwrapping any
+`mc:AlternateContent`.
+
+Charts using the `cx:` schema are always written inside `mc:AlternateContent`,
+with the real graphic frame under `mc:Choice` and a static picture under
+`mc:Fallback`. Without this unwrapping they are invisible to discovery. Newer
+picture effects and slicers use the same wrapper, so this is deliberately
+generic rather than a `chartEx` special case.
+"""
+function effective_shapes(anchor::XML.Node)::Vector{XML.Node}
+    out = XML.Node[]
+    for child in XML.eachelement(anchor)
+        name = localname(child)
+        if name == "AlternateContent"
+            append!(out, resolve_alternate_content(child))
+        elseif name in SHAPE_TAGS
+            push!(out, child)
+        end
+    end
+    return out
+end
+
+function resolve_alternate_content(ac::XML.Node)::Vector{XML.Node}
+    fallback = nothing
+    for branch in XML.eachelement(ac)
+        n = localname(branch)
+        if n == "Choice"
+            # The first Choice unconditionally: branches differ in fidelity, not
+            # in which chart they reference, and discovery only needs to see the
+            # frame. Checking `Requires` matters only once we render.
+            return elements_with_tags(branch, SHAPE_TAGS)
+        elseif n == "Fallback" && isnothing(fallback)
+            fallback = branch
+        end
+    end
+    return isnothing(fallback) ? XML.Node[] : elements_with_tags(fallback, SHAPE_TAGS)
+end
+
+# The chart reference sits at a fixed depth below a graphic frame:
+#   <xdr:graphicFrame><a:graphic><a:graphicData><c:chart r:id="..."/>
+# `cx:chart` sits in exactly the same place, so one walk covers both; the
+# relationship type, not the element, tells the two schemas apart.
+function frame_chart_element(shape::XML.Node)::Union{Nothing,XML.Node}
+    localname(shape) == "graphicFrame" || return nothing
+    graphic = first_element_with_tag(shape, "graphic")
+    graphicdata = first_element_with_tag(graphic, "graphicData")
+    return first_element_with_tag(graphicdata, "chart")
+end
+
+"""
+Concatenated text of a DrawingML rich-text block (`c:rich`, `cx:rich`), which is
+`rich -> a:p* -> (a:r | a:fld)* -> a:t`.
+
+Distinct from the shared-string/inline-string text of a worksheet cell, which
+has no paragraph level. `nothing` rather than `""` when empty, so callers can
+fall through to a cached title.
+"""
+function drawingml_text(rich::Union{Nothing,XML.Node})::Union{Nothing,String}
+    isnothing(rich) && return nothing
+    buf = IOBuffer()
+    for p in XML.eachelement(rich)
+        localname(p) == "p" || continue
+        for run in XML.eachelement(p)
+            localname(run) in ("r", "fld") || continue
+            print(buf, something(child_text(run, "t"), ""))
+        end
+    end
+    s = String(take!(buf))
+    return isempty(s) ? nothing : s
+end
+
+"""
+Resolve a `cx:f` source reference to a range.
+
+Excel writes chartEx sources indirectly, through an auto-generated workbook
+defined name (`_xlchart.v1.0`) rather than as a direct range, so a name is
+resolved before parsing. Direct references are parsed as-is. `nothing` where
+the name is absent or holds a constant rather than a reference.
+"""
+function resolve_chartex_ref(xf::XLSXFile, ref::AbstractString)::ChartRange
+    r = parse_chart_range(ref)
+    isnothing(r) || return r
+    is_workbook_defined_name(xf, ref) || return nothing
+    v = get_defined_name_value(get_workbook(xf), ref)
+    return is_defined_name_value_a_reference(v) ? v : nothing
 end
 
 # ===========================================================================
@@ -193,6 +243,7 @@ function first_cached_string(r::Union{Nothing,ChartRef})::Union{Nothing,String}
     return string(v)
 end
 
+
 # ===========================================================================
 # External references
 # ===========================================================================
@@ -222,8 +273,9 @@ function materialise(xf::XLSXFile, r::Union{Nothing,ChartRef})::Union{Nothing,Ch
     return ChartRef(r.kind, materialise_external_ref(xf, r.ref), r.format_code, r.ptCount, r.data, r.errors)
 end
 
+
 # ===========================================================================
-# Chart part parsing
+# Part enumeration
 # ===========================================================================
 
 chart_name(path::AbstractString) = first(splitext(last(_split_zip_path(String(path)))))
@@ -239,15 +291,13 @@ function parts_with_content_type(xf::XLSXFile, ctype::String)::Vector{String}
     return sort!(paths)
 end
 
-chart_parts(xf::XLSXFile) = filter(p -> haskey(xf.data, p), parts_with_content_type(xf, CT_CHART))
-chartex_parts(xf::XLSXFile) = parts_with_content_type(xf, CT_CHARTEX)
+chart_parts(xf::XLSXFile)   = filter(p -> haskey(xf.data, p), parts_with_content_type(xf, CT_CHART))
+chartex_parts(xf::XLSXFile) = filter(p -> haskey(xf.data, p), parts_with_content_type(xf, CT_CHARTEX))
 
-function chartex_note(xf::XLSXFile)::String
-    n = length(chartex_parts(xf))
-    n == 0 && return ""
-    return " The file also contains $n chart$(n == 1 ? "" : "s") using the `chartEx` schema " *
-           "(waterfall, funnel, treemap, sunburst, histogram, box & whisker), which XLSX.jl cannot read."
-end
+
+# ===========================================================================
+# Chart part parsing (c: schema)
+# ===========================================================================
 
 function parse_chart_series(ser::XML.Node, charttype::Symbol; read_cached_values::Bool=true)::ChartSeries
     # The series name always needs its cache, even under `read_cached_values=false`: it is metadata.
@@ -274,21 +324,8 @@ end
 function parse_chart_title(chartnode::Union{Nothing,XML.Node})::Union{Nothing,String}
     tx = first_element_with_tag(first_element_with_tag(chartnode, "title"), "tx")
     isnothing(tx) && return nothing
-
-    rich = first_element_with_tag(tx, "rich")
-    if !isnothing(rich)
-        buf = IOBuffer()
-        for p in XML.eachelement(rich)
-            localname(p) == "p" || continue
-            for run in XML.eachelement(p)
-                localname(run) in ("r", "fld") || continue
-                print(buf, something(child_text(run, "t"), ""))
-            end
-        end
-        title = String(take!(buf))
-        return isempty(title) ? nothing : title
-    end
-
+    t = drawingml_text(first_element_with_tag(tx, "rich"))
+    isnothing(t) || return t
     return first_cached_string(parse_chart_ref(tx; read_cached_values=true))
 end
 
@@ -337,102 +374,224 @@ function parse_chart_part(
                  parse_chart_title(chartnode), charttypes, series)
 end
 
+
+# ===========================================================================
+# Chart part parsing (cx: schema)
+# ===========================================================================
+
+function parse_chartex_part(
+    xf::XLSXFile,
+    path::String;
+    rId::Union{Nothing,String}=nothing,
+    sheet::Union{Nothing,String}=nothing,
+    from::Union{Nothing,String}=nothing,
+    to::Union{Nothing,String}=nothing,
+)::ChartEx
+
+    haskey(xf.data, path) || throw(XLSXError("Chart part `$path` not found in the package."))
+
+    chartspace = xml_root_element(xf.data[path])
+    localname(chartspace) != "chartSpace" &&
+        throw(XLSXError("Malformed chartEx part $path. Root node name should be `chartSpace`. Found $(localname(chartspace))."))
+
+    # Source ranges live up front in cx:chartData, shared across series, rather
+    # than being carried by each series as in the c: schema.
+    refs = String[]
+    ranges = ChartRange[]
+    chartdata = first_element_with_tag(chartspace, "chartData")
+    if !isnothing(chartdata)
+        for d in elements_with_tag(chartdata, "data")
+            for dim in XML.eachelement(d)
+                localname(dim) in ("numDim", "strDim") || continue
+                fml = child_text(dim, "f")
+                isnothing(fml) && continue
+                push!(refs, fml)
+                push!(ranges, resolve_chartex_ref(xf, fml))
+            end
+        end
+    end
+
+    chartnode = first_element_with_tag(chartspace, "chart")
+    plotarea = first_element_with_tag(chartnode, "plotArea")
+    region = first_element_with_tag(plotarea, "plotAreaRegion")
+
+    # The chart type is an attribute here, not an element name.
+    layouts = String[]
+    binning = false
+    for ser in (isnothing(region) ? XML.Node[] : elements_with_tag(region, "series"))
+        lid = get_attr(ser, "layoutId")
+        isempty(lid) || push!(layouts, lid)
+        isnothing(first_element_with_tag(ser, "binning")) || (binning = true)
+    end
+
+    title = drawingml_text(first_element_with_tag(
+        first_element_with_tag(first_element_with_tag(chartnode, "title"), "tx"), "rich"))
+
+    _, fname = _split_zip_path(path)
+    return ChartEx(path, first(splitext(fname)), rId, sheet, from, to,
+                   title, layouts, refs, ranges, binning)
+end
+
+
 # ===========================================================================
 # Discovery: sheet -> drawing -> chart
 # ===========================================================================
 
-# Chart parts in document order, each with its anchor when a drawing references it.
-# Sheet-anchored charts come first (sheet order, then anchor order); parts the
-# package declares but no drawing references follow.
-function chart_positions(xf::XLSXFile)::Vector{Pair{String,Union{Nothing,ChartAnchor}}}
-    out = Pair{String,Union{Nothing,ChartAnchor}}[]
-    seen = Set{String}()
-    for (path, a) in chart_anchors(xf)
-        (path in seen || !haskey(xf.data, path)) && continue
-        push!(seen, path)
-        push!(out, path => a)
-    end
-    for path in chart_parts(xf)
-        path in seen && continue
-        push!(seen, path)
-        push!(out, path => nothing)
-    end
-    return out
-end
-
-function chart_positions(ws::Worksheet)::Vector{Pair{String,Union{Nothing,ChartAnchor}}}
-    xf = get_xlsxfile(ws)
-    anchors = Pair{String,ChartAnchor}[]
-    sheet_path = get_relationship_target_by_id("xl", get_workbook(ws), ws.relationship_id)
-    charts_for_sheet!(anchors, xf, sheet_path, ws.name)
-    out = Pair{String,Union{Nothing,ChartAnchor}}[]
-    seen = Set{String}()
-    for (path, a) in anchors
-        path in seen && continue
-        push!(seen, path)
-        push!(out, path => a)
-    end
-    return out
-end
-
-parse_chart_at(xf::XLSXFile, path::String, a::Nothing; kw...) = parse_chart_part(xf, path; kw...)
-parse_chart_at(xf::XLSXFile, path::String, a::ChartAnchor; kw...) = parse_chart_part(xf, path; kw..., a...)
-
-# The chart reference sits at a fixed depth in a drawing anchor:
-#   <xdr:*Anchor><xdr:graphicFrame><a:graphic><a:graphicData><c:chart r:id="..."/>
-# Walking it explicitly is both cheaper and more precise than a recursive search
-# for a "chart" element, which could match elsewhere in the anchor.
-function anchor_chart_element(anchor::XML.Node)::Union{Nothing,XML.Node}
-    frame = first_element_with_tag(anchor, "graphicFrame")
-    graphic = first_element_with_tag(frame, "graphic")
-    graphicdata = first_element_with_tag(graphic, "graphicData")
-    return first_element_with_tag(graphicdata, "chart")
-end
-
-function charts_for_sheet!(anchors::Vector{Pair{String,ChartAnchor}}, xf::XLSXFile, sheet_path::String, sheet_name::String)
+function charts_for_sheet!(found::Vector{ChartLocation}, xf::XLSXFile,
+                           sheet_path::String, sheet_name::String)
     drawing_path = _drawing_path_for_sheet(xf, sheet_path)
-    isnothing(drawing_path) && return anchors
-    haskey(xf.data, drawing_path) || return anchors
+    isnothing(drawing_path) && return found
+    haskey(xf.data, drawing_path) || return found
 
-    rid_to_chart = rid_to_target(xf, drawing_path, REL_CHART)
-    isempty(rid_to_chart) && return anchors
+    rid_map = rid_to_target(xf, drawing_path, (REL_CHART, REL_CHARTEX))
+    isempty(rid_map) && return found
 
     for anchor in XML.eachelement(xml_root_element(xf.data[drawing_path]))
         endswith(localname(anchor), "Anchor") || continue
-        chart_el = anchor_chart_element(anchor)
-        isnothing(chart_el) && continue
-        rId = get_prefixed_attr(chart_el, "id")
-        isnothing(rId) && continue
-        chart_path = get(rid_to_chart, rId, nothing)
-        isnothing(chart_path) && continue
-        push!(anchors, chart_path => (
-            sheet=sheet_name,
-            from=_parse_cell_marker(anchor, "from"; is_to=false),
-            to=_parse_cell_marker(anchor, "to"; is_to=true),
-            rId=rId,
-        ))
+        from = _parse_cell_marker(anchor, "from"; is_to=false)
+        to   = _parse_cell_marker(anchor, "to"; is_to=true)
+        for shape in effective_shapes(anchor)
+            chart_el = frame_chart_element(shape)
+            isnothing(chart_el) && continue
+            rId = get_prefixed_attr(chart_el, "id")
+            isnothing(rId) && continue
+            entry = get(rid_map, rId, nothing)
+            isnothing(entry) && continue        # a picture or shape, not a chart
+            chart_path, reltype = entry
+            haskey(xf.data, chart_path) || continue
+            push!(found, ChartLocation(chart_path,
+                                       (sheet=sheet_name, from=from, to=to, rId=rId),
+                                       reltype == REL_CHARTEX ? :cx : :c))
+        end
     end
 
-    return anchors
+    return found
 end
 
-function chart_anchors(xf::XLSXFile)::Vector{Pair{String,ChartAnchor}}
+function chart_anchors(xf::XLSXFile)::Vector{ChartLocation}
     wb = get_workbook(xf)
-    anchors = Pair{String,ChartAnchor}[]
+    found = ChartLocation[]
     for sheet in wb.sheets
         sheet_path = get_relationship_target_by_id("xl", wb, sheet.relationship_id)
-        charts_for_sheet!(anchors, xf, sheet_path, sheet.name)
+        charts_for_sheet!(found, xf, sheet_path, sheet.name)
     end
-    return anchors
+    return found
 end
+
+# Chart parts in document order, each with its anchor when a drawing references
+# it. Sheet-anchored charts come first (sheet order, then anchor order); parts
+# the package declares but no drawing references follow.
+function chart_positions(xf::XLSXFile)::Vector{ChartLocation}
+    out = ChartLocation[]
+    seen = Set{String}()
+    for loc in chart_anchors(xf)
+        loc.path in seen && continue
+        push!(seen, loc.path)
+        push!(out, loc)
+    end
+    for (path, sch) in Iterators.flatten((
+            ((p, :c)  for p in chart_parts(xf)),
+            ((p, :cx) for p in chartex_parts(xf)),
+        ))
+        path in seen && continue
+        push!(seen, path)
+        push!(out, ChartLocation(path, nothing, sch))
+    end
+    return out
+end
+
+function chart_positions(ws::Worksheet)::Vector{ChartLocation}
+    xf = get_xlsxfile(ws)
+    found = ChartLocation[]
+    sheet_path = get_relationship_target_by_id("xl", get_workbook(ws), ws.relationship_id)
+    charts_for_sheet!(found, xf, sheet_path, ws.name)
+    out = ChartLocation[]
+    seen = Set{String}()
+    for loc in found
+        loc.path in seen && continue
+        push!(seen, loc.path)
+        push!(out, loc)
+    end
+    return out
+end
+
+function parse_chart_at(xf::XLSXFile, loc::ChartLocation; kw...)::AbstractChart
+    a = loc.anchor
+    if loc.schema === :cx
+        return isnothing(a) ? parse_chartex_part(xf, loc.path) :
+                              parse_chartex_part(xf, loc.path; a...)
+    end
+    return isnothing(a) ? parse_chart_part(xf, loc.path; kw...) :
+                          parse_chart_part(xf, loc.path; kw..., a...)
+end
+
+# Excel names a chartEx chart's sources `_xlchart.v<N>.<M>`, where N is a
+# counter it bumps per batch of charts and M runs within the batch. Pick a
+# fresh N so a copied chart's names cannot collide with the original's.
+function _next_xlchart_series(wb::Workbook)::Int
+    n = 0
+    for name in keys(wb.workbook_names)
+        m = match(r"^_xlchart\.v(\d+)\.\d+$", name)
+        isnothing(m) && continue
+        n = max(n, parse(Int, m.captures[1]))
+    end
+    return n + 1
+end
+
+# ===========================================================================
+# Accessors common to both schemas
+# ===========================================================================
+
+"""
+    chartSchema(c::AbstractChart) -> Symbol
+
+`:c` for charts in the original schema, `:cx` for newer `chartEx` charts.
+"""
+chartSchema(::Chart)   = :c
+chartSchema(::ChartEx) = :cx
+
+"""
+    chartType(c::AbstractChart) -> Symbol
+
+The kind of chart, as a single symbol, whatever the schema.
+
+For `c:` charts this is the plot-group tag - `:barChart`, `:scatterChart` - or
+`:combo` where the chart has more than one group. The full list is in
+`c.charttypes`, and each series carries its own group in `s.charttype`.
+
+For `cx:` charts it is the normalised layout: `:waterfall`, `:funnel`,
+`:treemap`, `:sunburst`, `:boxWhisker`, `:regionMap`, `:histogram`, `:pareto`,
+or `:clusteredColumn`. Histogram and Pareto are not distinct layouts in the
+file - a histogram is a clustered column series carrying `cx:binning`, and a
+Pareto adds a second `paretoLine` series - so both are derived here.
+"""
+function chartType(c::Chart)::Symbol
+    isempty(c.charttypes) && return :unknown
+    return length(c.charttypes) == 1 ? only(c.charttypes) : :combo
+end
+
+function chartType(c::ChartEx)::Symbol
+    ls = c.layouts
+    isempty(ls) && return :unknown
+    "paretoLine" in ls && return :pareto
+    length(ls) == 1 || return :combo
+    only(ls) == "clusteredColumn" && return c.binning ? :histogram : :clusteredColumn
+    return Symbol(only(ls))
+end
+
+chartpath(c::AbstractChart)  = c.path
+chartname(c::AbstractChart)  = c.name
+charttitle(c::AbstractChart) = c.title
+sheetname(c::AbstractChart)  = c.sheet
+
 
 # ===========================================================================
 # Public API
 # ===========================================================================
 
 """
-    getCharts(xf::XLSXFile; read_cached_values=true, get_external_refs=false) -> Vector{Chart}
-    getCharts(ws::Worksheet; read_cached_values=true, get_external_refs=false) -> Vector{Chart}
+    getCharts(xf::XLSXFile; read_cached_values=true, get_external_refs=false) -> Vector{AbstractChart}
+    getCharts(ws::Worksheet; read_cached_values=true, get_external_refs=false) -> Vector{AbstractChart}
 
 Return every chart in the file, or every chart anchored to `ws`, together with
 the data Excel cached inside each chart part.
@@ -458,7 +617,9 @@ julia> c.title
 julia> c.series[1].values.ref
 "Summary!\$B\$2:\$B\$5"
 
-julia> XLSX.getChartData(c)
+# To create a set of DataFrames from chart data skiping ChartEx
+julia> dfs = Dict(c.name => DataFrame(XLSX.getChartData(c))
+                  for c in XLSX.getCharts(f) if c isa XLSX.Chart)
 ```
 
 !!! note
@@ -467,43 +628,56 @@ julia> XLSX.getChartData(c)
     tool that does not populate the cache will return empty series.
 
 !!! note
-    Charts using the newer `chartEx` schema (waterfall, funnel, treemap,
-    sunburst, histogram, box & whisker) are stored under a different namespace
-    and are not read.
+    Charts using the newer `chartEx` schema - waterfall, funnel, treemap,
+    sunburst, histogram, Pareto, box & whisker, region map - are returned as
+    [`XLSX.ChartEx`](@ref) rather than [`XLSX.Chart`](@ref). Their type, title
+    and source ranges are available; their cached values are not, and
+    [`XLSX.getChartData`](@ref) throws for them. Use [`XLSX.chartSchema`](@ref) or
+    `isa` to tell the two apart. `read_cached_values` and `get_external_refs`
+    have no effect on them.
 
-See also [`XLSX.getChart`](@ref), [`XLSX.getChartData`](@ref).
+See also [`XLSX.getChart`](@ref), [`XLSX.getChartData`](@ref), [`XLSX.chartType`](@ref).
 """
-function getCharts(x::Union{Worksheet,XLSXFile}; read_cached_values::Bool=true, get_external_refs::Bool=false)::Vector{Chart}
+function getCharts(x::Union{Worksheet,XLSXFile};
+                   read_cached_values::Bool=true,
+                   get_external_refs::Bool=false)::Vector{AbstractChart}
     xf = get_xlsxfile(x)
-    charts = [parse_chart_at(xf, path, a; read_cached_values=read_cached_values, get_external_refs=get_external_refs)
-              for (path, a) in chart_positions(x)]
-    if isempty(charts) && !isempty(chartex_parts(xf))
-        @warn "No readable charts found." * chartex_note(xf) maxlog=1
+    charts = AbstractChart[]
+    for loc in chart_positions(x)
+        push!(charts, parse_chart_at(xf, loc;
+                                     read_cached_values=read_cached_values,
+                                     get_external_refs=get_external_refs))
     end
     return charts
 end
 
 """
-    getChart(ws::Worksheet, name; read_cached_values=true, get_external_refs=false) -> Chart
-    getChart(xf::XLSXFile, name; read_cached_values=true, get_external_refs=false) -> Chart
+    getChart(ws::Worksheet, name; read_cached_values=true, get_external_refs=false) -> AbstractChart
+    getChart(xf::XLSXFile, name; read_cached_values=true, get_external_refs=false) -> AbstractChart
 
 Return a single chart. `name` may be the part name (`"chart1"` or
 `"chart1.xml"`), the full package path, or the chart's relationship id within its
 drawing part (`"rId1"`).
 
+Returns a [`XLSX.ChartEx`](@ref) where the named part uses the `chartEx` schema.
+
 See also [`XLSX.getCharts`](@ref).
 """
 function getChart(x::Union{Worksheet,XLSXFile}, name::AbstractString;
-                  read_cached_values::Bool=true, get_external_refs::Bool=false)::Chart
+                  read_cached_values::Bool=true,
+                  get_external_refs::Bool=false)::AbstractChart
     xf = get_xlsxfile(x)
     positions = chart_positions(x)
     stem = chart_name(name)
-    for (path, a) in positions
-        path == name || chart_name(path) == stem ||
-            (!isnothing(a) && a.rId == name) || continue
-        return parse_chart_at(xf, path, a; read_cached_values=read_cached_values, get_external_refs=get_external_refs)
+    for loc in positions
+        loc.path == name || chart_name(loc.path) == stem ||
+            (!isnothing(loc.anchor) && loc.anchor.rId == name) || continue
+        return parse_chart_at(xf, loc;
+                              read_cached_values=read_cached_values,
+                              get_external_refs=get_external_refs)
     end
-    throw(XLSXError("No chart matching `$name`. Found: $(join(chart_name.(first.(positions)), ", "))." * chartex_note(get_xlsxfile(x))))
+    throw(XLSXError("No chart matching `$name`. Found: " *
+                    join((chart_name(l.path) for l in positions), ", ") * "."))
 end
 
 
@@ -538,6 +712,7 @@ See also [`XLSX.iserror`](@ref).
 geterror(r::ChartRef)::Vector{String} = String[geterror(r, i) for i in 1:length(r.data)]
 geterror(r::ChartRef, i::Integer)::String =
     haskey(r.errors, Int(i)) ? get_error_string(r.errors[Int(i)]) : ""
+
 
 # ===========================================================================
 # Cached data as a table
@@ -593,6 +768,12 @@ julia> DataFrame(XLSX.getChartData(f["Summary"], "chart1"))
      │ String      Float64   Float64
 ```
 
+!!! note
+    `chartEx` charts carry no readable value cache, so this throws
+    [`XLSX.XLSXError`](@ref) for them. Use
+    [`XLSX.getChartRanges`](@ref) and [`XLSX.getdata`](@ref) to read their
+    source cells instead.
+
 See also [`XLSX.getCharts`](@ref), [`XLSX.gettable`](@ref).
 """
 function getChartData(c::Chart)::DataTable
@@ -644,43 +825,69 @@ function getChartData(c::Chart)::DataTable
     return DataTable(columns, labels)
 end
 
+"""
+    getChartData(c::ChartEx)
+
+`chartEx` charts do not carry a readable value cache. Throws
+[`XLSX.XLSXError`](@ref).
+"""
+getChartData(c::ChartEx) =
+    throw(XLSXError("Cannot get data for chart `$(c.name)`: it is a $(chartType(c)) chart, " *
+                    "which uses the `chartEx` schema and carries no readable value cache. " *
+                    "Use `getChartRanges` to find its source cells and `getdata` to read them."))
+
 getChartData(x::Union{Worksheet,XLSXFile}, name::AbstractString; kw...)::DataTable =
     getChartData(getChart(x, name; kw...))
 
-"""
-    chart_range(r) -> Union{Nothing,SheetCellRef,SheetCellRange,SheetRowRange,SheetColumnRange,NonContiguousRange}
 
-The source range of a `ChartRef`, or `nothing` when it has no addressable one:
+# ===========================================================================
+# Source ranges
+# ===========================================================================
+
+"""
+    parse_chart_range(ref) -> ChartRange
+
+A chart source formula as a range, or `nothing` when it has no addressable one:
 literal series, external-workbook references, and defined names.
 """
-function chart_range(r::Union{Nothing,ChartRef})
-    (isnothing(r) || isnothing(r.ref)) && return nothing
-    s = strip(r.ref)
+function parse_chart_range(ref::Union{Nothing,AbstractString})
+    isnothing(ref) && return nothing
+    s = strip(ref)
+    isempty(s) && return nothing
     occursin('[', s) && return nothing                  # external workbook
     if startswith(s, '(') && endswith(s, ')')           # multi-area
         s = s[nextind(s, firstindex(s)):prevind(s, lastindex(s))]
     end
     occursin(',', s) && return NonContiguousRange(String(s))
-    (is_valid_fixed_sheet_cellrange(s) || is_valid_sheet_cellrange(s)) && return SheetCellRange(s)
-    (is_valid_fixed_sheet_cellname(s)  || is_valid_sheet_cellname(s))  && return SheetCellRef(s)
+    (is_valid_fixed_sheet_cellrange(s)    || is_valid_sheet_cellrange(s))    && return SheetCellRange(s)
+    (is_valid_fixed_sheet_cellname(s)     || is_valid_sheet_cellname(s))     && return SheetCellRef(s)
     (is_valid_fixed_sheet_column_range(s) || is_valid_sheet_column_range(s)) && return SheetColumnRange(s)
     (is_valid_fixed_sheet_row_range(s)    || is_valid_sheet_row_range(s))    && return SheetRowRange(s)
     return nothing                                      # defined name, or unrecognised
 end
 
 """
+    chart_range(r::ChartRef) -> ChartRange
+
+The source range of a `ChartRef`, or `nothing` when it has none.
+"""
+chart_range(r::Union{Nothing,ChartRef}) =
+    isnothing(r) ? nothing : parse_chart_range(r.ref)
+
+"""
     getChartRanges(c::Chart) -> Vector{ChartRanges}
-    getChartRanges(ws::Worksheet, name) -> Vector{ChartRanges}
-    getChartRanges(xf::XLSXFile, name) -> Vector{ChartRanges}
-    getChartRanges(ws::Worksheet) -> Vector{@NamedTuple{chart::String, ranges::Vector{ChartRanges}}}
-    getChartRanges(xf::XLSXFile) -> Vector{@NamedTuple{chart::String, ranges::Vector{ChartRanges}}}
+    getChartRanges(c::ChartEx) -> Vector{ChartRange}
+    getChartRanges(ws::Worksheet, name) -> Vector
+    getChartRanges(xf::XLSXFile, name) -> Vector
+    getChartRanges(ws::Worksheet) -> Vector{@NamedTuple{chart::String, ranges::Vector}}
+    getChartRanges(xf::XLSXFile) -> Vector{@NamedTuple{chart::String, ranges::Vector}}
 
 The worksheet ranges of the source data a chart plots from.
 
-Given a `Chart`, or a chart `name` in any of the forms [`XLSX.getChart`](@ref)
-accepts, return one entry per series in document order, parallel to `c.series`.
-Each entry carries the series `idx` and `name` alongside its `categories`,
-`values` and `bubble_sizes` ranges.
+Given a [`XLSX.Chart`](@ref), or a chart `name` in any of the forms
+[`XLSX.getChart`](@ref) accepts, return one entry per series in document order,
+parallel to `c.series`. Each entry carries the series `idx` and `name` alongside
+its `categories`, `values` and `bubble_sizes` ranges.
 
 Given no name, return the ranges of every chart on the worksheet or in the
 workbook, each paired with its chart name, following [`XLSX.getCharts`](@ref).
@@ -692,7 +899,6 @@ the two mean the same thing whatever the chart type, as in [`XLSX.ChartSeries`](
 A range is `nothing` wherever the series has no addressable source: a literal
 series (`c:numLit`/`c:strLit`), a reference to an external workbook, a defined
 name.
-
 
 # Examples
 ```julia
@@ -721,6 +927,12 @@ julia> [(x.chart, length(x.ranges)) for x in XLSX.getChartRanges(f)]
     cache is a snapshot from the last save, and the cells may have changed
     since, or the source sheet may have been deleted entirely.
 
+!!! note
+    For a [`XLSX.ChartEx`](@ref) this returns a flat `Vector{ChartRange}` rather
+    than one entry per series. The `cx:` schema declares its data dimensions
+    once in `cx:chartData` and shares them across series, so there is no
+    per-series `idx` or `name` to report.
+
 See also [`XLSX.getChart`](@ref), [`XLSX.getCharts`](@ref), [`XLSX.getChartData`](@ref).
 """
 getChartRanges(c::Chart)::Vector{ChartRanges} =
@@ -731,11 +943,14 @@ getChartRanges(c::Chart)::Vector{ChartRanges} =
       bubble_sizes = chart_range(s.bubble_sizes))
      for s in c.series]
 
-getChartRanges(x::Union{Worksheet,XLSXFile}, name::AbstractString)::Vector{ChartRanges} =
+getChartRanges(c::ChartEx)::Vector{ChartRange} = c.ranges
+
+getChartRanges(x::Union{Worksheet,XLSXFile}, name::AbstractString) =
     getChartRanges(getChart(x, name; read_cached_values=false))
 
 getChartRanges(x::Union{Worksheet,XLSXFile}) =
     [(chart = c.name, ranges = getChartRanges(c)) for c in getCharts(x; read_cached_values=false)]
+
 
 # ===========================================================================
 # Display
@@ -754,7 +969,7 @@ Base.show(io::IO, s::ChartSeries) =
 
 Base.show(io::IO, r::ChartRef) =
     print(io, "XLSX.ChartRef(", something(r.ref, "<literal>"), ", ", r.ptCount, " pts)")
-    
+
 function Base.show(io::IO, ::MIME"text/plain", c::Chart)
     print(io, "XLSX.Chart \"", c.name, "\"")
     isnothing(c.sheet) || print(io, " on sheet \"", c.sheet, "\"")
@@ -786,3 +1001,20 @@ function Base.show(io::IO, ::MIME"text/plain", r::ChartRef)
     isempty(r.data) || println(io, "  data: ", r.data)
 end
 
+Base.show(io::IO, c::ChartEx) =
+    print(io, "XLSX.ChartEx(\"", c.name, "\"",
+          isnothing(c.sheet) ? "" : ", \"" * c.sheet * "\"",
+          isnothing(c.from) ? "" : ", " * c.from,
+          ", ", chartType(c), ", ", length(c.refs), " refs)")
+
+function Base.show(io::IO, ::MIME"text/plain", c::ChartEx)
+    print(io, "XLSX.ChartEx \"", c.name, "\"")
+    isnothing(c.sheet) || print(io, " on sheet \"", c.sheet, "\"")
+    isnothing(c.from) || print(io, " at ", c.from, isnothing(c.to) ? "" : ":" * c.to)
+    println(io)
+    isnothing(c.title) || println(io, "  title: ", repr(c.title))
+    println(io, "  type: ", chartType(c))
+    isempty(c.layouts) || println(io, "  layouts: ", join(c.layouts, ", "))
+    println(io, "  refs: ", isempty(c.refs) ? "none" : join(c.refs, ", "))
+    println(io, "  (chartEx: cached values and appearance are not read)")
+end

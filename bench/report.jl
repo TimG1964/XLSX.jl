@@ -1,6 +1,6 @@
 using BenchmarkTools
 using Printf
-#using UnicodePlots
+using UnicodePlots
 
 const ROOT        = @__DIR__
 const RESULTS_DIR = joinpath(ROOT, "results")
@@ -51,7 +51,7 @@ let
     for v in ver_labels
         header *= @sprintf("%15s", v)
     end
-    header *= @sprintf("%15s%15s", "v0.11/v0.10", "dev/v0.10")
+    header *= @sprintf("%15s%15s", "v0.11/v0.10", "v0.12/v0.10")
     println(header)
     println("-"^(30 + 15*length(ver_labels) + 30))
 
@@ -78,7 +78,7 @@ let
     println("\nMedian times in milliseconds. Ratio < 1.0x = faster than v0.10.")
 end
 
-#=
+
 # ── Bar charts ────────────────────────────────────────────────────────────────
 
 println("\n" * "="^60)
@@ -101,4 +101,3 @@ for bench in benchmarks, fix in fixtures
     println()
     display(barplot(labels, times; title="$(fix) / $(bench)", xlabel="milliseconds", width=60))
 end
-=#

@@ -241,10 +241,13 @@ end
 
 # the only constructor the accessors use — keeps value and absolute paired
 DefinedName(name::AbstractString, scope::Union{Nothing,AbstractString}, dnv::DefinedNameValue) =
-    DefinedName(String(name), isnothing(scope) ? nothing : String(scope), dnv.value, dnv.isabs)
+    DefinedName(String(name), isnothing(scope) ? nothing : String(scope),
+                dnv.value, dnv.isabs, dnv.hidden)
 
 # ... and back, for the write path and for make_absolute
-DefinedNameValue(dn::DefinedName) = DefinedNameValue(dn.value, dn.absolute)
+DefinedNameValue(dn::DefinedName) = DefinedNameValue(dn.value, dn.absolute, dn.hidden)
+
+DefinedNameValue(value, isabs) = DefinedNameValue(value, isabs, false)
 
 @inline is_workbook_scoped(dn::DefinedName)::Bool = isnothing(dn.scope)
 Base.:(==)(a::DefinedName, b::DefinedName) =
@@ -340,6 +343,17 @@ end
 @inline find_workbook_defined_name(xl::XLSXFile, name::AbstractString) = find_workbook_defined_name(get_workbook(xl), name)
 @inline find_worksheet_defined_name(ws::Worksheet, name::AbstractString) = find_worksheet_defined_name(get_workbook(ws), ws.sheetId, name)
 
+# Is this name one Excel maintains for itself? Used to filter the accessors
+# and to protect names from deletion. Takes the hidden flag into account,
+# since chart names are marked hidden rather than prefixed distinctively.
+@inline is_system_defined_name(name::AbstractString, hidden::Bool)::Bool =
+    hidden || startswith(uppercase(name), "_XLNM.")
+
+# Would this name look like one Excel maintains for itself? Used to refuse
+# creation. Cannot consult a hidden flag — there is no name yet.
+@inline is_system_like_defined_name(name::AbstractString)::Bool =
+    startswith(uppercase(name), "_XLNM.") || startswith(uppercase(name), "_XLCHART.")
+
 @inline is_workbook_defined_name(wb::Workbook, name::AbstractString)::Bool =
     !isnothing(find_workbook_defined_name(wb, name))
 @inline is_worksheet_defined_name(wb::Workbook, sheetId::Int, name::AbstractString)::Bool =
@@ -394,7 +408,11 @@ function is_valid_defined_name(name::AbstractString)::Bool
     return true
 end
 
-function addDefName(xf::XLSXFile, name::AbstractString, value::DefinedNameValueTypes; absolute=true)
+function addDefName(xf::XLSXFile, name::AbstractString, value::DefinedNameValueTypes; absolute=true, hidden::Bool=false)
+    if is_system_like_defined_name(name)
+        throw(XLSXError("`$name` is reserved for names Excel generates for its own use " *
+                        "(charts, print areas, filters) and cannot be created."))
+    end
     if !is_valid_defined_name(name)
         throw(XLSXError("Invalid defined name: `$name`. May only contain letters, numbers, `_` or `\\` and must start with a letter or `_`."))
     end
@@ -406,10 +424,11 @@ function addDefName(xf::XLSXFile, name::AbstractString, value::DefinedNameValueT
     else
         abs = absolute ? true : false
     end
-    xf.workbook.workbook_names[name] = DefinedNameValue(value, abs)
+    xf.workbook.workbook_names[name] = DefinedNameValue(value, abs, hidden)
 end
-addDefName(xf::XLSXFile, name::AbstractString, value::Integer; absolute=true) = addDefName(xf, name, Int64(value); absolute)
-function addDefName(ws::Worksheet, name::AbstractString, value::DefinedNameValueTypes; absolute=true)
+addDefName(xf::XLSXFile, name::AbstractString, value::Integer; absolute=true, hidden::Bool=false) = 
+    addDefName(xf, name, Int64(value); absolute, hidden)
+function addDefName(ws::Worksheet, name::AbstractString, value::DefinedNameValueTypes; absolute=true, hidden::Bool=false)
     wb = get_workbook(ws)
     if !is_valid_defined_name(name)
         throw(XLSXError("Invalid defined name: `$name`. May only contain letters, numbers, `_` or `\\` and must start with a letter or `_`."))
@@ -427,11 +446,12 @@ function addDefName(ws::Worksheet, name::AbstractString, value::DefinedNameValue
         abs = absolute ? true : false
     end
 # - wb.worksheet_names[(ordinal_sheet_number(wb, ws.name), name)] = DefinedNameValue(value, abs)
-    wb.worksheet_names[(ws.sheetId, name)] = DefinedNameValue(value, abs)
+    wb.worksheet_names[(ws.sheetId, name)] = DefinedNameValue(value, abs, hidden)
 end
-addDefName(ws::Worksheet, name::AbstractString, value::Integer; absolute=true) = addDefName(ws, name, Int64(value); absolute)
+addDefName(ws::Worksheet, name::AbstractString, value::Integer; absolute=true, hidden::Bool=false) = 
+    addDefName(ws, name, Int64(value); absolute, hidden)
 
-function delDefName(xf::XLSXFile, names::Vector{String})
+function delDefName(xf::XLSXFile, names::Vector{String}; force::Bool=false)
     wb = get_workbook(xf)
     targets = Vector{String}(undef, length(names))
     for (i, name) in enumerate(names)
@@ -440,6 +460,11 @@ function delDefName(xf::XLSXFile, names::Vector{String})
         isnothing(k) && throw(XLSXError("Workbook has no defined name called `$name`."))
         j = findfirst(isequal(k), view(targets, 1:i-1))
         isnothing(j) || throw(XLSXError("Defined name `$name` given more than once (also as `$(names[j])`)."))
+        if !force && is_system_defined_name(k, wb.workbook_names[k].hidden)
+            throw(XLSXError("`$k` is a system-defined name, used by Excel for charts, " *
+                            "print areas or filters, and is not safe to delete. " *
+                            "Pass `force=true` to delete it anyway."))
+        end
         targets[i] = k
     end
     for k in targets
@@ -448,7 +473,7 @@ function delDefName(xf::XLSXFile, names::Vector{String})
     return nothing
 end
 
-function delDefName(ws::Worksheet, names::Vector{String})
+function delDefName(ws::Worksheet, names::Vector{String}; force::Bool=false)
     wb = get_workbook(ws)
     targets = Vector{Tuple{Int,String}}(undef, length(names))
     for (i, name) in enumerate(names)
@@ -457,6 +482,11 @@ function delDefName(ws::Worksheet, names::Vector{String})
         isnothing(k) && throw(XLSXError("Worksheet `$(ws.name)` has no defined name called `$name`."))
         j = findfirst(isequal(k), view(targets, 1:i-1))
         isnothing(j) || throw(XLSXError("Defined name `$name` given more than once (also as `$(names[j])`)."))
+        if !force && is_system_defined_name(last(k), wb.worksheet_names[k].hidden)
+            throw(XLSXError("`$(last(k))` is a system-defined name, used by Excel for charts, " *
+                            "print areas or filters, and is not safe to delete. " *
+                            "Pass `force=true` to delete it anyway."))
+        end
         targets[i] = k
     end
     for k in targets
@@ -467,12 +497,12 @@ end
 
  
 """
-    deleteDefinedName(xf::XLSXFile,  name::AbstractString)
-    deleteDefinedName(ws::Worksheet, name::AbstractString)
-    deleteDefinedName(xf::XLSXFile,  names)
-    deleteDefinedName(ws::Worksheet, names)
+    deleteDefinedName(xf::XLSXFile,  name::AbstractString; force::Bool=false)
+    deleteDefinedName(ws::Worksheet, name::AbstractString; force::Bool=false)
+    deleteDefinedName(xf::XLSXFile,  names; force::Bool=false)
+    deleteDefinedName(ws::Worksheet, names; force::Bool=false)
  
-Delete one or more defined names from the scope named by the first argument:
+Delete one or more user-defined names from the scope named by the first argument:
 workbook scope for an `XLSXFile`, the worksheet's own scope for a `Worksheet`.
 The two scopes are independent — a worksheet-scoped name is invisible to the
 `XLSXFile` method and vice versa, even when both scopes hold the same name.
@@ -482,6 +512,10 @@ values returned by [`getDefinedNames`](@ref). A `DefinedName` is checked
 against the first argument rather than routed by it, so
 `deleteDefinedName(ws, getDefinedNames(ws))` deletes every name scoped to `ws`,
 while `deleteDefinedName(ws, getDefinedNames(xf))` throws.
+
+Names Excel generates for its own use — chart data ranges, print areas, filter
+ranges — are kept, since deleting them breaks the features that depend on them.
+Pass `force=true` to delete those too.
  
 Names are matched case-insensitively, as in Excel, so `"my_name"` deletes a name
 stored as `"My_Name"`.
@@ -493,7 +527,7 @@ removed. An empty collection is a no-op.
 Deleting a defined name does not update formulas that referred to it; Excel
 shows `#NAME?` for those, exactly as it does when a name is deleted through its
 own name manager.
- 
+
 To clear a whole file at both scopes at once, see [`deleteAllDefinedNames`](@ref).
  
 # Examples
@@ -509,17 +543,18 @@ See also [`addDefinedName`](@ref), [`getDefinedNames`](@ref),
 [`deleteAllDefinedNames`](@ref).
 """
 function deleteDefinedName end
- 
-deleteDefinedName(xf::XLSXFile, name::AbstractString) = delDefName(xf, [String(name)])
-deleteDefinedName(ws::Worksheet, name::AbstractString) = delDefName(ws, [String(name)])
- 
-deleteDefinedName(xf::XLSXFile, names::AbstractVector{<:AbstractString}) = delDefName(xf, String.(names))
-deleteDefinedName(ws::Worksheet, names::AbstractVector{<:AbstractString}) = delDefName(ws, String.(names))
- 
-deleteDefinedName(xf::XLSXFile, dns::AbstractVector{DefinedName}) =
-    delDefName(xf, [_checked_name(dn, nothing, "the workbook") for dn in dns])
-deleteDefinedName(ws::Worksheet, dns::AbstractVector{DefinedName}) =
-    delDefName(ws, [_checked_name(dn, ws.name, "worksheet \"$(ws.name)\"") for dn in dns])
+deleteDefinedName(xf::XLSXFile, name::AbstractString; force::Bool=false) =
+    delDefName(xf, [String(name)]; force)
+deleteDefinedName(ws::Worksheet, name::AbstractString; force::Bool=false) =
+    delDefName(ws, [String(name)]; force)
+deleteDefinedName(xf::XLSXFile, names::AbstractVector{<:AbstractString}; force::Bool=false) =
+    delDefName(xf, String.(names); force)
+deleteDefinedName(ws::Worksheet, names::AbstractVector{<:AbstractString}; force::Bool=false) =
+    delDefName(ws, String.(names); force)
+deleteDefinedName(xf::XLSXFile, dns::AbstractVector{DefinedName}; force::Bool=false) =
+    delDefName(xf, [_checked_name(dn, nothing, "workbook") for dn in dns]; force)
+deleteDefinedName(ws::Worksheet, dns::AbstractVector{DefinedName}; force::Bool=false) =
+    delDefName(ws, [_checked_name(dn, ws.name, "worksheet \"$(ws.name)\"") for dn in dns]; force)
 
 # scope is the first argument; a DefinedName from elsewhere is refused, not routed
 @inline function _checked_name(dn::DefinedName, expected::Union{Nothing,String}, where_str::String)
@@ -529,19 +564,28 @@ deleteDefinedName(ws::Worksheet, dns::AbstractVector{DefinedName}) =
 end
 
 """
-    deleteAllDefinedNames(xf::XLSXFile)
+    deleteAllDefinedNames(xf::XLSXFile; force=false)
 
-Delete every defined name in `xf`, workbook-scoped and worksheet-scoped alike.
+Delete every user-defined name in `xf`, at both workbook and worksheet scope.
+
+Names Excel generates for its own use — chart data ranges, print areas, filter
+ranges — are kept, since deleting them breaks the features that depend on them.
+Pass `force=true` to delete those too.
+
 This and [`getAllDefinedNames`](@ref) are the only defined name operations that
-act across scopes; everything else acts solely on the scope named by its first
-argument.
+span scopes.
 
 See also [`deleteDefinedName`](@ref).
 """
-function deleteAllDefinedNames(xf::XLSXFile)
+function deleteAllDefinedNames(xf::XLSXFile; force::Bool=false)
     wb = get_workbook(xf)
-    empty!(wb.workbook_names)
-    empty!(wb.worksheet_names)
+    if force
+        empty!(wb.workbook_names)
+        empty!(wb.worksheet_names)
+    else
+        filter!(p -> is_system_defined_name(first(p), last(p).hidden), wb.workbook_names)
+        filter!(p -> is_system_defined_name(last(first(p)), last(p).hidden), wb.worksheet_names)
+    end
     return nothing
 end
 
@@ -563,13 +607,13 @@ function update_defined_names_renamed_sheet!(wb::Workbook, old_name::String, new
         dn = wb.workbook_names[k]
         dn.value isa DefinedNameRangeTypes || continue
         dn.value.sheet == old_name || continue
-        wb.workbook_names[k] = DefinedNameValue(rename_sheet(dn.value, new_name), dn.isabs)
+        wb.workbook_names[k] = DefinedNameValue(rename_sheet(dn.value, new_name), dn.isabs, dn.hidden)
     end
     for k in collect(keys(wb.worksheet_names))
         dn = wb.worksheet_names[k]
         dn.value isa DefinedNameRangeTypes || continue
         dn.value.sheet == old_name || continue
-        wb.worksheet_names[k] = DefinedNameValue(rename_sheet(dn.value, new_name), dn.isabs)
+        wb.worksheet_names[k] = DefinedNameValue(rename_sheet(dn.value, new_name), dn.isabs, dn.hidden)
     end
     return nothing
 end
@@ -577,8 +621,10 @@ end
 """
     addDefinedName(xf::XLSXFile,  name::AbstractString, value::Union{Int, Float64, String}; absolute=true)
     addDefinedName(xf::XLSXFile,  name::AbstractString, value::AbstractString; absolute=true)
+    addDefinedName(xf::XLSXFile,  name::AbstractString, value::Union{SheetCellRef, SheetCellRange, NonContiguousRange}; absolute=true)
     addDefinedName(sh::Worksheet, name::AbstractString, value::Union{Int, Float64, String}; absolute=true)
     addDefinedName(sh::Worksheet, name::AbstractString, value::AbstractString; absolute=true)
+    addDefinedName(sh::Worksheet, name::AbstractString, value::Union{SheetCellRef, SheetCellRange, NonContiguousRange}; absolute=true)
 
 Add a defined name to the Workbook or Worksheet. If an `XLSXFile` is passed, the defined name 
 is added to the Workbook. If a `Worksheet` is passed, the defined name is added to the Worksheet.
@@ -596,6 +642,12 @@ reference. However, Excel treats them differently. When `definedNames` are read 
 an XLSXFile, we keep track of whether they are absolute or not. If the XLSXFile is subsequently 
 written out again, the status of the `definedNames` is preserved.
 
+Names Excel generates for its own use are reserved and cannot be created here:
+`addDefinedName` throws for anything beginning `_xlnm.` or `_xlchart.`. Such
+names are read and written unchanged, and are excluded from
+[`getDefinedNames`](@ref), so every name that function returns can be recreated
+with `addDefinedName(x, dn.name, dn.value; absolute=dn.absolute)`.
+
 # Examples
 ```julia
 julia> XLSX.addDefinedName(sh, "ID", "C21")
@@ -611,14 +663,14 @@ julia> XLSX.addDefinedName(xf, "Life_the_universe_and_everything", 42)
 julia> XLSX.addDefinedName(xf, "first_name", "Hello World")
 
 ```
+
+See also [`getDefinedNames`](@ref), [`deleteDefinedName`](@ref), [`XLSX.DefinedName`](@ref).
 """
 function addDefinedName end
 addDefinedName(xf::XLSXFile, name::AbstractString, value::Union{Integer,Float64}; absolute=true) = addDefName(xf, name, value isa Integer ? Int64(value) : value; absolute)
 addDefinedName(ws::Worksheet, name::AbstractString, value::Union{Integer,Float64}; absolute=true) = addDefName(ws, name, value isa Integer ? Int64(value) : value; absolute)
-addDefinedName(xf::XLSXFile, name::AbstractString, value::DefinedNameRangeTypes;
-               absolute::Union{Bool,Vector{Bool}}=true) = addDefName(xf, name, value; absolute)
-addDefinedName(ws::Worksheet, name::AbstractString, value::DefinedNameRangeTypes;
-               absolute::Union{Bool,Vector{Bool}}=true) = addDefName(ws, name, value; absolute)
+addDefinedName(xf::XLSXFile, name::AbstractString, value::DefinedNameRangeTypes; absolute::Union{Bool,Vector{Bool}}=true) = addDefName(xf, name, value; absolute)
+addDefinedName(ws::Worksheet, name::AbstractString, value::DefinedNameRangeTypes; absolute::Union{Bool,Vector{Bool}}=true) = addDefName(ws, name, value; absolute)
 function addDefinedName(xf::XLSXFile, name::AbstractString, value::AbstractString; absolute=true)
     if value == ""
         throw(XLSXError("Defined name value cannot be an empty string."))
@@ -656,10 +708,9 @@ function addDefinedName(ws::Worksheet, name::AbstractString, value::AbstractStri
     end
 end
 
-
 """
-    XLSX.getDefinedNames(xf::XLSXFile)  -> Vector{DefinedName}
-    XLSX.getDefinedNames(ws::Worksheet) -> Vector{DefinedName}
+    XLSX.getDefinedNames(xf::XLSXFile; include_system::Bool=false)  -> Vector{DefinedName}
+    XLSX.getDefinedNames(ws::Worksheet; include_system::Bool=false) -> Vector{DefinedName}
  
 Return the defined names in a single scope, sorted by name.
  
@@ -668,6 +719,9 @@ Given an `XLSXFile`, the workbook-scoped names are returned. Given a
 workbook-scoped names, even though those can be used from the sheet in a
 formula. The scope is the argument, so the result carries no scope of its own
 to choose from.
+
+Use the keyword `include_system` to include defined names Excel itself creates and manages 
+(eg for print area or for ChartEx-type charts) (default= false).
  
 The result can be passed back to `deleteDefinedName`, which takes its scope
 from the same kind of argument, so `deleteDefinedName(x, getDefinedNames(x))`
@@ -692,22 +746,28 @@ See also [`addDefinedName`](@ref), [`XLSX.getAllDefinedNames`](@ref),
 [`XLSX.DefinedName`](@ref).
 """
 function getDefinedNames end
-getDefinedNames(xf::XLSXFile)::Vector{DefinedName} =
-    sort!([DefinedName(k, nothing, v) for (k, v) in get_workbook(xf).workbook_names],
-          by=dn -> uppercase(dn.name))
-function getDefinedNames(ws::Worksheet)::Vector{DefinedName}
+function getDefinedNames(xf::XLSXFile; include_system::Bool=false)::Vector{DefinedName}
+    dns = [DefinedName(k, nothing, v) for (k, v) in get_workbook(xf).workbook_names]
+    include_system || filter!(dn -> !is_system_defined_name(dn.name, dn.hidden), dns)
+    return sort!(dns, by = dn -> uppercase(dn.name))
+end
+function getDefinedNames(ws::Worksheet; include_system::Bool=false)::Vector{DefinedName}
     wb = get_workbook(ws)
-    return sort!([DefinedName(last(k), ws.name, v) for (k, v) in wb.worksheet_names if first(k) == ws.sheetId],
-                 by=dn -> uppercase(dn.name))
+    dns = [DefinedName(last(k), ws.name, v) for (k, v) in wb.worksheet_names if first(k) == ws.sheetId]
+    include_system || filter!(dn -> !is_system_defined_name(dn.name, dn.hidden), dns)
+    return sort!(dns, by=dn -> uppercase(dn.name))
 end
 
 
 """
-    XLSX.getAllDefinedNames(xf::XLSXFile) -> Vector{DefinedName}
+    XLSX.getAllDefinedNames(xf::XLSXFile; include_system::Bool=false) -> Vector{DefinedName}
  
-Return every defined name in `xf`, at every scope, sorted by scope then name.
+Return every user-defined name in `xf`, at every scope, sorted by scope then name.
 Each result carries the scope it came from: `nothing` for a workbook-scoped
 name, or the name of the worksheet it is scoped to.
+
+Use the keyword `include_system` to include defined names Excel itself creates and manages 
+(eg for print area or for ChartEx-type charts) (default= false).
  
 This is a view of the whole file for inspection. Deleting names still happens
 one scope at a time — pass the result of [`XLSX.getDefinedNames`](@ref) to
@@ -727,7 +787,7 @@ julia> XLSX.getAllDefinedNames(xf)
  
 See also [`XLSX.getDefinedNames`](@ref), [`XLSX.DefinedName`](@ref).
 """
-function getAllDefinedNames(xf::XLSXFile)::Vector{DefinedName}
+function getAllDefinedNames(xf::XLSXFile; include_system::Bool=false)::Vector{DefinedName}
     wb = get_workbook(xf)
     sheet_lookup = Dict(ws.sheetId => ws.name for ws in wb.sheets)
 
@@ -740,5 +800,6 @@ function getAllDefinedNames(xf::XLSXFile)::Vector{DefinedName}
             throw(XLSXError("Defined name `$name` is scoped to sheetId $sid, which is not in the workbook."))
         push!(result, DefinedName(name, sheet_lookup[sid], v))
     end
+    include_system || filter!(dn -> !is_system_defined_name(dn.name, dn.hidden), result)
     return sort!(result, by = dn -> (something(dn.scope, ""), uppercase(dn.name)))
 end

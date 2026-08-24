@@ -422,14 +422,20 @@ internally, as it never needs the values.
 ## What is not supported
 
 - **Creating or editing charts.** Reading only, for now.
-- **`chartEx` charts.** Waterfall, funnel, treemap, sunburst, histogram and
-  box & whisker charts use a newer schema under a different namespace and are not
-  read. Where a file contains them and nothing else readable, `getCharts` warns
-  and returns an empty vector; where a lookup fails, the error message says how
-  many `chartEx` charts were found.
-- **Chart appearance.** Colours, fonts, axis scales, gridlines, data labels,
-  trendlines and legends are all left alone on read and preserved on write, but
-  are not exposed.
+- **chartEx charts.** Waterfall, funnel, treemap, sunburst, histogram,
+  Pareto, box & whisker and region map charts use a newer schema under a
+  different namespace. These are returned as [`XLSX.ChartEx`](@ref) rather
+  than [`XLSX.Chart`](@ref): their type, title and source ranges are read,
+  but their cached values are not, and [`XLSX.getChartData`](@ref) throws
+  for them.
+- **chartEx source references.** Excel writes these indirectly, through
+  hidden defined names of the form `_xlchart.v1.0` rather than as worksheet
+  ranges. `c.refs` holds the reference as written;
+  [`XLSX.getChartRanges`](@ref) resolves it. Those names are excluded from
+  [`XLSX.getDefinedNames`](@ref) and are protected from deletion.
+- **Chart appearance.** Colours, fonts, axis scales, gridlines, data labels, 
+  trendlines and legends are all preserved on write but are not currently 
+  exposed for reading.
 - **Live recomputation.** Values come from the cache. Use
   [`XLSX.getChartRanges`](@ref) with [`XLSX.getdata`](@ref) to read the source
   cells as they stand now.
