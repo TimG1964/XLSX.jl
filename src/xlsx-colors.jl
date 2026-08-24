@@ -60,27 +60,32 @@ function _theme_color_value(node::XML.Node)::Union{String,Nothing}
     return nothing
 end
 
+# The theme's <a:clrScheme> element. Shared by the index-ordered
+# `get_theme_colors` and the name-keyed `get_theme_color_map`.
+function _clrscheme_element(wb::Workbook)::XML.Node
+    xroot = xml_root_element(theme_xmlroot(wb))
+
+    theme_els_idx = findfirst(c -> localname(c) == "themeElements", xml_elements(xroot))
+    isnothing(theme_els_idx) &&
+        throw(XLSXError("Malformed theme: no `themeElements` found in theme1.xml."))
+    theme_els = xml_elements(xroot)[theme_els_idx]
+
+    clrscheme_idx = findfirst(c -> localname(c) == "clrScheme", xml_elements(theme_els))
+    isnothing(clrscheme_idx) &&
+        throw(XLSXError("Malformed theme: no `clrScheme` found in theme1.xml."))
+    return xml_elements(theme_els)[clrscheme_idx]
+end
+
 # Read and cache the 12 theme colors for a workbook, in OOXML theme-index order
 # (see `THEME_COLOR_ORDER`). Reads the actual `xl/theme/theme1.xml` clrScheme, so this
 # reflects whatever theme the workbook was actually saved with - not just the Excel default.
 function get_theme_colors(wb::Workbook)::Vector{String}
     if wb.theme_colors === nothing
-        xroot = xml_root_element(theme_xmlroot(wb))
-
-        theme_els_idx = findfirst(c -> localname(c) == "themeElements", xml_elements(xroot))
-        isnothing(theme_els_idx) && throw(XLSXError("Malformed theme: no `themeElements` found in theme1.xml."))
-        theme_els = xml_elements(xroot)[theme_els_idx]
-
-        clrscheme_idx = findfirst(c -> localname(c) == "clrScheme", xml_elements(theme_els))
-        isnothing(clrscheme_idx) && throw(XLSXError("Malformed theme: no `clrScheme` found in theme1.xml."))
-        clrscheme = xml_elements(theme_els)[clrscheme_idx]
-
         lookup = Dict{String,String}()
-        for c in xml_elements(clrscheme)
+        for c in xml_elements(_clrscheme_element(wb))
             val = _theme_color_value(c)
             isnothing(val) || (lookup[localname(c)] = val)
         end
-
         wb.theme_colors = String[]
         for name in THEME_COLOR_ORDER
             if haskey(lookup, name)
@@ -236,4 +241,83 @@ function resolveColor(wb::Workbook, atts::AbstractDict; prefix::AbstractString="
     else
         return "FF000000"
     end
+end
+
+"""
+The theme's `clrScheme` keyed by DrawingML name, as `<a:schemeClr val="..."/>`
+refers to it.
+
+Distinct from [`get_theme_colors`](@ref), which is index-ordered for the
+spreadsheet `<color theme="N"/>` attribute and applies Excel's documented dk/lt
+index swap. Names are not swapped. `tx1`/`dk1` and `bg1`/`lt1` are aliases in
+DrawingML, so both keys are populated.
+"""
+function get_theme_color_map(wb::Workbook)::Dict{String,String}
+    if wb.theme_color_map === nothing
+        m = Dict{String,String}()
+        for c in xml_elements(_clrscheme_element(wb))
+            val = _theme_color_value(c)
+            isnothing(val) || (m[localname(c)] = val)
+        end
+        haskey(m, "dk1") && (m["tx1"] = m["dk1"])
+        haskey(m, "lt1") && (m["bg1"] = m["lt1"])
+        haskey(m, "dk2") && (m["tx2"] = m["dk2"])
+        haskey(m, "lt2") && (m["bg2"] = m["lt2"])
+        wb.theme_color_map = m
+    end
+    return wb.theme_color_map
+end
+
+# DrawingML transform values are in thousandths of a percent: 60000 == 60%.
+@inline _pct(v::Int) = v / 100_000
+
+"""
+Apply the DrawingML colour transforms to an "RRGGBB" hex string, in document
+order, returning the transformed hex and the resulting alpha.
+
+`lumMod`, `lumOff` and `satMod` operate in HSL, which is why they are applied
+via Colors.jl rather than with the spreadsheet `apply_tint` algorithm: Excel's
+`<color tint="...">` and DrawingML's transforms are different operations and
+give different results.
+"""
+function apply_drawingml_transforms(hex::AbstractString,
+                                    transforms::Vector{Pair{Symbol,Int}})
+    c = Colors.RGB{Float64}(parse(Colors.Colorant, "#" * hex))
+    alpha = 1.0
+
+    for (kind, v) in transforms
+        p = _pct(v)
+        if kind === :alpha
+            alpha = p
+        elseif kind === :lumMod || kind === :lumOff || kind === :satMod
+            h = convert(Colors.HSL{Float64}, c)
+            l, s = h.l, h.s
+            kind === :lumMod && (l *= p)
+            kind === :lumOff && (l += p)
+            kind === :satMod && (s *= p)
+            c = convert(Colors.RGB{Float64},
+                        Colors.HSL{Float64}(h.h, clamp(s, 0.0, 1.0), clamp(l, 0.0, 1.0)))
+        elseif kind === :shade
+            c = _linear_map(c, x -> x * p)
+        elseif kind === :tint
+            c = _linear_map(c, x -> x * p + (1.0 - p))
+        end
+        # Unhandled transforms (hueMod, red, green, blue, gamma, inv, gray,
+        # comp) are rare in chart parts and are left as no-ops rather than
+        # silently applied wrongly. The raw element is preserved regardless.
+    end
+
+    return Colors.hex(Colors.RGB{Float64}(clamp(c.r, 0, 1),
+                                          clamp(c.g, 0, 1),
+                                          clamp(c.b, 0, 1)), :RRGGBB), alpha
+end
+
+@inline _srgb_to_linear(x) = x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055)^2.4
+@inline _linear_to_srgb(x) = x <= 0.0031308 ? x * 12.92 : 1.055 * x^(1/2.4) - 0.055
+
+function _linear_map(c::Colors.RGB{Float64}, f)
+    r = _linear_to_srgb(clamp(f(_srgb_to_linear(c.r)), 0.0, 1.0))
+    g = _linear_to_srgb(clamp(f(_srgb_to_linear(c.g)), 0.0, 1.0))
+    b = _linear_to_srgb(clamp(f(_srgb_to_linear(c.b)), 0.0, 1.0))
+    return Colors.RGB{Float64}(r, g, b)
 end

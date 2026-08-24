@@ -117,6 +117,7 @@ include("panes.jl")
 include("conditional-format-helpers.jl") # must load before conditional-formats.jl
 include("conditional-formats.jl")
 include("images.jl")
+include("drawingml.jl")
 include("charts.jl")
 include("write.jl")
 include("fileArray.jl")

@@ -8,6 +8,7 @@ import CSV
 using StyledStrings
 using ZipArchives: ZipReader, zip_names, zip_readentry, ZipWriter, zip_newfile
 using Logging
+using Colors
 
 # If SAVE_FILES is true then every testset that creates an XLSXFile in memory
 # or that writes an xlsx file will have a file created in `outdir`.
@@ -134,6 +135,7 @@ include(joinpath(files_directory, "Charts_tests.jl"))
 include(joinpath(files_directory, "Colors-tests.jl"))
 include(joinpath(files_directory, "Conditional-format_tests.jl"))
 include(joinpath(files_directory, "Copy-Add_tests.jl"))
+include(joinpath(files_directory, "DrawingML_tests.jl"))
 include(joinpath(files_directory, "Defined-names_tests.jl"))
 include(joinpath(files_directory, "Edit_tests.jl"))
 include(joinpath(files_directory, "Errors_tests.jl"))

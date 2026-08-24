@@ -657,6 +657,7 @@ mutable struct Workbook
     num_style_index_cache::Dict{Int, CellDataFormat}
     theme_xroot::Union{XML.Node, Nothing}
     theme_colors::Union{Vector{String}, Nothing}
+    theme_color_map::Union{Nothing,Dict{String,String}}
     cellXfs_cache::Union{Vector{XML.Node}, Nothing}   # cache for get_cellXfs_nodes
     numFmt_cache::Union{Dict{Int, String}, Nothing}   # cache for get_numFmt_cache
     style_table_cache::Dict{String, Vector{XML.Node}} # cache for fonts/borders/fills, keyed by tag ("fonts","borders","fills")
@@ -1016,4 +1017,30 @@ struct ChartEx <: AbstractChart
     refs::Vector{String}
     ranges::Vector{ChartRange}
     binning::Bool
+end
+
+"""
+    DrawingColor
+
+A DrawingML colour: the element as written, plus the RGB it resolves to.
+
+`kind` and `val` record the reference as authored - a theme colour stays a
+theme colour - and `transforms` the modifications applied to it, in document
+order. `rgb` and `alpha` give the resolved result for anyone who just wants to
+know what it looks like.
+
+# Fields
+- `kind::Symbol` - `:srgb`, `:scheme`, `:sys`, `:prst`, `:hsl` or `:scrgb`.
+- `val::String` - the `val` attribute: `"FF0000"`, `"accent1"`, `"windowText"`.
+- `transforms::Vector{Pair{Symbol,Int}}` - e.g. `[:lumMod => 60000, :lumOff => 40000]`,
+  in thousandths of a percent, in the order DrawingML applies them.
+- `rgb::String` - the resolved colour as `"RRGGBB"`.
+- `alpha::Float64` - `1.0` unless an `alpha` transform applies.
+"""
+struct DrawingColor
+    kind::Symbol
+    val::String
+    transforms::Vector{Pair{Symbol,Int}}
+    rgb::String
+    alpha::Float64
 end

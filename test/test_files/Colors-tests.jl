@@ -125,4 +125,32 @@
         @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("theme" => "12"))
         @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("theme" => "notanumber"))
     end
+
+    @testset "theme colour transforms match Excel" begin
+        f = XLSX.opentemplate(joinpath(data_directory, "chart_theme_colors.xlsx"))
+        wb = XLSX.get_workbook(f)
+        ch = XLSX.xml_root_element(f.data["xl/charts/chart1.xml"])
+
+        cols = XLSX.DrawingColor[]
+        walk(n) = for c in XML.eachelement(n)
+            XLSX.localname(c) == "solidFill" ?
+                (col = XLSX.parse_drawing_color(wb, c); isnothing(col) || push!(cols, col)) :
+                walk(c)
+        end
+        walk(ch)
+
+        # Values confirmed against what Excel reports in More Fill Colors.
+        function byval(v, t)
+            hits = filter(c -> c.val == v && c.transforms == t, cols)
+            @test !isempty(hits)
+            @test allequal(c.rgb for c in hits)     # same input, same output everywhere
+            return first(hits).rgb
+        end
+
+        @test byval("accent1", Pair{Symbol,Int}[])                              == "156082"
+        @test byval("accent1", [:lumMod => 60000, :lumOff => 40000])            == "46B1E1"
+        @test byval("accent1", [:lumMod => 75000])                              == "104862"
+        @test byval("tx1",     [:lumMod => 65000, :lumOff => 35000])            == "595959"
+        @test byval("tx1",     [:lumMod => 15000, :lumOff => 85000])            == "D9D9D9"
+    end
 end
