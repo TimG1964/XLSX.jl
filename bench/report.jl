@@ -1,6 +1,6 @@
 using BenchmarkTools
 using Printf
-using UnicodePlots
+#using UnicodePlots
 
 const ROOT        = @__DIR__
 const RESULTS_DIR = joinpath(ROOT, "results")

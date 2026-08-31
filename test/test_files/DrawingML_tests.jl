@@ -204,8 +204,7 @@
             </a:ln>""")
         @test ln.fill.kind === :solid
         @test ln.fill.fgcolor.rgb == "FF0000"
-        @test ln.width == 19050
-        @test XLSX.line_width_points(ln) == 1.5
+        @test ln.width == 1.5
         @test ln.dash == "dash"          # an element, not an attribute
         @test ln.cap == "rnd"
         @test ln.compound == "sng"
@@ -223,8 +222,7 @@
     @testset "line that sets only a width" begin
         ln = line_of("""<a:ln xmlns:a="$(XLSX.NS_A)" w="9525"/>""")
         @test isnothing(ln.fill)         # says nothing about the stroke...
-        @test ln.width == 9525
-        @test XLSX.line_width_points(ln) == 0.75
+        @test ln.width == 0.75
         @test isnothing(ln.cap)
         @test isnothing(ln.compound)
     end
@@ -248,7 +246,7 @@
             </c:spPr>""")
         # The line's own fill, not the shape's.
         @test ln.fill.fgcolor.rgb == "123456"
-        @test XLSX.line_width_points(ln) == 1.0
+        @test ln.width == 1.0
     end
 
     @testset "no ln child" begin
@@ -258,7 +256,9 @@
             </c:spPr>""", XML.Node)
         @test isnothing(XLSX.parse_drawing_line(wb, XLSX.xml_root_element(doc)))
         @test isnothing(XLSX.parse_drawing_line(wb, nothing))
-        @test isnothing(XLSX.line_width_points(line_of("""<a:ln xmlns:a="$(XLSX.NS_A)"/>""")))
+        ln_bare = line_of("""<a:ln xmlns:a="$(XLSX.NS_A)"/>""")
+        @test ln_bare !== nothing
+        @test isnothing(ln_bare.width)
     end
 end
 
@@ -276,6 +276,7 @@ end
 # what your fixtures contain. Run them, read the failures, pin the values.
 # =============================================================================
 
+const localname = XLSX.localname
 const _attr           = XLSX._attr
 const _attr_int       = XLSX._attr_int
 const _attr_bool      = XLSX._attr_bool
@@ -300,6 +301,11 @@ const resolve_theme_font  = XLSX.resolve_theme_font
 const xml_root_element    = XLSX.xml_root_element
 const get_xml_data        = XLSX.get_xml_data
 const getCharts           = XLSX.getCharts
+
+const parse_drawing_shape_props = XLSX.parse_drawing_shape_props
+const DrawingShapeProps         = XLSX.DrawingShapeProps
+const has_fill                  = XLSX.has_fill
+const has_line                  = XLSX.has_line
 
 # Parse a fragment into its root element. XML.parse returns a document node;
 # the element is its last child (a declaration may precede it).
@@ -396,7 +402,7 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 @test p.size == 9.0
                 @test p.bold === true
                 @test p.italic === false
-                @test p.underline == "none"
+                @test p.under == "none"
                 @test t.paragraphs[1].props.align == "ctr"
 
                 @test is_uniform(t)                        # no runs: uniform
@@ -535,21 +541,63 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 @test plotarea !== nothing
 
                 ax = first_element_with_tag(plotarea, "valAx")
-                if ax !== nothing
-                    t = parse_drawing_text(wb, ax)
-                    if t !== nothing
-                        @test text_content(t) == ""      # formatting only
-                        @test is_uniform(t)
-                        @test t.raw !== nothing          # kept for write-back
+                @test ax !== nothing
 
-                        p = default_run_props(t)
-                        # TODO: pin the actual size/colour once you've seen
-                        # what Excel wrote — @show p to find out.
-                        @test p === nothing || p.size isa Float64
-                    end
-                end
+                t = parse_drawing_text(wb, ax)
+                @test t !== nothing
+                @test text_content(t) == ""          # formatting only
+                @test isempty(text_runs(t))
+                @test is_uniform(t)
+                @test t.raw !== nothing              # kept for write-back
+
+                # <a:bodyPr rot="-60000000" spcFirstLastPara="1"
+                #  vertOverflow="ellipsis" vert="horz" wrap="square"
+                #  anchor="ctr" anchorCtr="1"/>
+                @test t.body.rotation == -1000.0
+                @test t.body.vertical == "horz"
+                @test t.body.wrap == "square"
+                @test t.body.anchor == "ctr"
+                @test t.body.anchorctr === true
+                @test t.body.spcfirstlastpara === true
+                @test t.body.vertoverflow == "ellipsis"
+                @test t.body.horzoverflow === nothing
+                @test t.body.autofit === nothing     # absent, not :none
+                @test t.body.insetleft === nothing
+
+                # The font is on a:pPr/a:defRPr — this txPr has no runs.
+                @test t.paragraphs[1].props.defprops !== nothing
+                p = default_run_props(t)
+                @test p === t.paragraphs[1].props.defprops
+
+                # <a:defRPr sz="900" b="0" i="0" u="none" strike="noStrike"
+                #  kern="1200" baseline="0"/>
+                @test p.size == 9.0
+                @test p.kern == 12.0
+                @test p.under == "none"
+                @test p.strike == "noStrike"
+
+                # Written as 0, so explicitly false — not absent.
+                @test p.bold === false
+                @test p.italic === false
+                @test p.baseline == 0.0
+
+                # Not written at all.
+                @test p.caps === nothing
+                @test p.spacing === nothing
+                @test p.lang === nothing
+                @test p.line === nothing
+
+                # tx1 + lumMod 65000 / lumOff 35000
+                @test p.fill !== nothing
+                @test p.fill.kind == :solid
+                @test p.fill.fgcolor.rgb == "595959"
+
+                # Theme references, kept as written.
+                @test p.latin == "+mn-lt"
+                @test p.ea == "+mn-ea"
+                @test p.cs == "+mn-cs"
+                @test resolve_theme_font(wb, p.latin) !== nothing
             end
-
             @testset "title rich text" begin
                 title = first_element_with_tag(chart, "title")
                 if title !== nothing
@@ -580,6 +628,140 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 @test resolve_theme_font(wb, "Calibri") == "Calibri"
                 @test resolve_theme_font(wb, nothing) === nothing
                 @test resolve_theme_font(wb, "+xx-lt") === nothing   # undefined ref
+            end
+        end
+    end
+end
+
+@testset "DrawingML shape properties" begin
+
+    XLSX.openxlsx(joinpath(data_directory, "chart_basic.xlsx")) do xf
+        wb = XLSX.get_workbook(xf)
+
+        @testset "solid fill and line" begin
+            node = _frag("""<c:spPr xmlns:c="$NS_C" $_NSDECL>
+                  <a:solidFill><a:srgbClr val="4472C4"/></a:solidFill>
+                  <a:ln w="19050"><a:solidFill><a:srgbClr val="203864"/></a:solidFill>
+                    <a:prstDash val="dash"/></a:ln>
+                </c:spPr>""")
+
+            sp = parse_drawing_shape_props(wb, node)
+            @test sp isa DrawingShapeProps
+            @test sp.fill.kind == :solid
+            @test sp.fill.fgcolor.rgb == "4472C4"
+            @test sp.line.width == 1.5              # points, converted at parse
+            @test sp.line.dash == "dash"
+            @test sp.line.fill.fgcolor.rgb == "203864"
+            @test has_fill(sp)
+            @test has_line(sp)
+            @test sp.effects === nothing
+            @test sp.bwmode === nothing
+            @test sp.raw !== nothing
+        end
+
+        @testset "noFill is not absence" begin
+            # Chart-area shape: transparent background, no border. Both are
+            # deliberate, and neither is the same as omitting the element.
+            node = _frag("""<c:spPr xmlns:c="$NS_C" $_NSDECL>
+                  <a:noFill/>
+                  <a:ln><a:noFill/></a:ln>
+                </c:spPr>""")
+
+            sp = parse_drawing_shape_props(wb, node)
+            @test sp.fill !== nothing               # present...
+            @test sp.fill.kind == :none             # ...and explicitly invisible
+            @test !has_fill(sp)
+
+            @test sp.line !== nothing
+            @test sp.line.fill.kind == :none
+            @test !has_line(sp)
+        end
+
+        @testset "absence is inheritance" begin
+            node = _frag("""<c:spPr xmlns:c="$NS_C" $_NSDECL/>""")
+
+            sp = parse_drawing_shape_props(wb, node)
+            @test sp !== nothing                    # the element exists
+            @test sp.fill === nothing               # but sets nothing
+            @test sp.line === nothing
+            @test !has_fill(sp)
+            @test !has_line(sp)
+        end
+
+        @testset "parse from parent, and no spPr at all" begin
+            ser = _frag("""<c:ser xmlns:c="$NS_C" $_NSDECL>
+                  <c:idx val="0"/>
+                  <c:spPr><a:solidFill><a:schemeClr val="accent1"/></a:solidFill></c:spPr>
+                </c:ser>""")
+            sp = parse_drawing_shape_props(wb, ser)
+            @test sp !== nothing
+            @test sp.fill.fgcolor.rgb == "156082"   # accent1, as pinned elsewhere
+
+            bare = _frag("""<c:ser xmlns:c="$NS_C"><c:idx val="0"/></c:ser>""")
+            @test parse_drawing_shape_props(wb, bare) === nothing
+
+            # chains without a guard
+            @test parse_drawing_shape_props(wb, nothing) === nothing
+        end
+
+        @testset "effects preserved, not modelled" begin
+            node = _frag("""<c:spPr xmlns:c="$NS_C" $_NSDECL>
+                  <a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>
+                  <a:effectLst><a:outerShdw blurRad="50800" dist="38100"/></a:effectLst>
+                </c:spPr>""")
+
+            sp = parse_drawing_shape_props(wb, node)
+            @test sp.effects !== nothing
+            @test localname(sp.effects) == "effectLst"
+        end
+
+        @testset "pattern fill keeps DrawingML vocabulary" begin
+            node = _frag("""<c:spPr xmlns:c="$NS_C" $_NSDECL>
+                  <a:pattFill prst="ltUpDiag">
+                    <a:fgClr><a:srgbClr val="000000"/></a:fgClr>
+                    <a:bgClr><a:srgbClr val="FFFFFF"/></a:bgClr>
+                  </a:pattFill>
+                </c:spPr>""")
+
+            sp = parse_drawing_shape_props(wb, node)
+            @test sp.fill.kind == :pattern
+            @test sp.fill.preset == "ltUpDiag"      # not "lightUp"
+            @test has_fill(sp)
+        end
+    end
+
+    @testset "fixture: series spPr" begin
+        XLSX.openxlsx(joinpath(data_directory, "chart_basic.xlsx")) do xf
+            wb = XLSX.get_workbook(xf)
+            c = first(getCharts(xf["Data"]))
+
+            root  = xml_root_element(get_xml_data(xf, c.path))
+            chart = first_element_with_tag(root, "chart")
+            plotarea = first_element_with_tag(chart, "plotArea")
+            barchart = first_element_with_tag(plotarea, "barChart")
+            @test barchart !== nothing
+
+            ser = first_element_with_tag(barchart, "ser")
+            @test ser !== nothing
+
+            sp = parse_drawing_shape_props(wb, ser)
+            @test sp !== nothing
+            @test sp.raw !== nothing
+
+            @test has_fill(sp)
+            @test sp.fill.kind == :solid
+            @test sp.fill.fgcolor.rgb == "156082"     # accent1
+
+            # Excel writes an explicit "no border", which is not the same as
+            # omitting a:ln. has_line must be false while sp.line is not nothing.
+            @test sp.line !== nothing
+            @test sp.line.fill.kind == :none
+            @test !has_line(sp)
+
+            @test sp.effects !== nothing
+            @test localname(sp.effects) == "effectLst"
+            if sp !== nothing
+                @test sp.raw !== nothing
             end
         end
     end

@@ -1094,11 +1094,43 @@ one point.
 """
 struct DrawingLine
     fill::Union{Nothing,DrawingFill}
-    width::Union{Nothing,Int}
+    width::Union{Nothing,Float64}       # w, points (file stores EMU)
     dash::Union{Nothing,String}
     cap::Union{Nothing,String}
     compound::Union{Nothing,String}
     raw::XML.Node
+end
+
+"""
+    DrawingShapeProps
+
+Shape properties (`a:spPr`) — the fill and outline of anything drawn in a chart:
+series, data points, the plot area, the chart area, axis lines, legend, gridlines.
+
+`fill` and `line` distinguish three states, and the difference matters:
+
+| file                            | reads as               | means                  |
+|---------------------------------|------------------------|------------------------|
+| no fill element                 | `nothing`              | inherit from the style |
+| `<a:noFill/>`                   | `kind == :none`        | deliberately invisible |
+| `<a:solidFill>…`                | `kind == :solid`       | this colour            |
+
+The same applies to `line.fill`: `<a:ln><a:noFill/></a:ln>` is how Excel writes
+"no border", which is not the same as omitting `a:ln` entirely.
+
+`effects` holds `a:effectLst` or `a:effectDag` as an unparsed node — enough to
+report that a shape has effects without modelling shadows and glows. Geometry
+(`a:xfrm`, `a:prstGeom`, `a:custGeom`) and 3-D (`a:scene3d`, `a:sp3d`) are not
+modelled at all; they stay in `raw`, which is where chart creation (stage 6)
+will find them. Chart parts rarely carry geometry — it belongs to the drawing
+shapes that host the chart, not the chart itself.
+"""
+struct DrawingShapeProps
+    fill::Union{Nothing,DrawingFill}
+    line::Union{Nothing,DrawingLine}
+    effects::Union{Nothing,XML.Node}    # a:effectLst or a:effectDag
+    bwmode::Union{Nothing,String}       # bwMode: clr | auto | gray | ltGray | invGray | ...
+    raw::Union{Nothing,XML.Node}
 end
 
 # =============================================================================
@@ -1113,7 +1145,7 @@ end
 Character-level properties: `a:rPr`, `a:defRPr` or `a:endParaRPr`.
 
 Sizes are points (the file stores 1/100 pt), `baseline` is a percentage, and
-`underline` / `strike` / `caps` keep the DrawingML vocabulary as written
+`under` / `strike` / `caps` keep the DrawingML vocabulary as written
 (`"sng"`, `"noStrike"`, `"small"`). Typefaces may be theme references —
 `"+mn-lt"` for the minor latin font, `"+mj-lt"` for major.
 """
@@ -1122,7 +1154,7 @@ struct DrawingRunProps
     size::Union{Nothing,Float64}        # sz, points
     bold::Union{Nothing,Bool}           # b
     italic::Union{Nothing,Bool}         # i
-    underline::Union{Nothing,String}    # u
+    under::Union{Nothing,String}        # u
     strike::Union{Nothing,String}
     caps::Union{Nothing,String}         # cap
     baseline::Union{Nothing,Float64}    # fraction of the font size

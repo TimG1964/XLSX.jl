@@ -208,21 +208,17 @@ function parse_drawing_line(wb::Workbook, node::Union{Nothing,XML.Node})::Union{
     el = localname(node) == "ln" ? node : first_element_with_tag(node, "ln")
     isnothing(el) && return nothing
 
-    w = tryparse(Int, get_attr(el, "w"))
     dash = first_element_with_tag(el, "prstDash")
 
     return DrawingLine(
         parse_drawing_fill(wb, el),
-        w,
+        _attr_emu(el, "w"),          # points, converted at parse time
         _attr(dash, "val"),
         _attr(el, "cap"),
         _attr(el, "cmpd"),
         el,
     )
 end
-
-"Line width in points. `nothing` where the element does not set one."
-line_width_points(ln::DrawingLine) = isnothing(ln.width) ? nothing : ln.width / 12700
 
 Base.show(io::IO, fl::DrawingFill) =
     print(io, "XLSX.DrawingFill(", fl.kind,
@@ -436,6 +432,79 @@ function parse_drawing_body_props(node::XML.Node; tag::AbstractString="bodyPr")
     )
 end
 
+"""
+    parse_drawing_shape_props(wb, node; tag="spPr") -> Union{Nothing,DrawingShapeProps}
+
+Parse a shape-properties element. `node` may be the element itself or its
+parent, and may be `nothing` so that optional lookups chain without guards:
+
+    parse_drawing_shape_props(wb, series_node)                    # c:spPr
+    parse_drawing_shape_props(wb, first_element_with_tag(x, "y")) # may be nothing
+
+Returns `nothing` when there is no `spPr` — which for a series means "inherit
+from the chart style", not "no fill".
+"""
+function parse_drawing_shape_props(wb::Workbook, node::Union{Nothing,XML.Node};
+                                   tag::AbstractString="spPr")::Union{Nothing,DrawingShapeProps}
+    isnothing(node) && return nothing
+    el = localname(node) == tag ? node : first_element_with_tag(node, tag)
+    isnothing(el) && return nothing
+
+    effects = first_element_with_tag(el, "effectLst")
+    isnothing(effects) && (effects = first_element_with_tag(el, "effectDag"))
+
+    return DrawingShapeProps(
+        parse_drawing_fill(wb, el),
+        parse_drawing_line(wb, el),
+        effects,
+        _attr(el, "bwMode"),
+        el,
+    )
+end
+
+# ---------------------------------------------------------------------------
+# Convenience predicates
+#
+# These exist because `isnothing(sp.fill)` and `sp.fill.kind == :none` are easy
+# to conflate at a call site, and the difference is the whole point of the type.
+# ---------------------------------------------------------------------------
+
+"""
+    has_fill(sp::DrawingShapeProps) -> Bool
+
+Whether the shape sets a visible fill. `false` both when no fill is specified
+(inherited) and when `<a:noFill/>` is written (deliberately transparent) — use
+`sp.fill` directly to tell those apart.
+"""
+has_fill(sp::DrawingShapeProps) = !isnothing(sp.fill) && sp.fill.kind !== :none
+
+"""
+    has_line(sp::DrawingShapeProps) -> Bool
+
+Whether the shape sets a visible outline. `false` when `a:ln` is absent, and
+also when it contains `<a:noFill/>`, which is how Excel writes "no border".
+"""
+has_line(sp::DrawingShapeProps) =
+    !isnothing(sp.line) && !isnothing(sp.line.fill) && sp.line.fill.kind !== :none
+
+function Base.show(io::IO, sp::DrawingShapeProps)
+    parts = String[]
+    if isnothing(sp.fill)
+        push!(parts, "fill inherited")
+    else
+        push!(parts, "fill $(sp.fill.kind)")
+    end
+    if isnothing(sp.line)
+        push!(parts, "line inherited")
+    elseif !isnothing(sp.line.fill) && sp.line.fill.kind === :none
+        push!(parts, "no line")
+    else
+        push!(parts, isnothing(sp.line.width) ? "line" : "line $(sp.line.width)pt")
+    end
+    isnothing(sp.effects) || push!(parts, "effects")
+    print(io, "DrawingShapeProps(", join(parts, ", "), ")")
+end
+
 # ---------------------------------------------------------------------------
 # a:p and its runs
 # ---------------------------------------------------------------------------
@@ -540,15 +609,19 @@ end
 text_runs(t::DrawingText) = [r for p in t.paragraphs for r in p.runs]
 
 # Comparable identity for run properties, ignoring `lang` and `raw`: two runs
-# that differ only by spellcheck language are the same formatting. Colours
-# compare on their resolved value, not on the node that produced it.
+# differing only by spellcheck language are the same formatting.
+#
+# Two conventions shared with `Base.:(==)(::RichTextRun, ::RichTextRun)`:
+# colours compare on their resolved value rather than how they were written
+# (as that does via `get_color`), and an absent property is distinct from one
+# set to a default (as that does by comparing key sets).
 _color_key(c) = c === nothing ? nothing : (c.rgb, c.alpha)
 _fill_key(f) = f === nothing ? nothing : (f.kind, _color_key(f.fgcolor), _color_key(f.bgcolor), f.preset)
 _line_key(l) = l === nothing ? nothing : (_fill_key(l.fill), l.width, l.dash, l.cap, l.compound)
 
 _props_key(::Nothing) = nothing
 _props_key(p::DrawingRunProps) = (
-    p.size, p.bold, p.italic, p.underline, p.strike, p.caps,
+    p.size, p.bold, p.italic, p.under, p.strike, p.caps,
     p.baseline, p.kern, p.spacing,
     _fill_key(p.fill), _line_key(p.line),
     p.latin, p.ea, p.cs,
@@ -565,6 +638,10 @@ This compares *as written*, not as resolved — two runs reaching the same
 appearance by different inheritance paths compare as different. That is the
 conservative direction: it can report mixed where a full cascade would report
 uniform, but never the reverse.
+
+Unlike `==` on `RichTextRun`, this ignores run text entirely: the question is
+whether formatting is consistent across the text, not whether the runs are
+identical. Two runs reading differently but formatted alike are uniform.
 """
 function is_uniform(t::DrawingText)
     key = nothing
@@ -625,6 +702,6 @@ function Base.show(io::IO, t::DrawingText)
         print(io, "DrawingText($np paragraph(s), formatting only)")
     else
         mixed = is_uniform(t) ? "" : ", mixed"
-        print(io, "DrawingText(", repr(first(s, 40)), ", $np paragraph(s), $nr run(s)$mixed)")
+        print(io, "DrawingText(", repr(truncate_len(s, 40)), ", $np paragraph(s), $nr run(s)$mixed)")
     end
 end
