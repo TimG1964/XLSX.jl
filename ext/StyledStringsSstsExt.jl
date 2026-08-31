@@ -3,7 +3,7 @@ module StyledStringsSstsExt
 @static if VERSION >= v"1.11-"
 
     using XLSX
-    import XLSX: setdata!, RichTextString, RichTextRun
+    import XLSX: setdata!, RichTextString, RichTextRun, resetFont, getcell, EmptyCell
 
     import StyledStrings: StyledStrings, AnnotatedString
     import StyledStrings: load_customisations!, getface, Face, FACES, SimpleColor
@@ -12,8 +12,13 @@ module StyledStringsSstsExt
         import StyledStrings: HTML_BASIC_COLORS
     end
 
-    setdata!(sheet::Worksheet, ref::CellRef, ss::AnnotatedString{T}) where T =
-        setdata!(sheet, ref, RichTextString(_ssToRuns(ss)))
+const _AnnStr = Union{AnnotatedString, SubString{<:AnnotatedString}}
+
+function setdata!(sheet::Worksheet, ref::CellRef, ss::_AnnStr)
+    getcell(sheet, ref) isa EmptyCell || resetFont(sheet, ref)
+    isempty(ss) && return setdata!(sheet, ref, "")
+    return setdata!(sheet, ref, RichTextString(_ssToRuns(ss)))
+end
 
 """
     _ssToRuns(s::Union{<:AnnotatedString, SubString{<:AnnotatedString}}) -> Vector{XLSX.RichTextRun}
@@ -23,8 +28,10 @@ Converts an `AnnotatedString` to a vector of `RichTextRun`s.
     function _ssToRuns(s::Union{<:AnnotatedString, SubString{<:AnnotatedString}})
         runs = RichTextRun[]
         load_customisations!()
+        dflt = getface()
         for (str, styles) in Base.eachregion(s)
-            push!(runs, RichTextRun(String(str), collect(_ss_style(getface(styles)))))
+            isempty(str) && continue
+            push!(runs, RichTextRun(String(str), collect(_ss_style(getface(styles), dflt))))
         end
         return runs
     end
@@ -71,15 +78,15 @@ Creates a dictionary of Excel font attributes from a StyledString `face`.
 
 Returns a Dict of (attribute => value).
 """
-    function _ss_style(face::Face)
+    function _ss_style(face::Face, dflt::Face=getface())
         d = Dict{Symbol, Any}()
 
-        if !isnothing(face.font) && face.font != "monospace"
+        if !isnothing(face.font) && face.font != dflt.font
             d[:name] = face.font
         end
 
-        if !isnothing(face.height)
-            d[:size] = face.height ÷ 10
+        if face.height isa Int && face.height != dflt.height
+            d[:size] = max(1, round(Int, face.height / 10, RoundNearestTiesUp))
         end
 
         if !isnothing(face.weight) && face.weight in (:medium, :semibold, :bold, :extrabold, :black)

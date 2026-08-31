@@ -347,6 +347,28 @@ function getFont(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellFont}
     return nothing
 end
 
+"""
+    resetFont(sh::Worksheet, cellref::CellRef) -> Int
+
+Reset a cell's font to the workbook default (`fontId` 0), leaving its other
+style attributes — alignment, borders, fills, number format — untouched.
+"""
+function resetFont(sh::Worksheet, cellref::CellRef)::Int
+    get_xlsxfile(sh).is_writable ||
+        throw(XLSXError("Cannot reset font because XLSXFile is not writable."))
+
+    cell = getcell(sh, cellref)
+    cell isa EmptyCell &&
+        throw(XLSXError("Cannot reset font for an `EmptyCell`: $(cellname(cellref)). Set the value first."))
+
+    # Style 0 is already the default xf, which points at font 0.
+    cell.style == UInt32(0) && return 0
+
+    cell.style = update_template_xf(sh, CellDataFormat(cell.style),
+                                    ["fontId", "applyFont"], ["0", "1"]).id
+    return 0
+end
+
 #
 # -- Get and set border attributes
 #

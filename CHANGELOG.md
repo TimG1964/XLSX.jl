@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   gains a `hidden` field.
 - fix `deletesheet!` leaving chart parts orphaned in the package.
 - fix `copysheet!` sharing chart parts with the original; charts are now cloned and repointed at the copied sheet, for both `c:` and `chartEx` charts.
+- `AnnotatedString`s no longer force a 12pt size on every run: runs that set no font name or size now inherit them from the cell font, which is reset to the workbook default when the string is assigned. Empty and `SubString` annotated strings are also handled.
 
 ## [v0.12.3](https://github.com/JuliaData/XLSX.jl/tree/v0.12.3) - 2026-08-20
 - Address [#263](https://github.com/JuliaData/XLSX.jl/issues/263) (Retrieve data from chart)

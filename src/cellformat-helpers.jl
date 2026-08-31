@@ -1201,121 +1201,103 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
     is = parse(str_formatted, XML.Node)[1] # Convert to XML.Node for ease of handling
 
     all_r = filter(z -> localname(z) == "r", XML.children(is))
-    run_elements = reduce(vcat, [XML.children(z) for z in all_r])
-    rPr_elements = filter(z -> localname(z) == "rPr", run_elements) # rPr elements
 
-    t=String[] # text elements
-    for i in filter(z -> localname(z) == "t", run_elements)
-        push!(t, XML.is_simple(i[1]) ? XML.simple_value(i[1]) : XML.value(i[1]))
+    # One entry per <r>: its <rPr> (or `nothing`) and its text.
+    rPrs = Union{Nothing, XML.Node}[]
+    t    = String[]
+    for r in all_r
+        kids = XML.children(r)
+        i_rPr = findfirst(z -> localname(z) == "rPr", kids)
+        i_t   = findfirst(z -> localname(z) == "t", kids)
+        push!(rPrs, isnothing(i_rPr) ? nothing : kids[i_rPr])
+        tel = kids[i_t]
+        push!(t, XML.is_simple(tel[1]) ? XML.simple_value(tel[1]) : XML.value(tel[1]))
     end
 
-    for rPr in rPr_elements
-        # Delete rPr attributes for any attributes (kw...) given in setFont
-        atts = ["b", "i", "strike", "u", "vertAlign", "sz", "color", "rFont", "family", "scheme"] # set of all possible rPr attributes in required order
+    first_had_rPr = !isnothing(rPrs[1])
 
-        new_rPr = fill(XML.Element("DeleteMe"), length(atts)) # to collect new rPr elements
+    atts = ["b", "i", "strike", "u", "vertAlign", "sz", "color", "rFont", "family", "scheme"]
 
-        for att in XML.children(rPr) # first copy existing attributes
-            for i in 1:length(atts)
-                if XML.tag(att) == atts[i]
-                    new_rPr[i] = att
-                end
+    for rPr in rPrs
+        isnothing(rPr) && continue    # nothing to strip from an unattributed run
+
+        new_rPr = fill(XML.Element("DeleteMe"), length(atts))
+        for att in XML.children(rPr)
+            for i in eachindex(atts)
+                XML.tag(att) == atts[i] && (new_rPr[i] = att)
             end
         end
 
-        # then mark any elements for deletion that are in the keywords given in setFont/setUniformFont
-        if !isnothing(bold)
-            new_rPr[1] = XML.Element("DeleteMe")
-        end
-        if !isnothing(italic)
-            new_rPr[2] = XML.Element("DeleteMe")
-        end
-        if !isnothing(strike)
-            new_rPr[3] = XML.Element("DeleteMe")
-        end
-        if !isnothing(under)
-            new_rPr[4] = XML.Element("DeleteMe")
-        end
-        if !isnothing(size)
-            new_rPr[6] = XML.Element("DeleteMe")
-        end
-        if !isnothing(color)
-            new_rPr[7] = XML.Element("DeleteMe")
-        end
+        !isnothing(bold)   && (new_rPr[1]  = XML.Element("DeleteMe"))
+        !isnothing(italic) && (new_rPr[2]  = XML.Element("DeleteMe"))
+        !isnothing(strike) && (new_rPr[3]  = XML.Element("DeleteMe"))
+        !isnothing(under)  && (new_rPr[4]  = XML.Element("DeleteMe"))
+        !isnothing(size)   && (new_rPr[6]  = XML.Element("DeleteMe"))
+        !isnothing(color)  && (new_rPr[7]  = XML.Element("DeleteMe"))
         if !isnothing(name)
-            new_rPr[8] = XML.Element("DeleteMe")
-            new_rPr[9] = XML.Element("DeleteMe")
-            new_rPr[10] = XML.Element("DeleteMe")
+            new_rPr[8] = new_rPr[9] = new_rPr[10] = XML.Element("DeleteMe")
         end
 
-        # finally push merged elements back to rPr
         if !isnothing(rPr.children)
             empty!(rPr.children)
-            foreach(new_rPr) do element 
+            foreach(new_rPr) do element
                 XML.tag(element) != "DeleteMe" && push!(rPr.children, element)
             end
         end
     end
 
-    # now need to merge any adjacent <r> elements that have identical <rPr> elements
-    if length(t) == length(rPr_elements) # first <r> may or may not have an <rPr> element but always has a <t> element.
-        inc_first=0
-    elseif length(t) == length(rPr_elements)+1
-        inc_first=1
-    else
-        throw(XLSXError("Something wrong here!"))
-    end
-    for i in length(rPr_elements):-1:2 # merge adjacent <r> elements that have identical <rPr> elements
-        if rPr_elements[i] == rPr_elements[i-1]
-            t[i+inc_first-1] *= t[i+inc_first]
-            t[i+inc_first] = ")___DeleteMe___("
+    # An <rPr> stripped down to nothing means the same as no <rPr> at all:
+    # inherit the cell font. Normalise so the merge comparison below is total.
+    for i in eachindex(rPrs)
+        r = rPrs[i]
+        if !isnothing(r) && (isnothing(XML.children(r)) || isempty(XML.children(r)))
+            rPrs[i] = nothing
         end
     end
 
-    # if first <r> has no <rPr> and the only remaining <rPr> is empty, merge text
-    if inc_first==1 && (length(t) == 2 || all([x == ")___DeleteMe___(" for x in t[3:end]]))
-        if isnothing(XML.attributes(rPr_elements[1]))
-            t[1] *= t[2]
-            t[2] = ")___DeleteMe___("
+    # Merge adjacent runs with identical formatting. `nothing == nothing` is
+    # true, so runs that both inherit the cell font merge as expected.
+    for i in length(rPrs):-1:2
+        if rPrs[i] == rPrs[i-1]
+            t[i-1] *= t[i]
+            t[i] = ")___DeleteMe___("
         end
     end
-
 
     pattern = ")___DeleteMe___("
     valid = s -> !occursin(pattern, s)
-    only_first_valid = valid(t[1]) && count(valid, t) == 1
-    if only_first_valid
-        # only one <r>, so convert to cell level Font
-        if inc_first == 1
-            # no atts => no op
-        else
-            # move single run attributes to cell Font attributes
-            setFont(ws, cell.ref; getRichTextString(ws, cell.ref).runs[1].atts...)
+
+    if valid(t[1]) && count(valid, t) == 1
+        # Read the run attributes while the cell still points at the rich text.
+        atts1 = first_had_rPr ? getRichTextString(ws, cell.ref).runs[1].atts : nothing
+
+        new_index = add_shared_string!(wb, t[1])
+
+        if !isnothing(atts1) && !isempty(atts1)
+            # Point the cell at the plain string first, otherwise the setFont
+            # below re-enters this function on the same rich text and recurses.
+            cell.value = reinterpret(UInt64, Int64(new_index))
+            setFont(ws, cell.ref; atts1...)
         end
-        new_index=add_shared_string!(wb, t[1])
     else
-        # reconstruct updated str_formatted
         new_r = IOBuffer()
         write(new_r, "<si>\n")
-        for r in 1:length(all_r)
-            if t[r] != ")___DeleteMe___(" # signals a merged <r> element to be skipped
-                write(new_r, "  <r>\n")
-                r > inc_first && write(new_r, XML.write(rPr_elements[r-inc_first]) * "\n")
-                write(new_r, "    <t" * (needs_preserve(t[r]) ? " xml:space=\"preserve\"" : "") * ">" *t[r] * "</t>\n")
-                write(new_r, "  </r>\n")
-            end
+        for r in eachindex(t)
+            t[r] == pattern && continue
+            write(new_r, "  <r>\n")
+            isnothing(rPrs[r]) || write(new_r, XML.write(rPrs[r]) * "\n")
+            write(new_r, "    <t" * (needs_preserve(t[r]) ? " xml:space=\"preserve\"" : "") *
+                ">" * XML.escape(t[r]) * "</t>\n")
+            write(new_r, "  </r>\n")
         end
         write(new_r, "</si>")
 
         str_formatted = String(take!(new_r))
 
         ind = get(sst.index, str_formatted, nothing)
-        if ind !== nothing
-            return ind  # Found exact match
-        end
+        ind !== nothing && return ind
 
-        new_index=add_formatted_string!(wb, sst, str_formatted) # can't update existing sharded string in case it is used by another cell
+        new_index = add_formatted_string!(wb, sst, str_formatted)
     end
     return new_index
-
 end
