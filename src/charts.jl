@@ -40,6 +40,11 @@ const CHART_GROUP_TAGS = Set([
 const SHAPE_TAGS = ("graphicFrame", "pic", "sp", "grpSp", "cxnSp", "contentPart")
 
 
+Base.:(==)(a::Chart, b::Chart) = a.package === b.package && a.path == b.path
+Base.hash(c::Chart, h::UInt) = hash(c.path, hash(objectid(c.package), h))
+Base.:(==)(a::ChartEx, b::ChartEx) = a.package === b.package && a.path == b.path
+Base.hash(c::ChartEx, h::UInt) = hash(c.path, hash(objectid(c.package), h))
+
 # ===========================================================================
 # Traversal helpers
 # ===========================================================================
@@ -118,7 +123,7 @@ end
 # `cx:chart` sits in exactly the same place, so one walk covers both; the
 # relationship type, not the element, tells the two schemas apart.
 function frame_chart_element(shape::XML.Node)::Union{Nothing,XML.Node}
-    localname(shape) == "graphicFrame" || return nothing
+    has_localname(shape, "graphicFrame") || return nothing
     graphic = first_element_with_tag(shape, "graphic")
     graphicdata = first_element_with_tag(graphic, "graphicData")
     return first_element_with_tag(graphicdata, "chart")
@@ -136,7 +141,7 @@ function drawingml_text(rich::Union{Nothing,XML.Node})::Union{Nothing,String}
     isnothing(rich) && return nothing
     buf = IOBuffer()
     for p in XML.eachelement(rich)
-        localname(p) == "p" || continue
+        has_localname(p, "p") || continue
         for run in XML.eachelement(p)
             localname(run) in ("r", "fld") || continue
             print(buf, something(child_text(run, "t"), ""))
@@ -166,6 +171,19 @@ end
 # Cache parsing
 # ===========================================================================
 
+"""
+    chart_root(c::AbstractChart) -> XML.Node
+
+The `c:chartSpace` (or `cx:chartSpace`) element for `c`. Charts are values
+parsed at a moment in time, not live handles, so a chart outlives deletion of
+its part; this throws rather than returning a stale tree.
+"""
+function chart_root(c::AbstractChart)
+    haskey(c.package.data, c.path) ||
+        throw(XLSXError("Chart part `$(c.path)` is no longer in the workbook."))
+    return xml_root_element(get_xml_data(c.package, c.path))
+end
+
 # A cached point is one of: a number, a known Excel error, or (rarely) text that
 # is neither. Errors are recorded separately and stored as `missing`.
 function parse_cached_point!(errors::Dict{Int,UInt64}, i::Int, s::AbstractString, numeric::Bool)
@@ -184,7 +202,7 @@ function parse_cached_points(node::XML.Node, numeric::Bool)
     values = Vector{Any}(missing, n)
     errors = Dict{Int,UInt64}()
     for pt in XML.eachelement(node)
-        localname(pt) == "pt" || continue
+        has_localname(pt, "pt") || continue
         i = tryparse(Int, get_attr(pt, "idx"))
         isnothing(i) && continue
         s = child_text(pt, "v")
@@ -218,7 +236,7 @@ function parse_chart_ref(container::Union{Nothing,XML.Node}; read_cached_values:
             levels = Any[]
             if read_cached_values && !isnothing(cnode)
                 for lvl in XML.eachelement(cnode)
-                    localname(lvl) == "lvl" || continue
+                    has_localname(lvl, "lvl") || continue
                     pts, _ = parse_cached_points(lvl, false)
                     push!(levels, pts)
                 end
@@ -321,6 +339,7 @@ function parse_chart_series(ser::XML.Node, charttype::Symbol; read_cached_values
         categories,
         values,
         parse_chart_ref(first_element_with_tag(ser, "bubbleSize"); read_cached_values=read_cached_values),
+        ser
     )
 end
 
@@ -345,8 +364,8 @@ function parse_chart_part(
 
     haskey(xf.data, path) || throw(XLSXError("Chart part `$path` not found in the package."))
 
-    chartspace = xml_root_element(xf.data[path])
-    localname(chartspace) != "chartSpace" &&
+    chartspace = xml_root_element(get_xml_data(xf, path))
+    !has_localname(chartspace, "chartSpace") &&
         throw(XLSXError("Malformed chart part $path. Root node name should be `chartSpace`. Found $(localname(chartspace))."))
 
     chartnode = first_element_with_tag(chartspace, "chart")
@@ -366,14 +385,15 @@ function parse_chart_part(
                                 materialise(xf, s.name_ref),
                                 materialise(xf, s.categories),
                                 materialise(xf, s.values),
-                                materialise(xf, s.bubble_sizes))
+                                materialise(xf, s.bubble_sizes),
+                                s.raw)
             end
             push!(series, s)
         end
     end
 
     _, fname = _split_zip_path(path)
-    return Chart(path, first(splitext(fname)), rId, sheet, from, to,
+    return Chart(xf, path, first(splitext(fname)), rId, sheet, from, to,
                  parse_chart_title(chartnode), charttypes, series)
 end
 
@@ -394,7 +414,7 @@ function parse_chartex_part(
     haskey(xf.data, path) || throw(XLSXError("Chart part `$path` not found in the package."))
 
     chartspace = xml_root_element(xf.data[path])
-    localname(chartspace) != "chartSpace" &&
+    !has_localname(chartspace, "chartSpace") &&
         throw(XLSXError("Malformed chartEx part $path. Root node name should be `chartSpace`. Found $(localname(chartspace))."))
 
     # Source ranges live up front in cx:chartData, shared across series, rather
@@ -431,7 +451,7 @@ function parse_chartex_part(
         first_element_with_tag(first_element_with_tag(chartnode, "title"), "tx"), "rich"))
 
     _, fname = _split_zip_path(path)
-    return ChartEx(path, first(splitext(fname)), rId, sheet, from, to,
+    return ChartEx(xf, path, first(splitext(fname)), rId, sheet, from, to,
                    title, layouts, refs, ranges, binning)
 end
 
@@ -877,6 +897,17 @@ The source range of a `ChartRef`, or `nothing` when it has none.
 chart_range(r::Union{Nothing,ChartRef}) =
     isnothing(r) ? nothing : parse_chart_range(r.ref)
 
+# The range computation, independent of any chart or open file. `getChartRanges`
+# is the public entry point; this exists so the logic can be exercised without
+# constructing a Chart, which now requires a live XLSXFile.
+_chart_ranges(series::Vector{ChartSeries})::Vector{ChartRanges} =
+    [(idx = s.idx,
+      name = s.name,
+      categories = chart_range(s.categories),
+      values = chart_range(s.values),
+      bubble_sizes = chart_range(s.bubble_sizes))
+     for s in series]
+
 """
     getChartRanges(c::Chart) -> Vector{ChartRanges}
     getChartRanges(c::ChartEx) -> Vector{ChartRange}
@@ -938,13 +969,7 @@ julia> [(x.chart, length(x.ranges)) for x in XLSX.getChartRanges(f)]
 
 See also [`XLSX.getChart`](@ref), [`XLSX.getCharts`](@ref), [`XLSX.getChartData`](@ref).
 """
-getChartRanges(c::Chart)::Vector{ChartRanges} =
-    [(idx = s.idx,
-      name = s.name,
-      categories = chart_range(s.categories),
-      values = chart_range(s.values),
-      bubble_sizes = chart_range(s.bubble_sizes))
-     for s in c.series]
+getChartRanges(c::Chart)::Vector{ChartRanges} = _chart_ranges(c.series)
 
 getChartRanges(c::ChartEx)::Vector{ChartRange} = c.ranges
 
@@ -982,7 +1007,7 @@ function Base.show(io::IO, ::MIME"text/plain", c::Chart)
     println(io, "  type: ", join(string.(c.charttypes), ", "))
     println(io, "  series: ", length(c.series))
     for (i, s) in enumerate(c.series)
-        print(io, "    [", s.order, "] ", something(s.name, "Series$(i)"))
+        print(io, "    [", i, "] ", something(s.name, "Series$(i)"))
         isnothing(s.values) ||
             print(io, " - ", something(s.values.ref, "<literal>"), " (", s.values.ptCount, " pts)")
         println(io)

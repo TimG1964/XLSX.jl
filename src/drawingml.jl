@@ -205,7 +205,7 @@ Parse the outline held by `node`, or `nothing` where it holds none. Pass the
 """
 function parse_drawing_line(wb::Workbook, node::Union{Nothing,XML.Node})::Union{Nothing,DrawingLine}
     isnothing(node) && return nothing
-    el = localname(node) == "ln" ? node : first_element_with_tag(node, "ln")
+    el = has_localname(node, "ln") ? node : first_element_with_tag(node, "ln")
     isnothing(el) && return nothing
 
     dash = first_element_with_tag(el, "prstDash")
@@ -331,7 +331,7 @@ Fields left `nothing` are absent from the file, which means "inherit" — not
 "default". Resolving the cascade is `effective_run_props`' job, not this one's.
 """
 function parse_drawing_run_props(wb::Workbook, node::XML.Node; tag::AbstractString="rPr")
-    el = localname(node) == tag ? node : first_element_with_tag(node, tag)
+    el = has_localname(node, tag) ? node : first_element_with_tag(node, tag)
     el === nothing && return nothing
 
     return DrawingRunProps(
@@ -365,7 +365,7 @@ Parse paragraph properties. The nested `a:defRPr` is parsed into a full
 `DrawingRunProps` — in a chart `txPr` it is the only place the font appears.
 """
 function parse_drawing_paragraph_props(wb::Workbook, node::XML.Node; tag::AbstractString="pPr")
-    el = localname(node) == tag ? node : first_element_with_tag(node, tag)
+    el = has_localname(node, tag) ? node : first_element_with_tag(node, tag)
     el === nothing && return nothing
 
     return DrawingParaProps(
@@ -395,7 +395,7 @@ Parse text-body properties. Autofit is an element, not an attribute:
 `linespacereduction`), `a:spAutoFit` -> `:shape`. Absent means "inherit".
 """
 function parse_drawing_body_props(node::XML.Node; tag::AbstractString="bodyPr")
-    el = localname(node) == tag ? node : first_element_with_tag(node, tag)
+    el = has_localname(node, tag) ? node : first_element_with_tag(node, tag)
     el === nothing && return nothing
 
     autofit = nothing
@@ -447,7 +447,7 @@ from the chart style", not "no fill".
 function parse_drawing_shape_props(wb::Workbook, node::Union{Nothing,XML.Node};
                                    tag::AbstractString="spPr")::Union{Nothing,DrawingShapeProps}
     isnothing(node) && return nothing
-    el = localname(node) == tag ? node : first_element_with_tag(node, tag)
+    el = has_localname(node, tag) ? node : first_element_with_tag(node, tag)
     isnothing(el) && return nothing
 
     effects = first_element_with_tag(el, "effectLst")
@@ -560,7 +560,7 @@ carries list-level defaults we do not model, and dropping it would change how
 Excel renders inherited text.
 """
 function parse_drawing_text(wb::Workbook, node::XML.Node; tag::AbstractString="txPr")
-    el = if localname(node) == tag || _is_text_body(node)
+    el = if has_localname(node, tag) || _is_text_body(node)
         node
     else
         first_element_with_tag(node, tag)
@@ -576,9 +576,10 @@ function parse_drawing_text(wb::Workbook, node::XML.Node; tag::AbstractString="t
         el,
     )
 end
+parse_drawing_text(::Workbook, ::Nothing; kw...) = nothing
 
 _is_text_body(node::XML.Node) =
-    first_element_with_tag(node, "bodyPr") !== nothing && localname(node) != "spPr"
+    first_element_with_tag(node, "bodyPr") !== nothing && !has_localname(node, "spPr")
 
 # ---------------------------------------------------------------------------
 # Reading the text back out
@@ -705,3 +706,4 @@ function Base.show(io::IO, t::DrawingText)
         print(io, "DrawingText(", repr(truncate_len(s, 40)), ", $np paragraph(s), $nr run(s)$mixed)")
     end
 end
+

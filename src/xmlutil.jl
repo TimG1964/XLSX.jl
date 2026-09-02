@@ -14,7 +14,6 @@ function first_element_with_tag(node::Union{Nothing,XML.Node}, tag::AbstractStri
     end
     return nothing
 end
-first_element_with_tag(::Nothing, ::AbstractString) = nothing
 
 elements_with_tag(node::XML.Node, tag::AbstractString) =
     XML.Node[n for n in XML.eachelement(node) if has_localname(n, tag)]
@@ -78,7 +77,7 @@ function get_prefixed_attr(node::XML.Node, key::AbstractString)::Union{Nothing,S
     atts = XML.attributes(node)
     isnothing(atts) && return nothing
     for (k, v) in atts
-        occursin(':', k) && localname(k) == key && return v
+        occursin(':', k) && has_localname(k, key) && return v
     end
     return nothing
 end

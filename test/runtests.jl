@@ -132,6 +132,7 @@ it so.
 =#
 include(joinpath(files_directory, "Cell-names_tests.jl"))
 include(joinpath(files_directory, "Charts_tests.jl"))
+include(joinpath(files_directory, "ChartProps_tests.jl"))
 include(joinpath(files_directory, "Colors-tests.jl"))
 include(joinpath(files_directory, "Conditional-format_tests.jl"))
 include(joinpath(files_directory, "Copy-Add_tests.jl"))

@@ -938,6 +938,7 @@ struct ChartSeries
     categories::Union{Nothing,ChartRef}
     values::Union{Nothing,ChartRef}
     bubble_sizes::Union{Nothing,ChartRef}
+    raw::XML.Node          # the c:ser element
 end
 
 const ChartRange = Union{Nothing,SheetCellRef,SheetCellRange,SheetRowRange,SheetColumnRange,NonContiguousRange}
@@ -977,6 +978,7 @@ Metadata for one chart part, plus its series.
 - `series` - `Vector{ChartSeries}` in document order.
 """
 struct Chart <: AbstractChart
+    package::XLSXFile
     path::String
     name::String
     rId::Union{Nothing,String}
@@ -1007,6 +1009,7 @@ Fields shared with [`Chart`](@ref) have the same meaning.
   histogram from a plain clustered column chart.
 """
 struct ChartEx <: AbstractChart
+    package::XLSXFile
     path::String
     name::String
     rId::Union{Nothing,String}
@@ -1019,6 +1022,7 @@ struct ChartEx <: AbstractChart
     ranges::Vector{ChartRange}
     binning::Bool
 end
+
 
 """
     DrawingColor
@@ -1257,4 +1261,174 @@ struct DrawingText
     liststyle::Union{Nothing,XML.Node}
     paragraphs::Vector{DrawingParagraph}
     raw::Union{Nothing,XML.Node}
+end
+
+struct ChartMarker
+    symbol::Union{Nothing,Symbol}   # :circle, :square, :none, ...
+    size::Union{Nothing,Int}        # points, 2–72
+    shape::Union{Nothing,DrawingShapeProps}
+    raw::XML.Node
+end
+
+"""
+    ChartAxis
+
+One axis element from `c:plotArea` — `c:catAx`, `c:valAx`, `c:dateAx` or `c:serAx`.
+
+# Fields
+- `kind` — `:catAx`, `:valAx`, `:dateAx`, `:serAx`, as written.
+- `axid` — `c:axId`. The identifier chart groups and `c:crossAx` reference.
+- `pos` — `:l`, `:r`, `:t`, `:b` from `c:axPos`.
+- `crossax` — `axId` of the axis this one crosses.
+- `deleted` — `c:delete val="1"`. A deleted axis is still present in the XML
+  and still formattable; Excel just doesn't draw it.
+- `raw` — the axis element.
+"""
+struct ChartAxis
+    kind::Symbol
+    axid::Union{Nothing,Int}
+    pos::Union{Nothing,Symbol}
+    crossax::Union{Nothing,Int}
+    deleted::Bool
+    raw::XML.Node
+end
+
+"""
+    ChartGroup
+
+One chart-type group inside `c:plotArea` — `c:barChart`, `c:lineChart`,
+`c:scatterChart` and so on. A combo chart has several; a plain chart has one.
+
+The group is what ties series to axes: its `c:axId` children name the axes its
+series are plotted against, so a series on a secondary axis is a series in a
+group that names the secondary axis ids.
+
+# Fields
+- `kind` — `:barChart`, `:lineChart`, …, as written.
+- `axids` — `c:axId` values in document order. Two for most chart types, three
+  for 3-D charts with a series axis, none for pie and doughnut.
+- `raw` — the group element.
+"""
+struct ChartGroup
+    kind::Symbol
+    axids::Vector{Int}
+    raw::XML.Node
+end
+
+"""
+    ChartDataPoint
+
+A per-point formatting override (`c:ser/c:dPt`). Points without an override
+have no `c:dPt` element at all, so a series of ten bars with one recoloured has
+exactly one of these.
+
+# Fields
+- `idx` — `c:idx`, Excel's 0-based point number. Not a position in any Julia
+  collection; use [`series_data_point`](@ref) to look up by 1-based position.
+- `invert_if_negative`, `bubble3d` — the flags Excel writes alongside.
+- `raw` — the `c:dPt` element.
+"""
+struct ChartDataPoint
+    idx::Int
+    invert_if_negative::Union{Nothing,Bool}
+    bubble3d::Union{Nothing,Bool}
+    raw::XML.Node
+end
+
+"""
+    ChartDataLabel
+
+An individual data label override (`c:ser/c:dLbls/c:dLbl`). Excel writes one
+only for a label the user moved, retyped or reformatted individually; the rest
+of the series' labels come from the series-level `c:dLbls`.
+
+# Fields
+- `idx` — `c:idx`, Excel's 0-based point number. Not a Julia position; use
+  [`series_data_label`](@ref) to look up by 1-based position.
+- `delete` — `c:delete`. `true` hides this one label while the rest of the
+  series keeps its labels, and Excel then writes nothing else in the element,
+  so the other accessors return `nothing`. `nothing` means no `c:delete` was
+  written at all.
+- `raw` — the `c:dLbl` element.
+"""
+struct ChartDataLabel
+    idx::Int
+    delete::Union{Nothing,Bool}
+    raw::XML.Node
+end
+"""
+    ChartTrendline
+
+A trendline on a series (`c:ser/c:trendline`). A series can carry several — a
+linear fit and a moving average, say — so accessors return a vector.
+
+# Fields
+- `kind` — `c:trendlineType`: `:linear`, `:log`, `:exp`, `:power`, `:poly`,
+  `:movingAvg`.
+- `name` — `c:name`, the user's label for the line. `nothing` means Excel
+  generates one from the type and series name.
+- `order` — `c:order`, the degree of a polynomial fit. Meaningful for `:poly`.
+- `period` — `c:period`, the window of a moving average. Meaningful for
+  `:movingAvg`.
+- `forward`, `backward` — `c:forward`/`c:backward`, how far the line is
+  extrapolated beyond the data, in category units.
+- `intercept` — `c:intercept`, a forced y-intercept. `nothing` means the fit
+  chooses one.
+- `disp_rsqr`, `disp_eq` — whether the R² value and the fit equation are shown
+  on the chart.
+- `raw` — the `c:trendline` element.
+"""
+struct ChartTrendline
+    kind::Union{Nothing,Symbol}
+    name::Union{Nothing,String}
+    order::Union{Nothing,Int}
+    period::Union{Nothing,Int}
+    forward::Union{Nothing,Float64}
+    backward::Union{Nothing,Float64}
+    intercept::Union{Nothing,Float64}
+    disp_rsqr::Union{Nothing,Bool}
+    disp_eq::Union{Nothing,Bool}
+    raw::XML.Node
+end
+
+"""
+    ChartErrorBars
+
+Error bars on a series (`c:ser/c:errBars`). A series carries at most two, one
+for each of `x` and `y`.
+
+# Fields
+- `direction` — `c:errDir`: `:x` or `:y`. `nothing` on a chart type where only
+  one direction is possible, in which case Excel omits it.
+- `bar_type` — `c:errBarType`: `:both`, `:minus`, `:plus`.
+- `value_type` — `c:errValType`: `:cust`, `:fixedVal`, `:percentage`,
+  `:stdDev`, `:stdErr`.
+- `value` — `c:val`, the magnitude, for every `value_type` except `:cust`.
+- `no_end_cap` — `c:noEndCap`.
+- `raw` — the `c:errBars` element.
+"""
+struct ChartErrorBars
+    direction::Union{Nothing,Symbol}
+    bar_type::Union{Nothing,Symbol}
+    value_type::Union{Nothing,Symbol}
+    value::Union{Nothing,Float64}
+    no_end_cap::Union{Nothing,Bool}
+    raw::XML.Node
+end
+
+"""
+    ChartUpDownBars
+
+Up and down bars on a line or stock chart (`c:upDownBars`), drawn between the
+first and last series at each category. The two bars are formatted separately:
+`up` is drawn where the last series exceeds the first, `down` where it falls
+short.
+
+# Fields
+- `gap_width` — `c:gapWidth`, spacing as a percentage of bar width.
+- `raw` — the `c:upDownBars` element.
+"""
+struct ChartUpDownBars
+    gap_width::Union{Nothing,Int}
+    raw::XML.Node
 end

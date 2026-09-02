@@ -119,6 +119,7 @@ include("conditional-formats.jl")
 include("images.jl")
 include("drawingml.jl")
 include("charts.jl")
+include("chartprops.jl")
 include("write.jl")
 include("fileArray.jl")
 

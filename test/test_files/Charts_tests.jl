@@ -422,14 +422,12 @@
 
         # the conversion that used to throw
         s = XLSX.ChartSeries(0, 0, :barChart, "S", nothing,
-                            rr("Sheet1!\$2:\$2"), rr("Sheet1!\$3:\$3"), nothing)
-        c = XLSX.Chart("xl/charts/chart1.xml", "chart1", nothing, nothing, nothing, nothing,
-                    nothing, [:barChart], [s])
-        ranges = XLSX.getChartRanges(c)
+                             rr("Sheet1!\$2:\$2"), rr("Sheet1!\$3:\$3"), nothing,
+                             XML.Element("c:ser"))
+        ranges = XLSX._chart_ranges([s])
         @test ranges[1].categories isa XLSX.SheetRowRange
         @test ranges[1].values     isa XLSX.SheetRowRange
     end
-
     @testset "ChartRange union covers chart_range" begin
         @test XLSX.SheetCellRef       <: XLSX.ChartRange
         @test XLSX.SheetCellRange     <: XLSX.ChartRange
