@@ -356,3 +356,65 @@ XLSX.writexlsx("Example_add_chart_out.xlsx", f, overwrite=true)
 ```
 
 ![image|320x500](./images/Add_image_2.png)
+
+## Adding a dataBar with varying colors
+
+Excel's databar conditional format have a fixed color. The bar length 
+changes with the cell value but the color doesn't. The function `setColoredDataBars`
+provides a pragmatic workaround to make this possible in XLSX.
+
+```
+xf = newxlsx()
+s=xf[1]
+s["B1"] = "dataBar"
+s["C1"] = "coloredDataBar"
+s["A2:A11"] = sort!(rand(10))
+s["B2:B11"] = s["A2:A11"]
+s["C2:C11"] = s["A2:A11"]
+setConditionalFormat(s, "B2:B11", :dataBar; showVal="false")
+XLSX.setColoredDataBars(s, "C2:C11"; 
+    bands=5, 
+    min_val="0", 
+    max_val="1",
+    breaks=[0.2, 0.4, 0.6, 0.8],
+    colors=[:red, :orange, :yellow3, :chartreuse3, :green], 
+    showVal="false")
+writexlsx("coloredDataBar.xlsx", xf)
+```
+
+![image|320x500](./images/coloredDataBars.png)
+
+This function uses the native databar conditional format, but it partitions the range 
+supplied based on cell values and applies different databars of different colors to 
+each partition at the time the function is called. If the data subsequently change,
+the bar lengths will allways change but the colors won't, and so become misleading.
+This function therefore behaves like a static conditional format.
+
+!!! note
+
+    `setColoredDataBars` requires cells to contain values. If cells contain formulas
+    written by `setFormula`, there values will be set to missing but will be recalculated
+    when the resulting file is opened by Excel. Until such a recalculation by Excel 
+    happens, `setColoredDataBars cannot work:
+
+    ```julia
+    xf = newxlsx()
+    s=xf[1]
+    s["A2:A11"] = sort!(rand(10))
+    setFormula(s, "B2:B11", "=A1") # setting a formula sets values to missing
+    setFormula(s, "C2:C11", "=A1") # values are are only populated when Excel recalculates
+    setConditionalFormat(s, "B2:B11", :dataBar; showVal="false") # works as it does not depend on cell contents
+    XLSX.setColoredDataBars(s, "C2:C11"; # fails
+        bands=5, 
+        min_val="0", 
+        max_val="1",
+        breaks=[0.2, 0.4, 0.6, 0.8],
+        colors=[:red, :orange, :yellow3, :chartreuse3, :green], 
+        showVal="false")
+    ERROR: XLSXError: No numeric values in `C2:C11` to band.
+    ```
+
+!!! note
+
+    This function is provided on an experimental basis and isn't public. It may be withdrawn 
+    in future and only remain here (more fully documented) as an example.

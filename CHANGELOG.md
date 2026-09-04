@@ -6,22 +6,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 - fix [#454](https://github.com/JuliaData/XLSX.jl/issues/454) (retain number formats)
-- When given range that resolves to a single cell, `setFormat`, `setFont`, `setFill`, `setBorder` and `setAlignment` now return the cell's attribute id, instead of -1.
+- When given range that resolves to a single cell, `setFormat`, `setFont`, `setFill`, 
+  `setBorder` and `setAlignment` now return the cell's attribute id, instead of -1.
 - Add a `deleteDefinedName` function
 - Add a `removeMergedCells` function
 - Add support for reading `chartEx` charts (waterfall, funnel, treemap, sunburst,
   histogram, Pareto, box & whisker, region map). These are returned as `ChartEx`
   from `getCharts`, which now returns `Vector{AbstractChart}`. New: `AbstractChart`,
   `ChartEx`, `chartSchema`, `chartType`.
-- fix bug preventing system (Excel-private) defined names surviving a read/write round trip.
+- fix bug preventing system (Excel-private) defined names surviving a read/write 
+  round trip.
 - `getDefinedNames` and `getAllDefinedNames` now exclude names Excel maintains for
   itself (hidden names, and the `_xlnm.` built-ins); pass `include_system=true` for
   the old behaviour. `deleteDefinedName` and `deleteAllDefinedNames` refuse them
   unless `force=true`, and `addDefinedName` refuses to create them. `DefinedName`
   gains a `hidden` field.
 - fix `deletesheet!` leaving chart parts orphaned in the package.
-- fix `copysheet!` sharing chart parts with the original; charts are now cloned and repointed at the copied sheet, for both `c:` and `chartEx` charts.
-- `AnnotatedString`s no longer force a 12pt size on every run: runs that set no font name or size now inherit them from the cell font, which is reset to the workbook default when the string is assigned. Empty and `SubString` annotated strings are also handled.
+- fix `copysheet!` sharing chart parts with the original; charts are now cloned and 
+  repointed at the copied sheet, for both `c:` and `chartEx` charts.
+- `AnnotatedString`s no longer force a 12pt size on every run: runs that set no 
+  font name or size now inherit them from the cell font, which is reset to the 
+  workbook default when the string is assigned. Empty and `SubString` annotated 
+  strings are also handled.
+- Conditional formats can now be applied to non-contiguous ranges (`"A1:A5,C1:C5"`,
+  non-contiguous defined names, and vectors or step ranges of rows/columns) for all
+  conditional format types.
+- `setColoredDataBars` (experimental, not exported): data bars whose colour changes with
+  value as well as their length, by splitting a range into value-based bands and writing
+  one rule per band.
+- `clearConditionalFormats` (experimental, not exported): removes conditional formats
+  lying entirely within a given range.
+- `getConditionalFormats` now returns `Vector{Pair{Union{CellRange,NonContiguousRange},...}}`
+  rather than `Vector{Pair{CellRange,...}}`.
+- A non-contiguous defined name now yields a single conditional format rule covering all
+  its areas, rather than one rule per area.
+- Data bar `gradient`, `border` and axis settings were silently discarded by Excel: the
+  `<extLst>` linking a rule to its Excel 2010 counterpart was written inside `<dataBar>`
+  instead of `<cfRule>`.
+- `setCfDataBar` cleared `max_val` when `min_type` was `"automatic"`, and failed to clear
+  it when `max_type` was `"highest"`.
+- A custom three-colour `colorScale` without an explicit `mid_col` threw an error;
+  `mid_col` now defaults to white.
 
 ## [v0.12.3](https://github.com/JuliaData/XLSX.jl/tree/v0.12.3) - 2026-08-20
 - Address [#263](https://github.com/JuliaData/XLSX.jl/issues/263) (Retrieve data from chart)

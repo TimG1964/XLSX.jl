@@ -38,6 +38,26 @@ end
 #
 # --- Standard conditional formats
 #
+
+function process_cf_vecint(f::Function, ws::Worksheet, row, col; kw...)
+    dim = get_dimension(ws)
+    isInDim(ws, dim, row, col)
+    cells = [CellRef(a, b) for a in row for b in col]
+    return f(ws, NonContiguousRange(ws.name, _compress(cells)); kw...)
+end
+function process_cf_veccolon(f::Function, ws::Worksheet, row, col; kw...)
+    dim = get_dimension(ws)
+    @assert isnothing(row) || isnothing(col) "Something wrong here!"
+    if isnothing(col)
+        col = dim.start.column_number:dim.stop.column_number
+    else
+        row = dim.start.row_number:dim.stop.row_number
+    end
+    isInDim(ws, dim, row, col)
+    cells = [CellRef(a, b) for a in row for b in col]
+    return f(ws, NonContiguousRange(ws.name, _compress(cells)); kw...)
+end
+
 function allCfs(ws::Worksheet)::Vector{XML.Node}
     wb = get_workbook(ws)
     xf = get_xlsxfile(ws)
@@ -75,20 +95,21 @@ function update_worksheet_cfx!(allcfs, cfx, ws, rng)
     pfx = get_prefix(ws)
     pfx = pfx == "" ? pfx : pfx * ":"
 
-    matchcfs = filter(x -> x["sqref"] == string(rng), allcfs)   # Match range with existing conditional formatting blocks.
+    sq = _cf_sqref(rng)
+
+    matchcfs = filter(x -> x["sqref"] == sq, allcfs)
     l = length(matchcfs)
-    if l == 0                                                   # No existing conditional formatting blocks for this range so create a new one.
-        new_cf = XML.Element("conditionalFormatting"; sqref=string(rng))
+    if l == 0
+        new_cf = XML.Element("conditionalFormatting"; sqref=sq)
         push!(new_cf, cfx)
-        add_cf_to_XML(ws, new_cf)                               # Add the new conditional formatting block to the worksheet XML.
-    elseif l == 1                                               # Existing conditional formatting block found for this range so add new rule to that block.
+        add_cf_to_XML(ws, new_cf)
+    elseif l == 1
         push!(matchcfs[1], cfx)
     else
         throw(XLSXError("Too many conditional formatting blocks for range `$rng`. Must be one or none, found `$l`."))
     end
     update_worksheets_xml!(get_xlsxfile(ws))
 end
-
 #
 # --- Conditional formats relying on Excel 2010 extensions
 #
@@ -132,6 +153,7 @@ function make_extCfsBlock()
 end
 function update_worksheet_ext_cfx!(allcfs, cfx, ws, rng)
     wb = get_workbook(ws)
+    sq = _cf_sqref(rng)
     sheetdoc = xmlroot(get_workbook(ws), ws.relationship_id)
     i, j = get_idces(sheetdoc, "worksheet", "extLst")
     if isnothing(j)
@@ -140,18 +162,18 @@ function update_worksheet_ext_cfx!(allcfs, cfx, ws, rng)
     end
     m, n = get_idces(sheetdoc[i], "extLst", "ext")
     @assert m==j
-    if length(allcfs)==0                                        # No <conditionalFormattings> block. Need to create one.
-        extcfs=XML.Element("x14:conditionalFormattings")
-        push!(sheetdoc[i][j][n], extcfs)
-    end
-    matchcfs = filter(x -> XML.simple_value(x[end]) == string(rng), allcfs)   # Match range with existing conditional formatting blocks.
     o, p = get_idces(sheetdoc[i][j], "ext", "x14:conditionalFormattings")
+    if isnothing(p)
+        push!(sheetdoc[i][j][n], XML.Element("x14:conditionalFormattings"))
+        o, p = get_idces(sheetdoc[i][j], "ext", "x14:conditionalFormattings")
+    end
+    matchcfs = filter(x -> XML.simple_value(x[end]) == sq, allcfs)   # Match range with existing conditional formatting blocks.
     @assert o==n
     l = length(matchcfs)
     if l == 0                                                   # No existing conditional formatting blocks for this range so create a new one.
         new_cf = make_extCfsBlock()
         push!(new_cf, cfx)
-        push!(new_cf, XML.Element("xm:sqref", XML.Text(string(rng))))
+        push!(new_cf, XML.Element("xm:sqref", XML.Text(sq)))
         push!(sheetdoc[i][j][n][p], new_cf)                        # Add the new conditional formatting block to the worksheet XML.
     elseif l == 1                                               # Existing conditional formatting block found for this range so add new rule to that block.
         pushfirst!(matchcfs[1], cfx)
@@ -183,6 +205,14 @@ function get_x14_icon(x14set)
     return rule
 end
 
+function _normalise_cfvo_val(ws, val)
+    isnothing(val) && return nothing
+    if is_valid_fixed_sheet_cellname(val)
+        do_sheet_names_match(ws, SheetCellRef(val))
+        val = string(SheetCellRef(val).cellref)
+    end
+    return uppercase_unquoted(val)
+end
 #
 # ---- Formatting (styles) definitions for conditional formats
 #
@@ -200,7 +230,7 @@ function Add_Cf_Dx(wb::Workbook, new_dx::XML.Node)::DxFormat
         existing_dxf_elements_count = length(xml_elements(xroot[i][j]))
 
         if parse(Int, xroot[i][j]["count"]) != existing_dxf_elements_count
-            throw(XLSXError("Wrong number of xf elements found: $existing_cellxf_elements_count. Expected $(parse(Int, xroot[i][j]["count"]))."))
+            throw(XLSXError("Wrong number of xf elements found: $existing_dxf_elements_count. Expected $(parse(Int, xroot[i][j]["count"]))."))
         end
     end
 
@@ -300,4 +330,80 @@ function get_new_dx(wb::Workbook, dx::Dict{String,Dict{String,String}})::XML.Nod
     end
 
     return new_dx
+end
+
+# ---------------------------------------------------------------------------
+# Non-contiguous range support for conditional formats
+# ---------------------------------------------------------------------------
+
+const CfRange = Union{CellRange,NonContiguousRange}
+
+_cf_areas(rng::CellRange) = (rng,)
+_cf_areas(ncr::NonContiguousRange) = ncr.rng
+
+# OOXML `sqref` is space-separated; XLSX.jl's user-facing ranges are comma-separated.
+_cf_sqref(rng::CellRange) = string(rng)
+_cf_sqref(ncr::NonContiguousRange) = join((string(a) for a in ncr.rng), " ")
+
+_cf_anchor(rng::CellRange) = rng.start
+_cf_anchor(ncr::NonContiguousRange) =
+    (a = first(ncr.rng); a isa CellRef ? a : a.start)
+
+function _cf_range(ws::Worksheet, sqref::AbstractString)
+    s = join(split(strip(sqref)), ",")
+    occursin(',', s) && return NonContiguousRange(ws, s)
+    is_valid_cellname(s) && return CellRange(CellRef(s), CellRef(s))
+    return CellRange(s)
+end
+
+function _check_cf_areas(ws::Worksheet, rng::CfRange)
+    dim = get_dimension(ws)
+    for a in _cf_areas(rng)
+        r = a isa CellRef ? CellRange(a, a) : a
+        issubset(r, dim) || throw(XLSXError("Range `$a` goes outside worksheet dimension ($dim)."))
+    end
+    return nothing
+end
+
+_check_cf_range(ws::Worksheet, rng::CellRange) = _check_cf_areas(ws, rng)
+function _check_cf_range(ws::Worksheet, ncr::NonContiguousRange)
+    do_sheet_names_match(ws, ncr)
+    isempty(ncr.rng) && throw(XLSXError("Cannot apply a conditional format to an empty range."))
+    _check_cf_areas(ws, ncr)
+    sq = _cf_sqref(ncr)
+    length(sq) > 2000 && throw(XLSXError(
+        "Range has too many separate areas for a conditional format (sqref is $(length(sq)) characters)."))
+    return nothing
+end
+
+# ---------------------------------------------------------------------------
+# Colour bands
+# ---------------------------------------------------------------------------
+
+# "FFRRGGBB" -> Colorant, for interpolation. `get_color` guarantees 8 hex digits,
+# so `s[3:end]` is always a clean RRGGBB. Alpha is dropped: data bar fills ignore it.
+_to_colorant(s::AbstractString) = parse(Colors.Colorant, "#" * s[3:end])
+
+# Colorant -> "FFRRGGBB". LCHab interpolation can leave the sRGB gamut, so clamp.
+function _from_colorant(c)
+    r = convert(Colors.RGB{Float64}, c)
+    return "FF" * Colors.hex(Colors.RGB{Float64}(clamp(r.r, 0, 1),
+                                                 clamp(r.g, 0, 1),
+                                                 clamp(r.b, 0, 1)), :RRGGBB)
+end
+
+# Interpolation is done in LCHab rather than RGB: an RGB path from green to red
+# passes through a muddy olive, which defeats the point of visually ordered bands.
+function _band_colors(spec, n::Int)::Vector{String}
+    cols = get_color.(spec isa Union{AbstractString,Symbol} ? [spec] : collect(spec))
+
+    if length(cols) == n
+        return cols
+    elseif length(cols) == 2
+        n == 1 && return [cols[1]]
+        c1, c2 = convert.(Colors.LCHab, _to_colorant.(cols))
+        return _from_colorant.(range(c1, c2; length=n))
+    end
+    throw(XLSXError("`colors` must give either $n colors (one per band) or " *
+                    "2 colors to interpolate between, got $(length(cols))."))
 end

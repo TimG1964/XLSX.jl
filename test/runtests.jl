@@ -6,7 +6,7 @@ import DataFrames, Random
 import Distributions as Dist
 import CSV
 using StyledStrings
-using ZipArchives: ZipReader, zip_names, zip_readentry, ZipWriter, zip_newfile
+using ZipArchives #: ZipReader, zip_names, zip_readentry, ZipWriter, zip_newfile
 using Logging
 using Colors
 

@@ -536,12 +536,12 @@ function process_ranges(f::Function, ws::Worksheet, ref_or_rng::AbstractString; 
         v = get_defined_name_value(wb, ref_or_rng)
         if is_defined_name_value_a_constant(v)
             throw(XLSXError("Can only assign attributes to cells but `$(ref_or_rng)` is a constant: $(ref_or_rng)=$v."))
-        elseif is_defined_name_value_a_reference(v)
-            if is_valid_non_contiguous_range(string(v))
-                _ = f.(Ref(get_xlsxfile(wb)), replace.(split(string(v), ","), "'" => "", "\$" => ""); kw...)
-                newid = -1
+    elseif is_defined_name_value_a_reference(v)
+            cleaned = replace(string(v), "'" => "", "\$" => "")
+            if is_valid_non_contiguous_range(cleaned)
+                newid = f(ws, NonContiguousRange(ws, cleaned); kw...)
             else
-                newid = f(get_xlsxfile(wb), replace(string(v), "'" => "", "\$" => ""); kw...)
+                newid = f(get_xlsxfile(wb), cleaned; kw...)
             end
         else
             throw(XLSXError("Unexpected defined name value: $v."))
@@ -562,6 +562,8 @@ function process_ranges(f::Function, ws::Worksheet, ref_or_rng::AbstractString; 
         newid = f(ws, SheetColumnRange(ref_or_rng); kw...)
     elseif is_valid_sheet_row_range(ref_or_rng)
         newid = f(ws, SheetRowRange(ref_or_rng); kw...)
+    elseif is_valid_non_contiguous_range(ref_or_rng)
+        return f(ws, NonContiguousRange(ws, ref_or_rng); kw...)
     elseif is_valid_non_contiguous_cellrange(ref_or_rng)
         newid = f(ws, NonContiguousRange(ws, ref_or_rng); kw...)
     elseif is_valid_non_contiguous_sheetcellrange(ref_or_rng)

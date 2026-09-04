@@ -1432,3 +1432,42 @@ struct ChartUpDownBars
     gap_width::Union{Nothing,Int}
     raw::XML.Node
 end
+
+"""
+    FormatSite
+
+One rung of a formatting cascade: the node that could carry a property, and
+whether it does. `container` always exists — it is the `c:ser`, `c:dPt`,
+`c:marker` or chart-space element being inspected. `props` is the `spPr` or
+`txPr` found on it, or `nothing` where none was written, which is the rung
+being absent rather than the property being off.
+
+`kind` distinguishes what `props` holds, so a chain is interpretable without
+knowing which resolver built it: `:shape` for an `spPr` on the element itself,
+`:marker` for an `spPr` on its `c:marker`, `:text` for a `txPr`.
+"""
+struct FormatSite
+    level::Symbol                      # :point, :series, :group, :plotarea, :chartspace, :style, :theme
+    kind::Symbol                       # :shape, :marker, :text
+    container::XML.Node
+    props::Union{Nothing,XML.Node}
+end
+
+"""
+    Effective{T}
+
+The result of resolving a property up a cascade. `value` is the first explicit
+setting found, or `nothing` where the property is written at no rung at all —
+which means Excel takes it from the chart style part, not that it is off. An
+explicit `<a:noFill/>` resolves to a `DrawingFill` with `kind === :none` and a
+`site`, because deliberately off is a setting.
+
+`site` is the rung that answered. `chain` is every rung that was or could have
+been consulted, highest precedence first, and is populated whether or not a
+value was found — a setter uses it to decide where to write.
+"""
+struct Effective{T}
+    value::Union{Nothing,T}
+    site::Union{Nothing,FormatSite}
+    chain::Vector{FormatSite}
+end

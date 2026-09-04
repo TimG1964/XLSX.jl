@@ -859,3 +859,69 @@ function nCR(s::AbstractString, ranges::Vector{String}) :: NonContiguousRange
 
     return NonContiguousRange(s, noncontig)
 end
+
+const NCArea = Union{CellRef,CellRange}
+
+_area(r1, c1, r2, c2) =
+    (r1 == r2 && c1 == c2) ? CellRef(r1, c1) :
+                             CellRange(CellRef(r1, c1), CellRef(r2, c2))
+
+"""
+    _compress(cells::AbstractVector{CellRef}) -> Vector{Union{CellRef,CellRange}}
+
+Merge a set of cell references into the smallest convenient set of areas covering
+exactly the same cells.
+
+Consecutive rows within a column are merged into a `CellRange`, and horizontally
+adjacent columns sharing an identical set of row runs are merged into a rectangle.
+Single cells that merge with nothing are returned as `CellRef`. No attempt is made
+to find a minimal rectangle cover: a ragged selection may return more areas than
+strictly necessary.
+
+Duplicate references are ignored. Areas are returned ordered by column block, then
+by row within each block, which is not in general the order the cells were supplied in.
+
+Used to keep the `sqref` attribute of a non-contiguous range compact. An
+uncompressed selection of scattered cells can exceed what Excel will accept.
+"""
+function _compress(cells::AbstractVector{CellRef})::Vector{NCArea}
+    isempty(cells) && return NCArea[]
+
+    bycol = Dict{Int,Vector{Int}}()
+    for c in cells
+        push!(get!(() -> Int[], bycol, c.column_number), c.row_number)
+    end
+
+    # vertical runs within each column
+    runs = Dict{Int,Vector{UnitRange{Int}}}()
+    for (col, rows) in bycol
+        unique!(sort!(rows))
+        v = UnitRange{Int}[]
+        i = 1
+        while i <= length(rows)
+            j = i
+            while j < length(rows) && rows[j+1] == rows[j] + 1
+                j += 1
+            end
+            push!(v, rows[i]:rows[j])
+            i = j + 1
+        end
+        runs[col] = v
+    end
+
+    # merge adjacent columns whose run sets are identical -> rectangles
+    areas = NCArea[]
+    cols = sort!(collect(keys(runs)))
+    i = 1
+    while i <= length(cols)
+        j = i
+        while j < length(cols) && cols[j+1] == cols[j] + 1 && runs[cols[j+1]] == runs[cols[i]]
+            j += 1
+        end
+        for r in runs[cols[i]]
+            push!(areas, _area(first(r), cols[i], last(r), cols[j]))
+        end
+        i = j + 1
+    end
+    return areas
+end

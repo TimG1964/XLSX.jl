@@ -28,6 +28,8 @@ XLSX.getRichTextString
 ```@docs
 XLSX.getConditionalFormats
 XLSX.setConditionalFormat
+XLSX.setColoredDataBars
+XLSX.clearConditionalFormats
 ```
 
 ## Column width and row height

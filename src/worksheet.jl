@@ -740,3 +740,140 @@ end
 function getcellrange(ws::Worksheet, rng::AbstractString)
     return ref_chooser(getcellrange, ws, rng)
 end
+
+"""
+    partition(sheet, rng, key::Function; [compress]) -> Vector{Pair}
+
+Split the cells of `rng` into value-based groups, returning each group as a
+[`NonContiguousRange`](@ref) paired with its label.
+
+`rng` may be a `CellRange` or a string such as `"B2:B101"`. `key` is applied to the
+value of each cell and returns the label of the group that cell belongs to, or
+`nothing` to exclude the cell from every group. Because each cell maps to exactly one
+label, the groups are mutually exclusive and, apart from excluded cells, cover `rng`.
+
+Pairs are returned in the order their labels were first encountered, scanning `rng`
+row by row. Groups are never empty: a label no cell maps to does not appear.
+
+If `compress` is `true` (the default) each group's cells are merged into the smallest
+convenient set of areas. If `false`, every cell becomes its own single-cell area. This
+affects what [`getdata`](@ref) returns for the resulting range, which yields one matrix
+per area: an uncompressed range of `n` cells gives `n` 1x1 matrices, while a compressed
+one gives fewer, larger matrices. Set `compress=false` if you need that structure to be
+independent of the data.
+
+# Examples
+
+```julia
+julia> XLSX.partition(sheet, "B2:B101", v -> v isa Real ? (v < 0 ? :neg : :pos) : nothing)
+2-element Vector{Pair{Symbol, XLSX.NonContiguousRange}}:
+ :pos => B2:B7,B12,B15:B98
+ :neg => B8:B11,B13:B14,B99:B101
+```
+
+See also [`setDataBands`](@ref).
+"""
+function partition(ws::Worksheet, rng::CellRange, key::Function; compress::Bool=true)
+    data = getdata(ws, rng)
+    r0, c0 = rng.start.row_number, rng.start.column_number
+
+    seen = []                       # insertion order
+    cells  = Vector{CellRef}[]
+    index  = Dict{Any,Int}()
+
+    for i in axes(data, 1), j in axes(data, 2)
+        k = key(data[i, j])
+        k === nothing && continue
+        idx = get(index, k, 0)
+        if idx == 0
+            push!(seen, k)
+            push!(cells, CellRef[])
+            idx = index[k] = length(seen)
+        end
+        push!(cells[idx], CellRef(r0 + i - 1, c0 + j - 1))
+    end
+
+    ranges = [NonContiguousRange(ws.name,
+                compress ? _compress(cs) : NCArea[c for c in cs]) for cs in cells]
+
+    return Pair.(identity.(seen), ranges)    # identity.() narrows Vector{Any}
+end
+
+# Forwards to either the `key::Function` or `breaks::AbstractVector` method.
+partition(ws::Worksheet, rng::AbstractString, by; kwargs...) =
+    partition(ws, CellRange(rng), by; kwargs...)
+
+"""
+    partition(sheet, rng, breaks::AbstractVector{<:Real}; [labels], [gte], [compress]) -> Vector{Pair}
+
+Split the cells of `rng` into bands separated by `breaks`, returning each band as a
+[`NonContiguousRange`](@ref) paired with its label.
+
+`breaks` must be sorted ascending and gives `length(breaks)+1` bands. By default a
+cell whose value equals a break falls in the band above it, so `breaks=[10, 50]`
+gives the bands `(-Inf,10)`, `[10,50)` and `[50,Inf)`. Set `gte=false` to compare
+with `>` rather than `>=`, placing boundary values in the band below instead. `gte`
+may also be a vector of `Bool` with one entry per break, to set the comparison at
+each break independently. This follows the `min_gte`, `mid_gte`, `mid2_gte` and
+`max_gte` keywords of [`setConditionalFormat`](@ref), which control the equivalent
+comparison within an icon set rule.
+
+Cells whose value is not a finite Real -- including empty cells, text 
+and NaN -- are excluded from every band.
+
+`labels` supplies one label per band and defaults to `1:length(breaks)+1`. Unlike the
+`key` method, pairs are returned in band order rather than in the order encountered.
+Bands containing no cells are dropped, so the result may be shorter than `labels`.
+
+`compress` behaves as for the `key` method: when `true` (the default) each band's
+cells are merged into the smallest convenient set of areas, which affects the number
+and shape of the matrices [`getdata`](@ref) returns for the resulting range.
+
+# Examples
+
+```julia
+julia> XLSX.partition(sheet, "B2:B101", [10, 50]; labels=[:low, :mid, :high])
+3-element Vector{Pair{Symbol, XLSX.NonContiguousRange}}:
+  :low => B2:B4,B9,B22:B31
+  :mid => B5:B8,B10:B21
+ :high => B32:B101
+```
+
+Placing values equal to the lower break in the band below, but leaving the upper
+break at its default:
+
+```julia
+julia> XLSX.partition(sheet, "B2:B101", [10, 50]; gte=[false, true])
+```
+
+See also [`setDataBands`](@ref).
+"""
+function partition(ws::Worksheet, rng::CellRange, breaks::AbstractVector{<:Real};
+                   labels=nothing, gte::Union{Bool,AbstractVector{Bool}}=true,
+                   compress::Bool=true)
+    issorted(breaks) || throw(XLSXError("`breaks` must be sorted ascending."))
+
+    labs = isnothing(labels) ? collect(1:length(breaks)+1) : collect(labels)
+    length(labs) == length(breaks) + 1 ||
+        throw(XLSXError("Need $(length(breaks)+1) labels for $(length(breaks)) breaks, got $(length(labs))."))
+    allunique(labs) ||
+        throw(XLSXError("`labels` must be unique."))
+
+    g = gte isa Bool ? fill(gte, length(breaks)) : collect(gte)
+    length(g) == length(breaks) ||
+        throw(XLSXError("`gte` must be a Bool or have one entry per break ($(length(breaks))), got $(length(g))."))
+
+    function k(v)
+        (v isa Real && !isnan(v)) || return nothing
+        n = 0
+        for i in eachindex(breaks)
+            (g[i] ? v >= breaks[i] : v > breaks[i]) || break
+            n += 1
+        end
+        return labs[n + 1]
+    end
+
+    p = partition(ws, rng, k; compress)
+    d = Dict(p)
+    return [l => d[l] for l in labs if haskey(d, l)]
+end

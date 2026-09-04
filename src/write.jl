@@ -75,7 +75,7 @@ function writexlsx(output_source::Union{AbstractString,IO}, xf::XLSXFile; overwr
         for f in keys(xf.files)
             if !occursin(r"^xl/worksheets/[^/]+\.xml$|^xl/sharedStrings\.xml$", f)
                 ZipArchives.zip_newfile(xlsx, f; compress=true)
-                xml_str = XML.write(xf.data[f])
+                xml_str = XML.write(xf.data[f]; indentsize=0)
                 write(xlsx, xml_str)
             end
         end
