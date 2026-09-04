@@ -48,6 +48,23 @@ import PrecompileTools as PCT    # this is a small dependency.
 # `*table`/`*sheet`/`*data` are lowercase (`addtable!`, `getdata`), the
 # formatting and feature layer is camelCase (`setFont`, `freezePanes`,
 # `getCharts`). Match the neighbours.
+#
+# Chart property accessors follow `get<Subject><Property>`, and their setters
+# `set<Subject><Property>` — `getSeriesFill`/`setSeriesFill`,
+# `getAxisShapeProps`/`setAxisShapeProps`. The subject is the thing the property
+# belongs to, not the argument used to reach it: `getMarkerFill(c, i, point)`
+# takes a series index but describes the marker.
+#
+# This is the chart-props reader/writer surface only. The DrawingML layer keeps
+# snake_case — `parse_drawing_fill`, `has_line`, `text_content`,
+# `resolve_color_base` — because those are parsers and predicates rather than
+# accessors, and sit with the package's other internals.
+#
+# Note two senses of "resolve", deliberately kept apart. `resolve_color_base`
+# and `apply_drawingml_transforms` resolve a colour to RGB. The `get<Subject>`
+# accessors that return an `Effective` resolve a property up the inheritance
+# cascade. A cascade-resolved fill may still hold a scheme colour, which is then
+# a separate step.
 # ---------------------------------------------------------------------------
 
 export
@@ -119,6 +136,7 @@ include("conditional-formats.jl")
 include("images.jl")
 include("drawingml.jl")
 include("charts.jl")
+include("chartschema.jl")
 include("chartprops.jl")
 include("write.jl")
 include("fileArray.jl")

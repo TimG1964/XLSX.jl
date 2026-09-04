@@ -82,6 +82,26 @@ function get_prefixed_attr(node::XML.Node, key::AbstractString)::Union{Nothing,S
     return nothing
 end
 
+"""
+    ns_prefixes(root) -> Dict{String,String}
+
+Map namespace URI to the prefix declared for it on `root`, from the `xmlns:*`
+attributes of the chart part's `c:chartSpace`. Read from the file rather than
+assumed, because a prefix is a per-document choice even though Excel always
+writes `c` and `a`.
+"""
+function ns_prefixes(root::XML.Node)
+    out = Dict{String,String}()
+    for (k, v) in something(root.attributes, Pair{String,String}[])
+        if k == "xmlns"
+            out[v] = ""
+        elseif startswith(k, "xmlns:")
+            out[v] = k[7:end]
+        end
+    end
+    return out
+end
+
 function child_val(node::Union{Nothing,XML.Node}, tag::AbstractString, default::Int)::Int
     el = first_element_with_tag(node, tag)
     isnothing(el) && return default
