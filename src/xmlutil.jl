@@ -109,3 +109,31 @@ function child_val(node::Union{Nothing,XML.Node}, tag::AbstractString, default::
     isnothing(v) && return default
     return something(tryparse(Int, v), default)
 end
+
+"""
+    with_attribute(node, name, value) -> XML.Node
+
+Return a node equal to `node` with attribute `name` set to `value`, replacing
+any existing value in place so attribute order is preserved. A `nothing` value
+removes the attribute.
+
+`XML.Node` is immutable and `XML.attributes` returns a wrapper with no
+`setindex!`, so this rebuilds rather than mutating — see [`insert_child`](@ref).
+"""
+function with_attribute(node::XML.Node, name::AbstractString, value)
+    attrs = isnothing(node.attributes) ? Pair{String,String}[] : copy(node.attributes)
+    i = findfirst(p -> first(p) == name, attrs)
+
+    if isnothing(value)
+        isnothing(i) && return node
+        deleteat!(attrs, i)
+    elseif isnothing(i)
+        push!(attrs, String(name) => string(value))
+    else
+        attrs[i] = String(name) => string(value)
+    end
+
+    return typeof(node)(XML.nodetype(node), XML.tag(node),
+                        isempty(attrs) ? nothing : attrs,
+                        XML.value(node), node.children)
+end

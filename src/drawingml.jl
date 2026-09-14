@@ -210,26 +210,40 @@ function parse_drawing_line(wb::Workbook, node::Union{Nothing,XML.Node})::Union{
 
     dash = first_element_with_tag(el, "prstDash")
 
+    # The join is whichever of the three is present; only miter carries a limit.
+    join = first_element_with_tag(el, "round")
+    isnothing(join) && (join = first_element_with_tag(el, "bevel"))
+    isnothing(join) && (join = first_element_with_tag(el, "miter"))
+
     return DrawingLine(
         parse_drawing_fill(wb, el),
         _attr_emu(el, "w"),          # points, converted at parse time
         _attr(dash, "val"),
         _attr(el, "cap"),
         _attr(el, "cmpd"),
+        isnothing(join) ? nothing : String(localname(join)),
+        _attr_pct_opt(join, "lim"),  # nothing for round and bevel
         el,
     )
 end
 
+# A fill read from a file carries a DrawingColor with `rgb` resolved; one built
+# by hand may carry a SchemeColor or a string, which has no resolved value until
+# it is written and read back.
+_show_color(c::DrawingColor) = "#" * c.rgb
+_show_color(c::SchemeColor)  = string(c.token)
+_show_color(c::AbstractString) = String(c)
+
 Base.show(io::IO, fl::DrawingFill) =
     print(io, "XLSX.DrawingFill(", fl.kind,
-          isnothing(fl.fgcolor) ? "" : ", #" * fl.fgcolor.rgb,
-          isnothing(fl.bgcolor) ? "" : " on #" * fl.bgcolor.rgb, ")")
+          isnothing(fl.fgcolor) ? "" : ", " * _show_color(fl.fgcolor),
+          isnothing(fl.bgcolor) ? "" : " on " * _show_color(fl.bgcolor), ")")
 
 function Base.show(io::IO, ::MIME"text/plain", fl::DrawingFill)
     println(io, "XLSX.DrawingFill ", fl.kind)
     isnothing(fl.preset)  || println(io, "  pattern: ", fl.preset)
-    isnothing(fl.fgcolor) || println(io, "  foreground: #", fl.fgcolor.rgb)
-    isnothing(fl.bgcolor) || println(io, "  background: #", fl.bgcolor.rgb)
+    isnothing(fl.fgcolor) || println(io, "  foreground: ", _show_color(fl.fgcolor))
+    isnothing(fl.bgcolor) || println(io, "  background: ", _show_color(fl.bgcolor))
     fl.kind in (:gradient, :blip, :group) &&
         println(io, "  (not modelled; preserved on write)")
 end
@@ -707,3 +721,490 @@ function Base.show(io::IO, t::DrawingText)
     end
 end
 
+#-- Writing ------------------------------------------------------------------
+
+"""
+    _sp_with_fill(sp, key, color, pfx) -> XML.Node
+
+Set the fill of an element that carries one — an `a:spPr`, or a run-properties
+element, which share the fill group. `key` is that element's [`SchemaKey`](@ref).
+
+`:none` writes `<a:noFill/>`; `:inherit` removes the fill so the cascade
+resolves it.
+"""
+function _sp_with_fill(sp::XML.Node, key::SchemaKey, color, pfx::Dict{String,String})
+    color === :inherit && return remove_choice(sp, key, FILL_GROUP)
+    fill = color === :none       ? XML.Element(prefixed_tag(pfx[NS_A], "noFill")) :
+           color isa SchemeColor ? _solid_fill_node(_scheme_color_node(color, pfx), pfx) :
+                                   _solid_fill_node(_srgb_color_node(color, pfx), pfx)
+    return insert_child(remove_choice(sp, key, FILL_GROUP), key, fill)
+end
+
+"""
+    _sp_with_line(sp, key, f, pfx) -> XML.Node
+
+Apply `f` to the `a:ln` of an element that carries one, creating it if absent.
+`key` is that element's [`SchemaKey`](@ref) — `(NS_A, "spPr")` for shape
+properties, `(NS_A, "defRPr")` for run properties.
+"""
+function _sp_with_line(sp::XML.Node, key::SchemaKey, f, pfx::Dict{String,String})
+    ln = something(first_element_with_tag(sp, "ln"),
+                   XML.Element(prefixed_tag(pfx[NS_A], "ln")))
+    return insert_child(sp, key, f(ln))
+end
+
+"""
+    _scheme_color_node(sc::SchemeColor, prefixes) -> XML.Node
+
+Build the `a:schemeClr` element for `sc`, with its transforms as child elements
+in the order they are held. Percentages are written back as the hundredths
+DrawingML expects: `lumMod = 75` becomes `val="75000"`.
+"""
+function _scheme_color_node(sc::SchemeColor,
+                            prefixes::Dict{String,String} = Dict(NS_A => "a"))
+    pfx  = prefixes[NS_A]
+    kids = XML.Node{String}[
+        XML.Element(prefixed_tag(pfx, String(name)); val = string(round(Int, v * 1000)))
+        for (name, v) in sc.transforms
+    ]
+    node = XML.Element(prefixed_tag(pfx, "schemeClr"); val = String(sc.token))
+    return isempty(kids) ? node : _with_children(node, kids)
+end
+
+_solid_fill_node(color_node::XML.Node,
+                 prefixes::Dict{String,String} = Dict(NS_A => "a")) =
+    _with_children(XML.Element(prefixed_tag(prefixes[NS_A], "solidFill")),
+                   XML.Node{String}[color_node])
+
+"""
+    _srgb_color_node(color, prefixes) -> XML.Node
+
+Build the `a:srgbClr` element for `color`, which may be an eight-digit
+`AARRGGBB` string or any Colors.jl named color — the same spellings `setFill`
+accepts, via [`get_color`](@ref).
+
+Alpha is split out into an `a:alpha` child, because DrawingML carries the color
+as six digits and alpha as a transform, unlike the spreadsheet's eight-digit
+form. A fully opaque color emits no `a:alpha`, since writing one Excel would
+have omitted is a change for no reason.
+"""
+function _srgb_color_node(color::AbstractString,
+                          prefixes::Dict{String,String} = Dict(NS_A => "a"))
+    argb = get_color(String(color))
+    pfx  = prefixes[NS_A]
+    node = XML.Element(prefixed_tag(pfx, "srgbClr"); val = argb[3:end])
+
+    a = parse(Int, argb[1:2]; base = 16)
+    a == 255 && return node
+    return _with_children(node, XML.Node{String}[
+        XML.Element(prefixed_tag(pfx, "alpha"); val = string(round(Int, a / 255 * 100000)))])
+end
+
+_srgb_color_node(color::Symbol, prefixes::Dict{String,String} = Dict(NS_A => "a")) =
+    _srgb_color_node(String(color), prefixes)
+
+_srgb_color_node(c::Colors.Colorant, prefixes::Dict{String,String} = Dict(NS_A => "a")) =
+    _srgb_color_node(Colors.hex(c, :AARRGGBB), prefixes)
+
+"""
+    _ln_with_width(ln, points, pfx) -> XML.Node
+
+Set the `w` attribute of an `a:ln`, in points — the unit Excel's width box uses.
+`:inherit` removes it.
+
+`ST_LineWidth` caps at 20116800 EMU, so a width above 1584pt makes the part
+invalid; it is rejected here rather than written.
+"""
+function _ln_with_width(ln::XML.Node, points)
+    points === :inherit && return with_attribute(ln, "w", nothing)
+    emu = round(Int, points * 12700)
+    0 <= emu <= 20116800 || throw(XLSXError(
+        "A line width of $points pt is outside the range DrawingML allows (0 to 1584 pt)."))
+    return with_attribute(ln, "w", emu)
+end
+
+_ln_with_cap(ln, cap) =
+    with_attribute(ln, "cap", cap === :inherit ? nothing :
+                   String(_check(cap, CAP_VALUES, "cap", CAP_ALIASES)))
+
+_ln_with_compound(ln, cmpd) =
+    with_attribute(ln, "cmpd", cmpd === :inherit ? nothing :
+                   String(_check(cmpd, CMPD_VALUES, "compound", CMPD_ALIASES)))
+
+function _ln_with_dash(ln, dash, pfx)
+    dash === :inherit && return remove_choice(ln, (NS_A, "ln"), DASH_GROUP)
+    node = XML.Element(prefixed_tag(pfx[NS_A], "prstDash");
+                       val = String(_check(dash, DASH_VALUES, "dash", DASH_ALIASES)))
+    return insert_child(remove_choice(ln, (NS_A, "ln"), DASH_GROUP), (NS_A, "ln"), node)
+end
+
+function _ln_with_color(ln, color, pfx)
+    color === :inherit && return remove_choice(ln, (NS_A, "ln"), FILL_GROUP)
+    fill = color === :none      ? XML.Element(prefixed_tag(pfx[NS_A], "noFill")) :
+           color isa SchemeColor ? _solid_fill_node(_scheme_color_node(color, pfx), pfx) :
+                                   _solid_fill_node(_srgb_color_node(color, pfx), pfx)
+    return insert_child(remove_choice(ln, (NS_A, "ln"), FILL_GROUP), (NS_A, "ln"), fill)
+end
+
+# ST_PresetLineDashVal, ST_LineCap and ST_CompoundLine (ECMA-376, dml-main.xsd).
+# Vocabulary as written — the Excel UI names are aliases, not replacements.
+const DASH_VALUES = (:solid, :dot, :dash, :lgDash, :dashDot, :lgDashDot,
+                     :lgDashDotDot, :sysDash, :sysDot, :sysDashDot, :sysDashDotDot)
+
+const CAP_VALUES  = (:rnd, :sq, :flat)
+
+const CMPD_VALUES = (:sng, :dbl, :thickThin, :thinThick, :tri)
+
+const JOIN_VALUES = (:round, :bevel, :miter)
+
+"""
+    _ln_with_join(ln, join, pfx) -> XML.Node
+
+Set the join of an `a:ln`: `:round`, `:bevel` or `:miter`, or `:inherit` to
+remove it. Excel uses the same three words, so there are no aliases.
+
+A miter limit is an attribute of the `a:miter` element rather than a property of
+the line, so it is set with [`_ln_with_miter_limit`](@ref) and is lost if the
+join is later changed.
+"""
+function _ln_with_join(ln::XML.Node, join, pfx::Dict{String,String})
+    join === :inherit && return remove_choice(ln, (NS_A, "ln"), JOIN_GROUP)
+    tag  = String(_check(join, JOIN_VALUES, "join"))
+    node = XML.Element(prefixed_tag(pfx[NS_A], tag))
+    return insert_child(remove_choice(ln, (NS_A, "ln"), JOIN_GROUP), (NS_A, "ln"), node)
+end
+
+"""
+    _ln_with_miter_limit(ln, limit, pfx) -> XML.Node
+
+Set the `lim` attribute of an `a:ln`'s `a:miter`, as a multiple of the line
+width — Excel's default is 8. `:inherit` removes it. Throws where the join is
+not miter, since the attribute has no meaning on `a:round` or `a:bevel`.
+"""
+function _ln_with_miter_limit(ln::XML.Node, limit)
+    m = first_element_with_tag(ln, "miter")
+    isnothing(m) && throw(XLSXError(
+        "A miter limit needs a miter join; set `join = :miter` first."))
+    new = with_attribute(m, "lim", limit === :inherit ? nothing : round(Int, limit * 100000))
+    return replace_child(ln, m, new)
+end
+
+"""
+    _color_node_from(dc::DrawingColor, pfx) -> XML.Node
+
+Serialize a `DrawingColor`, keeping the kind it was written as. Transforms are
+emitted in the order they are held, as DrawingML applies them in sequence.
+
+`rgb` and `alpha` are resolved values, not source, and are not written — the
+file keeps the scheme reference and its transforms so the theme still applies.
+
+`hslClr` and `scrgbClr` carry component attributes rather than a `val`, which
+`DrawingColor` does not model, so they cannot be written.
+"""
+function _color_node_from(dc::DrawingColor, pfx::Dict{String,String})
+    dc.kind in (:hsl, :scrgb) && throw(XLSXError(
+        "`$(dc.kind)` colors carry component attributes rather than a `val`, " *
+        "which is not modelled; write the color as srgb instead."))
+
+    tag = dc.kind === :scheme ? "schemeClr" :
+          dc.kind === :srgb   ? "srgbClr"   :
+          dc.kind === :sys    ? "sysClr"    :
+          dc.kind === :prst   ? "prstClr"   :
+          throw(XLSXError("Unknown color kind `$(dc.kind)`."))
+
+    kids = XML.Node{String}[_el(pfx, String(name); val = string(v))
+                            for (name, v) in dc.transforms]
+    return _el(pfx, tag, kids...; val = dc.val)
+end
+_color_node_from(sc::SchemeColor, pfx::Dict{String,String}) = _scheme_color_node(sc, pfx)
+_color_node_from(s::AbstractString, pfx::Dict{String,String}) = _srgb_color_node(s, pfx)
+
+"""
+    _fill_node_from(fill::DrawingFill, pfx) -> XML.Node
+
+Serialize a `DrawingFill`. Solid and none are built fresh; gradient, pattern,
+blip and group fills are emitted from `raw`, because the struct models them
+partially and reconstructing one from what it keeps would lose detail.
+
+A fill of those kinds with no `raw` throws — it was constructed rather than
+parsed, and there is nothing to write.
+"""
+function _fill_node_from(fill::DrawingFill, pfx::Dict{String,String})
+    fill.kind === :none && return _el(pfx, "noFill")
+
+    if fill.kind === :solid
+        isnothing(fill.fgcolor) && throw(XLSXError("A solid fill needs a color."))
+        return _el(pfx, "solidFill", _color_node_from(fill.fgcolor, pfx))
+    end
+
+    isnothing(fill.raw) && throw(XLSXError(
+        "A $(fill.kind) fill can only be written from a parsed one; this was " *
+        "constructed and carries no node."))
+    return fill.raw
+end
+
+"""
+    _line_node(line::DrawingLine, pfx) -> XML.Node
+
+Serialize a `DrawingLine` by applying each property it sets to a fresh `a:ln`.
+Absent fields are not written, so a line says only what it carries.
+"""
+function _line_node(line::DrawingLine, pfx::Dict{String,String})
+    node = _el(pfx, "ln")
+    isnothing(line.width)       || (node = _ln_with_width(node, line.width))
+    isnothing(line.cap)         || (node = _ln_with_cap(node, Symbol(line.cap)))
+    isnothing(line.compound)    || (node = _ln_with_compound(node, Symbol(line.compound)))
+    isnothing(line.fill)        || (node = insert_child(node, (NS_A, "ln"),
+                                               _fill_node_from(line.fill, pfx)))
+    isnothing(line.dash)        || (node = _ln_with_dash(node, Symbol(line.dash), pfx))
+    isnothing(line.join)        || (node = _ln_with_join(node, Symbol(line.join), pfx))
+    isnothing(line.miter_limit) || (node = _ln_with_miter_limit(node, line.miter_limit))
+    return node
+end
+
+#-- Text body serialization ---------------------------------------------------
+#
+# The inverse of parse_drawing_text. Every field that was converted at parse
+# time is converted back here: points to 1/100pt or EMU, degrees to 1/60000,
+# fractions to thousandths of a percent. A field left `nothing` is not written,
+# which is what makes a constructed DrawingText say only what the caller asked.
+
+_el(pfx, tag, kids...; attrs...) = XML.Element(prefixed_tag(pfx[NS_A], tag), kids...; attrs...)
+#_el(pfx, tag; kw...) = XML.Element(prefixed_tag(pfx[NS_A], tag); kw...)
+
+_with(node, kids) = isempty(kids) ? node : _with_children(node, kids)
+
+_emu(points) = round(Int, points * EMU_PER_POINT)
+
+const _RUN_PROP_ATTRS = (
+    :lang     => ("lang",     string),
+    :size     => ("sz",       v -> string(round(Int, v * 100))),
+    :bold     => ("b",        v -> v ? "1" : "0"),
+    :italic   => ("i",        v -> v ? "1" : "0"),
+    :under    => ("u",        string),
+    :strike   => ("strike",   string),
+    :caps     => ("cap",      string),
+    :baseline => ("baseline", v -> string(round(Int, v * 100000))),
+    :kern     => ("kern",     v -> string(round(Int, v * 100))),
+    :spacing  => ("spc",      v -> string(round(Int, v * 100))),
+)
+
+# Field -> typeface element tag.
+const _RUN_PROP_FONTS = Dict{Symbol,String}(
+    :latin => "latin", :ea => "ea", :cs => "cs",
+)
+
+# Linear scan over ten entries — a parallel Dict for lookup would be faster and
+# not worth the second structure to keep in step.
+_run_prop_attr(field::Symbol) =
+    (i = findfirst(p -> first(p) === field, _RUN_PROP_ATTRS);
+     isnothing(i) ? nothing : last(_RUN_PROP_ATTRS[i]))
+
+"""
+    _rpr_with_prop(rpr, field, value, pfx) -> XML.Node
+
+Set one field of a run-properties element (`a:defRPr`, `a:rPr` or
+`a:endParaRPr`). `:inherit` removes it.
+
+Most fields are attributes; `:fill` and `:line` are child elements, and the
+three typefaces are `typeface` attributes on their own child elements.
+`:line` takes either a color or a `NamedTuple` of line keywords — a bare value
+is treated as `(color = value,)`.
+"""
+function _rpr_with_prop(rpr::XML.Node, field::Symbol, value, pfx::Dict{String,String})
+    key = (NS_A, String(localname(rpr)))
+
+    spec = _run_prop_attr(field)
+    if !isnothing(spec)
+        name, enc = spec
+        return with_attribute(rpr, name, value === :inherit ? nothing : enc(value))
+
+    elseif haskey(_RUN_PROP_FONTS, field)
+        tag = _RUN_PROP_FONTS[field]
+        value === :inherit && return remove_child(rpr, tag)
+        return insert_child(rpr, key,
+                            XML.Element(prefixed_tag(pfx[NS_A], tag); typeface = string(value)))
+
+    elseif field === :fill
+        return _sp_with_fill(rpr, key, value, pfx)
+
+    elseif field === :line
+        value === :inherit && return remove_child(rpr, "ln")
+        kw = value isa NamedTuple ? value : (color = value,)
+        return _sp_with_line(rpr, key, ln -> _ln_with(ln, pfx; kw...), pfx)
+    end
+
+    throw(XLSXError("`$field` is not a run property. Valid fields: " *
+                    join(_RUN_PROP_FIELDS, ", ") * "."))
+end
+
+"""
+    _text_with_run_prop(body, field, value, pfx) -> XML.Node
+
+Set one run property on a text body's paragraph defaults
+(`a:p/a:pPr/a:defRPr`), creating the paragraph and its properties if absent.
+
+`body` is an `a:CT_TextBody` — a `c:txPr`, a `c:rich`, or the cx: equivalent.
+Only the first paragraph is touched: a chart text body with several paragraphs
+is rare, and changing all of them would be a different operation.
+
+This sets the paragraph *default*, which every run inherits unless it overrides
+the property in its own `a:rPr`. A body whose runs carry explicit properties —
+a retyped data label, typically — will not change appearance until those are
+changed too.
+"""
+function _text_with_run_prop(body::XML.Node, field::Symbol, value, pfx::Dict{String,String})
+    skey = (NS_A, String(localname(body)))
+    return rebuild_path(body,
+        [(NS_A, "p")      => "p",
+         (NS_A, "pPr")    => "pPr",
+         (NS_A, "defRPr") => "defRPr"],
+        rpr -> _rpr_with_prop(rpr, field, value, pfx);
+        prefixes = pfx,
+        parent_key = skey)
+end
+
+"""
+    _run_props_node(rp, tag, pfx) -> XML.Node
+
+Serialize a `DrawingRunProps` as `a:rPr`, `a:defRPr` or `a:endParaRPr`, named
+by `tag`. All three are `CT_TextCharacterProperties`.
+"""
+function _run_props_node(rp::DrawingRunProps, tag::AbstractString, pfx::Dict{String,String})
+    node = _el(pfx, tag)
+    for (field, (name, enc)) in _RUN_PROP_ATTRS
+        v = getfield(rp, field)
+        isnothing(v) || (node = with_attribute(node, name, enc(v)))
+    end
+
+    key = (NS_A, tag)
+    isnothing(rp.line) || (node = insert_child(node, key, _line_node(rp.line, pfx)))
+    isnothing(rp.fill) || (node = insert_child(node, key, _fill_node_from(rp.fill, pfx)))
+    for (field, t) in _RUN_PROP_FONTS
+        v = getfield(rp, field)
+        isnothing(v) || (node = insert_child(node, key, _el(pfx, t; typeface = v)))
+    end
+    return node
+end
+
+"""
+    _para_props_node(pp, pfx) -> XML.Node
+
+Serialize a `DrawingParaProps` as `a:pPr`.
+"""
+function _para_props_node(pp::DrawingParaProps, pfx::Dict{String,String})
+    node = _el(pfx, "pPr")
+    isnothing(pp.align)       || (node = with_attribute(node, "algn", pp.align))
+    isnothing(pp.level)       || (node = with_attribute(node, "lvl", string(pp.level)))
+    isnothing(pp.marginleft)  || (node = with_attribute(node, "marL", string(_emu(pp.marginleft))))
+    isnothing(pp.marginright) || (node = with_attribute(node, "marR", string(_emu(pp.marginright))))
+    isnothing(pp.indent)      || (node = with_attribute(node, "indent", string(_emu(pp.indent))))
+    isnothing(pp.rtl)         || (node = with_attribute(node, "rtl", pp.rtl ? "1" : "0"))
+
+    key = (NS_A, "pPr")
+    for (tag, v) in (("lnSpc", pp.linespacing), ("spcBef", pp.spacebefore),
+                     ("spcAft", pp.spaceafter))
+        isnothing(v) && continue
+        kind, amount = v
+        inner = kind === :pct ? _el(pfx, "spcPct"; val = string(round(Int, amount * 1000))) :
+                                _el(pfx, "spcPts"; val = string(round(Int, amount * 100)))
+        node = insert_child(node, key, XML.Element(prefixed_tag(pfx[NS_A], tag), inner))
+    end
+    isnothing(pp.defprops) ||
+        (node = insert_child(node, key, _run_props_node(pp.defprops, "defRPr", pfx)))
+    return node
+end
+
+"""
+    _body_props_node(bp, pfx) -> XML.Node
+
+Serialize a `DrawingBodyProps` as `a:bodyPr`. Autofit is one of three child
+elements rather than an attribute, and `fontscale`/`linespacereduction` belong
+to `a:normAutofit` alone.
+"""
+function _body_props_node(bp::DrawingBodyProps, pfx::Dict{String,String})
+    node = _el(pfx, "bodyPr")
+    isnothing(bp.rotation) || (node = with_attribute(node, "rot", string(round(Int, bp.rotation * 60000))))
+    for (name, v) in (("vert", bp.vertical), ("wrap", bp.wrap), ("anchor", bp.anchor),
+                      ("vertOverflow", bp.vertoverflow), ("horzOverflow", bp.horzoverflow))
+        isnothing(v) || (node = with_attribute(node, name, v))
+    end
+    for (name, v) in (("anchorCtr", bp.anchorctr), ("upright", bp.upright),
+                      ("spcFirstLastPara", bp.spcfirstlastpara))
+        isnothing(v) || (node = with_attribute(node, name, v ? "1" : "0"))
+    end
+    for (name, v) in (("lIns", bp.insetleft), ("tIns", bp.insettop),
+                      ("rIns", bp.insetright), ("bIns", bp.insetbottom))
+        isnothing(v) || (node = with_attribute(node, name, string(_emu(v))))
+    end
+
+    if bp.autofit === :none
+        node = insert_child(node, (NS_A, "bodyPr"), _el(pfx, "noAutofit"))
+    elseif bp.autofit === :shape
+        node = insert_child(node, (NS_A, "bodyPr"), _el(pfx, "spAutoFit"))
+    elseif bp.autofit === :normal
+        na = _el(pfx, "normAutofit")
+        isnothing(bp.fontscale) ||
+            (na = with_attribute(na, "fontScale", string(round(Int, bp.fontscale * 100000))))
+        isnothing(bp.linespacereduction) ||
+            (na = with_attribute(na, "lnSpcReduction",
+                                 string(round(Int, bp.linespacereduction * 100000))))
+        node = insert_child(node, (NS_A, "bodyPr"), na)
+    end
+    return node
+
+end
+
+"""
+    _text_from(text, tag, pfx) -> XML.Node
+
+Serialize a `DrawingText` as a text body element named `tag` — `txPr` or
+`rich`, both `a:CT_TextBody`. The prefix comes from the tag's own namespace at
+the call site; the body's children are all DrawingML.
+"""
+function _text_from(text::DrawingText, tag::AbstractString, pfx::Dict{String,String},
+                    ns::AbstractString = NS_C)
+    isempty(text.paragraphs) && throw(XLSXError(
+        "A text body needs at least one paragraph; `CT_TextBody` requires it."))
+
+    kids = XML.Node{String}[]
+    # bodyPr is required even when it sets nothing, and a body without one is
+    # rejected by Excel. lstStyle is optional, but Excel always writes it.
+    push!(kids, isnothing(text.body) ? _el(pfx, "bodyPr") : _body_props_node(text.body, pfx))
+    push!(kids, isnothing(text.liststyle) ? _el(pfx, "lstStyle") : text.liststyle)
+    append!(kids, _paragraph_node(p, pfx) for p in text.paragraphs)
+    return XML.Element(prefixed_tag(pfx[ns], tag), kids...)
+end
+
+"""
+    _new_text_body(tag, pfx) -> XML.Node
+
+An empty text body — `c:txPr` or `c:rich` — carrying the `a:bodyPr` that
+`CT_TextBody` requires and the `a:lstStyle` Excel always writes. A body without
+a `bodyPr` is rejected when the file is opened.
+"""
+_new_text_body(tag::AbstractString, pfx::Dict{String,String}) =
+    XML.Element(prefixed_tag(pfx[NS_C], tag), _el(pfx, "bodyPr"), _el(pfx, "lstStyle"))
+
+function _paragraph_node(p::DrawingParagraph, pfx::Dict{String,String})
+    kids = XML.Node{String}[]
+    isnothing(p.props) || push!(kids, _para_props_node(p.props, pfx))
+    append!(kids, _run_node(r, pfx) for r in p.runs)
+    isnothing(p.endprops) ||
+        push!(kids, _run_props_node(p.endprops, "endParaRPr", pfx))
+    return _el(pfx, "p", kids...)
+end
+
+function _run_node(r::DrawingRun, pfx::Dict{String,String})
+    if r.kind === :br
+        node = _el(pfx, "br")
+        isnothing(r.props) || (node = insert_child(node, (NS_A, "br"),
+                                        _run_props_node(r.props, "rPr", pfx)))
+        return node
+    end
+    node = _el(pfx, r.kind === :fld ? "fld" : "r")
+    isnothing(r.props) || (node = insert_child(node, (NS_A, "r"), _run_props_node(r.props, "rPr", pfx)))
+    isnothing(r.text) || (node = insert_child(node, (NS_A, "r"),
+                            XML.Element(prefixed_tag(pfx[NS_A], "t"), XML.Text(r.text))))
+    return node
+end

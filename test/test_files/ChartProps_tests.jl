@@ -91,6 +91,58 @@ const FormatSite             = XLSX.FormatSite
 const Effective              = XLSX.Effective
 const has_line               = XLSX.has_line
 const getSeriesShapeProps     = XLSX.getSeriesShapeProps
+const setSeriesFill          = XLSX.setSeriesFill
+const SchemeColor = XLSX.SchemeColor
+
+const setSeriesLine           = XLSX.setSeriesLine
+const setSeriesLineColor      = XLSX.setSeriesLineColor
+const setSeriesLineWidth      = XLSX.setSeriesLineWidth
+const setSeriesLineDash       = XLSX.setSeriesLineDash
+const setSeriesLineCap        = XLSX.setSeriesLineCap
+const setSeriesLineCompound   = XLSX.setSeriesLineCompound
+const setSeriesLineJoin       = XLSX.setSeriesLineJoin
+const setSeriesLineMiterLimit = XLSX.setSeriesLineMiterLimit
+const CHILD_ORDER             = XLSX.CHILD_ORDER
+const NS_A                    = XLSX.NS_A
+
+const setMarkerSymbol = XLSX.setMarkerSymbol
+const setMarkerSize = XLSX.setMarkerSize
+const setMarkerFill = XLSX.setMarkerFill
+const setMarkerLineColor = XLSX.setMarkerLineColor
+const setMarkerLineWidth = XLSX.setMarkerLineWidth
+const setMarker = XLSX.setMarker
+const getSeriesMarker = XLSX.getSeriesMarker
+const getMarkerFill = XLSX.getMarkerFill
+const NS_C = XLSX.NS_C
+
+const setLabelTextProp = XLSX.setLabelTextProp
+const setGroupLabelTextProp = XLSX.setGroupLabelTextProp
+const setChartSpaceTextProp = XLSX.setChartSpaceTextProp
+const getLabelTextProp = XLSX.getLabelTextProp
+const getSeriesDataLabel = XLSX.getSeriesDataLabel
+const getChartGroups = XLSX.getChartGroups
+const parse_drawing_text = XLSX.parse_drawing_text
+const _series = XLSX._series
+
+const getChartTitleText = XLSX.getChartTitleText
+const setChartTitleTextProp = XLSX.setChartTitleTextProp
+const getChartTitleTextProps = XLSX.getChartTitleTextProps
+const setChartTitleText = XLSX.setChartTitleText
+const DrawingText = XLSX.DrawingText
+const text_content = XLSX.text_content
+const DrawingParagraph = XLSX.DrawingParagraph
+const DrawingRunProps = XLSX.DrawingRunProps
+const DrawingRun = XLSX.DrawingRun
+const getChartAxis = XLSX.getChartAxis
+const first_run_props = XLSX.first_run_props
+const setAxisTitleText = XLSX.setAxisTitleText
+const getAxisTitleText = XLSX.getAxisTitleText
+const setAxisTitleTextProp = XLSX.setAxisTitleTextProp
+const setLegendTextProp = XLSX.setLegendTextProp
+const getLegendTextProps = XLSX.getLegendTextProps
+const chart_root = XLSX.chart_root
+
+
 @testset "ChartProps" begin
 
     f  = XLSX.readxlsx(joinpath(data_directory, "chart_appearance.xlsx"))
@@ -503,6 +555,347 @@ const getSeriesShapeProps     = XLSX.getSeriesShapeProps
         @test e.site.level === :series && e.value == 10.5
         e = getLabelTextProp(c, 2, :size)
         @test e.site.level === :series && e.value == 9.0
+    end
+
+        @testset "setSeriesFill" begin
+        # Setters mutate xf.data, so work on a copy rather than the tracked fixture.
+        src = joinpath(data_directory, "chart_appearance.xlsx")
+        tmp = joinpath(mktempdir(), "appearance.xlsx")
+        cp(src, tmp)
+
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+        c  = first(XLSX.getCharts(xf[1]))
+        wb = XLSX.get_workbook(xf[1])
+
+        # Series 3 has an spPr with a line and no fill — the empty-slot case.
+        @test isnothing(getSeriesFill(c, 3).value)
+
+        c = setSeriesFill(c, 3, "red")
+        e = getSeriesFill(c, 3)
+        @test e.site.level === :series
+        @test e.value.kind === :solid
+        @test e.value.fgcolor.rgb == "FF0000"
+
+        # the line is untouched
+        @test !isnothing(getSeriesLine(c, 3).value)
+
+        # replacing an existing fill does not throw and does not duplicate
+        c  = setSeriesFill(c, 3, "blue")
+        sp = getSeriesShapeProps(c, 3).raw
+        @test count(k -> localname(k) in ("solidFill","noFill","gradFill","pattFill",
+                                        "blipFill","grpFill"), XML.children(sp)) == 1
+        @test getSeriesFill(c, 3).value.fgcolor.rgb == "0000FF"
+
+        # a theme color with transforms
+        c = setSeriesFill(c, 3, SchemeColor(:accent1; lumMod = 75))
+        e = getSeriesFill(c, 3)
+        @test e.value.fgcolor.val == "accent1"
+        @test e.value.fgcolor.transforms == [:lumMod => 75000]
+
+        # :none is explicit, and resolves to a fill rather than to nothing
+        c = setSeriesFill(c, 3, :none)
+        e = getSeriesFill(c, 3)
+        @test e.value.kind === :none && !isnothing(e.site)
+
+        # :inherit removes it, so the cascade finds nothing
+        c = setSeriesFill(c, 3, :inherit)
+        e = getSeriesFill(c, 3)
+        @test isnothing(e.value) && isnothing(e.site)
+        @test length(e.chain) == 1                 # rung still reported for a setter
+
+        # a Symbol that is a Colors.jl name is a color, not an instruction
+        c = setSeriesFill(c, 3, :red)
+        @test getSeriesFill(c, 3).value.fgcolor.rgb == "FF0000"
+
+        # series 1 is in the bar group — the other branch of SER_TYPE
+        c = setSeriesFill(c, 1, "green")
+        @test getSeriesFill(c, 1).value.fgcolor.rgb == "008000"
+
+        # the survivor test: writing and reopening keeps the change
+        XLSX.writexlsx(tmp, xf; overwrite = true)
+        xf2 = XLSX.openxlsx(tmp)
+        c2  = first(XLSX.getCharts(xf2[1]))
+        @test getSeriesFill(c2, 1).value.fgcolor.rgb == "008000"
+    end
+    @testset "setSeriesLine" begin
+        # Setters mutate xf.data, so work on a copy rather than the tracked fixture.
+        tmp = joinpath(mktempdir(), "appearance.xlsx")
+        cp(joinpath(data_directory, "chart_appearance.xlsx"), tmp)
+
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+        c  = first(XLSX.getCharts(xf[1]))
+
+        # All three series have an a:ln written with noFill inside — the line exists
+        # and draws nothing. Remove it to exercise creation from scratch.
+        @test !isnothing(getSeriesLine(c, 2).value)
+        @test !has_line(getSeriesShapeProps(c, 2))
+
+        c = setSeriesLine(c, 2, :inherit)
+        @test isnothing(getSeriesLine(c, 2).value)
+
+        c = setSeriesLineColor(c, 2, "red")
+        e = getSeriesLine(c, 2)
+        @test e.site.level === :series
+        @test e.value.fill.fgcolor.rgb == "FF0000"
+        @test has_line(getSeriesShapeProps(c, 2))
+        # the fill is untouched
+        @test !isnothing(getSeriesFill(c, 2).value)
+
+        # width in points, as Excel's box takes it
+        c = setSeriesLineWidth(c, 2, 2.25)
+        @test getSeriesLine(c, 2).value.width ≈ 2.25
+        @test_throws XLSXError setSeriesLineWidth(c, 2, 2000)
+
+        # dash by either vocabulary
+        c = setSeriesLineDash(c, 2, :roundDot)
+        @test getSeriesLine(c, 2).value.dash == "sysDot"
+        c = setSeriesLineDash(c, 2, :sysDash)
+        @test getSeriesLine(c, 2).value.dash == "sysDash"
+
+        c = setSeriesLineCap(c, 2, :round)
+        @test getSeriesLine(c, 2).value.cap == "rnd"
+
+        c = setSeriesLineCompound(c, 2, :double)
+        @test getSeriesLine(c, 2).value.compound == "dbl"
+
+        c = setSeriesLineJoin(c, 2, :miter)
+        @test getSeriesLine(c, 2).value.join == "miter"
+        c = setSeriesLineMiterLimit(c, 2, 8)
+        @test getSeriesLine(c, 2).value.miter_limit ≈ 8.0
+
+        # everything set at once is still in schema order
+        ln = first_element_with_tag(getSeriesShapeProps(c, 2).raw, "ln")
+        @test issorted([findfirst(==(localname(k)), CHILD_ORDER[(NS_A, "ln")])
+                        for k in XML.eachelement(ln)])
+
+        # :inherit removes one property and leaves the rest
+        c = setSeriesLineDash(c, 2, :inherit)
+        e = getSeriesLine(c, 2)
+        @test isnothing(e.value.dash) && e.value.cap == "rnd" && e.value.width ≈ 2.25
+
+        # the sugar is one rebuild, and a bad value leaves nothing applied
+        c = setSeriesLine(c, 3; color = "blue", width = 1.5, dash = :dash)
+        e = getSeriesLine(c, 3)
+        @test e.value.fill.fgcolor.rgb == "0000FF" && e.value.width ≈ 1.5 && e.value.dash == "dash"
+
+        before = XML.write(getSeriesShapeProps(c, 3).raw)
+        @test_throws XLSXError setSeriesLine(c, 3; width = 3, dash = :nonsense)
+        @test XML.write(getSeriesShapeProps(c, 3).raw) == before      # atomic
+
+        # no keywords is a no-op returning the same chart
+        @test setSeriesLine(c, 3) === c
+
+        # whole-line :none and :inherit
+        c = setSeriesLine(c, 3, :none)
+        @test !has_line(getSeriesShapeProps(c, 3))          # element present, fill off
+        @test !isnothing(first_element_with_tag(getSeriesShapeProps(c, 3).raw, "ln"))
+        c = setSeriesLine(c, 3, :inherit)
+        @test isnothing(first_element_with_tag(getSeriesShapeProps(c, 3).raw, "ln"))
+
+        # survives a write and reopen
+        c = setSeriesLineColor(c, 1, "green")
+        XLSX.writexlsx(tmp, xf; overwrite = true)
+        xf2 = XLSX.openxlsx(tmp)
+        c2  = first(XLSX.getCharts(xf2[1]))
+        @test getSeriesLine(c2, 1).value.fill.fgcolor.rgb == "008000"
+    end
+
+    @testset "setMarker" begin
+        tmp = joinpath(mktempdir(), "appearance.xlsx")
+        cp(joinpath(data_directory, "chart_appearance.xlsx"), tmp)
+
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+        c  = first(XLSX.getCharts(xf[1]))
+
+        # Series 3 is the line series: c:marker diamond size 9 with its own spPr.
+        m = getSeriesMarker(c, 3)
+        @test m.symbol === :diamond && m.size == 9
+
+        c = setMarkerSymbol(c, 3, :circle)
+        @test getSeriesMarker(c, 3).symbol === :circle
+        c = setMarkerSize(c, 3, 12)
+        @test getSeriesMarker(c, 3).size == 12
+
+        @test_throws XLSXError setMarkerSize(c, 3, 100)     # ST_MarkerSize is 2..72
+        @test_throws XLSXError setMarkerSize(c, 3, 1)
+        @test_throws XLSXError setMarkerSymbol(c, 3, :hexagon)
+
+        # :none is a symbol; :inherit removes the element
+        c = setMarkerSymbol(c, 3, :none)
+        @test getSeriesMarker(c, 3).symbol === :none
+        c = setMarkerSymbol(c, 3, :inherit)
+        @test isnothing(getSeriesMarker(c, 3).symbol)
+        @test getSeriesMarker(c, 3).size == 12              # size survives
+
+        # marker fill and line, on the series marker
+        c = setMarkerFill(c, 3, "red")
+        @test getMarkerFill(c, 3, 1).value.fgcolor.rgb == "FF0000"
+        c = setMarkerLineColor(c, 3, "blue")
+        c = setMarkerLineWidth(c, 3, 1.5)
+        ln = first_element_with_tag(getSeriesMarker(c, 3).shape.raw, "ln")
+        @test !isnothing(ln)
+
+        # schema order inside c:marker
+        mk = getSeriesMarker(c, 3).raw
+        @test issorted([findfirst(==(localname(k)), CHILD_ORDER[(NS_C, "marker")])
+                        for k in XML.eachelement(mk)])
+
+        # the point marker: series 3's dPt at idx 2 is point 3
+        c = setMarkerFill(c, 3, 3, "green")
+        e = getMarkerFill(c, 3, 3)
+        @test e.site.level === :point && e.value.fgcolor.rgb == "008000"
+
+        # a point Excel never formatted has no c:dPt, and this does not create one
+        @test_throws XLSXError setMarkerFill(c, 3, 1, "red")
+
+        # the sugar is one rebuild
+        c = setMarker(c, 3; symbol = :square, size = 7, fill = "yellow")
+        m = getSeriesMarker(c, 3)
+        @test m.symbol === :square && m.size == 7
+        @test setMarker(c, 3) === c                          # no keywords, no-op
+
+        # survives a write and reopen
+        XLSX.writexlsx(tmp, xf; overwrite = true)
+        c2 = first(XLSX.getCharts(XLSX.openxlsx(tmp)[1]))
+        @test getSeriesMarker(c2, 3).symbol === :square
+    end
+
+    @testset "setLabelTextProp" begin
+        tmp = joinpath(mktempdir(), "appearance.xlsx")
+        cp(joinpath(data_directory, "chart_appearance.xlsx"), tmp)
+
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+        wb = XLSX.get_workbook(xf[1])
+        c  = first(XLSX.getCharts(xf[1]))
+
+        # Series 1's labels are sz 1050 accent1+lumMod; series 2's are sz 900.
+        @test getLabelTextProp(c, 1, :size).value ≈ 10.5
+        @test getLabelTextProp(c, 2, :size).value ≈ 9.0
+
+        c = setLabelTextProp(c, 1, :size, 14)
+        e = getLabelTextProp(c, 1, :size)
+        @test e.value ≈ 14.0 && e.site.level === :series
+        @test getLabelTextProp(c, 2, :size).value ≈ 9.0      # series 2 untouched
+
+        # other fields are independent
+        c = setLabelTextProp(c, 1, :bold, true)
+        @test getLabelTextProp(c, 1, :bold).value === true
+        @test getLabelTextProp(c, 1, :size).value ≈ 14.0
+
+        # :inherit removes one field and leaves the rest
+        c = setLabelTextProp(c, 1, :size, :inherit)
+        @test isnothing(getLabelTextProp(c, 1, :size).value)
+        @test getLabelTextProp(c, 1, :bold).value === true
+
+        # compound fields
+        c = setLabelTextProp(c, 1, :fill, "red")
+        @test getLabelTextProp(c, 1, :fill).value.fgcolor.rgb == "FF0000"
+        c = setLabelTextProp(c, 1, :fill, SchemeColor(:accent1; lumMod = 75))
+        @test getLabelTextProp(c, 1, :fill).value.fgcolor.val == "accent1"
+        c = setLabelTextProp(c, 1, :line, (color = "blue", width = 1.5))
+        l = getLabelTextProp(c, 1, :line).value
+        @test l.fill.fgcolor.rgb == "0000FF" && l.width ≈ 1.5
+
+        @test_throws XLSXError setLabelTextProp(c, 1, :nonsense, 1)
+
+        # Series 3 has no c:dLbls at all — creating one writes formatting only.
+        @test isnothing(getLabelTextProp(c, 3, :size).value)
+        c = setLabelTextProp(c, 3, :size, 11)
+        @test getLabelTextProp(c, 3, :size).value ≈ 11.0
+        dl = first_element_with_tag(_series(c, 3).raw, "dLbls")
+        @test !isnothing(dl)
+        @test localname.(collect(XML.eachelement(dl))) == ["txPr"]   # no show* flags
+
+        # An individual label. Series 1's dLbl at idx 0 is point 1, retyped, and
+        # carries formatting in BOTH c:tx/c:rich and c:txPr — writing one alone
+        # would leave the edit invisible in Excel.
+        c = setLabelTextProp(c, 1, 1, :size, 20)
+        lbl = getSeriesDataLabel(c, 1, 1).raw
+        for body in (first_element_with_tag(lbl, "txPr"),
+                    first_element_with_tag(first_element_with_tag(lbl, "tx"), "rich"))
+            rp = XLSX.default_run_props(parse_drawing_text(wb, body))
+            @test rp.size ≈ 20.0
+        end
+
+        # A deleted label cannot be formatted. Series 1's dLbl at idx 2 is point 3.
+        @test_throws XLSXError setLabelTextProp(c, 1, 3, :size, 12)
+
+        # A point with no individual label throws rather than creating one.
+        @test_throws XLSXError setLabelTextProp(c, 2, 1, :size, 12)
+
+        # the group rung. Series 1's txPr sets i="0" explicitly — Excel writes the
+        # full attribute set — so the group cannot be reached until that is removed.
+        c = setLabelTextProp(c, 1, :italic, :inherit)
+        g = getChartGroups(c)[1]
+        c = setGroupLabelTextProp(c, g, :italic, true)
+        e = getLabelTextProp(c, 1, :italic)
+        @test e.value === true && e.site.level === :group
+
+        # the chart space rung
+        c = setChartSpaceTextProp(c, :caps, "all")
+        e = getLabelTextProp(c, 3, :caps)
+        @test e.value == "all" && e.site.level === :chartspace
+
+        # survives a write and reopen
+        XLSX.writexlsx(tmp, xf; overwrite = true)
+        c2 = first(XLSX.getCharts(XLSX.openxlsx(tmp)[1]))
+        @test getLabelTextProp(c2, 3, :size).value ≈ 11.0
+    end
+
+    @testset "title and legend text" begin
+        tmp = joinpath(mktempdir(), "appearance.xlsx")
+        cp(joinpath(data_directory, "chart_appearance.xlsx"), tmp)
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+        c  = first(XLSX.getCharts(xf[1]))
+        wb = XLSX.get_workbook(xf[1])
+
+        # The fixture's chart title has spPr and txPr but no c:tx — Excel generates
+        # the text. Setting a property touches txPr only.
+        @test isnothing(getChartTitleText(c))
+        c = setChartTitleTextProp(c, :bold, true)
+        @test XLSX.default_run_props(getChartTitleTextProps(c)).bold === true
+        @test isnothing(getChartTitleText(c))        # still no literal text
+
+        # Giving it literal text, then changing a property, must update both bodies.
+        c = setChartTitleText(c, "Revenue")
+        @test text_content(getChartTitleText(c)) == "Revenue"
+        c = setChartTitleTextProp(c, :size, 18)
+        @test XLSX.default_run_props(getChartTitleTextProps(c)).size ≈ 18.0
+        @test XLSX.default_run_props(getChartTitleText(c)).size ≈ 18.0
+
+        # A DrawingText replaces text and formatting wholesale.
+        c = setChartTitleText(c, DrawingText(DrawingParagraph(
+                DrawingRun("Q4", props = DrawingRunProps(size = 24.0, italic = true)))))
+        g = getChartTitleText(c)
+        @test text_content(g) == "Q4"
+        @test first_run_props(g).size ≈ 24.0 && first_run_props(g).italic === true
+
+        # Axis titles. The catAx at 612078287 is titled "Horizontal".
+        ax = getChartAxis(c, 612078287)
+        @test text_content(getAxisTitleText(c, ax)) == "Horizontal"
+        c  = setAxisTitleText(c, ax, "Quarter")
+        ax = getChartAxis(c, 612078287)              # the Chart is fresh; re-fetch
+        @test text_content(getAxisTitleText(c, ax)) == "Quarter"
+
+        c  = setAxisTitleTextProp(c, ax, :bold, true)
+        ax = getChartAxis(c, 612078287)
+        @test XLSX.default_run_props(getAxisTitleText(c, ax)).bold === true
+
+        # The legend has txPr and no c:tx, so only formatting is settable.
+        c = setLegendTextProp(c, :size, 11)
+        @test XLSX.default_run_props(getLegendTextProps(c)).size ≈ 11.0
+
+        # Schema order survives creating a title from nothing.
+        t = first_element_with_tag(first_element_with_tag(chart_root(c), "chart"), "title")
+        @test issorted([XLSX._slot(CHILD_ORDER[(NS_C, "title")], localname(k))
+                        for k in XML.eachelement(t)])
+
+        # survives a write and reopen
+        XLSX.writexlsx(tmp, xf; overwrite = true)
+        c2 = first(XLSX.getCharts(XLSX.openxlsx(tmp)[1]))
+        @test text_content(getChartTitleText(c2)) == "Q4"
+        ax2 = getChartAxis(c2, 612078287)
+        @test text_content(getAxisTitleText(c2, ax2)) == "Quarter"
     end
 end
 

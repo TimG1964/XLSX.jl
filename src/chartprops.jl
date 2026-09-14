@@ -1077,3 +1077,639 @@ function _text_chain(c::Chart, i::Integer)
     push!(chain, _site_path(:chartspace, :text, root, "txPr"))
     return chain
 end
+
+"""
+    set_chart_root!(c::Chart, newroot::XML.Node) -> nothing
+
+Write `newroot` back as the chart part's root element. `rebuild_path` returns a
+new `c:chartSpace` rather than mutating, and `get_xml_data` memoizes the parsed
+document, so a rebuilt root that is not written back leaves the correct tree in
+memory and the old one on disk — silently, since `writexlsx` serializes what is
+in `xf.data`.
+
+Splices into the existing document so the declaration and any other top-level
+nodes survive.
+"""
+function set_chart_root!(c::Chart, newroot::XML.Node)
+    doc = get_xml_data(c.package, c.path)
+    old = xml_root_element(doc)
+    c.package.data[c.path] = replace_child(doc, old, newroot)
+    return nothing
+end
+
+#-- Write path ---------------------------------------------------------------
+
+"""
+    _ln_with(ln, pfx; color, width, dash, cap, compound, join, miterLimit) -> XML.Node
+
+Apply the given line properties to an `a:ln`, leaving unspecified ones alone.
+Join is applied before the miter limit, which lives on the `a:miter` element.
+"""
+function _ln_with(ln::XML.Node, pfx::Dict{String,String};
+                  color = nothing, width = nothing, dash = nothing,
+                  cap = nothing, compound = nothing,
+                  join = nothing, miterLimit = nothing)
+    isnothing(color)      || (ln = _ln_with_color(ln, color, pfx))
+    isnothing(width)      || (ln = _ln_with_width(ln, width))
+    isnothing(dash)       || (ln = _ln_with_dash(ln, dash, pfx))
+    isnothing(cap)        || (ln = _ln_with_cap(ln, cap))
+    isnothing(compound)   || (ln = _ln_with_compound(ln, compound))
+    isnothing(join)       || (ln = _ln_with_join(ln, join, pfx))
+    isnothing(miterLimit) || (ln = _ln_with_miter_limit(ln, miterLimit))
+    return ln
+end
+
+"""
+    _series_path(c, i) -> Vector
+
+The `rebuild_path` steps from a chart part's root down to series `i`'s `c:ser`.
+Both the group and the series are matched by node identity rather than by tag,
+since a combo chart may hold several groups of one type and each holds several
+series.
+"""
+function _series_path(c::Chart, i::Integer)
+    ser  = _series(c, i).raw
+    grp  = getSeriesGroup(c, i).raw
+    gtag = String(localname(grp))
+    skey = (NS_C, SER_TYPE[gtag])
+    steps = [(NS_C, "chart")    => "chart",
+             (NS_C, "plotArea") => "plotArea",
+             (NS_C, gtag)       => (gtag, n -> n === grp),
+             skey               => ("ser", n -> n === ser)]
+    return steps, skey
+end
+
+"""
+    setSeriesFill(c, i, color) -> Chart
+
+Set the fill of series `i`'s graphic. `color` may be a color string or Symbol,
+a `Colors.Colorant`, a [`SchemeColor`](@ref), `:none` for an explicit
+`<a:noFill/>`, or `:inherit` to remove it so the chart style applies.
+
+`:none` and `:inherit` are different states. An absent fill inherits; `noFill`
+does not.
+
+Returns a fresh `Chart` — the part is rebuilt, so any `Chart` from before this
+call, including `c`, holds stale nodes.
+"""
+setSeriesFill(c::Chart, i::Integer, color::Union{AbstractString,Colors.Colorant,SchemeColor}) =
+    _set_series_shape(c, i, (sp, pfx) -> _sp_with_fill(sp, (NS_A, "spPr"), color, pfx))
+
+function setSeriesFill(c::Chart, i::Integer, what::Symbol)
+    (what === :none || what === :inherit) &&
+        return _set_series_shape(c, i, (sp, pfx) -> _sp_with_fill(sp, (NS_A, "spPr"), what, pfx))
+    return setSeriesFill(c, i, String(what))
+end
+
+"""
+    _set_series_line(c, i, f) -> Chart
+
+Apply `f` to series `i`'s `a:ln`, creating one if absent, and rebuild the chart
+part once. `f` takes the `a:ln` element and returns its replacement.
+
+The part is rebuilt only after `f` returns, so a throw part-way through a
+composed transform leaves the file untouched.
+"""
+_set_series_line(c::Chart, i::Integer, f) =
+    _set_series_shape(c, i, (sp, pfx) -> _sp_with_line(sp, (NS_A, "spPr"), ln -> f(ln, pfx), pfx))
+
+
+"""
+    setSeriesLineColor(c, i, color) -> Chart
+
+Set the color of series `i`'s outline. Takes the same values as
+[`setSeriesFill`](@ref): a color, a [`SchemeColor`](@ref), `:none` for an
+explicit `<a:noFill/>`, or `:inherit` to remove it.
+
+Note `:none` here leaves the `a:ln` in place with no fill — the line exists and
+draws nothing, which is what Excel writes and is distinct from
+`setSeriesLine(c, i, :none)`, which removes the outline entirely.
+"""
+setSeriesLineColor(c::Chart, i::Integer, color) =
+    _set_series_line(c, i, (ln, pfx) -> _ln_with_color(ln, color, pfx))
+
+setSeriesLineWidth(c::Chart, i::Integer, points) =
+    _set_series_line(c, i, (ln, _) -> _ln_with_width(ln, points))
+
+setSeriesLineDash(c::Chart, i::Integer, dash) =
+    _set_series_line(c, i, (ln, pfx) -> _ln_with_dash(ln, dash, pfx))
+
+setSeriesLineCap(c::Chart, i::Integer, cap) =
+    _set_series_line(c, i, (ln, _) -> _ln_with_cap(ln, cap))
+
+setSeriesLineCompound(c::Chart, i::Integer, cmpd) =
+    _set_series_line(c, i, (ln, _) -> _ln_with_compound(ln, cmpd))
+
+setSeriesLineJoin(c::Chart, i::Integer, join) =
+    _set_series_line(c, i, (ln, pfx) -> _ln_with_join(ln, join, pfx))
+
+setSeriesLineMiterLimit(c::Chart, i::Integer, limit) =
+    _set_series_line(c, i, (ln, _) -> _ln_with_miter_limit(ln, limit))
+
+"""
+    setSeriesLine(c, i; color, width, dash, cap, compound, join, miterLimit) -> Chart
+    setSeriesLine(c, i, :none)
+    setSeriesLine(c, i, :inherit)
+
+Set several line properties at once, in one rebuild of the chart part. A keyword
+left unspecified is left alone; pass `:inherit` to remove one that is set.
+
+The symbol form acts on the whole outline: `:none` writes an `a:ln` whose fill is
+`<a:noFill/>`, and `:inherit` removes the `a:ln` so the chart style supplies it.
+"""
+function setSeriesLine(c::Chart, i::Integer;
+                       color = nothing, width = nothing, dash = nothing,
+                       cap = nothing, compound = nothing,
+                       join = nothing, miterLimit = nothing)
+    all(isnothing, (color, width, dash, cap, compound, join, miterLimit)) && return c
+
+    return _set_series_line(c, i, (ln, pfx) ->
+        _ln_with(ln, pfx; color, width, dash, cap, compound, join, miterLimit))
+end
+
+function setSeriesLine(c::Chart, i::Integer, what::Symbol)
+    what === :inherit && return _set_series_shape(c, i, (sp, _) -> remove_child(sp, "ln"))
+    what === :none    && return setSeriesLineColor(c, i, :none)
+    throw(XLSXError("`$what` is not a line instruction; use `:none` or `:inherit`."))
+end
+
+"""
+    _set_series_shape(c, i, f) -> Chart
+
+Apply `f` to series `i`'s `c:spPr`, creating one if absent, and rebuild the
+chart part once. `f` takes the `spPr` element and returns its replacement.
+
+Where [`_set_series_line`](@ref) works inside the `a:ln`, this works on its
+parent — needed for changes to the `a:ln` itself, such as removing it.
+"""
+function _set_series_shape(c::Chart, i::Integer, f)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+        steps, ser_key = _series_path(c, i)
+    new = rebuild_path(root, [steps...; (NS_A, "spPr") => "spPr"],
+                       sp -> f(sp, pfx);
+                       prefixes = pfx, parent_key = ser_key)
+    set_chart_root!(c, new)
+    return getChart(c.package, c.name)
+end
+
+"""
+    _marker_with_symbol(mk, symbol, pfx) -> XML.Node
+
+Set a `c:marker`'s `c:symbol`. `:none` is a symbol in its own right — a marker
+explicitly drawn as nothing — while `:inherit` removes the element so the chart
+style decides. `:auto` is DrawingML's own "let Excel choose".
+"""
+function _marker_with_symbol(mk::XML.Node, symbol, pfx::Dict{String,String})
+    symbol === :inherit && return remove_child(mk, "symbol")
+    node = XML.Element(prefixed_tag(pfx[NS_C], "symbol");
+                       val = String(_check(symbol, MARKER_SYMBOLS, "marker symbol")))
+    return insert_child(mk, (NS_C, "marker"), node)
+end
+
+"""
+    _marker_with_size(mk, size, pfx) -> XML.Node
+
+Set a `c:marker`'s `c:size`, in points. `ST_MarkerSize` allows 2 to 72.
+`:inherit` removes it; Excel's default is 5.
+"""
+function _marker_with_size(mk::XML.Node, size, pfx::Dict{String,String})
+    size === :inherit && return remove_child(mk, "size")
+    n = round(Int, size)
+    2 <= n <= 72 || throw(XLSXError(
+        "A marker size of $size is outside the range DrawingML allows (2 to 72)."))
+    return insert_child(mk, (NS_C, "marker"),
+                        XML.Element(prefixed_tag(pfx[NS_C], "size"); val = string(n)))
+end
+
+"""
+    _set_marker(c, i, point, f) -> Chart
+
+Apply `f` to a `c:marker`, creating one if absent, and rebuild the chart part
+once. `point` selects a data point's marker; `nothing` selects the series'.
+
+A data point that Excel never formatted has no `c:dPt`, and this does not create
+one — setting a marker on such a point throws. Creating a `c:dPt` means writing
+the `c:idx` that identifies it, which is a different operation from creating the
+empty intermediates `rebuild_path` makes.
+"""
+function _set_marker(c::Chart, i::Integer, point::Union{Nothing,Integer}, f)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    steps, ser_key = _series_path(c, i)
+
+    if !isnothing(point)
+        dp = getSeriesDataPoint(c, i, point)
+        isnothing(dp) && throw(XLSXError(
+            "Series $i has no formatting for data point $point, and creating one " *
+            "is not supported yet."))
+        push!(steps, (NS_C, "dPt") => ("dPt", n -> n === dp.raw))
+    end
+    push!(steps, (NS_C, "marker") => "marker")
+
+    new = rebuild_path(root, steps, mk -> f(mk, pfx);
+                       prefixes = pfx, parent_key = ser_key)
+    set_chart_root!(c, new)
+    return getChart(c.package, c.name)
+end
+
+"""
+    setMarkerSymbol(c, i, symbol) -> Chart
+    setMarkerSymbol(c, i, point, symbol) -> Chart
+
+Set the marker shape for series `i`, or for one of its data points. One of
+`:circle`, `:dash`, `:diamond`, `:dot`, `:none`, `:picture`, `:plus`, `:square`,
+`:star`, `:triangle`, `:x` or `:auto`.
+
+`:none` draws no marker and `:auto` lets Excel choose; both are settings.
+`:inherit` removes the element so the chart style decides.
+"""
+setMarkerSymbol(c::Chart, i::Integer, symbol) =
+    _set_marker(c, i, nothing, (mk, pfx) -> _marker_with_symbol(mk, symbol, pfx))
+
+setMarkerSymbol(c::Chart, i::Integer, point::Integer, symbol) =
+    _set_marker(c, i, point, (mk, pfx) -> _marker_with_symbol(mk, symbol, pfx))
+
+
+setMarkerSize(c::Chart, i::Integer, size) =
+    _set_marker(c, i, nothing, (mk, pfx) -> _marker_with_size(mk, size, pfx))
+
+setMarkerSize(c::Chart, i::Integer, point::Integer, size) =
+    _set_marker(c, i, point, (mk, pfx) -> _marker_with_size(mk, size, pfx))
+
+_marker_with_fill(mk, color, pfx) =
+    insert_child(mk, (NS_C, "marker"),
+                 _sp_with_fill(_marker_sp(mk, pfx), (NS_A, "spPr"), color, pfx))
+
+_marker_sp(mk, pfx) = something(first_element_with_tag(mk, "spPr"),
+                                XML.Element(prefixed_tag(pfx[NS_C], "spPr")))
+
+
+
+setMarkerFill(c::Chart, i::Integer, color) =
+    _set_marker(c, i, nothing, (mk, pfx) -> _marker_with_fill(mk, color, pfx))
+
+setMarkerFill(c::Chart, i::Integer, point::Integer, color) =
+    _set_marker(c, i, point, (mk, pfx) -> _marker_with_fill(mk, color, pfx))
+
+
+"""
+    _marker_with_line(mk, f, pfx) -> XML.Node
+
+Apply `f` to the `a:ln` of a `c:marker`'s `c:spPr`, creating both if absent.
+"""
+_marker_with_line(mk::XML.Node, f, pfx::Dict{String,String}) =
+    insert_child(mk, (NS_C, "marker"),
+                 _sp_with_line(_marker_sp(mk, pfx), (NS_A, "spPr"), f, pfx))
+
+setMarkerLineColor(c::Chart, i::Integer, color) =
+    _set_marker(c, i, nothing, (mk, pfx) ->
+        _marker_with_line(mk, ln -> _ln_with_color(ln, color, pfx), pfx))
+
+setMarkerLineColor(c::Chart, i::Integer, point::Integer, color) =
+    _set_marker(c, i, point, (mk, pfx) ->
+        _marker_with_line(mk, ln -> _ln_with_color(ln, color, pfx), pfx))
+
+setMarkerLineWidth(c::Chart, i::Integer, points) =
+    _set_marker(c, i, nothing, (mk, pfx) ->
+        _marker_with_line(mk, ln -> _ln_with_width(ln, points), pfx))
+
+setMarkerLineWidth(c::Chart, i::Integer, point::Integer, points) =
+    _set_marker(c, i, point, (mk, pfx) ->
+        _marker_with_line(mk, ln -> _ln_with_width(ln, points), pfx))
+
+"""
+    setMarker(c, i; symbol, size, fill, lineColor, lineWidth) -> Chart
+    setMarker(c, i, point; ...) -> Chart
+
+Set several marker properties at once, in one rebuild. A keyword left
+unspecified is left alone; pass `:inherit` to remove one that is set.
+"""
+function setMarker(c::Chart, i::Integer, point::Union{Nothing,Integer} = nothing;
+                   symbol = nothing, size = nothing, fill = nothing,
+                   lineColor = nothing, lineWidth = nothing)
+    all(isnothing, (symbol, size, fill, lineColor, lineWidth)) && return c
+    return _set_marker(c, i, point, function (mk, pfx)
+        isnothing(symbol) || (mk = _marker_with_symbol(mk, symbol, pfx))
+        isnothing(size)   || (mk = _marker_with_size(mk, size, pfx))
+        isnothing(fill)   || (mk = _marker_with_fill(mk, fill, pfx))
+        if !isnothing(lineColor) || !isnothing(lineWidth)
+            mk = _marker_with_line(mk, function (ln)
+                isnothing(lineColor) || (ln = _ln_with_color(ln, lineColor, pfx))
+                isnothing(lineWidth) || (ln = _ln_with_width(ln, lineWidth))
+                return ln
+            end, pfx)
+        end
+        return mk
+    end)
+end
+
+"""
+    _txpr_with_run_prop(el, key, field, value, pfx) -> XML.Node
+
+Set one run property on an element's `c:txPr`, creating it if absent. `key` is
+`el`'s [`SchemaKey`](@ref).
+"""
+function _txpr_with_run_prop(el::XML.Node, key::SchemaKey, field::Symbol, value,
+                             pfx::Dict{String,String})
+    txpr = something(first_element_with_tag(el, "txPr"), _new_text_body("txPr", pfx))
+    return insert_child(el, key, _text_with_run_prop(txpr, field, value, pfx))
+end
+
+"""
+    _both_with_run_prop(el, key, field, value, pfx) -> XML.Node
+
+Set one run property on an element's `c:txPr` and, where it holds literal text,
+on its `c:tx/c:rich` as well.
+
+Excel renders the `rich` body, so writing only `c:txPr` leaves the edit
+invisible. This is the shape data labels, chart titles and axis titles share.
+`c:rich` is updated only where it already exists — one with no text means
+nothing, and typing text is a separate operation.
+"""
+function _both_with_run_prop(el::XML.Node, key::SchemaKey, field::Symbol, value,
+                             pfx::Dict{String,String})
+    el = _txpr_with_run_prop(el, key, field, value, pfx)
+
+    tx = first_element_with_tag(el, "tx")
+    isnothing(tx) && return el
+    rich = first_element_with_tag(tx, "rich")
+    isnothing(rich) && return el          # a c:strRef title has no literal text
+
+    return replace_child(el, tx,
+               replace_child(tx, rich, _text_with_run_prop(rich, field, value, pfx)))
+end
+
+"""
+    setLabelTextProp(c, i, field, value) -> Chart
+    setLabelTextProp(c, i, point, field, value) -> Chart
+
+Set one text property of series `i`'s data labels, or of one individual label.
+`field` is a field of `DrawingRunProps` other than `raw` — the same vocabulary
+[`getLabelTextProp`](@ref) resolves. `:inherit` removes it.
+
+Creating a `c:dLbls` where none existed writes every `show*` flag as off, so
+formatting a series' labels does not make them appear. A `c:dLbls` that names no
+flags shows labels with Excel's own defaults — legend key, series name and value
+— which would turn them on for a series that had none.
+
+Two fields take compound values. `:fill` accepts anything
+[`setSeriesFill`](@ref) does — a color, a [`SchemeColor`](@ref), `:none` or
+`:inherit`. `:line` accepts a color, or a `NamedTuple` of the
+[`setSeriesLine`](@ref) keywords: `(color = "red", width = 1.5)`.
+
+A label that has been deleted carries only `c:delete` and cannot be formatted —
+undeleting it is a separate operation.
+"""
+function setLabelTextProp(c::Chart, i::Integer, field::Symbol, value)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    steps, ser_key = _series_path(c, i)
+    new = rebuild_path(root, [steps...; (NS_C, "dLbls") => "dLbls"],
+                       lbl -> _label_transform(lbl, field, value, pfx);
+                       prefixes = pfx, parent_key = ser_key)
+    set_chart_root!(c, new)
+    return getChart(c.package, c.name)
+end
+
+function setLabelTextProp(c::Chart, i::Integer, point::Integer, field::Symbol, value)
+    dl = getSeriesDataLabel(c, i, point)
+    isnothing(dl) && throw(XLSXError(
+        "Series $i has no individual formatting for label $point, and creating " *
+        "one is not supported yet."))
+
+    dl.delete === true && throw(XLSXError(
+        "Label $point of series $i is deleted, so it has no formatting to set. " *
+        "A deleted `c:dLbl` carries only `c:delete`, which the schema makes " *
+        "exclusive of every display property."))
+
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    steps, ser_key = _series_path(c, i)
+    new = rebuild_path(root,
+                       [steps...;
+                        (NS_C, "dLbls") => "dLbls";
+                        (NS_C, "dLbl")  => ("dLbl", n -> n === dl.raw)],
+                       lbl -> _label_transform(lbl, field, value, pfx);
+                           prefixes = pfx, parent_key = ser_key)
+    set_chart_root!(c, new)
+    return getChart(c.package, c.name)
+end
+
+"""
+    setGroupLabelTextProp(c, g::ChartGroup, field, value) -> Chart
+
+Set one text property of a chart group's data labels — the rung every series in
+the group inherits from.
+"""
+function setGroupLabelTextProp(c::Chart, g::ChartGroup, field::Symbol, value)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    gtag = String(localname(g.raw))
+    new  = rebuild_path(root,
+               [(NS_C, "chart")    => "chart",
+                (NS_C, "plotArea") => "plotArea",
+                (NS_C, gtag)       => (gtag, n -> n === g.raw),
+                (NS_C, "dLbls")    => "dLbls"],
+                lbl -> _both_with_run_prop(lbl, (NS_C, String(localname(lbl))),
+                            field, value, pfx);
+               prefixes = pfx)
+    set_chart_root!(c, new)
+    return getChart(c.package, c.name)
+end
+
+"""
+    setChartSpaceTextProp(c, field, value) -> Chart
+
+Set one text property on `c:chartSpace/c:txPr` — the bottom rung of the text
+cascade, which every text body in the chart inherits from unless it overrides.
+"""
+function setChartSpaceTextProp(c::Chart, field::Symbol, value)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    txpr = something(first_element_with_tag(root, "txPr"), _new_text_body("txPr", pfx))
+    new  = insert_child(root, (NS_C, "chartSpace"),
+                        _text_with_run_prop(txpr, field, value, pfx))
+    set_chart_root!(c, new)
+    return getChart(c.package, c.name)
+end
+
+"""
+    setChartTitleText(c, text) -> Chart
+
+Replace the chart title's text and all its formatting. `text` may be a
+`DrawingText` or a string, which becomes a one-run title inheriting its
+formatting from the chart style.
+
+This replaces rather than merges, like writing a `RichTextString` to a cell —
+use [`setChartTitleTextProp`](@ref) to change one property and leave the rest.
+
+A title bound to a cell (`c:tx/c:strRef`) is replaced by literal text; the
+reference is lost. `c:autoTitleDeleted` is not touched, so a chart with the
+title switched off stays that way.
+"""
+function setChartTitleText(c::Chart, text::DrawingText)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    new  = rebuild_path(root,
+               [(NS_C, "chart") => "chart",
+                (NS_C, "title") => "title",
+                (NS_C, "tx")    => "tx"],
+               tx -> insert_child(remove_choice(tx, (NS_C, "tx"), TX_GROUP),
+                                  (NS_C, "tx"), _text_from(text, "rich", pfx));
+               prefixes = pfx)
+    set_chart_root!(c, new)
+    return getChart(c.package, c.name)
+end
+
+setChartTitleText(c::Chart, text::AbstractString) =
+    setChartTitleText(c, DrawingText(text))
+
+"""
+    setAxisTitleText(c, ax::ChartAxis, text) -> Chart
+
+Replace an axis title's text and all its formatting. As
+[`setChartTitleText`](@ref), including that a cell reference is replaced by
+literal text.
+"""
+function setAxisTitleText(c::Chart, ax::ChartAxis, text::DrawingText)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    atag = String(localname(ax.raw))
+    new  = rebuild_path(root,
+               [(NS_C, "chart")    => "chart",
+                (NS_C, "plotArea") => "plotArea",
+                (NS_C, atag)       => (atag, n -> n === ax.raw),
+                (NS_C, "title")    => "title",
+                (NS_C, "tx")       => "tx"],
+               tx -> insert_child(remove_choice(tx, (NS_C, "tx"), TX_GROUP),
+                                  (NS_C, "tx"), _text_from(text, "rich", pfx));
+               prefixes = pfx)
+    set_chart_root!(c, new)
+    return getChart(c.package, c.name)
+end
+
+setAxisTitleText(c::Chart, ax::ChartAxis, text::AbstractString) =
+    setAxisTitleText(c, ax, DrawingText(text))
+
+"""
+    setLabelText(c, i, point, text) -> Chart
+
+Replace one data label's typed-over text and all its formatting, so the label
+shows `text` instead of its value.
+
+The label must already exist as a `c:dLbl` — Excel writes one when you edit or
+format a label individually. Creating one is not supported yet.
+"""
+function setLabelText(c::Chart, i::Integer, point::Integer, text::DrawingText)
+    dl = getSeriesDataLabel(c, i, point)
+    isnothing(dl) && throw(XLSXError(
+        "Series $i has no individual label $point, and creating one is not " *
+        "supported yet."))
+    dl.delete === true && throw(XLSXError(
+        "Label $point of series $i is deleted, so it has no text to set."))
+
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    steps, ser_key = _series_path(c, i)
+    new = rebuild_path(root,
+              [steps...;
+               (NS_C, "dLbls") => "dLbls";
+               (NS_C, "dLbl")  => ("dLbl", n -> n === dl.raw);
+               (NS_C, "tx")    => "tx"],
+              tx -> insert_child(remove_choice(tx, (NS_C, "tx"), TX_GROUP),
+                                 (NS_C, "tx"), _text_from(text, "rich", pfx));
+              prefixes = pfx, parent_key = ser_key)
+    set_chart_root!(c, new)
+    return getChart(c.package, c.name)
+end
+
+setLabelText(c::Chart, i::Integer, point::Integer, text::AbstractString) =
+    setLabelText(c, i, point, DrawingText(text))
+
+"""
+    setChartTitleTextProp(c, field, value) -> Chart
+
+Set one text property of the chart title. `field` is a field of
+`DrawingRunProps` other than `raw`; `:inherit` removes it.
+
+A title carries formatting in `c:title/c:txPr` and, when it holds literal text,
+in `c:title/c:tx/c:rich` as well — Excel renders the `rich` one, so both are
+written. Contrast [`setChartTitleText`](@ref), which replaces the text and all
+its formatting.
+"""
+function setChartTitleTextProp(c::Chart, field::Symbol, value)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    new  = rebuild_path(root,
+               [(NS_C, "chart") => "chart",
+                (NS_C, "title") => "title"],
+               t -> _both_with_run_prop(t, (NS_C, "title"), field, value, pfx);
+               prefixes = pfx)
+    set_chart_root!(c, new)
+    return getChart(c.package, c.name)
+end
+
+"""
+    setAxisTitleTextProp(c, ax::ChartAxis, field, value) -> Chart
+
+Set one text property of an axis title. As [`setChartTitleTextProp`](@ref).
+"""
+function setAxisTitleTextProp(c::Chart, ax::ChartAxis, field::Symbol, value)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    atag = String(localname(ax.raw))
+    new  = rebuild_path(root,
+               [(NS_C, "chart")    => "chart",
+                (NS_C, "plotArea") => "plotArea",
+                (NS_C, atag)       => (atag, n -> n === ax.raw),
+                (NS_C, "title")    => "title"],
+               t -> _both_with_run_prop(t, (NS_C, "title"), field, value, pfx);
+               prefixes = pfx)
+    set_chart_root!(c, new)
+    return getChart(c.package, c.name)
+end
+
+"""
+    setLegendTextProp(c, field, value) -> Chart
+
+Set one text property of the legend (`c:legend/c:txPr`). A legend takes its text
+from the series names, so there is no `c:tx` to replace — only its formatting is
+settable.
+"""
+function setLegendTextProp(c::Chart, field::Symbol, value)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    new  = rebuild_path(root,
+               [(NS_C, "chart")  => "chart",
+                (NS_C, "legend") => "legend"],
+               lg -> _txpr_with_run_prop(lg, (NS_C, "legend"), field, value, pfx);
+               prefixes = pfx)
+    set_chart_root!(c, new)
+    return getChart(c.package, c.name)
+end
+
+"""
+    _dlbls_flags_off(lbl, key, pfx) -> XML.Node
+
+Write every `show*` flag as `val="0"` on a `c:dLbls` that names none.
+
+A `c:dLbls` with no flags shows labels with Excel's own defaults — legend key,
+series name and value — so creating one to hold formatting would turn labels on
+for a series that had none. Excel writes all six whenever it creates a
+`c:dLbls`; matching that keeps a formatting call from changing what is
+displayed. A `c:dLbls` that already names any flag is left alone.
+"""
+function _dlbls_flags_off(lbl::XML.Node, key::SchemaKey, pfx::Dict{String,String})
+    any(f -> !isnothing(first_element_with_tag(lbl, f)), DLBLS_FLAGS) && return lbl
+    for f in DLBLS_FLAGS
+        lbl = insert_child(lbl, key, XML.Element(prefixed_tag(pfx[NS_C], f); val = "0"))
+    end
+    return lbl
+end
+
+function _label_transform(lbl, field, value, pfx)
+    key = (NS_C, String(localname(lbl)))
+    localname(lbl) == "dLbls" && (lbl = _dlbls_flags_off(lbl, key, pfx))
+    return _both_with_run_prop(lbl, key, field, value, pfx)
+end

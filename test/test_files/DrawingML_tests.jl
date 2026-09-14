@@ -264,20 +264,13 @@ end
 
 # =============================================================================
 # DrawingML Text
-#
-# Three groups:
-#   1. attribute readers — units and the absent/explicit distinction, no file
-#   2. hand-built XML — shapes the fixtures may not contain (multi-run, mixed
-#      formatting, breaks, indentation)
-#   3. fixtures — the real thing, against chart_basic.xlsx and
-#      chart_theme_colors.xlsx
-#
-# Group 3 has @test_broken-style placeholders marked TODO where I don't know
-# what your fixtures contain. Run them, read the failures, pin the values.
-# =============================================================================
+## =============================================================================
 
+const XLSXError = XLSX.XLSXError
 const localname = XLSX.localname
+
 const _attr           = XLSX._attr
+const get_attr        = XLSX.get_attr
 const _attr_int       = XLSX._attr_int
 const _attr_bool      = XLSX._attr_bool
 const _attr_pt        = XLSX._attr_pt
@@ -290,6 +283,7 @@ const NS_C = XLSX.NS_C
 const NS_A = XLSX.NS_A
 
 const parse_drawing_text  = XLSX.parse_drawing_text
+const parse_drawing_color = XLSX.parse_drawing_color
 const default_run_props   = XLSX.default_run_props
 const first_run_props     = XLSX.first_run_props
 const is_uniform          = XLSX.is_uniform
@@ -298,6 +292,7 @@ const text_runs           = XLSX.text_runs
 const DrawingText         = XLSX.DrawingText
 const get_theme_fonts     = XLSX.get_theme_fonts
 const resolve_theme_font  = XLSX.resolve_theme_font
+const resolve_color_base  = XLSX.resolve_color_base
 const xml_root_element    = XLSX.xml_root_element
 const get_xml_data        = XLSX.get_xml_data
 const getCharts           = XLSX.getCharts
@@ -306,6 +301,34 @@ const parse_drawing_shape_props = XLSX.parse_drawing_shape_props
 const DrawingShapeProps         = XLSX.DrawingShapeProps
 const has_fill                  = XLSX.has_fill
 const has_line                  = XLSX.has_line
+
+const SchemeColor = XLSX.SchemeColor
+const _scheme_color_node = XLSX._scheme_color_node
+const _solid_fill_node = XLSX._solid_fill_node
+const _srgb_color_node = XLSX._srgb_color_node
+
+const apply_drawingml_transforms = XLSX.apply_drawingml_transforms
+
+const _ln_with_width = XLSX._ln_with_width
+const _ln_with_dash = XLSX._ln_with_dash
+const _ln_with_cap = XLSX._ln_with_cap
+const _ln_with_compound = XLSX._ln_with_compound
+const _ln_with_join = XLSX._ln_with_join
+const _ln_with_miter_limit = XLSX._ln_with_miter_limit
+const _ln_with_color = XLSX._ln_with_color
+
+const _text_from         = XLSX._text_from
+const _fill_node_from    = XLSX._fill_node_from
+const _color_node_from   = XLSX._color_node_from
+const DrawingText        = XLSX.DrawingText
+const DrawingParagraph   = XLSX.DrawingParagraph
+const DrawingRun         = XLSX.DrawingRun
+const DrawingRunProps    = XLSX.DrawingRunProps
+const DrawingParaProps   = XLSX.DrawingParaProps
+const DrawingBodyProps   = XLSX.DrawingBodyProps
+const DrawingFill        = XLSX.DrawingFill
+const DrawingLine        = XLSX.DrawingLine
+const DrawingColor       = XLSX.DrawingColor
 
 # Parse a fragment into its root element. XML.parse returns a document node;
 # the element is its last child (a declaration may precede it).
@@ -764,5 +787,250 @@ end
                 @test sp.raw !== nothing
             end
         end
+    end
+end
+
+@testset "SchemeColor" begin
+    @testset "construction" begin
+        @test SchemeColor(:accent1).token === :accent1
+        @test isempty(SchemeColor(:accent1).transforms)
+        @test SchemeColor(:accent1; lumMod = 75).transforms == [:lumMod => 75.0]
+        @test SchemeColor(:tx1; lumMod = 65, lumOff = 35).transforms ==
+              [:lumMod => 65.0, :lumOff => 35.0]
+        # integers convert
+        @test SchemeColor(:accent1; alpha = 80).transforms == [:alpha => 80.0]
+        # vector form takes any order
+        @test SchemeColor(:accent2, [:shade => 50.0, :alpha => 80.0]).transforms ==
+              [:shade => 50.0, :alpha => 80.0]
+    end
+
+    @testset "validation" begin
+        @test_throws XLSXError SchemeColor(:accent7)
+        @test_throws XLSXError SchemeColor(:acccent1)          # typo, not silently accepted
+        @test_throws XLSXError SchemeColor(:accent1, [:lumMud => 75.0])
+        @test_throws XLSXError SchemeColor(:theme1)            # spreadsheet vocabulary, not DrawingML
+    end
+
+    @testset "aliases" begin
+        # preserved as written
+        @test SchemeColor(:lt1).token === :lt1
+        @test SchemeColor(:dk2).token === :dk2
+        # but equal and equally hashed
+        @test SchemeColor(:lt1) == SchemeColor(:bg1)
+        @test SchemeColor(:dk1) == SchemeColor(:tx1)
+        @test SchemeColor(:lt2) == SchemeColor(:bg2)
+        @test SchemeColor(:dk2) == SchemeColor(:tx2)
+        @test hash(SchemeColor(:lt1)) == hash(SchemeColor(:bg1))
+        @test isequal(SchemeColor(:lt1), SchemeColor(:bg1))
+        # so one Dict slot, not two
+        d = Dict(SchemeColor(:lt1) => 1); d[SchemeColor(:bg1)] = 2
+        @test length(d) == 1
+        # aliases with matching transforms are still equal
+        @test SchemeColor(:lt1; lumMod = 50) == SchemeColor(:bg1; lumMod = 50)
+        # different slots are not
+        @test SchemeColor(:accent1) != SchemeColor(:accent2)
+    end
+
+    @testset "transform order is significant" begin
+        a = SchemeColor(:accent1; lumMod = 75, lumOff = 25)
+        b = SchemeColor(:accent1, [:lumOff => 25.0, :lumMod => 75.0])
+        @test a.transforms != b.transforms
+        @test a != b
+        @test SchemeColor(:accent1; lumMod = 75) != SchemeColor(:accent1; lumMod = 50)
+        @test SchemeColor(:accent1) != SchemeColor(:accent1; lumMod = 75)
+    end
+
+    xf = XLSX.openxlsx(joinpath(data_directory, "chart_appearance.xlsx"))
+    wb = XLSX.get_workbook(xf[1])
+    @testset "SchemeColor round trip" begin
+
+        # resolve_color_base does the theme lookup only; the transforms are applied
+        # separately, so composing the two is what a reader effectively does.
+        resolved(wb, n) = first(apply_drawingml_transforms(
+            resolve_color_base(wb, n),
+            parse_drawing_color(wb, n).transforms))
+
+        # accent1, untransformed
+        n  = _scheme_color_node(SchemeColor(:accent1))
+        @test XML.write(n) == """<a:schemeClr val="accent1"/>"""
+        dc = parse_drawing_color(wb, n)
+        @test dc.kind === :scheme && dc.val == "accent1"
+
+        # accent1 + lumMod 75% — 104862 against the Office theme, verified in stage 2
+        n = _scheme_color_node(SchemeColor(:accent1; lumMod = 75))
+        @test occursin("""val="75000\"""", XML.write(n))
+        dc = parse_drawing_color(wb, n)
+        @test length(dc.transforms) == 1
+        @test resolve_color_base(wb, n) == "156082"
+
+        # tx1 + lumMod 65 / lumOff 35 — 595959, and order is preserved through the XML
+        n = _scheme_color_node(SchemeColor(:tx1; lumMod = 65, lumOff = 35))
+        @test localname.(collect(XML.eachelement(n))) == ["lumMod", "lumOff"]
+        @test resolve_color_base(wb, n) == "000000"
+
+        # what we build parses back to what we built
+        for sc in (SchemeColor(:accent1), SchemeColor(:accent1; lumMod = 75),
+                SchemeColor(:tx1; lumMod = 65, lumOff = 35),
+                SchemeColor(:accent2, [:shade => 50.0, :alpha => 80.0]))
+            dc = parse_drawing_color(wb, _scheme_color_node(sc))
+            @test dc.val == String(sc.token)
+            @test length(dc.transforms) == length(sc.transforms)
+        end
+
+        @test resolve_color_base(wb, _scheme_color_node(SchemeColor(:accent1))) == "156082"
+        @test resolved(wb, _scheme_color_node(SchemeColor(:accent1; lumMod = 75))) == "104862"
+        @test resolved(wb, _scheme_color_node(SchemeColor(:tx1; lumMod = 65, lumOff = 35))) == "595959"
+
+        # solidFill wrapper
+        f = parse_drawing_fill(wb, _solid_fill_node(_scheme_color_node(SchemeColor(:accent1))))
+        @test f.kind === :solid && f.fgcolor.val == "accent1"
+
+        # alpha rides alongside the hex rather than altering it
+        n = _scheme_color_node(SchemeColor(:accent1; alpha = 50))
+        hex, alpha = apply_drawingml_transforms(
+            resolve_color_base(wb, n), parse_drawing_color(wb, n).transforms)
+        @test hex == "156082"
+        @test alpha ≈ 0.5
+    end
+
+    @testset "srgb color nodes" begin
+        # 8-digit hex passes through, split into six digits plus alpha
+        @test XML.write(_srgb_color_node("FFFF0000")) == """<a:srgbClr val="FF0000"/>"""
+        @test XML.write(_srgb_color_node("ffff0000")) == """<a:srgbClr val="FF0000"/>"""   # case
+
+        # Colors.jl names
+        @test XML.write(_srgb_color_node("red"))   == """<a:srgbClr val="FF0000"/>"""
+        @test XML.write(_srgb_color_node(:red))    == """<a:srgbClr val="FF0000"/>"""
+        @test XML.write(_srgb_color_node("grey"))  == XML.write(_srgb_color_node("gray"))
+
+        # opaque emits no alpha child
+        @test isnothing(_srgb_color_node("FF0000FF").children) ||
+            isempty(_srgb_color_node("FF0000FF").children)
+
+        # partial alpha becomes a transform
+        n = _srgb_color_node("800000FF")
+        @test localname.(collect(XML.eachelement(n))) == ["alpha"]
+        @test get_attr(first(XML.eachelement(n)), "val") == "50196"   # 128/255
+
+        # colorants, opaque and transparent
+        @test XML.write(_srgb_color_node(Colors.RGB(1, 0, 0))) == """<a:srgbClr val="FF0000"/>"""
+        n = _srgb_color_node(Colors.ARGB(1, 0, 0, 0.5))
+        @test get_attr(n, "val") == "FF0000"
+        @test !isempty(XML.children(n))
+
+        # invalid names throw get_color's message
+        @test_throws XLSXError _srgb_color_node("notacolor")
+
+        # round trip through the parser
+        dc = parse_drawing_color(wb, _srgb_color_node("red"))
+        @test dc.kind === :srgb && dc.rgb == "FF0000"
+    end
+
+    @testset "_ln_with_*" begin
+        pfx = Dict(NS_A => "a")
+        ln() = XML.Element("a:ln")
+
+        @test get_attr(_ln_with_width(ln(), 2), "w") == "25400"
+        @test_throws XLSXError _ln_with_width(ln(), 2000)
+        @test_throws XLSXError _ln_with_width(ln(), -1)
+        @test get_attr(_ln_with_width(_ln_with_width(ln(), 2), :inherit), "w") == ""
+
+        # Excel names and DrawingML names both work, and resolve to the same thing
+        @test XML.write(_ln_with_dash(ln(), :roundDot, pfx)) ==
+            XML.write(_ln_with_dash(ln(), :sysDot, pfx))
+        @test_throws XLSXError _ln_with_dash(ln(), :dotted, pfx)
+
+        @test get_attr(_ln_with_cap(ln(), :round), "cap") == "rnd"
+        @test get_attr(_ln_with_cap(ln(), :rnd), "cap") == "rnd"
+        @test get_attr(_ln_with_compound(ln(), :double), "cmpd") == "dbl"
+
+        # join, and the limit that depends on it
+        l = _ln_with_join(ln(), :miter, pfx)
+        @test localname.(collect(XML.eachelement(l))) == ["miter"]
+        @test get_attr(first(XML.eachelement(_ln_with_miter_limit(l, 8))), "lim") == "800000"
+        @test_throws XLSXError _ln_with_miter_limit(ln(), 8)
+        @test_throws XLSXError _ln_with_miter_limit(_ln_with_join(ln(), :bevel, pfx), 8)
+
+        # schema order: fill, dash, join
+        full = _ln_with_join(_ln_with_dash(_ln_with_color(ln(), "red", pfx), :dash, pfx), :round, pfx)
+        @test localname.(collect(XML.eachelement(full))) == ["solidFill", "prstDash", "round"]
+
+        # each choice group replaces rather than accumulates
+        @test localname.(collect(XML.eachelement(
+            _ln_with_color(_ln_with_color(ln(), "red", pfx), :none, pfx)))) == ["noFill"]
+    end
+
+    @testset "text body round trip" begin
+        pfx = Dict(NS_A => "a", NS_C => "c")
+
+        rt(t) = parse_drawing_text(wb, _text_from(t, "txPr", pfx))
+
+        # plain text
+        t = DrawingText("Revenue by Region")
+        g = rt(t)
+        @test length(g.paragraphs) == 1
+        @test text_content(g) == "Revenue by Region"
+
+        # run properties survive, in both directions
+        t = DrawingText(DrawingParagraph(
+                DrawingRun("Revenue", props = DrawingRunProps(size = 14.0, bold = true,
+                                                            latin = "Calibri"))))
+        g = rt(t)
+        rp = first_run_props(g)
+        @test rp.size ≈ 14.0 && rp.bold === true && rp.latin == "Calibri"
+        @test isnothing(rp.italic)          # absent stays absent
+
+        # paragraph defaults
+        t = DrawingText(DrawingParagraph("x",
+                props = DrawingParaProps(align = "ctr",
+                                        defprops = DrawingRunProps(size = 10.5))))
+        g = rt(t)
+        @test g.paragraphs[1].props.align == "ctr"
+        @test g.paragraphs[1].props.defprops.size ≈ 10.5
+
+        # a solid fill on a run, scheme and srgb
+        for color in (DrawingColor(:srgb, "FF0000", Pair{Symbol,Int}[], "FF0000", 1.0),
+                    DrawingColor(:scheme, "accent1", [:lumMod => 75000], "104862", 1.0))
+            t = DrawingText(DrawingParagraph(DrawingRun("x",
+                    props = DrawingRunProps(fill = DrawingFill(:solid; fgcolor = color)))))
+            f = first_run_props(rt(t)).fill
+            @test f.kind === :solid
+            @test f.fgcolor.val == color.val
+            @test f.fgcolor.transforms == color.transforms
+        end
+
+        # a text outline
+        t = DrawingText(DrawingParagraph(DrawingRun("x",
+                props = DrawingRunProps(line = DrawingLine(width = 1.5, dash = "sysDot")))))
+        l = first_run_props(rt(t)).line
+        @test l.width ≈ 1.5 && l.dash == "sysDot"
+
+        # body properties, including the three-way autofit
+        for (af, extra) in ((:none, ()), (:shape, ()),
+                            (:normal, (fontscale = 0.9, linespacereduction = 0.1)))
+            t = DrawingText("x"; body = DrawingBodyProps(; rotation = -45.0, anchor = "ctr",
+                                                        autofit = af, extra...))
+            b = rt(t).body
+            @test b.rotation ≈ -45.0 && b.anchor == "ctr" && b.autofit === af
+        end
+        b = rt(DrawingText("x"; body = DrawingBodyProps(autofit = :normal, fontscale = 0.9))).body
+        @test b.fontscale ≈ 0.9
+
+        # several runs keep document order
+        t = DrawingText(DrawingParagraph("one", DrawingRun("\n", kind = :br), "two"))
+        g = rt(t)
+        @test [r.kind for r in g.paragraphs[1].runs] == [:run, :br, :run]
+        @test text_content(g) == "one\ntwo"
+
+        # schema order inside a:p and a:defRPr
+        n = _text_from(DrawingText(DrawingParagraph("x",
+                props = DrawingParaProps(defprops = DrawingRunProps(size = 10.0)))), "txPr", pfx)
+        p = first_element_with_tag(n, "p")
+        @test localname.(collect(XML.eachelement(p))) == ["pPr", "r"]
+
+        # what cannot be written says so
+        @test_throws XLSXError _fill_node_from(DrawingFill(:gradient), pfx)
+        @test_throws XLSXError _color_node_from(
+            DrawingColor(:scrgb, "", Pair{Symbol,Int}[], "000000", 1.0), pfx)
     end
 end

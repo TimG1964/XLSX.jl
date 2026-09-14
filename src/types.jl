@@ -976,6 +976,11 @@ Metadata for one chart part, plus its series.
 - `title` - chart title text; `nothing` if auto-generated or deleted.
 - `charttypes` - e.g. `[:barChart]`, or several for a combo chart.
 - `series` - `Vector{ChartSeries}` in document order.
+
+    # Stage 6 note: chart-level types keep a non-nullable `raw` because every
+    # accessor assumes a parsed node. Creating charts from scratch will need the
+    # same nullable treatment the DrawingML types have, and every `.raw` use
+    # audited with it.
 """
 struct Chart <: AbstractChart
     package::XLSXFile
@@ -1023,6 +1028,88 @@ struct ChartEx <: AbstractChart
     binning::Bool
 end
 
+const SCHEME_TOKENS = (:bg1, :tx1, :bg2, :tx2, :accent1, :accent2, :accent3,
+                       :accent4, :accent5, :accent6, :hlink, :folHlink,
+                       :lt1, :dk1, :lt2, :dk2)
+
+const COLOR_TRANSFORMS = (:lumMod, :lumOff, :shade, :tint, :satMod, :alpha)
+
+# bg1/lt1, tx1/dk1, bg2/lt2 and tx2/dk2 name the same slot. The field keeps the
+# token as written so a round trip preserves it; equality and hashing normalize
+# so two spellings of one color compare equal.
+const SCHEME_ALIASES = Dict(:lt1 => :bg1, :dk1 => :tx1, :lt2 => :bg2, :dk2 => :tx2)
+
+"""
+    SchemeColor(token; lumMod = nothing, lumOff = nothing, ...)
+    SchemeColor(token, transforms)
+
+A DrawingML theme color: a token naming a slot in the workbook's color scheme,
+plus any transforms applied to it. Distinct from the spreadsheet
+`<color theme="N"/>` mechanism, which is index-ordered and uses a different
+tint algorithm — see `get_theme_colors` for that.
+
+`token` is one of `:bg1`, `:tx1`, `:bg2`, `:tx2`, `:accent1` … `:accent6`,
+`:hlink`, `:folHlink`, or the aliases `:lt1`, `:dk1`, `:lt2`, `:dk2`.
+
+The `:lt1`, `:dk1`, `:lt2` and `:dk2` aliases are preserved as written, so a
+round trip keeps the spelling the file used, but two spellings of one slot
+compare and hash equal.
+
+Transforms are held in document order, because DrawingML applies them in
+sequence and `lumMod` before `lumOff` is not the same as the reverse. Equality
+is positional for the same reason: two `SchemeColor`s with the same transforms
+in different orders are not equal, because they do not render the same. Values
+are percentages, not the hundredths DrawingML writes: `lumMod = 75` is 75%.
+
+The keyword constructor emits transforms in the conventional order — `lumMod`
+before `lumOff`, shade or tint last. Any other order needs the vector form.
+
+# Examples
+
+    SchemeColor(:accent1)
+    SchemeColor(:accent1; lumMod = 75)                    # 104862 against the Office theme
+    SchemeColor(:tx1; lumMod = 65, lumOff = 35)           # 595959
+    SchemeColor(:accent2, [:shade => 50.0, :alpha => 80.0])
+"""
+struct SchemeColor
+    token::Symbol
+    transforms::Vector{Pair{Symbol,Float64}}
+
+    function SchemeColor(token::Symbol, transforms::Vector{Pair{Symbol,Float64}})
+        token in SCHEME_TOKENS || throw(XLSXError(
+            "`$token` is not a theme color token. Valid tokens: " *
+            join(SCHEME_TOKENS, ", ") * "."))
+        for (name, _) in transforms
+            name in COLOR_TRANSFORMS || throw(XLSXError(
+                "`$name` is not a color transform. Valid transforms: " *
+                join(COLOR_TRANSFORMS, ", ") * "."))
+        end
+        return new(token, transforms)
+    end
+end
+
+function SchemeColor(token::Symbol; lumMod = nothing, lumOff = nothing,
+                     satMod = nothing, shade = nothing, tint = nothing,
+                     alpha = nothing)
+    t = Pair{Symbol,Float64}[]
+    isnothing(lumMod) || push!(t, :lumMod => Float64(lumMod))
+    isnothing(lumOff) || push!(t, :lumOff => Float64(lumOff))
+    isnothing(satMod) || push!(t, :satMod => Float64(satMod))
+    isnothing(shade)  || push!(t, :shade  => Float64(shade))
+    isnothing(tint)   || push!(t, :tint   => Float64(tint))
+    isnothing(alpha)  || push!(t, :alpha  => Float64(alpha))
+    return SchemeColor(token, t)
+end
+
+canonical_token(t::Symbol) = get(SCHEME_ALIASES, t, t)
+
+Base.:(==)(a::SchemeColor, b::SchemeColor) =
+    canonical_token(a.token) == canonical_token(b.token) && a.transforms == b.transforms
+
+Base.hash(c::SchemeColor, h::UInt) =
+    hash(c.transforms, hash(canonical_token(c.token), hash(:SchemeColor, h)))
+
+Base.isequal(a::SchemeColor, b::SchemeColor) = a == b
 
 """
     DrawingColor
@@ -1041,6 +1128,9 @@ know what it looks like.
   in thousandths of a percent, in the order DrawingML applies them.
 - `rgb::String` - the resolved colour as `"RRGGBB"`.
 - `alpha::Float64` - `1.0` unless an `alpha` transform applies.
+
+`rgb` and `alpha` are resolved values, not source, and are not written — the
+file keeps the scheme reference and its transforms so the theme still applies.
 """
 struct DrawingColor
     kind::Symbol
@@ -1049,6 +1139,18 @@ struct DrawingColor
     rgb::String
     alpha::Float64
 end
+
+"""
+    ColorSpec
+
+Anything that can specify a color where one is written: a parsed
+[`DrawingColor`](@ref), a [`SchemeColor`](@ref), or a string naming an
+`AARRGGBB` value or a Colors.jl color.
+
+The parser only ever produces `DrawingColor`, so a value read from a file is
+always that. The other two exist for construction.
+"""
+const ColorSpec = Union{DrawingColor, SchemeColor, String}
 
 """
     DrawingFill
@@ -1072,11 +1174,25 @@ on write.
 """
 struct DrawingFill
     kind::Symbol
-    fgcolor::Union{Nothing,DrawingColor}
-    bgcolor::Union{Nothing,DrawingColor}
+    fgcolor::Union{Nothing,ColorSpec}
+    bgcolor::Union{Nothing,ColorSpec}
     preset::Union{Nothing,String}
-    raw::XML.Node
+    raw::Union{Nothing,XML.Node}
 end
+
+"""
+    DrawingFill(kind; fgcolor = nothing, bgcolor = nothing, preset = nothing)
+
+A fill built rather than parsed. `kind` is `:none`, `:solid`, `:gradient`,
+`:pattern`, `:blip` or `:group`; only `:none` and `:solid` can be serialized
+from a constructed value, since the others are modelled partially and written
+back from `raw`.
+A fill read from a file carries a DrawingColor with `rgb` resolved; one built
+by hand may carry a SchemeColor or a string, which has no resolved value until
+it is written and read back.
+"""
+DrawingFill(kind::Symbol; fgcolor = nothing, bgcolor = nothing, preset = nothing) =
+    DrawingFill(kind, fgcolor, bgcolor, preset, nothing)
 
 """
     DrawingLine
@@ -1098,12 +1214,18 @@ one point.
 """
 struct DrawingLine
     fill::Union{Nothing,DrawingFill}
-    width::Union{Nothing,Float64}       # w, points (file stores EMU)
+    width::Union{Nothing,Float64}         # w, points (file stores EMU)
     dash::Union{Nothing,String}
     cap::Union{Nothing,String}
     compound::Union{Nothing,String}
-    raw::XML.Node
+    join::Union{Nothing,String}           # :round, :bevel, :miter
+    miter_limit::Union{Nothing,Float64}   # fraction of line width; only with miter
+    raw::Union{Nothing,XML.Node}
 end
+
+DrawingLine(; fill = nothing, width = nothing, dash = nothing, cap = nothing,
+              compound = nothing, join = nothing, miter_limit = nothing) =
+    DrawingLine(fill, width, dash, cap, compound, join, miter_limit, nothing)
 
 """
     DrawingShapeProps
@@ -1172,6 +1294,14 @@ struct DrawingRunProps
     raw::Union{Nothing,XML.Node}
 end
 
+DrawingRunProps(; lang = nothing, size = nothing, bold = nothing, italic = nothing,
+                  under = nothing, strike = nothing, caps = nothing,
+                  baseline = nothing, kern = nothing, spacing = nothing,
+                  fill = nothing, line = nothing,
+                  latin = nothing, ea = nothing, cs = nothing) =
+    DrawingRunProps(lang, size, bold, italic, under, strike, caps, baseline,
+                    kern, spacing, fill, line, latin, ea, cs, nothing)
+
 """
     DrawingParaProps
 
@@ -1193,6 +1323,15 @@ struct DrawingParaProps
     raw::Union{Nothing,XML.Node}
 end
 
+DrawingParaProps(; align = nothing, level = nothing,
+                   marginleft = nothing, marginright = nothing, indent = nothing,
+                   rtl = nothing, linespacing = nothing,
+                   spacebefore = nothing, spaceafter = nothing,
+                   defprops = nothing) =
+    DrawingParaProps(align, level, marginleft, marginright, indent, rtl,
+                     linespacing, spacebefore, spaceafter, defprops, nothing)
+
+
 """
     DrawingRun
 
@@ -1207,6 +1346,16 @@ struct DrawingRun
 end
 
 """
+    DrawingRun(text; props = nothing, kind = :run)
+
+One run of text. `kind` is `:run`, `:br` or `:fld`; a break carries `"\\n"` as
+its text.
+"""
+DrawingRun(text::AbstractString; props = nothing, kind::Symbol = :run) =
+    DrawingRun(kind, String(text), props, nothing)
+
+
+"""
     DrawingParagraph
 
 One `a:p`: properties, runs in document order, and the trailing
@@ -1218,6 +1367,18 @@ struct DrawingParagraph
     endprops::Union{Nothing,DrawingRunProps}
     raw::Union{Nothing,XML.Node}
 end
+
+"""
+    DrawingParagraph(runs...; props = nothing, endprops = nothing)
+
+One paragraph. Runs may be `DrawingRun`s or plain strings, which become runs
+with no properties of their own — they inherit the paragraph default.
+"""
+DrawingParagraph(runs::Union{DrawingRun,AbstractString}...;
+                 props = nothing, endprops = nothing) =
+    DrawingParagraph(props,
+                     DrawingRun[r isa DrawingRun ? r : DrawingRun(r) for r in runs],
+                     endprops, nothing)
 
 """
     DrawingBodyProps
@@ -1247,6 +1408,19 @@ struct DrawingBodyProps
     raw::Union{Nothing,XML.Node}
 end
 
+DrawingBodyProps(; rotation = nothing, vertical = nothing, wrap = nothing,
+                   anchor = nothing, anchorctr = nothing, upright = nothing,
+                   spcfirstlastpara = nothing, vertoverflow = nothing,
+                   horzoverflow = nothing,
+                   insetleft = nothing, insettop = nothing,
+                   insetright = nothing, insetbottom = nothing,
+                   autofit = nothing, fontscale = nothing,
+                   linespacereduction = nothing) =
+    DrawingBodyProps(rotation, vertical, wrap, anchor, anchorctr, upright,
+                     spcfirstlastpara, vertoverflow, horzoverflow,
+                     insetleft, insettop, insetright, insetbottom,
+                     autofit, fontscale, linespacereduction, nothing)
+
 """
     DrawingText
 
@@ -1262,6 +1436,23 @@ struct DrawingText
     paragraphs::Vector{DrawingParagraph}
     raw::Union{Nothing,XML.Node}
 end
+
+"""
+    DrawingText(paragraphs...; body = nothing, liststyle = nothing)
+
+A text body. Paragraphs may be `DrawingParagraph`s or plain strings, each
+becoming a one-run paragraph.
+
+    DrawingText("Revenue by Region")
+    DrawingText(DrawingParagraph("Revenue", DrawingRun(" 2026",
+                    props = DrawingRunProps(bold = true))))
+"""
+DrawingText(paras::Union{DrawingParagraph,AbstractString}...;
+            body = nothing, liststyle = nothing) =
+    DrawingText(body, liststyle,
+                DrawingParagraph[p isa DrawingParagraph ? p : DrawingParagraph(p)
+                                 for p in paras],
+                nothing)
 
 struct ChartMarker
     symbol::Union{Nothing,Symbol}   # :circle, :square, :none, ...
@@ -1471,3 +1662,14 @@ struct Effective{T}
     site::Union{Nothing,FormatSite}
     chain::Vector{FormatSite}
 end
+
+"""
+    SchemaKey
+
+The `(namespace, complex-type)` pair identifying which `xsd:sequence` governs an
+element's children. Not derivable from the element's tag: every series is `c:ser`
+but its child order depends on the group containing it (`barSer`, `lineSer`, …),
+and `c:spPr` is `a:CT_ShapeProperties` despite its chart prefix. Callers state it.
+"""
+const SchemaKey = Tuple{String,String}
+

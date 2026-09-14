@@ -2,7 +2,13 @@
 # dml-chart.xsd), denormalized — EG_SerShared and EG_AxShared expanded inline.
 # An element inserted out of this order makes the part invalid and Excel will
 # refuse or repair the file.
-const CHILD_ORDER = Dict{Tuple{String,String},Vector{String}}(
+#
+# mc:AlternateContent may appear anywhere and has no slot, so _schema_position
+# skips it. Excel uses it in c:chartSpace to wrap c:style. A setter for an
+# element Excel wraps this way must look inside the AlternateContent rather than
+# insert a sibling, or the file ends up with two competing values.
+#
+const CHILD_ORDER = Dict{Tuple{String,String},Vector{Union{String,Vector{String}}}}(
 
     # Series, one per chart type
     (NS_C, "areaSer")    => ["idx","order","tx","spPr","pictureOptions","dPt","dLbls",
@@ -63,14 +69,74 @@ const CHILD_ORDER = Dict{Tuple{String,String},Vector{String}}(
     # c:txPr / c:rich are a:CT_TextBody — DrawingML types used at chart-prefixed
     # elements — so the child order belongs to DrawingML regardless of the prefix
     # the element itself carries.
-    (NS_A, "spPr") => ["xfrm","noFill","solidFill","gradFill","blipFill","pattFill",
-                       "grpFill","ln","effectLst","effectDag","scene3d","sp3d","extLst"],
+    (NS_A, "spPr") => ["xfrm","custGeom","prstGeom","noFill","solidFill","gradFill",
+                       "blipFill","pattFill","grpFill","ln","effectLst","effectDag",
+                       "scene3d","sp3d","extLst"],
     (NS_A, "txPr") => ["bodyPr","lstStyle","p"],
     (NS_A, "rich") => ["bodyPr","lstStyle","p"],
 
     # CT_Tx is a chart type, unlike the two above.
     (NS_C, "tx")   => ["strRef","rich"],
+
+    # Chart space and plot area
+    (NS_C, "chartSpace") => ["date1904","lang","roundedCorners","style","clrMapOvr",
+                             "pivotSource","protection","chart","spPr","txPr",
+                             "externalData","printSettings","userShapes","extLst"],
+    (NS_C, "chart")      => ["title","autoTitleDeleted","pivotFmts","view3D","floor",
+                             "sideWall","backWall","plotArea","legend","plotVisOnly",
+                             "dispBlanksAs","showDLblsOverMax","extLst"],
+    (NS_C, "plotArea") => ["layout",
+                           ["areaChart","area3DChart","lineChart","line3DChart","stockChart",
+                            "radarChart","scatterChart","pieChart","pie3DChart","doughnutChart",
+                            "barChart","bar3DChart","ofPieChart","surfaceChart","surface3DChart",
+                            "bubbleChart"],
+                           ["valAx","catAx","dateAx","serAx"],
+                           "dTable","spPr","extLst"],
+
+    # Groups
+    (NS_C, "barChart")  => ["barDir","grouping","varyColors","ser","dLbls","gapWidth",
+                            "overlap","serLines","axId","extLst"],
+    (NS_C, "lineChart") => ["grouping","varyColors","ser","dLbls","dropLines","hiLowLines",
+                            "upDownBars","marker","smooth","axId","extLst"],
+
+    # CT_LineProperties. Three choice groups then the ends. Note the line fill
+    # group has four members, not the six of CT_ShapeProperties — a line cannot
+    # take a blipFill or grpFill.
+    (NS_A, "ln") => ["noFill","solidFill","gradFill","pattFill",
+                     "prstDash","custDash",
+                     "round","bevel","miter",
+                     "headEnd","tailEnd","extLst"],
+
+    # Text body internals. CT_TextCharacterProperties serves a:defRPr, a:rPr and
+    # a:endParaRPr — the run properties themselves are attributes on it, so this
+    # order governs only its fill, line and typeface children.
+    (NS_A, "p")    => ["pPr", "r", "br", "fld", "endParaRPr"],
+    (NS_A, "pPr")  => ["lnSpc","spcBef","spcAft","buClrTx","buClr","buSzTx","buSzPct",
+                       "buSzPts","buFontTx","buFont","buNone","buAutoNum","buChar",
+                       "buBlip","tabLst","defRPr","extLst"],
+    (NS_A, "defRPr") => ["ln","noFill","solidFill","gradFill","blipFill","pattFill",
+                         "grpFill","effectLst","effectDag","highlight","uLnTx","uLn",
+                         "uFillTx","uFill","latin","ea","cs","sym","hlinkClick",
+                         "hlinkMouseOver","rtl","extLst"],
+    (NS_A, "r")   => ["rPr", "t"],
+    (NS_A, "fld") => ["rPr", "pPr", "t"],
+    (NS_A, "br")  => ["rPr"],
+    (NS_A, "lnSpc")  => [["spcPct", "spcPts"]],
+    (NS_A, "spcBef") => [["spcPct", "spcPts"]],
+    (NS_A, "spcAft") => [["spcPct", "spcPts"]],
+    (NS_A, "bodyPr") => ["prstTxWarp",
+                         "noAutofit", "normAutofit", "spAutoFit",
+                         "scene3d",
+                         "sp3d", "flatTx",
+                         "extLst"],
+    (NS_C, "title")       => ["tx","layout","overlay","spPr","txPr","extLst"],
+    (NS_C, "legend")      => ["legendPos","legendEntry","layout","overlay","spPr",
+                              "txPr","extLst"],
+    (NS_C, "legendEntry") => ["idx","delete","txPr","extLst"],          
 )
+
+CHILD_ORDER[(NS_A, "rPr")]         = CHILD_ORDER[(NS_A, "defRPr")]
+CHILD_ORDER[(NS_A, "endParaRPr")]  = CHILD_ORDER[(NS_A, "defRPr")]
 
 # Tags that may appear more than once, keyed by parent. errBars is maxOccurs=2
 # on area, bubble and scatter series and 1 elsewhere, so this cannot be a flat set.
@@ -86,19 +152,53 @@ const REPEATABLE = Dict{Tuple{String,String},Set{String}}(
     (NS_C, "dLbls")      => Set(["dLbl"]),
     (NS_A, "txPr")       => Set(["p"]),
     (NS_A, "rich")       => Set(["p"]),
+    (NS_C, "barChart")  => Set(["ser", "axId"]),
+    (NS_C, "lineChart") => Set(["ser", "axId"]),
+    (NS_C, "plotArea")  => Set(["areaChart","area3DChart","lineChart","line3DChart",
+                                "stockChart","radarChart","scatterChart","pieChart",
+                                "pie3DChart","doughnutChart","barChart","bar3DChart",
+                                "ofPieChart","surfaceChart","surface3DChart","bubbleChart",
+                                "valAx","catAx","dateAx","serAx"]),
+    (NS_A, "p")          => Set(["r", "br", "fld"]),
+    (NS_C, "legend")     => Set(["legendEntry"]),
 )
 
 # xsd:choice groups where every member excludes every other — at most one may
 # appear. The common case.
 const SCHEMA_ALTERNATIVES = Dict{Tuple{String,String},Vector{Vector{String}}}(
-    (NS_A, "spPr") => [["noFill","solidFill","gradFill","blipFill","pattFill","grpFill"],
+    (NS_A, "spPr") => [["custGeom","prstGeom"],
+                       ["noFill","solidFill","gradFill","blipFill","pattFill","grpFill"],
                        ["effectLst","effectDag"]],
     (NS_C, "catAx")  => [["crosses","crossesAt"]],
     (NS_C, "valAx")  => [["crosses","crossesAt"]],
     (NS_C, "dateAx") => [["crosses","crossesAt"]],
     (NS_C, "serAx")  => [["crosses","crossesAt"]],
     (NS_C, "tx")     => [["strRef","rich"]],
+    (NS_A, "ln")     => [["noFill","solidFill","gradFill","pattFill"],
+                        ["prstDash","custDash"],
+                        ["round","bevel","miter"]],
+    (NS_A, "defRPr") => [["noFill","solidFill","gradFill","blipFill","pattFill","grpFill"],
+                         ["effectLst","effectDag"],
+                         ["uLnTx","uLn"],
+                         ["uFillTx","uFill"]],
+    (NS_A, "lnSpc")  => [["spcPct", "spcPts"]],
+    (NS_A, "spcBef") => [["spcPct", "spcPts"]],
+    (NS_A, "spcAft") => [["spcPct", "spcPts"]],
+    (NS_A, "bodyPr") => [["noAutofit", "normAutofit", "spAutoFit"],
+                         ["sp3d", "flatTx"]],
 )
+SCHEMA_ALTERNATIVES[(NS_A, "rPr")]        = SCHEMA_ALTERNATIVES[(NS_A, "defRPr")]
+SCHEMA_ALTERNATIVES[(NS_A, "endParaRPr")] = SCHEMA_ALTERNATIVES[(NS_A, "defRPr")]
+
+# Any member of a choice group identifies the group, since remove_choice removes
+# whichever member is present rather than the one named. These constants say
+# "the fill group" at a call site, where a bare "solidFill" would read as a target.
+const FILL_GROUP   = "solidFill"
+const JOIN_GROUP = "miter"
+const EFFECT_GROUP = "effectLst"
+const DASH_GROUP = "prstDash"
+# c:tx is a choice of c:strRef or c:rich; either member names the group.
+const TX_GROUP = "rich"
 
 # xsd:choice where one member excludes a whole group whose own members coexist.
 # In CT_DLbls, `delete` excludes every display property, but those properties
@@ -113,28 +213,146 @@ const SCHEMA_CHOICES = Dict{Tuple{String,String},Vector{Pair{String,Vector{Strin
                                      "showPercent","showBubbleSize","separator"]],
 )
 
+# Which series type governs a c:ser's child order, keyed by the group containing
+# it. Not derivable from the group name: stockChart holds lineSer, doughnutChart
+# and ofPieChart hold pieSer, and every 3D variant shares its 2D counterpart's
+# series type.
+const SER_TYPE = Dict{String,String}(
+    "areaChart"      => "areaSer",
+    "area3DChart"    => "areaSer",
+    "lineChart"      => "lineSer",
+    "line3DChart"    => "lineSer",
+    "stockChart"     => "lineSer",
+    "radarChart"     => "radarSer",
+    "scatterChart"   => "scatterSer",
+    "pieChart"       => "pieSer",
+    "pie3DChart"     => "pieSer",
+    "doughnutChart"  => "pieSer",
+    "ofPieChart"     => "pieSer",
+    "barChart"       => "barSer",
+    "bar3DChart"     => "barSer",
+    "surfaceChart"   => "surfaceSer",
+    "surface3DChart" => "surfaceSer",
+    "bubbleChart"    => "bubbleSer",
+)
 
-"""
-    SchemaKey
+# The six c:dLbls display flags, in schema order. Excel writes all of them
+# whenever it creates a c:dLbls.
+const DLBLS_FLAGS = ("showLegendKey", "showVal", "showCatName", "showSerName",
+                     "showPercent", "showBubbleSize")
 
-The `(namespace, complex-type)` pair identifying which `xsd:sequence` governs an
-element's children. Not derivable from the element's tag: every series is `c:ser`
-but its child order depends on the group containing it (`barSer`, `lineSer`, …),
-and `c:spPr` is `a:CT_ShapeProperties` despite its chart prefix. Callers state it.
-"""
-const SchemaKey = Tuple{String,String}
+
+# Excel UI names for a:prstDash values. Excel's dropdown offers eight of the
+# eleven DrawingML presets; the other three (:dot, :sysDashDot, :sysDashDotDot)
+# have no UI name and are reachable only by their DrawingML spelling.
+#
+# Note Round Dot is sysDot and Square Dot is sysDash — not :dot and :dash, which
+# are different patterns Excel does not expose.
+const DASH_ALIASES = Dict{Symbol,Symbol}(
+    :roundDot        => :sysDot,
+    :squareDot       => :sysDash,
+    :longDash        => :lgDash,
+    :longDashDot     => :lgDashDot,
+    :longDashDotDot  => :lgDashDotDot,
+    # :solid, :dash and :dashDot are spelled the same either way.
+)
+
+const CAP_ALIASES = Dict{Symbol,Symbol}(
+    :square => :sq,
+    :round  => :rnd,
+    # :flat is the same either way.
+)
+
+const CMPD_ALIASES = Dict{Symbol,Symbol}(
+    :simple    => :sng,
+    :double    => :dbl,
+    :triple    => :tri,
+    # :thickThin and :thinThick are the same either way.
+)
+
+# ST_MarkerStyle (ECMA-376, dml-chart.xsd). Excel's UI uses the same words for
+# the shapes, so there are no aliases; :auto and :picture have no UI entry.
+const MARKER_SYMBOLS = (:circle, :dash, :diamond, :dot, :none, :picture,
+                        :plus, :square, :star, :triangle, :x, :auto)
+
 
 _with_children(n::XML.Node, kids::Vector) =
     typeof(n)(XML.nodetype(n), XML.tag(n), n.attributes, XML.value(n), kids)
 
-# First index whose tag sorts after `pos` in the schema order; end+1 if none.
+# Slot index of `tag` in a child order, where a nested vector is one slot whose
+# members may appear in any order (an unbounded xsd:choice). Nothing if unknown.
+function _slot(order, tag::AbstractString)
+    for (i, entry) in enumerate(order)
+        entry isa AbstractString ? (entry == tag && return i) :
+                                   (tag in entry && return i)
+    end
+    return nothing
+end
+
 function _schema_position(order, kids, pos::Integer)
     for (i, k) in enumerate(kids)
-        p = findfirst(==(localname(k)), order)
-        isnothing(p) && continue           # unknown child (extension) — leave it alone
+        p = _slot(order, localname(k))
+        isnothing(p) && continue
         p > pos && return i
     end
     return length(kids) + 1
+end
+
+"""
+    _check_choice(key, tag, kids)
+
+Throw where inserting `tag` would violate an `xsd:choice` against a child already
+present.
+"""
+function _check_choice(key::SchemaKey, tag::AbstractString, kids)
+    for grp in get(SCHEMA_ALTERNATIVES, key, Vector{String}[])
+        tag in grp || continue
+        for k in kids
+            kt = localname(k)
+            if kt != tag && kt in grp
+                throw(XLSXError(
+                    "`$tag` and `$kt` are alternatives in `$(key[2])`; remove `$kt` first."))
+            end
+        end
+    end
+    for (owner, excluded) in get(SCHEMA_CHOICES, key, Pair{String,Vector{String}}[])
+        conflicts = if tag == owner
+            excluded
+        elseif tag in excluded
+            [owner]
+        else
+            continue
+        end
+        for k in kids
+            kt = localname(k)
+            if kt in conflicts
+                throw(XLSXError(
+                    "`$tag` and `$kt` are alternatives in `$(key[2])`; remove `$kt` first."))
+            end
+        end
+    end
+    return nothing
+end
+
+"""
+    remove_choice(parent, key, member) -> XML.Node
+
+Return a node equal to `parent` with whichever member of the `xsd:choice` group
+containing `member` is present removed. Used to make a property inherit again:
+removing the fill element from an `spPr` restores the cascade, which is not the
+same as writing `<a:noFill/>`.
+"""
+function remove_choice(parent::XML.Node, key::SchemaKey, member::AbstractString)
+    for grp in get(SCHEMA_ALTERNATIVES, key, Vector{String}[])
+        member in grp || continue
+        isnothing(parent.children) && return parent
+        i = findfirst(k -> localname(k) in grp, parent.children)
+        isnothing(i) && return parent
+        kids = copy(parent.children)
+        deleteat!(kids, i)
+        return _with_children(parent, kids)
+    end
+    throw(XLSXError("`$member` is not part of a choice group in `$(key[2])`."))
 end
 
 """
@@ -185,42 +403,6 @@ function insert_child(parent::XML.Node, key::SchemaKey, child::XML.Node)
 end
 
 """
-    _check_choice(key, tag, kids)
-
-Throw where inserting `tag` would violate an `xsd:choice` against a child already
-present.
-"""
-function _check_choice(key::SchemaKey, tag::AbstractString, kids)
-    for grp in get(SCHEMA_ALTERNATIVES, key, Vector{String}[])
-        tag in grp || continue
-        for k in kids
-            kt = localname(k)
-            if kt != tag && kt in grp
-                throw(XLSXError(
-                    "`$tag` and `$kt` are alternatives in `$(key[2])`; remove `$kt` first."))
-            end
-        end
-    end
-    for (owner, excluded) in get(SCHEMA_CHOICES, key, Pair{String,Vector{String}}[])
-        conflicts = if tag == owner
-            excluded
-        elseif tag in excluded
-            [owner]
-        else
-            continue
-        end
-        for k in kids
-            kt = localname(k)
-            if kt in conflicts
-                throw(XLSXError(
-                    "`$tag` and `$kt` are alternatives in `$(key[2])`; remove `$kt` first."))
-            end
-        end
-    end
-    return nothing
-end
-
-"""
     replace_child(parent, old, new) -> XML.Node
 
 Return a node equal to `parent` with the child identical (`===`) to `old`
@@ -237,15 +419,36 @@ function replace_child(parent::XML.Node, old::XML.Node, new::XML.Node)
 end
 
 """
-    rebuild_path(node, steps, f; prefixes, key) -> XML.Node
+    remove_child(parent, tag) -> XML.Node
+
+Return a node equal to `parent` with its child named `tag` removed, or `parent`
+unchanged where it has none. Only the first match is removed.
+
+`XML.Node` is immutable, so this returns the parent to use rather than mutating
+it — see [`insert_child`](@ref).
+"""
+function remove_child(parent::XML.Node, tag::AbstractString)
+    isnothing(parent.children) && return parent
+    i = findfirst(k -> localname(k) == tag, parent.children)
+    isnothing(i) && return parent
+    kids = copy(parent.children)
+    deleteat!(kids, i)
+    return _with_children(parent, kids)
+end
+
+"""
+    rebuild_path(node, steps, f; prefixes, parent_key) -> XML.Node
 
 Descend `node` by `steps`, apply `f` to the element found there, and rebuild
 every ancestor on the way back so the change appears in the returned root.
 
 Each step is `key => tag` or `key => (tag, predicate)`, where `key` is the
 [`SchemaKey`](@ref) of the element that step names. The key's namespace also
-supplies the prefix for an element this creates. `key` (the keyword) is the
-schema key of `node` itself, defaulting to the chart part's root.
+supplies the prefix for an element this creates.
+
+`parent_key` is the [`SchemaKey`](@ref) of `node` itself, needed when a step has
+to create an element and `insert_child` must know where it goes. It defaults to
+the chart part's root; a caller that starts partway down must say so.
 
 A step with no predicate that matches nothing is created empty and inserted in
 schema order, so a descent always reaches a node. A step with a predicate is
@@ -274,7 +477,8 @@ would grow empty elements into the file just by looking at them.
 """
 function rebuild_path(node::XML.Node, steps, f;
                       prefixes::Dict{String,String},
-                      key::SchemaKey = (NS_C, "chartSpace"))
+                      parent_key::SchemaKey = (NS_C, "chartSpace"))
+
     isempty(steps) && return f(node)
 
     step_key, spec = first(steps)
@@ -291,10 +495,20 @@ function rebuild_path(node::XML.Node, steps, f;
         haskey(prefixes, ns) ||
             throw(XLSXError("Namespace `$ns` is not declared on the chart part."))
         fresh = XML.Element(prefixed_tag(prefixes[ns], tag))
-        node  = insert_child(node, key, fresh)
+        node  = insert_child(node, parent_key, fresh)
         i     = findfirst(k -> k === fresh, node.children)
     end
     return replace_child(node, node.children[i],
                          rebuild_path(node.children[i], rest, f;
-                                      prefixes, key = step_key))
+                                      prefixes, parent_key = step_key))
+end
+
+function _check(v::Symbol, allowed, what, aliases = Dict{Symbol,Symbol}())
+    val = get(aliases, v, v)
+    if val ∉ allowed     
+        msg = "`$v` is not a valid $what. Valid values: " * join(allowed, ", ")
+        isempty(aliases) || (msg *= "; or the Excel names " * join(keys(aliases), ", "))
+        throw(XLSXError(msg * "."))
+    end
+    return val
 end
