@@ -8,6 +8,14 @@
 # element Excel wraps this way must look inside the AlternateContent rather than
 # insert a sibling, or the file ends up with two competing values.
 #
+# XML.jl's Node is a non-mutable struct whose `children` and `attributes` fields
+# are `Union{Nothing,Vector}`. push! and setindex! exist and mutate in place, but
+# only when the field is already a vector — on an element parsed from `<a/>` they
+# throw "Node does not accept children", because the struct cannot be given one.
+# Excel writes empty elements routinely, so every write here returns a new node
+# rather than mutating: insert_child, replace_child, remove_child and
+# with_attribute all take a node and give one back.
+#
 const CHILD_ORDER = Dict{Tuple{String,String},Vector{Union{String,Vector{String}}}}(
 
     # Series, one per chart type

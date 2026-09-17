@@ -1010,6 +1010,24 @@ function getMarkerFill(c::Chart, i::Integer, point::Integer)::Effective{DrawingF
     _walk_fill(_wb(c), chain)
 end
 
+# Resolve one run-property field over any chain of text sites. Schema-agnostic:
+# the caller decides which sites form the cascade.
+function _resolve_text_field(wb, chain, field::Symbol)
+    field in _RUN_PROP_FIELDS || throw(XLSXError(
+        "`$field` is not a resolvable text property. Valid fields: " *
+        join(_RUN_PROP_FIELDS, ", ") * "."))
+    for s in chain
+        isnothing(s.props) && continue
+        txt = parse_drawing_text(wb, s.props)
+        isnothing(txt) && continue
+        rp = default_run_props(txt)
+        isnothing(rp) && continue          # mixed text: no single answer at this rung
+        v = getfield(rp, field)
+        isnothing(v) || return Effective{_RUN_PROP_TYPES[field]}(v, s, chain)
+    end
+    return Effective{_RUN_PROP_TYPES[field]}(nothing, nothing, chain)
+end
+
 """
     getLabelTextProp(c::Chart, i::Integer, field::Symbol) -> Effective
 
@@ -1029,24 +1047,9 @@ A rung whose `txPr` exists but sets nothing (an empty `a:defRPr`, which Excel
 writes at the chart space) does not answer: the walk continues, and a field set
 at no rung resolves to `nothing`, meaning Excel takes it from the chart style.
 """
-function getLabelTextProp(c::Chart, i::Integer, field::Symbol)
-    field in _RUN_PROP_FIELDS || throw(XLSXError(
-        "`$field` is not a resolvable text property. Valid fields: " *
-        join(_RUN_PROP_FIELDS, ", ") * "."))
+getLabelTextProp(c::Chart, i::Integer, field::Symbol) =
+    _resolve_text_field(_wb(c), _text_chain(c, i), field)
 
-    wb = _wb(c)
-    chain = _text_chain(c, i)
-    for s in chain
-        isnothing(s.props) && continue
-        txt = parse_drawing_text(wb, s.props)
-        isnothing(txt) && continue
-        rp = default_run_props(txt)
-        isnothing(rp) && continue          # mixed text — no single answer at this rung
-        v = getfield(rp, field)
-        isnothing(v) || return Effective{_RUN_PROP_TYPES[field]}(v, s, chain)
-    end
-    return Effective{_RUN_PROP_TYPES[field]}(nothing, nothing, chain)
-end
 
 """
     _site_path(level, kind, container, path...) -> FormatSite

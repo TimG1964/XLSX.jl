@@ -35,6 +35,12 @@ const STRICT_TO_TRANSITIONAL = Dict(
         "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
     "http://purl.oclc.org/ooxml/drawingml/spreadsheetDrawing" =>
         "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+    "http://purl.oclc.org/ooxml/drawingml/diagram" =>
+        "http://schemas.openxmlformats.org/drawingml/2006/diagram",
+    "http://purl.oclc.org/ooxml/drawingml/lockedCanvas" =>
+        "http://schemas.openxmlformats.org/drawingml/2006/lockedCanvas",
+    "http://purl.oclc.org/ooxml/schemaLibrary/main" =>
+        "http://schemas.openxmlformats.org/schemaLibrary/2006/main",
 
     # officeDocument and relationships
     "http://purl.oclc.org/ooxml/officeDocument/relationships" =>
@@ -100,6 +106,15 @@ const STRICT_TO_TRANSITIONAL = Dict(
     "http://purl.oclc.org/ooxml/markup-compatibility/2006" =>
         "http://schemas.openxmlformats.org/markup-compatibility/2006",
 )
+
+# Apply _strict_to_transitional_node! to `node` and every element beneath it.
+function _strict_to_transitional_tree!(node::XML.Node, filename::AbstractString)
+    _strict_to_transitional_node!(node, filename)
+    for el in xml_elements(node)
+        _strict_to_transitional_tree!(el, filename)
+    end
+    return nothing
+end
 
 @inline get_xlsxfile(xf::XLSXFile)::XLSXFile = xf
 @inline get_xlsxfile(wb::Workbook)::XLSXFile = wb.package
@@ -693,11 +708,7 @@ function convert_strict_to_transitional!(xf::XLSXFile, pass::Int)
             end
             els = xml_elements(data)
             isempty(els) && continue
-            xroot = last(els)
-            _strict_to_transitional_node!(xroot, filename)
-            for el in xml_elements(xroot)
-                _strict_to_transitional_node!(el, filename)
-            end
+            _strict_to_transitional_tree!(last(els), filename)
         end
     end
     return nothing

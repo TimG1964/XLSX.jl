@@ -282,8 +282,8 @@
         @test c.name == "chartEx1"
         @test c.sheet == "Data"
         @test c.from == "G9"
-        @test length(c.refs) == 2
-        @test c.refs == ["_xlchart.v1.0", "_xlchart.v1.1"]
+        @test length(XLSX._cx_refs(c)) == 2
+        @test XLSX._cx_refs(c) == ["_xlchart.v1.0", "_xlchart.v1.1"]
         ranges = XLSX.getChartRanges(c)
         @test length(ranges) == 2
         @test all(!isnothing, ranges)

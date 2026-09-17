@@ -410,50 +410,52 @@ function parse_chartex_part(
     from::Union{Nothing,String}=nothing,
     to::Union{Nothing,String}=nothing,
 )::ChartEx
-
     haskey(xf.data, path) || throw(XLSXError("Chart part `$path` not found in the package."))
-
     chartspace = xml_root_element(xf.data[path])
     !has_localname(chartspace, "chartSpace") &&
         throw(XLSXError("Malformed chartEx part $path. Root node name should be `chartSpace`. Found $(localname(chartspace))."))
-
-    # Source ranges live up front in cx:chartData, shared across series, rather
-    # than being carried by each series as in the c: schema.
-    refs = String[]
-    ranges = ChartRange[]
-    chartdata = first_element_with_tag(chartspace, "chartData")
-    if !isnothing(chartdata)
-        for d in elements_with_tag(chartdata, "data")
-            for dim in XML.eachelement(d)
-                localname(dim) in ("numDim", "strDim") || continue
-                fml = child_text(dim, "f")
-                isnothing(fml) && continue
-                push!(refs, fml)
-                push!(ranges, resolve_chartex_ref(xf, fml))
-            end
-        end
-    end
-
-    chartnode = first_element_with_tag(chartspace, "chart")
-    plotarea = first_element_with_tag(chartnode, "plotArea")
-    region = first_element_with_tag(plotarea, "plotAreaRegion")
-
-    # The chart type is an attribute here, not an element name.
-    layouts = String[]
-    binning = false
-    for ser in (isnothing(region) ? XML.Node[] : elements_with_tag(region, "series"))
-        lid = get_attr(ser, "layoutId")
-        isempty(lid) || push!(layouts, lid)
-        isnothing(first_element_with_tag(ser, "binning")) || (binning = true)
-    end
-
-    title = drawingml_text(first_element_with_tag(
-        first_element_with_tag(first_element_with_tag(chartnode, "title"), "tx"), "rich"))
-
     _, fname = _split_zip_path(path)
-    return ChartEx(xf, path, first(splitext(fname)), rId, sheet, from, to,
-                   title, layouts, refs, ranges, binning)
+    return ChartEx(xf, path, first(splitext(fname)), rId, sheet, from, to)
 end
+
+# ---- ChartEx readers. Every call reads the current part, so a ChartEx
+#      never goes stale.
+
+_cx_root(c::ChartEx) = xml_root_element(c.package.data[c.path])
+_cx_chart(c::ChartEx) = first_element_with_tag(_cx_root(c), "chart")
+
+# cx:series nodes in document order.
+function _cx_series_nodes(c::ChartEx)
+    region = first_element_with_tag(
+        first_element_with_tag(_cx_chart(c), "plotArea"), "plotAreaRegion")
+    return isnothing(region) ? XML.Node[] : elements_with_tag(region, "series")
+end
+
+# layoutId of each series, as written.
+_cx_layouts(c::ChartEx)::Vector{String} =
+    filter!(!isempty, [get_attr(s, "layoutId") for s in _cx_series_nodes(c)])
+
+# cx:binning lives inside cx:layoutPr, not directly under cx:series.
+_cx_has_binning(c::ChartEx)::Bool = any(_cx_series_nodes(c)) do s
+    !isnothing(first_element_with_tag(first_element_with_tag(s, "layoutPr"), "binning"))
+end
+
+# Formula of every data dimension, and its resolved range, in document order.
+function _cx_refs(c::ChartEx)::Vector{String}
+    refs = String[]
+    chartdata = first_element_with_tag(_cx_root(c), "chartData")
+    isnothing(chartdata) && return refs
+    for d in elements_with_tag(chartdata, "data"), dim in XML.eachelement(d)
+        localname(dim) in ("numDim", "strDim") || continue
+        fml = child_text(dim, "f")
+        isnothing(fml) || push!(refs, fml)
+    end
+    return refs
+end
+
+# Title text: cx:tx holds either cx:rich (typed text) or cx:txData (bound to a
+# cell, with a cached cx:v). `nothing` when the title has no text of its own.
+_cx_title(c::ChartEx) = _cx_tx_text(_cx_title_tx(c))
 
 
 # ===========================================================================
@@ -594,17 +596,18 @@ function chartType(c::Chart)::Symbol
 end
 
 function chartType(c::ChartEx)::Symbol
-    ls = c.layouts
+    ls = unique(_cx_layouts(c))
     isempty(ls) && return :unknown
     "paretoLine" in ls && return :pareto
     length(ls) == 1 || return :combo
-    only(ls) == "clusteredColumn" && return c.binning ? :histogram : :clusteredColumn
+    only(ls) == "clusteredColumn" && return _cx_has_binning(c) ? :histogram : :clusteredColumn
     return Symbol(only(ls))
 end
 
 chartpath(c::AbstractChart)  = c.path
 chartname(c::AbstractChart)  = c.name
-charttitle(c::AbstractChart) = c.title
+charttitle(c::Chart) = c.title
+charttitle(c::ChartEx) = _cx_title(c)
 sheetname(c::AbstractChart)  = c.sheet
 
 
@@ -971,7 +974,7 @@ See also [`XLSX.getChart`](@ref), [`XLSX.getCharts`](@ref), [`XLSX.getChartData`
 """
 getChartRanges(c::Chart)::Vector{ChartRanges} = _chart_ranges(c.series)
 
-getChartRanges(c::ChartEx)::Vector{ChartRange} = c.ranges
+getChartRanges(c::ChartEx)::Vector{ChartRange} = [resolve_chartex_ref(c.package, r) for r in _cx_refs(c)]
 
 getChartRanges(x::Union{Worksheet,XLSXFile}, name::AbstractString) =
     getChartRanges(getChart(x, name; read_cached_values=false))
@@ -1033,16 +1036,21 @@ Base.show(io::IO, c::ChartEx) =
     print(io, "XLSX.ChartEx(\"", c.name, "\"",
           isnothing(c.sheet) ? "" : ", \"" * c.sheet * "\"",
           isnothing(c.from) ? "" : ", " * c.from,
-          ", ", chartType(c), ", ", length(c.refs), " refs)")
+          ", ", chartType(c), ", ", length(_cx_refs(c)), " refs)")
 
 function Base.show(io::IO, ::MIME"text/plain", c::ChartEx)
-    print(io, "XLSX.ChartEx \"", c.name, "\"")
-    isnothing(c.sheet) || print(io, " on sheet \"", c.sheet, "\"")
-    isnothing(c.from) || print(io, " at ", c.from, isnothing(c.to) ? "" : ":" * c.to)
+    # header, e.g.  XLSX.ChartEx "chartEx1" on sheet "Sheet1" at K9:R23
+    print(io, "XLSX.ChartEx ", repr(c.name))
+    isnothing(c.sheet) || print(io, " on sheet ", repr(c.sheet))
+    (isnothing(c.from) || isnothing(c.to)) || print(io, " at ", c.from, ":", c.to)
     println(io)
-    isnothing(c.title) || println(io, "  title: ", repr(c.title))
+
+    t = charttitle(c)
+    isnothing(t) || println(io, "  title: ", repr(t))
     println(io, "  type: ", chartType(c))
-    isempty(c.layouts) || println(io, "  layouts: ", join(c.layouts, ", "))
-    println(io, "  refs: ", isempty(c.refs) ? "none" : join(c.refs, ", "))
-    println(io, "  (chartEx: cached values and appearance are not read)")
+    ls = unique(_cx_layouts(c))
+    isempty(ls) || println(io, "  layouts: ", join(ls, ", "))
+    println(io, "  series: ", getChartSeriesCount(c))
+    refs = _cx_refs(c)
+    print(io, "  refs: ", isempty(refs) ? "none" : join(refs, ", "))
 end

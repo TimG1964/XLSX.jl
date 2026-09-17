@@ -161,5 +161,22 @@
         end
         isfile("mytest.xlsx") && rm("mytest.xlsx")
     end
+    @testset "Normalisation reaches every element" begin
+        # Strict namespaces can be declared below the root, e.g. xmlns:r on
+        # cx:chart inside mc:AlternateContent in a drawing part. A write must
+        # leave no Strict URI anywhere in the package.
+        for fixture in ("strict.xlsx", "Strict-foo.xlsx", "chart_ex.xlsx")
+            XLSX.writexlsx("mytest.xlsx", XLSX.openxlsx(joinpath(data_directory, fixture); mode="rw"), overwrite=true)
+            SAVE_FILES && save_outfile("mytest.xlsx")
 
+            r = ZipArchives.ZipReader(read("mytest.xlsx"))
+            for name in ZipArchives.zip_names(r)
+                (endswith(name, ".xml") || endswith(name, ".rels")) || continue
+                s = ZipArchives.zip_readentry(r, name, String)
+                @test !occursin("purl.oclc.org", s)
+                occursin("purl.oclc.org", s) && @info "Strict URI survived" fixture name
+            end
+            isfile("mytest.xlsx") && rm("mytest.xlsx")
+        end
+    end
 end

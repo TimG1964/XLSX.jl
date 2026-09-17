@@ -448,12 +448,12 @@
         cp = only(filter(c -> c.sheet == "Copy", charts))
 
         # The copy gets its own hidden defined names, pointing at the copy.
-        @test cp.refs == ["_xlchart.v2.0", "_xlchart.v2.1"]
+        @test XLSX._cx_refs(cp) == ["_xlchart.v2.0", "_xlchart.v2.1"]
         @test all(r -> startswith(string(r), "Copy!"), XLSX.getChartRanges(cp))
 
         # The original's names and ranges are untouched.
         orig = only(filter(c -> c.sheet == "Data", charts))
-        @test orig.refs == ["_xlchart.v1.0", "_xlchart.v1.1"]
+        @test XLSX._cx_refs(orig) == ["_xlchart.v1.0", "_xlchart.v1.1"]
         @test all(r -> startswith(string(r), "Data!"), XLSX.getChartRanges(orig))
 
         # Two names added, all still hidden and none user-visible.

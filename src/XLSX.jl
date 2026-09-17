@@ -138,6 +138,7 @@ include("drawingml.jl")
 include("charts.jl")
 include("chartschema.jl")
 include("chartprops.jl")
+include("chartexprops.jl")
 include("write.jl")
 include("fileArray.jl")
 

@@ -998,20 +998,31 @@ end
 """
     ChartEx
 
-Metadata for one `chartEx` part. These use the newer `cx:` schema - waterfall,
-funnel, treemap, sunburst, histogram, Pareto, box & whisker, region map - and
-are currently read for discovery only: chart type, title and source ranges are
-available; cached values and appearance are not.
+A handle to one chartEx part: a chart in the Microsoft `cx:` namespace
+(`http://schemas.microsoft.com/office/drawing/2014/chartex`), used by Excel for
+waterfall, funnel, treemap, sunburst, histogram, Pareto, box & whisker and
+region map charts. Charts in the ECMA-376 `c:` namespace are [`Chart`](@ref).
 
-Fields shared with [`Chart`](@ref) have the same meaning.
+A `ChartEx` holds only the part's identity and its anchor. Its content (layout,
+data references, title) is read from the part on each call, so a `ChartEx`
+remains valid after the part is written to.
 
 # Fields
-- `layouts` - raw `cx:series/@layoutId` values in document order. Prefer
-  [`XLSX.chartType`](@ref), which normalises these.
-- `refs` - `cx:f` formulae from `cx:chartData`. `cx` dimensions are shared
-  across series rather than owned by one, so this is a flat list.
-- `binning` - whether any series carries `cx:binning`, which distinguishes a
-  histogram from a plain clustered column chart.
+- `package` - the `XLSXFile` containing the chart.
+- `path` - package path, e.g. `"xl/charts/chartEx1.xml"`.
+- `name` - part name without extension, e.g. `"chartEx1"`.
+- `rId` - relationship id of the chart within its drawing part, if resolved.
+- `sheet` - name of the sheet the chart is anchored to, if resolved.
+- `from`, `to` - anchor cell references as strings, following `getImages`.
+
+# Reading content
+- [`chartType`](@ref) - e.g. `:waterfall`, `:histogram`.
+- [`charttitle`](@ref) - title text, whether typed or bound to a cell;
+  `nothing` if the title has no text of its own.
+- [`getChartRanges`](@ref) - the source range of each data dimension, resolved
+  through the workbook's hidden `_xlchart.*` defined names.
+
+See also [`getCharts`](@ref), [`chartSchema`](@ref).
 """
 struct ChartEx <: AbstractChart
     package::XLSXFile
@@ -1021,12 +1032,70 @@ struct ChartEx <: AbstractChart
     sheet::Union{Nothing,String}
     from::Union{Nothing,String}
     to::Union{Nothing,String}
-    title::Union{Nothing,String}
-    layouts::Vector{String}
-    refs::Vector{String}
-    ranges::Vector{ChartRange}
-    binning::Bool
 end
+
+"""
+    ChartExDimension
+
+One data dimension of a chartEx data block: a `cx:numDim` or `cx:strDim`.
+
+# Fields
+- `kind` - `:num` or `:str`.
+- `type` - the dimension's role as written, e.g. `:val`, `:cat`, `:size`,
+  `:x`, `:y`, `:colorVal`, `:colorStr`, `:entityId`.
+- `formula` - the text of `cx:f`, usually a hidden `_xlchart.*` defined name;
+  `nothing` if the dimension has no formula.
+- `range` - the resolved source range; `nothing` if unresolved.
+"""
+struct ChartExDimension
+    kind::Symbol
+    type::Symbol
+    formula::Union{Nothing,String}
+    range::ChartRange
+end
+
+"""
+    ChartExData
+
+One `cx:data` block. Series refer to a block by `id` through `cx:dataId`.
+"""
+struct ChartExData
+    id::Int
+    dimensions::Vector{ChartExDimension}
+end
+
+"""
+    ChartExBinning
+
+Histogram binning from `cx:layoutPr/cx:binning`. Field names follow the XML.
+A numeric field may also be `:auto`; `nothing` means not written.
+
+# Fields
+- `intervalClosed` - `:r` or `:l`, the closed side of each bin interval.
+- `underflow`, `overflow` - the underflow and overflow bin cut-offs.
+- `binSize` - bin width.
+- `binCount` - number of bins.
+"""
+struct ChartExBinning
+    intervalClosed::Union{Nothing,Symbol}
+    underflow::Union{Nothing,Float64,Symbol}
+    overflow::Union{Nothing,Float64,Symbol}
+    binSize::Union{Nothing,Float64,Symbol}
+    binCount::Union{Nothing,Int,Symbol}
+end
+
+Base.:(==)(a::ChartExDimension, b::ChartExDimension) =
+    a.kind == b.kind && a.type == b.type && a.formula == b.formula && a.range == b.range
+Base.hash(d::ChartExDimension, h::UInt) =
+    hash((d.kind, d.type, d.formula, d.range), hash(:ChartExDimension, h))
+
+Base.:(==)(a::ChartExData, b::ChartExData) = a.id == b.id && a.dimensions == b.dimensions
+Base.hash(d::ChartExData, h::UInt) = hash((d.id, d.dimensions), hash(:ChartExData, h))
+
+Base.:(==)(a::ChartExBinning, b::ChartExBinning) =
+    all(getfield(a, f) == getfield(b, f) for f in fieldnames(ChartExBinning))
+Base.hash(b::ChartExBinning, h::UInt) =
+    hash(Tuple(getfield(b, f) for f in fieldnames(ChartExBinning)), hash(:ChartExBinning, h))
 
 const SCHEME_TOKENS = (:bg1, :tx1, :bg2, :tx2, :accent1, :accent2, :accent3,
                        :accent4, :accent5, :accent6, :hlink, :folHlink,

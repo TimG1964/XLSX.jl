@@ -646,8 +646,8 @@ _props_key(p::DrawingRunProps) = (
     is_uniform(t::DrawingText) -> Bool
 
 Whether every run in `t` carries the same formatting, comparing only what is
-written on each `a:rPr` (a run with no `rPr` falls back to its paragraph's
-`defRPr`). Text with no runs is uniform by definition.
+written on each `a:rPr` (each run's rPr is overlaid on its paragraph's defRPr). 
+Text with no runs is uniform by definition.
 
 This compares *as written*, not as resolved — two runs reaching the same
 appearance by different inheritance paths compare as different. That is the
@@ -662,9 +662,9 @@ function is_uniform(t::DrawingText)
     key = nothing
     seen = false
     for p in t.paragraphs
-        fallback = p.props === nothing ? nothing : p.props.defprops
+        def = p.props === nothing ? nothing : p.props.defprops
         for r in p.runs
-            k = _props_key(r.props === nothing ? fallback : r.props)
+            k = _props_key(_overlay_run_props(def, r.props))
             if !seen
                 key = k
                 seen = true
@@ -693,18 +693,49 @@ function default_run_props(t::DrawingText)
     return first_run_props(t)
 end
 
+# Field-wise overlay: each field of `over` that is set wins, otherwise `base`'s.
+# `raw` is taken from `over` when it has one, since that is the node a caller
+# would edit to change what renders.
+function _overlay_run_props(base::Union{Nothing,DrawingRunProps},
+                            over::Union{Nothing,DrawingRunProps})
+    isnothing(base) && return over
+    isnothing(over) && return base
+    vals = map(fieldnames(DrawingRunProps)) do f
+        f === :raw && return isnothing(over.raw) ? base.raw : over.raw
+        v = getfield(over, f)
+        isnothing(v) ? getfield(base, f) : v
+    end
+    return DrawingRunProps(vals...)
+end
+
 """
     first_run_props(t::DrawingText) -> Union{Nothing,DrawingRunProps}
 
-The first run properties found, in `defRPr` -> `rPr` -> `endParaRPr` order,
-regardless of whether later runs agree. For a formatting-only `txPr` this is
-the whole story; for mixed text it describes only the first fragment.
+The run properties of the first text in `t`, regardless of whether later runs
+agree.
+
+Where the paragraph has runs, the first run's `a:rPr` is overlaid field by
+field on the paragraph's `a:defRPr`: a field the run sets wins, a field it
+omits comes from the default. An empty `a:defRPr` therefore never hides a
+run's formatting.
+
+Where it has no runs (a formatting-only `txPr`), the `a:defRPr` answers as
+written, and `a:endParaRPr` only when there is no `defRPr`: the end mark
+describes the paragraph end, not its text.
+
+For mixed text this describes only the first fragment; see
+[`default_run_props`](@ref).
 """
 function first_run_props(t::DrawingText)
     for p in t.paragraphs
-        p.props !== nothing && p.props.defprops !== nothing && return p.props.defprops
-        !isempty(p.runs) && p.runs[1].props !== nothing && return p.runs[1].props
-        p.endprops !== nothing && return p.endprops
+        def = p.props === nothing ? nothing : p.props.defprops
+        if isempty(p.runs)
+            isnothing(def) || return def
+        else
+            merged = _overlay_run_props(def, p.runs[1].props)
+            isnothing(merged) || return merged
+        end
+        isnothing(p.endprops) || return p.endprops
     end
     return nothing
 end
