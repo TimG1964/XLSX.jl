@@ -164,4 +164,190 @@
         @test isnothing(XLSX.getLabelTextProp(w, 1, :size).value)
 
     end
+
+    @testset "setSeriesFill" begin
+        tmp = joinpath(mktempdir(), "cx_fill.xlsx")
+        cp(joinpath(data_directory, "chartex_formatted.xlsx"), tmp)
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+        c = only(filter(x -> x isa XLSX.ChartEx, XLSX.getCharts(xf)))
+
+        # series fill, replacing a theme colour
+        @test XLSX.setSeriesFill(c, 1, "red") === c
+        @test XLSX.getSeriesFill(c, 1).value.fgcolor.rgb == "FF0000"   # same handle, still valid
+
+        # an existing dataPt (point 5, idx 4) is edited in place
+        XLSX.setSeriesFill(c, 1, XLSX.SchemeColor(:accent1); point = 5)
+        @test XLSX.getSeriesFill(c, 1; point = 5).value.fgcolor.val == "accent1"
+
+        # new dataPts: one before idx 4, one after, kept in idx order
+        XLSX.setSeriesFill(c, 1, "blue";  point = 2)
+        XLSX.setSeriesFill(c, 1, "green"; point = 7)
+        ser = XLSX._cx_series_node(c, 1)
+        @test [XLSX._cx_idx(n) for n in XLSX.elements_with_tag(ser, "dataPt")] == [1, 4, 6]
+        @test XLSX.getSeriesFill(c, 1; point = 2).site.level == :point
+
+        # child order of the series follows the schema
+        @test [String(XLSX.localname(n)) for n in XLSX.XML.eachelement(ser)] ==
+              ["spPr", "dataPt", "dataPt", "dataPt", "dataLabels", "dataId", "layoutPr"]
+
+        # :none is an explicit setting; :inherit on an unformatted point creates nothing
+        XLSX.setSeriesFill(c, 1, :none; point = 2)
+        @test XLSX.getSeriesFill(c, 1; point = 2).value.kind === :none
+        XLSX.setSeriesFill(c, 1, :inherit; point = 3)
+        @test length(XLSX.elements_with_tag(XLSX._cx_series_node(c, 1), "dataPt")) == 3
+
+        @test_throws XLSX.XLSXError XLSX.setSeriesFill(c, 1, "red"; point = 0)
+        @test_throws XLSX.XLSXError XLSX.setSeriesFill(c, 2, "red")   # only one series
+
+        @test all(n -> XLSX.XML.tag(XLSX.first_element_with_tag(n, "spPr")) == "cx:spPr",
+            XLSX.elements_with_tag(XLSX._cx_series_node(c, 1), "dataPt"))
+
+        # the changes reach disk
+        out = joinpath(mktempdir(), "cx_fill_out.xlsx")
+        XLSX.writexlsx(out, xf, overwrite = true)
+        f = XLSX.readxlsx(out)
+        d = only(filter(x -> x isa XLSX.ChartEx, XLSX.getCharts(f)))
+        @test XLSX.getSeriesFill(d, 1).value.fgcolor.rgb == "FF0000"
+        @test XLSX.getSeriesFill(d, 1; point = 7).value.fgcolor.rgb == "008000"
+        @test XLSX.getSeriesFill(d, 1; point = 2).value.kind === :none
+    end
+
+    @testset "setSeriesFill :inherit writes nothing where nothing was set" begin
+        tmp = joinpath(mktempdir(), "cx_inherit.xlsx")
+        cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp)
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+        w = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "waterfall", XLSX.getCharts(xf)))
+        XLSX.setSeriesFill(w, 1, :inherit)
+        @test isnothing(XLSX.first_element_with_tag(XLSX._cx_series_node(w, 1), "spPr"))
+    end
+
+    @testset "setSeriesLine" begin
+        tmp = joinpath(mktempdir(), "cx_line.xlsx")
+        cp(joinpath(data_directory, "chartex_formatted.xlsx"), tmp)
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+        c = only(filter(x -> x isa XLSX.ChartEx, XLSX.getCharts(xf)))
+
+        # several properties at once, on a series with no a:ln
+        XLSX.setSeriesLine(c, 1; color = "FFC00000", width = 2.25, dash = :dash, cap = :round)
+        l = XLSX.getSeriesLine(c, 1).value
+        @test l.fill.fgcolor.rgb == "C00000"
+        @test l.width ≈ 2.25
+        @test l.dash == "dash"
+        @test l.cap == "rnd"
+
+        # an Excel UI alias resolves to the DrawingML spelling
+        XLSX.setSeriesLineDash(c, 1, :roundDot)
+        @test XLSX.getSeriesLine(c, 1).value.dash == "sysDot"
+
+        # one property back to inherit, leaving the rest
+        XLSX.setSeriesLine(c, 1; width = :inherit)
+        l = XLSX.getSeriesLine(c, 1).value
+        @test isnothing(l.width) && l.fill.fgcolor.rgb == "C00000"
+
+        # a created point gets its own outline
+        XLSX.setSeriesLine(c, 1; point = 2, color = "FF0070C0", width = 1.5)
+        @test XLSX.getSeriesLine(c, 1; point = 2).site.level == :point
+        dp = only(filter(n -> XLSX._cx_idx(n) == 1,
+                         XLSX.elements_with_tag(XLSX._cx_series_node(c, 1), "dataPt")))
+        @test XLSX.XML.tag(XLSX.first_element_with_tag(dp, "spPr")) == "cx:spPr"
+
+        # :none is explicit, :inherit removes the a:ln
+        XLSX.setSeriesLine(c, 1, :none)
+        @test XLSX.getSeriesLine(c, 1).value.fill.kind === :none
+        XLSX.setSeriesLine(c, 1, :inherit)
+        @test isnothing(XLSX.first_element_with_tag(
+                  XLSX.first_element_with_tag(XLSX._cx_series_node(c, 1), "spPr"), "ln"))
+
+        # no keywords is a no-op; a bad symbol throws
+        @test XLSX.setSeriesLine(c, 1) === c
+        @test_throws XLSX.XLSXError XLSX.setSeriesLine(c, 1, :dotted)
+
+        # reaches disk
+        out = joinpath(mktempdir(), "cx_line_out.xlsx")
+        XLSX.writexlsx(out, xf, overwrite = true)
+        d = only(filter(x -> x isa XLSX.ChartEx, XLSX.getCharts(XLSX.readxlsx(out))))
+        @test XLSX.getSeriesLine(d, 1; point = 2).value.width ≈ 1.5
+    end
+
+    @testset "setLabelTextProp" begin
+        tmp = joinpath(mktempdir(), "cx_label.xlsx")
+        cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp)
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+        # the funnel has no cx:dataLabels at all
+        c = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "funnel", XLSX.getCharts(xf)))
+
+        @test isnothing(XLSX.getLabelTextProp(c, 1, :size).value)
+        XLSX.setLabelTextProp(c, 1, :size, 11)
+        @test XLSX.getLabelTextProp(c, 1, :size).value ≈ 11.0
+
+        # a created cx:dataLabels must not turn labels on
+        lbl = XLSX.first_element_with_tag(XLSX._cx_series_node(c, 1), "dataLabels")
+        @test XLSX.XML.tag(lbl) == "cx:dataLabels"
+        @test [String(XLSX.localname(n)) for n in XLSX.XML.eachelement(lbl)] == ["txPr", "visibility"]
+        @test all(f -> XLSX.getLabelFlag(c, 1, f) === false,
+                  (:seriesName, :categoryName, :value))
+        @test XLSX.XML.tag(XLSX.first_element_with_tag(lbl, "txPr")) == "cx:txPr"
+
+        # more fields, and a composite one
+        XLSX.setLabelTextProp(c, 1, :bold, true)
+        XLSX.setLabelTextProp(c, 1, :fill, "FF7030A0")
+        @test XLSX.getLabelTextProp(c, 1, :bold).value === true
+        @test XLSX.getLabelTextProp(c, 1, :fill).value.fgcolor.rgb == "7030A0"
+        @test XLSX.getLabelTextProp(c, 1, :size).value ≈ 11.0     # earlier field kept
+
+        XLSX.setLabelTextProp(c, 1, :size, :inherit)
+        @test isnothing(XLSX.getLabelTextProp(c, 1, :size).value)
+        @test_throws XLSX.XLSXError XLSX.setLabelTextProp(c, 1, :nonsense, 1)
+
+        # an existing cx:dataLabels keeps the flags Excel wrote
+        w = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "waterfall", XLSX.getCharts(xf)))
+        XLSX.setLabelTextProp(w, 1, :size, 9)
+        @test XLSX.getLabelFlag(w, 1, :value) === true
+        @test XLSX.getLabelTextProp(w, 1, :size).value ≈ 9.0
+
+        out = joinpath(mktempdir(), "cx_label_out.xlsx")
+        XLSX.writexlsx(out, xf, overwrite = true)
+        f = XLSX.readxlsx(out)
+        d = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "funnel", XLSX.getCharts(f)))
+        @test XLSX.getLabelTextProp(d, 1, :bold).value === true
+    end
+
+    @testset "title, legend and axis text" begin
+        tmp = joinpath(mktempdir(), "cx_text.xlsx")
+        cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp)
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+        w = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "waterfall", XLSX.getCharts(xf)))
+
+        # title: cx:title exists but has no txPr
+        XLSX.setChartTitleTextProp(w, :size, 16)
+        XLSX.setChartTitleTextProp(w, :fill, "FF7030A0")
+        tp = XLSX.default_run_props(XLSX.getChartTitleTextProps(w))
+        @test tp.size ≈ 16.0 && tp.fill.fgcolor.rgb == "7030A0"
+        @test XLSX.XML.tag(XLSX.first_element_with_tag(
+                  XLSX.first_element_with_tag(XLSX._cx_chart(w), "title"), "txPr")) == "cx:txPr"
+
+        # legend
+        XLSX.setLegendTextProp(w, :bold, true)
+        @test XLSX.default_run_props(XLSX.getLegendTextProps(w)).bold === true
+
+        # axes: by id, not position
+        @test XLSX.getChartAxisIds(w) == [0, 1]
+        XLSX.setAxisTitleTextProp(w, 1, :size, 12)
+        @test XLSX.default_run_props(XLSX.getAxisTitleTextProps(w, 1)).size ≈ 12.0
+        @test isnothing(XLSX.getAxisTitleTextProps(w, 0))          # untouched axis
+        @test_throws XLSX.XLSXError XLSX.setAxisTitleTextProp(w, 7, :size, 12)
+
+        # the legend is created where there is none (the funnel has no cx:legend)
+        fn = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "funnel", XLSX.getCharts(xf)))
+        XLSX.setLegendTextProp(fn, :size, 9)
+        lg = XLSX.first_element_with_tag(XLSX._cx_chart(fn), "legend")
+        @test XLSX.XML.tag(lg) == "cx:legend"
+        @test XLSX.default_run_props(XLSX.getLegendTextProps(fn)).size ≈ 9.0
+
+        out = joinpath(mktempdir(), "cx_text_out.xlsx")
+        XLSX.writexlsx(out, xf, overwrite = true)
+        d = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "waterfall",
+                        XLSX.getCharts(XLSX.readxlsx(out))))
+        @test XLSX.default_run_props(XLSX.getChartTitleTextProps(d)).size ≈ 16.0
+    end
 end

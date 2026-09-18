@@ -353,22 +353,27 @@ function repoint_chartex_refs!(xl::XLSXFile, chart_path::String,
     wb = get_workbook(xl)
     series = _next_xlchart_series(wb)
     counter = Ref(0)
+    # Excel shares one _xlchart name between cx:f elements in the same part
+    # (a Pareto chart's data blocks share their categories), so each name is
+    # cloned once and every occurrence repointed to the same clone.
+    cloned = Dict{String,String}()
     _repoint_cx_refs!(xml_root_element(xl.data[chart_path]), wb,
-                      old_sheet, new_sheet, series, counter)
+                      old_sheet, new_sheet, series, counter, cloned)
     return nothing
 end
 
 function _repoint_cx_refs!(node::XML.Node, wb::Workbook, old_sheet::String,
-                           new_sheet::String, series::Int, counter::Ref{Int})
+                           new_sheet::String, series::Int, counter::Ref{Int},
+                           cloned::Dict{String,String})
     for child in XML.eachelement(node)
         if localname(child) == "f"
             s = XML.is_simple_value(child)
             isnothing(s) && continue
             new_name = _clone_xlchart_name!(wb, String(s), old_sheet, new_sheet,
-                                            series, counter)
+                                            series, counter, cloned)
             isnothing(new_name) || (child[end] = XML.Text(new_name))
         else
-            _repoint_cx_refs!(child, wb, old_sheet, new_sheet, series, counter)
+            _repoint_cx_refs!(child, wb, old_sheet, new_sheet, series, counter, cloned)
         end
     end
     return nothing
@@ -377,7 +382,10 @@ end
 # `nothing` when the reference is not a workbook defined name pointing at
 # `old_sheet`, so the caller leaves it untouched.
 function _clone_xlchart_name!(wb::Workbook, ref::String, old_sheet::String,
-                              new_sheet::String, series::Int, counter::Ref{Int})
+                              new_sheet::String, series::Int, counter::Ref{Int},
+                              cloned::Dict{String,String})
+    haskey(cloned, ref) && return cloned[ref]
+
     k = find_workbook_defined_name(wb, ref)
     isnothing(k) && return nothing
     dnv = wb.workbook_names[k]
@@ -391,5 +399,6 @@ function _clone_xlchart_name!(wb::Workbook, ref::String, old_sheet::String,
     # name, not a user creating one.
     wb.workbook_names[new_name] =
         DefinedNameValue(rename_sheet(dnv.value, new_sheet), dnv.isabs, dnv.hidden)
+    cloned[ref] = new_name
     return new_name
 end

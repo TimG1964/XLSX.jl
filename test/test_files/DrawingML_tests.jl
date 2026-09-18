@@ -599,7 +599,68 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
         end
     end
 
+    @testset "run properties overlay defRPr" begin
+        f = XLSX.readxlsx(joinpath(data_directory, "chartex_formatted.xlsx"))
+        c = only(filter(x -> x isa XLSX.ChartEx, XLSX.getCharts(f)))
+        wb = XLSX._wb(c)
 
+        # Empty defRPr, formatting on the run: the run answers.
+        title = XLSX.parse_drawing_text(wb, first(XLSX.elements_with_tag(XLSX._cx_chart(c), "title")))
+        rp = XLSX.default_run_props(title)
+        @test rp.size ≈ 18.0
+        @test rp.fill.fgcolor.val == "8C8026"
+        @test rp.latin == "Comic Sans MS"
+
+        # No run: defRPr answers as written; endParaRPr does not contribute.
+        labels = XLSX.parse_drawing_text(wb, XLSX._cx_datalabels(c, 1))
+        lp = XLSX.default_run_props(labels)
+        @test lp.size ≈ 11.0
+        @test lp.bold === true
+        @test lp.fill.fgcolor.val == "7030A0"
+        @test isnothing(lp.latin)              # font is only on endParaRPr
+
+        # defRPr and run disagree: the run wins field by field, defRPr fills the rest.
+        xml = """<cx:title xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"
+                           xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+                   <cx:txPr><a:bodyPr/><a:lstStyle/><a:p>
+                     <a:pPr><a:defRPr sz="1400" b="1"/></a:pPr>
+                     <a:r><a:rPr sz="1800"/><a:t>x</a:t></a:r>
+                   </a:p></cx:txPr></cx:title>"""
+        node = XLSX.xml_root_element(parse(xml, XLSX.XML.Node))
+        mp = XLSX.default_run_props(XLSX.parse_drawing_text(wb, node))
+        @test mp.size ≈ 18.0                   # from the run
+        @test mp.bold === true                 # from defRPr
+    end
+    @testset "setting a run property clears it from the runs" begin
+        tmp = joinpath(mktempdir(), "runclear.xlsx")
+        cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp)
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+        h = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "histogram", XLSX.getCharts(xf)))
+
+        # Excel wrote this title with sz on both a:defRPr and the run's a:rPr
+        XLSX.setChartTitleTextProp(h, :size, 20)
+        tx = XLSX.first_element_with_tag(
+                XLSX.first_element_with_tag(XLSX._cx_chart(h), "title"), "txPr")
+        p   = XLSX.first_element_with_tag(tx, "p")
+        def = XLSX.first_element_with_tag(XLSX.first_element_with_tag(p, "pPr"), "defRPr")
+        rpr = XLSX.first_element_with_tag(XLSX.first_element_with_tag(p, "r"), "rPr")
+
+        @test XLSX.get_attr(def, "sz") == "2000"
+        @test isempty(XLSX.get_attr(rpr, "sz"))          # cleared, so the default renders
+        @test XLSX.get_attr(rpr, "lang") == "en-GB"      # the run keeps everything else
+
+        # what the reader resolves now matches what Excel will render
+        @test XLSX.default_run_props(XLSX.getChartTitleTextProps(h)).size ≈ 20.0
+
+        # a composite field: the run's own solidFill must go too
+        XLSX.setChartTitleTextProp(h, :fill, "FFC00000")
+        rpr = XLSX.first_element_with_tag(XLSX.first_element_with_tag(
+                XLSX.first_element_with_tag(
+                    XLSX.first_element_with_tag(XLSX._cx_chart(h), "title"), "txPr"), "p"), "r")
+        @test isnothing(XLSX.first_element_with_tag(
+                XLSX.first_element_with_tag(rpr, "rPr"), "solidFill"))
+        @test XLSX.default_run_props(XLSX.getChartTitleTextProps(h)).fill.fgcolor.rgb == "C00000"
+    end
     @testset "formatting cascade" begin
         f = XLSX.readxlsx(joinpath(data_directory, "chartex_formatted.xlsx"))
         c = only(filter(x -> x isa XLSX.ChartEx, XLSX.getCharts(f)))

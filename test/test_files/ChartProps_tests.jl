@@ -845,5 +845,38 @@
         ax2 = XLSX.getChartAxis(c2, 612078287)
         @test XLSX.text_content(XLSX.getAxisTitleText(c2, ax2)) == "Quarter"
     end
+
+    @testset "created spPr takes the chart prefix" begin
+        tmp = joinpath(mktempdir(), "prefix.xlsx")
+        cp(joinpath(data_directory, "chart_appearance.xlsx"), tmp)
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+        c = only(filter(x -> x isa XLSX.Chart, XLSX.getCharts(xf)))
+
+        # strip series 1's spPr so the setter has to create one
+        root = XLSX.chart_root(c)
+        new = XLSX.rebuild_path(root, XLSX._series_path(c, 1)[1],
+                                s -> XLSX.remove_child(s, "spPr");
+                                prefixes = XLSX.ns_prefixes(root))
+        XLSX.set_chart_root!(c, new)
+        c = XLSX.getChart(c.package, c.name)
+        c = XLSX.setSeriesFill(c, 1, "FF00B0F0")
+        @test XLSX.XML.tag(XLSX.first_element_with_tag(XLSX._series(c, 1).raw, "spPr")) == "c:spPr"
+    end
+
+    @testset "title run properties yield to the paragraph default" begin
+        tmp = joinpath(mktempdir(), "c_runclear.xlsx")
+        cp(joinpath(data_directory, "chart_basic.xlsx"), tmp)
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+        c = only(filter(x -> x isa XLSX.Chart, XLSX.getCharts(xf)))
+        c = XLSX.setChartTitleTextProp(c, :size, 18)
+        @test XLSX.default_run_props(XLSX.getChartTitleTextProps(c)).size ≈ 18.0
+        rich = XLSX.first_element_with_tag(
+                   XLSX.first_element_with_tag(XLSX.getChartTitleNode(c), "tx"), "rich")
+        for r in XLSX.elements_with_tag(XLSX.first_element_with_tag(rich, "p"), "r")
+            rpr = XLSX.first_element_with_tag(r, "rPr")
+            isnothing(rpr) || @test isempty(XLSX.get_attr(rpr, "sz"))
+        end
+    end
+
 end
 

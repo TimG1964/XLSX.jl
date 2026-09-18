@@ -1082,7 +1082,7 @@ function _text_chain(c::Chart, i::Integer)
 end
 
 """
-    set_chart_root!(c::Chart, newroot::XML.Node) -> nothing
+    set_chart_root!(c::AbstractChart, newroot::XML.Node) -> nothing
 
 Write `newroot` back as the chart part's root element. `rebuild_path` returns a
 new `c:chartSpace` rather than mutating, and `get_xml_data` memoizes the parsed
@@ -1093,7 +1093,7 @@ in `xf.data`.
 Splices into the existing document so the declaration and any other top-level
 nodes survive.
 """
-function set_chart_root!(c::Chart, newroot::XML.Node)
+function set_chart_root!(c::AbstractChart, newroot::XML.Node)
     doc = get_xml_data(c.package, c.path)
     old = xml_root_element(doc)
     c.package.data[c.path] = replace_child(doc, old, newroot)
@@ -1408,19 +1408,22 @@ function setMarker(c::Chart, i::Integer, point::Union{Nothing,Integer} = nothing
 end
 
 """
-    _txpr_with_run_prop(el, key, field, value, pfx) -> XML.Node
+    _txpr_with_run_prop(el, key, field, value, pfx, ns) -> XML.Node
 
 Set one run property on an element's `c:txPr`, creating it if absent. `key` is
 `el`'s [`SchemaKey`](@ref).
+
+`ns` is the namespace a created txPr takes, NS_C by default and NS_CX for a chartEx part.
 """
 function _txpr_with_run_prop(el::XML.Node, key::SchemaKey, field::Symbol, value,
-                             pfx::Dict{String,String})
-    txpr = something(first_element_with_tag(el, "txPr"), _new_text_body("txPr", pfx))
+                             pfx::Dict{String,String}; ns::AbstractString = NS_C)
+    txpr = something(first_element_with_tag(el, "txPr"), _new_text_body("txPr", pfx, ns))
     return insert_child(el, key, _text_with_run_prop(txpr, field, value, pfx))
 end
 
+
 """
-    _both_with_run_prop(el, key, field, value, pfx) -> XML.Node
+    _both_with_run_prop(el, key, field, value, pfx, ns) -> XML.Node
 
 Set one run property on an element's `c:txPr` and, where it holds literal text,
 on its `c:tx/c:rich` as well.
@@ -1429,10 +1432,12 @@ Excel renders the `rich` body, so writing only `c:txPr` leaves the edit
 invisible. This is the shape data labels, chart titles and axis titles share.
 `c:rich` is updated only where it already exists — one with no text means
 nothing, and typing text is a separate operation.
+
+`ns` is the namespace a created txPr takes, NS_C by default and NS_CX for a chartEx part.
 """
 function _both_with_run_prop(el::XML.Node, key::SchemaKey, field::Symbol, value,
-                             pfx::Dict{String,String})
-    el = _txpr_with_run_prop(el, key, field, value, pfx)
+                             pfx::Dict{String,String}; ns::AbstractString = NS_C)
+    el = _txpr_with_run_prop(el, key, field, value, pfx; ns)
 
     tx = first_element_with_tag(el, "tx")
     isnothing(tx) && return el

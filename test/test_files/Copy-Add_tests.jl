@@ -467,6 +467,42 @@
         @test length(XLSX.getCharts(h)) == 2
         @test allunique(c.path for c in XLSX.getCharts(h))
     end
+
+    @testset "copysheet! keeps a shared chartEx name shared" begin
+        xf = XLSX.openxlsx(joinpath(data_directory, "chartex_layouts.xlsx"); mode = "rw")
+        XLSX.copysheet!(xf["pareto"], "pareto2")
+        XLSX.writexlsx("mytest.xlsx", xf, overwrite = true)
+        SAVE_FILES && save_outfile("mytest.xlsx")
+
+        f = XLSX.readxlsx("mytest.xlsx")
+        cxs = filter(x -> x isa XLSX.ChartEx, XLSX.getCharts(f))
+        orig = only(filter(x -> x.sheet == "pareto",  cxs))
+        copy = only(filter(x -> x.sheet == "pareto2", cxs))
+
+        ob = XLSX.getChartDataBlocks(orig)
+        cb = XLSX.getChartDataBlocks(copy)
+
+        # the original is untouched: its two blocks still share one name
+        @test ob[1].dimensions[1].formula == ob[2].dimensions[1].formula == "_xlchart.v1.18"
+
+        # the copy's two blocks share one name too, and it is a new one
+        shared = cb[1].dimensions[1].formula
+        @test cb[2].dimensions[1].formula == shared
+        @test shared != "_xlchart.v1.18"
+
+        # every data dimension and series name in the copy points at the copied sheet
+        for d in vcat(cb[1].dimensions, cb[2].dimensions)
+            @test d.range.sheet == "pareto2"
+        end
+        @test XLSX.getSeriesNameRange(copy, 1).sheet == "pareto2"
+        @test XLSX.getSeriesNameRange(copy, 3).sheet == "pareto2"
+
+        # data: cat (shared), val, val; series names: two. Five names, not six.
+        @test length(unique(XLSX._cx_refs(copy))) == 3                      # data dimensions
+        @test length(XLSX._cx_refs(copy)) == 4                              # cat appears twice
+        isfile("mytest.xlsx") && rm("mytest.xlsx")
+    end
+    
     @testset "copysheet! clones chart parts for both schemas" begin
         f = XLSX.opentemplate(joinpath(data_directory, "chart_mixed.xlsx"))
         XLSX.copysheet!(f["Data"], "Copy")

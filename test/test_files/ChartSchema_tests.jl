@@ -16,7 +16,7 @@
     @testset "schema tables" begin
         for (key, order) in XLSX.CHILD_ORDER
             @test !isempty(order)
-            @test key[1] in (XLSX.NS_C, XLSX.NS_A)
+        @test key[1] in (XLSX.NS_C, XLSX.NS_A, XLSX.NS_CX)
         end
         pa = XLSX.CHILD_ORDER[(XLSX.NS_C, "plotArea")]
         @test XLSX._slot(pa, "catAx") == XLSX._slot(pa, "valAx") == XLSX._slot(pa, "dateAx")
@@ -127,6 +127,60 @@
         # a tag that is not in any choice group throws
         @test_throws XLSX.XLSXError XLSX.remove_choice(sp, SP, "ln")
         @test_throws XLSX.XLSXError XLSX.remove_choice(sp, SP, "nonsense")
+    end
+
+    @testset "cx CHILD_ORDER agrees with Excel output" begin
+        slot(order, name) = findfirst(s -> s isa String ? s == name : name in s, order)
+        prefix(tag) = (i=findfirst(':', tag); isnothing(i) ? "" : tag[1:(i-1)])
+
+        function check!(problems, checked, node, nsmap, part)
+            ns  = get(nsmap, prefix(XLSX.XML.tag(node)), "")
+            ln  = String(XLSX.localname(node))
+            key = (ns, ln)
+            if !haskey(XLSX.CHILD_ORDER, key) && ln in ("spPr", "txPr", "rich")
+                key = (XLSX.NS_A, ln)
+            end
+            order = get(XLSX.CHILD_ORDER, key, nothing)
+            last = 0
+            for ch in XLSX.XML.eachelement(node)
+                if !isnothing(order) && get(nsmap, prefix(XLSX.XML.tag(ch)), "") in (XLSX.NS_CX, XLSX.NS_A)
+                    checked[] += 1
+                    k = slot(order, String(XLSX.localname(ch)))
+                    if isnothing(k)
+                        push!(problems, "$part: $(XLSX.XML.tag(ch)) not in table for $key")
+                    elseif k < last
+                        push!(problems, "$part: $(XLSX.XML.tag(ch)) out of order in $key")
+                    else
+                        last = k
+                    end
+                end
+                check!(problems, checked, ch, nsmap, part)
+            end
+            if !isnothing(order)
+                names = [String(XLSX.localname(ch)) for ch in XLSX.XML.eachelement(node)
+                     if get(nsmap, prefix(XLSX.XML.tag(ch)), "") in (XLSX.NS_CX, XLSX.NS_A)]
+                reps = get(XLSX.REPEATABLE, key, Set{String}())
+                for n in unique(names)
+                    count(==(n), names) > 1 && !(n in reps) &&
+                        push!(problems, "$part: $n repeats in $key but is not in REPEATABLE")
+                end
+            end
+        end
+
+        for fixture in ("chart_ex.xlsx", "chartex_layouts.xlsx", "chartex_formatted.xlsx")
+            xf = XLSX.readxlsx(joinpath(data_directory, fixture))
+            for c in filter(x -> x isa XLSX.ChartEx, XLSX.getCharts(xf))
+                root = XLSX.xml_root_element(xf.data[c.path])
+                nsmap = XLSX.get_namespaces(root)
+                @test get(nsmap, prefix(XLSX.XML.tag(root)), "") == XLSX.NS_CX   # the root is cx:
+                problems = String[]
+                checked = Ref(0)
+                check!(problems, checked, root, nsmap, "$fixture:$(c.path)")
+                @test checked[] > 0                                              # not vacuous
+                @test isempty(problems)
+                isempty(problems) || foreach(println, problems)
+            end
+        end
     end
 
 end # ChartSchema

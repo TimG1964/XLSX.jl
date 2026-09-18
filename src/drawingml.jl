@@ -1072,27 +1072,48 @@ end
 """
     _text_with_run_prop(body, field, value, pfx) -> XML.Node
 
-Set one run property on a text body's paragraph defaults
-(`a:p/a:pPr/a:defRPr`), creating the paragraph and its properties if absent.
+Set one run property on a text body's paragraph default (`a:defRPr`), and remove
+that field from each run's `a:rPr` so the default is what renders.
 
-`body` is an `a:CT_TextBody` — a `c:txPr`, a `c:rich`, or the cx: equivalent.
-Only the first paragraph is touched: a chart text body with several paragraphs
-is rare, and changing all of them would be a different operation.
-
-This sets the paragraph *default*, which every run inherits unless it overrides
-the property in its own `a:rPr`. A body whose runs carry explicit properties —
-a retyped data label, typically — will not change appearance until those are
-changed too.
+A run's `a:rPr` overrides the paragraph default field by field, so writing only
+`a:defRPr` leaves a body whose runs set that field unchanged on screen — which is
+how Excel writes a title it has formatted. Clearing the field from the runs makes
+`a:defRPr` the single source for it while leaving the rest of each run's
+formatting alone. A setter that names no run is taken to mean the whole body.
 """
 function _text_with_run_prop(body::XML.Node, field::Symbol, value, pfx::Dict{String,String})
     skey = (NS_A, String(localname(body)))
-    return rebuild_path(body,
+    body = rebuild_path(body,
         [(NS_A, "p")      => "p",
          (NS_A, "pPr")    => "pPr",
          (NS_A, "defRPr") => "defRPr"],
         rpr -> _rpr_with_prop(rpr, field, value, pfx);
         prefixes = pfx,
         parent_key = skey)
+    return _clear_run_prop(body, field, pfx)
+end
+
+# Remove `field` from every a:r/a:rPr and a:endParaRPr in the body, so the
+# paragraph default governs it. Runs with no a:rPr are left alone.
+function _clear_run_prop(body::XML.Node, field::Symbol, pfx::Dict{String,String})
+    isnothing(body.children) && return body
+    kids = map(body.children) do p
+        localname(p) != "p" && return p
+        isnothing(p.children) && return p
+        _with_children(p, map(p.children) do n
+            tag = localname(n)
+            if tag in ("r", "br", "fld")
+                rpr = first_element_with_tag(n, "rPr")
+                isnothing(rpr) ? n :
+                    replace_child(n, rpr, _rpr_with_prop(rpr, field, :inherit, pfx))
+            elseif tag == "endParaRPr"
+                _rpr_with_prop(n, field, :inherit, pfx)
+            else
+                n
+            end
+        end)
+    end
+    return _with_children(body, kids)
 end
 
 """
@@ -1214,8 +1235,8 @@ An empty text body — `c:txPr` or `c:rich` — carrying the `a:bodyPr` that
 `CT_TextBody` requires and the `a:lstStyle` Excel always writes. A body without
 a `bodyPr` is rejected when the file is opened.
 """
-_new_text_body(tag::AbstractString, pfx::Dict{String,String}) =
-    XML.Element(prefixed_tag(pfx[NS_C], tag), _el(pfx, "bodyPr"), _el(pfx, "lstStyle"))
+_new_text_body(tag::AbstractString, pfx::Dict{String,String}, ns::AbstractString = NS_C) =
+    XML.Element(prefixed_tag(pfx[ns], tag), _el(pfx, "bodyPr"), _el(pfx, "lstStyle"))
 
 function _paragraph_node(p::DrawingParagraph, pfx::Dict{String,String})
     kids = XML.Node{String}[]

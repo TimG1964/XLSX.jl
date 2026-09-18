@@ -26,7 +26,7 @@ const CT_CHARTEX = "application/vnd.ms-office.chartex+xml"
 const MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 
 const NS_C  = "http://schemas.openxmlformats.org/drawingml/2006/chart"
-const NS_CX = "http://schemas.microsoft.com/office/drawing/2014/chart"
+const NS_CX = "http://schemas.microsoft.com/office/drawing/2014/chartex"
 
 # The <c:plotArea> children that group series. Series live one level below these.
 const CHART_GROUP_TAGS = Set([

@@ -315,6 +315,15 @@ Resolve the fill of series `i`, or of one data point of it, walking
 getSeriesFill(c::ChartEx, i::Integer; point::Union{Nothing,Integer}=nothing) =
     _walk_fill(_wb(c), _cx_shape_chain(c, i; point))
 
+    """
+    getSeriesLine(c::ChartEx, i::Integer; point=nothing) -> Effective{DrawingLine}
+
+Resolve the outline of series `i`, or of one data point of it, walking
+`cx:dataPt/cx:spPr` then `cx:series/cx:spPr`.
+"""
+getSeriesLine(c::ChartEx, i::Integer; point::Union{Nothing,Integer} = nothing) =
+    _walk_line(_wb(c), _cx_shape_chain(c, i; point))
+
 """
     getLabelTextProp(c::ChartEx, i::Integer, field::Symbol) -> Effective
 
@@ -324,3 +333,305 @@ for how fields inherit.
 """
 getLabelTextProp(c::ChartEx, i::Integer, field::Symbol) =
     _resolve_text_field(_wb(c), _cx_text_chain(c, i), field)
+
+    # ---- write path -------------------------------------------------------------
+#
+# A ChartEx is durable, so setters write the part and return `c` itself, which
+# remains valid. Handles to nodes (anything holding `raw`) are still invalidated,
+# as for c:.
+
+const _CX_ROOT_KEY = (NS_CX, "chartSpace")
+
+# rebuild_path steps from the root to series `i`, matched by node identity.
+function _cx_series_path(c::ChartEx, i::Integer)
+    ser = _cx_series_node(c, i)
+    return [(NS_CX, "chart")          => "chart",
+            (NS_CX, "plotArea")       => "plotArea",
+            (NS_CX, "plotAreaRegion") => "plotAreaRegion",
+            (NS_CX, "series")         => ("series", n -> n === ser)]
+end
+
+# Apply `f(ser, pfx)` to series `i` and write the part back once. A throw inside
+# `f` leaves the part untouched.
+function _cx_edit_series!(c::ChartEx, i::Integer, f)
+    root = _cx_root(c)
+    pfx  = ns_prefixes(root)
+    new  = rebuild_path(root, _cx_series_path(c, i), ser -> f(ser, pfx);
+                        prefixes = pfx, parent_key = _CX_ROOT_KEY)
+    set_chart_root!(c, new)
+    return c
+end
+
+_cx_idx(n) = tryparse(Int, get_attr(n, "idx"))
+
+# Apply `f` to the cx:dataPt for 1-based `point`, creating it if absent. A new
+# one is inserted in idx order among its siblings: before the first dataPt with a
+# larger idx, or in schema position (after the last dataPt) if there is none.
+function _cx_with_datapt(ser::XML.Node, point::Integer, pfx, f)
+    idx  = point - 1
+    kids = isnothing(ser.children) ? XML.Node[] : ser.children
+    j = findfirst(k -> localname(k) == "dataPt" && _cx_idx(k) == idx, kids)
+    if isnothing(j)
+        fresh = XML.Element(prefixed_tag(pfx[NS_CX], "dataPt"); idx = string(idx))
+        pts = findall(k -> localname(k) == "dataPt", kids)
+        if isempty(pts)
+            ser = insert_child(ser, (NS_CX, "series"), fresh)      # first one: schema position
+        else
+            # before the first dataPt with a larger idx, else after the last dataPt
+            k = findfirst(p -> something(_cx_idx(kids[p]), -1) > idx, pts)
+            at = isnothing(k) ? last(pts) + 1 : pts[k]
+            new_kids = Vector{eltype(kids)}(undef, 0)
+            append!(new_kids, kids[1:at-1]); push!(new_kids, fresh); append!(new_kids, kids[at:end])
+            ser = _with_children(ser, new_kids)
+        end
+        j = findfirst(n -> n === fresh, ser.children)
+    end
+    dp = ser.children[j]
+    return replace_child(ser, dp, f(dp))
+end
+
+# Apply `f(spPr, pfx)` to the spPr of series `i`, or of one of its points.
+# With `create = false`, a missing spPr (or dataPt) means there is nothing to
+# change, and nothing is created: removing a fill that was never written must
+# not leave an empty <cx:spPr/> behind.
+function _cx_set_shape!(c::ChartEx, i::Integer, point, f; create::Bool = true)
+    isnothing(point) || point >= 1 ||
+        throw(XLSXError("Data point positions start at 1; asked for $point."))
+    _cx_edit_series!(c, i, (ser, pfx) -> begin
+        edit(node, key) =
+            (!create && isnothing(first_element_with_tag(node, "spPr"))) ? node :
+            rebuild_path(node, [(NS_A, "spPr") => "spPr"], sp -> f(sp, pfx);
+                         prefixes = pfx, parent_key = key)
+        isnothing(point) && return edit(ser, (NS_CX, "series"))
+        (!create && isnothing(_cx_datapt_in(ser, point))) && return ser
+        return _cx_with_datapt(ser, point, pfx, dp -> edit(dp, (NS_CX, "dataPt")))
+    end)
+end
+
+_cx_datapt_in(ser, point) =
+    findfirst(k -> localname(k) == "dataPt" && _cx_idx(k) == point - 1,
+              isnothing(ser.children) ? XML.Node[] : ser.children)
+
+"""
+    setSeriesFill(c::ChartEx, i, color; point=nothing) -> ChartEx
+
+Set the fill of series `i`, or of one data point of it. `color` may be a colour
+string or Symbol, a `Colors.Colorant`, a [`SchemeColor`](@ref), `:none` for an
+explicit `<a:noFill/>`, or `:inherit` to remove the fill so the chart style
+applies.
+
+Setting a point's fill creates its `cx:dataPt` if Excel never formatted that
+point. `:inherit` never creates anything.
+
+Returns `c`, which remains valid.
+"""
+setSeriesFill(c::ChartEx, i::Integer, color::Union{AbstractString,Colors.Colorant,SchemeColor};
+              point::Union{Nothing,Integer} = nothing) =
+    _cx_set_shape!(c, i, point, (sp, pfx) -> _sp_with_fill(sp, (NS_A, "spPr"), color, pfx))
+
+function setSeriesFill(c::ChartEx, i::Integer, what::Symbol;
+                       point::Union{Nothing,Integer} = nothing)
+    what === :inherit &&
+        return _cx_set_shape!(c, i, point, (sp, pfx) -> _sp_with_fill(sp, (NS_A, "spPr"), :inherit, pfx);
+                              create = false)
+    what === :none &&
+        return _cx_set_shape!(c, i, point, (sp, pfx) -> _sp_with_fill(sp, (NS_A, "spPr"), :none, pfx))
+    return setSeriesFill(c, i, String(what); point)
+end
+
+# Apply `f(ln, pfx)` to the a:ln of series `i`, or of one of its points,
+# creating the a:ln and its cx:spPr if absent. One rebuild; a throw inside `f`
+# leaves the part untouched.
+_cx_set_line!(c::ChartEx, i::Integer, point, f; create::Bool = true) =
+    _cx_set_shape!(c, i, point,
+                   (sp, pfx) -> _sp_with_line(sp, (NS_A, "spPr"), ln -> f(ln, pfx), pfx);
+                   create)
+
+"""
+    setSeriesLine(c::ChartEx, i; point=nothing, color, width, dash, cap, compound, join, miterLimit) -> ChartEx
+    setSeriesLine(c::ChartEx, i, :none; point=nothing)
+    setSeriesLine(c::ChartEx, i, :inherit; point=nothing)
+
+Set several outline properties of series `i`, or of one data point of it, in one
+rebuild of the chart part. A keyword left unspecified is left alone; pass
+`:inherit` to remove one that is set.
+
+The symbol form acts on the whole outline: `:none` writes an `a:ln` whose fill is
+`<a:noFill/>`, and `:inherit` removes the `a:ln` so the chart style supplies it.
+
+Returns `c`, which remains valid.
+"""
+function setSeriesLine(c::ChartEx, i::Integer; point::Union{Nothing,Integer} = nothing,
+                       color = nothing, width = nothing, dash = nothing,
+                       cap = nothing, compound = nothing,
+                       join = nothing, miterLimit = nothing)
+    all(isnothing, (color, width, dash, cap, compound, join, miterLimit)) && return c
+    return _cx_set_line!(c, i, point, (ln, pfx) ->
+        _ln_with(ln, pfx; color, width, dash, cap, compound, join, miterLimit))
+end
+
+function setSeriesLine(c::ChartEx, i::Integer, what::Symbol;
+                       point::Union{Nothing,Integer} = nothing)
+    what === :inherit &&
+        return _cx_set_shape!(c, i, point, (sp, _) -> remove_child(sp, "ln"); create = false)
+    what === :none && return setSeriesLineColor(c, i, :none; point)
+    throw(XLSXError("`$what` is not a line instruction; use `:none` or `:inherit`."))
+end
+
+"""
+    setSeriesLineColor(c::ChartEx, i, color; point=nothing) -> ChartEx
+
+Set the colour of series `i`'s outline, or of one data point of it. `color` takes
+the same values as [`setSeriesFill`](@ref): `:none` writes an outline with
+`<a:noFill/>`, `:inherit` removes the colour and leaves the rest of the `a:ln`.
+"""
+setSeriesLineColor(c::ChartEx, i::Integer, color; point::Union{Nothing,Integer} = nothing) =
+    _cx_set_line!(c, i, point, (ln, pfx) -> _ln_with_color(ln, color, pfx))
+
+setSeriesLineWidth(c::ChartEx, i::Integer, pts; point::Union{Nothing,Integer} = nothing) =
+    _cx_set_line!(c, i, point, (ln, _) -> _ln_with_width(ln, pts))
+
+setSeriesLineDash(c::ChartEx, i::Integer, dash; point::Union{Nothing,Integer} = nothing) =
+    _cx_set_line!(c, i, point, (ln, pfx) -> _ln_with_dash(ln, dash, pfx))
+
+setSeriesLineCap(c::ChartEx, i::Integer, cap; point::Union{Nothing,Integer} = nothing) =
+    _cx_set_line!(c, i, point, (ln, _) -> _ln_with_cap(ln, cap))
+
+setSeriesLineCompound(c::ChartEx, i::Integer, cmpd; point::Union{Nothing,Integer} = nothing) =
+    _cx_set_line!(c, i, point, (ln, _) -> _ln_with_compound(ln, cmpd))
+
+setSeriesLineJoin(c::ChartEx, i::Integer, join; point::Union{Nothing,Integer} = nothing) =
+    _cx_set_line!(c, i, point, (ln, pfx) -> _ln_with_join(ln, join, pfx))
+
+setSeriesLineMiterLimit(c::ChartEx, i::Integer, lim; point::Union{Nothing,Integer} = nothing) =
+    _cx_set_line!(c, i, point, (ln, _) -> _ln_with_miter_limit(ln, lim))
+
+    # A created cx:dataLabels showing no flags would show labels with Excel's
+# defaults, as c:dLbls does, so all three are written off when creating one.
+# Unlike c:, they are attributes on a single cx:visibility child.
+const _CX_LABEL_FLAG_NAMES = ("seriesName", "categoryName", "value")
+
+function _cx_visibility_off(lbl::XML.Node, pfx::Dict{String,String})
+    isnothing(first_element_with_tag(lbl, "visibility")) || return lbl
+    vis = XML.Element(prefixed_tag(pfx[NS_CX], "visibility");
+                      seriesName = "0", categoryName = "0", value = "0")
+    return insert_child(lbl, (NS_CX, "dataLabels"), vis)
+end
+
+"""
+    setLabelTextProp(c::ChartEx, i, field, value) -> ChartEx
+
+Set one field of the data-label text formatting for series `i`, writing it on the
+series' `cx:dataLabels/cx:txPr`. `field` is a field of `DrawingRunProps`; `:fill`
+and `:line` are composite and take a colour or a named tuple of line properties.
+Pass `:inherit` to remove a field so the cascade resolves it.
+
+Creating a `cx:dataLabels` to hold formatting writes `cx:visibility` with all
+three flags off, since one that names no flags shows labels with Excel's
+defaults rather than none.
+
+Returns `c`, which remains valid.
+"""
+function setLabelTextProp(c::ChartEx, i::Integer, field::Symbol, value)
+    field in _RUN_PROP_FIELDS || throw(XLSXError(
+        "`$field` is not a resolvable text property. Valid fields: " *
+        join(_RUN_PROP_FIELDS, ", ") * "."))
+    return _cx_edit_series!(c, i, (ser, pfx) ->
+        rebuild_path(ser, [(NS_CX, "dataLabels") => "dataLabels"],
+                     lbl -> _cx_label_transform(lbl, field, value, pfx);
+                     prefixes = pfx, parent_key = (NS_CX, "series")))
+end
+
+# Apply `field` to the cx:dataLabels' cx:txPr, creating the text body and the
+# visibility flags if this is the first formatting written here.
+function _cx_label_transform(lbl::XML.Node, field::Symbol, value, pfx::Dict{String,String})
+    lbl = _cx_visibility_off(lbl, pfx)
+    tx  = first_element_with_tag(lbl, "txPr")
+    if isnothing(tx)
+        lbl = insert_child(lbl, (NS_CX, "dataLabels"), _new_text_body("txPr", pfx, NS_CX))
+        tx  = first_element_with_tag(lbl, "txPr")
+    end
+    return replace_child(lbl, tx, _text_with_run_prop(tx, field, value, pfx))
+end
+
+# ---- chart-level text -------------------------------------------------------
+
+# Apply `f(node, pfx)` at the end of `steps` from the part root, and write back.
+function _cx_edit_at!(c::ChartEx, steps, f)
+    root = _cx_root(c)
+    pfx  = ns_prefixes(root)
+    new  = rebuild_path(root, steps, n -> f(n, pfx);
+                        prefixes = pfx, parent_key = _CX_ROOT_KEY)
+    set_chart_root!(c, new)
+    return c
+end
+
+"""
+    setChartTitleTextProp(c::ChartEx, field, value) -> ChartEx
+
+Set one field of the chart title's text formatting, on `cx:title/cx:txPr`.
+Creates the title if the chart has none. Returns `c`, which remains valid.
+"""
+setChartTitleTextProp(c::ChartEx, field::Symbol, value) =
+    _cx_edit_at!(c, [(NS_CX, "chart") => "chart",
+                     (NS_CX, "title") => "title"],
+                 (t, pfx) -> _both_with_run_prop(t, (NS_CX, "title"), field, value, pfx; ns = NS_CX))
+
+"""
+    setLegendTextProp(c::ChartEx, field, value) -> ChartEx
+
+Set one field of the legend's text formatting, on `cx:legend/cx:txPr`.
+Creates the legend if the chart has none. Returns `c`, which remains valid.
+"""
+setLegendTextProp(c::ChartEx, field::Symbol, value) =
+    _cx_edit_at!(c, [(NS_CX, "chart")  => "chart",
+                     (NS_CX, "legend") => "legend"],
+                 (lg, pfx) -> _txpr_with_run_prop(lg, (NS_CX, "legend"), field, value, pfx; ns = NS_CX))
+
+"""
+    getChartAxisIds(c::ChartEx) -> Vector{Int}
+
+The `id` of each `cx:axis`, in document order. These are the values
+[`getSeriesAxisIds`](@ref) refers to.
+"""
+getChartAxisIds(c::ChartEx)::Vector{Int} =
+    [parse(Int, get_attr(a, "id")) for a in
+     elements_with_tag(first_element_with_tag(_cx_chart(c), "plotArea"), "axis")]
+
+# Steps to the cx:axis whose id attribute is `id`.
+function _cx_axis_path(c::ChartEx, id::Integer)
+    ids = getChartAxisIds(c)
+    id in ids || throw(XLSXError(
+        "Chart `$(c.name)` has no axis with id $id. Axis ids: $(join(ids, ", "))."))
+    return [(NS_CX, "chart")    => "chart",
+            (NS_CX, "plotArea") => "plotArea",
+            (NS_CX, "axis")     => ("axis", n -> tryparse(Int, get_attr(n, "id")) == id)]
+end
+
+"""
+    setAxisTitleTextProp(c::ChartEx, id::Integer, field, value) -> ChartEx
+
+Set one field of an axis title's text formatting, on `cx:axis/cx:title/cx:txPr`.
+`id` is the axis' `id` attribute, as [`getChartAxisIds`](@ref) reports it, not a
+position. Creates the title if the axis has none. Returns `c`, which remains
+valid.
+"""
+setAxisTitleTextProp(c::ChartEx, id::Integer, field::Symbol, value) =
+    _cx_edit_at!(c, [_cx_axis_path(c, id)...; (NS_CX, "title") => "title"],
+                 (t, pfx) -> _both_with_run_prop(t, (NS_CX, "title"), field, value, pfx; ns = NS_CX))
+
+"""
+    getAxisTitleTextProps(c::ChartEx, id::Integer) -> Union{Nothing, DrawingText}
+
+The text body of the axis title, or `nothing` if the axis has no title.
+"""
+getAxisTitleTextProps(c::ChartEx, id::Integer) =
+    parse_drawing_text(_wb(c), first_element_with_tag(_cx_axis_node(c, id), "title"))
+
+function _cx_axis_node(c::ChartEx, id::Integer)
+    pa = first_element_with_tag(_cx_chart(c), "plotArea")
+    for a in elements_with_tag(pa, "axis")
+        tryparse(Int, get_attr(a, "id")) == id && return a
+    end
+    throw(XLSXError("Chart `$(c.name)` has no axis with id $id."))
+end

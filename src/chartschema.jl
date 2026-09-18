@@ -141,10 +141,59 @@ const CHILD_ORDER = Dict{Tuple{String,String},Vector{Union{String,Vector{String}
     (NS_C, "legend")      => ["legendPos","legendEntry","layout","overlay","spPr",
                               "txPr","extLst"],
     (NS_C, "legendEntry") => ["idx","delete","txPr","extLst"],          
+
+
+    # ==== chartEx (cx:) ====
+    # From the chartex schema in [MS-ODRAWXML] 5.22. Keyed by element name, as
+    # above: the four cx element names shared by two complex types (title,
+    # visibility, lvl, pt) have identical child orders in both. cx:spPr, cx:txPr
+    # and cx:rich are DrawingML types and use the NS_A entries.
+    # Omitted: region-map geography, value colours and print settings.
+    (NS_CX, "chartSpace")     => ["chartData","chart","spPr","txPr","clrMapOvr","fmtOvrs",
+                                  "printSettings","extLst"],
+    (NS_CX, "chartData")      => ["externalData","data","extLst"],
+    (NS_CX, "data")           => [["numDim","strDim"], "extLst"],
+    (NS_CX, "numDim")         => ["f","nf","lvl"],
+    (NS_CX, "strDim")         => ["f","nf","lvl"],
+    (NS_CX, "chart")          => ["title","plotArea","legend","extLst"],
+    (NS_CX, "title")          => ["tx","spPr","txPr","offset","extLst"],
+    (NS_CX, "tx")             => ["txData","rich"],
+    (NS_CX, "txData")         => ["f","v"],
+    (NS_CX, "legend")         => ["spPr","txPr","offset","extLst"],
+    (NS_CX, "plotArea")       => ["plotAreaRegion","axis","spPr","extLst"],
+    (NS_CX, "plotAreaRegion") => ["plotSurface","series","extLst"],
+    (NS_CX, "plotSurface")    => ["spPr","extLst"],
+    (NS_CX, "series")         => ["tx","spPr","valueColors","valueColorPositions","dataPt",
+                                  "dataLabels","dataId","layoutPr","axisId","extLst"],
+    (NS_CX, "dataPt")         => ["spPr","extLst"],
+    (NS_CX, "dataLabels")     => ["numFmt","spPr","txPr","visibility","separator",
+                                  "dataLabel","dataLabelHidden","extLst"],
+    (NS_CX, "dataLabel")      => ["numFmt","spPr","txPr","visibility","separator","extLst"],
+    (NS_CX, "layoutPr")       => ["parentLabelLayout","regionLabelLayout","visibility",
+                                  "aggregation","binning","geography","statistics",
+                                  "subtotals","extLst"],
+    (NS_CX, "binning")        => ["binSize","binCount"],
+    (NS_CX, "subtotals")      => ["idx"],
+    (NS_CX, "axis")           => ["catScaling","valScaling","title","units","majorGridlines",
+                                  "minorGridlines","majorTickMarks","minorTickMarks",
+                                  "tickLabels","numFmt","spPr","txPr","extLst"],
+    (NS_CX, "units")          => ["unitsLabel","extLst"],
+    (NS_CX, "unitsLabel")     => ["tx","spPr","txPr","extLst"],
+    (NS_CX, "majorGridlines") => ["spPr","extLst"],
+    (NS_CX, "minorGridlines") => ["spPr","extLst"],
+    (NS_CX, "fmtOvrs")        => ["fmtOvr"],
+    (NS_CX, "fmtOvr")         => ["spPr","extLst"],
 )
 
 CHILD_ORDER[(NS_A, "rPr")]         = CHILD_ORDER[(NS_A, "defRPr")]
 CHILD_ORDER[(NS_A, "endParaRPr")]  = CHILD_ORDER[(NS_A, "defRPr")]
+
+# Elements whose child order is DrawingML's but whose own name is in the chart
+# schema: c:spPr / cx:spPr are a:CT_ShapeProperties, and c:txPr, c:rich and
+# cx:txPr are a:CT_TextBody. Their CHILD_ORDER key is therefore NS_A while the
+# element itself takes its parent's namespace. Every other NS_A-keyed element is
+# a genuine a: element and takes the key's namespace.
+const DML_TYPED_CHART_ELEMENTS = Set(["spPr", "txPr", "rich"])
 
 # Tags that may appear more than once, keyed by parent. errBars is maxOccurs=2
 # on area, bubble and scatter series and 1 elsewhere, so this cannot be a flat set.
@@ -169,22 +218,37 @@ const REPEATABLE = Dict{Tuple{String,String},Set{String}}(
                                 "valAx","catAx","dateAx","serAx"]),
     (NS_A, "p")          => Set(["r", "br", "fld"]),
     (NS_C, "legend")     => Set(["legendEntry"]),
+    
+    # ==== chartEx (cx:) ====
+    # Children with maxOccurs="unbounded" in the chartex schema ([MS-ODRAWXML] 5.22).
+    # extLst/ext omitted, as for c:.
+    (NS_CX, "chartData")      => Set(["data"]),
+    (NS_CX, "data")           => Set(["numDim", "strDim"]),
+    (NS_CX, "numDim")         => Set(["lvl"]),
+    (NS_CX, "strDim")         => Set(["lvl"]),
+    (NS_CX, "lvl")            => Set(["pt"]),
+    (NS_CX, "plotAreaRegion") => Set(["series"]),
+    (NS_CX, "plotArea")       => Set(["axis"]),
+    (NS_CX, "series")         => Set(["dataPt", "axisId"]),
+    (NS_CX, "dataLabels")     => Set(["dataLabel", "dataLabelHidden"]),
+    (NS_CX, "subtotals")      => Set(["idx"]),
+    (NS_CX, "fmtOvrs")        => Set(["fmtOvr"]),
 )
 
 # xsd:choice groups where every member excludes every other — at most one may
 # appear. The common case.
 const SCHEMA_ALTERNATIVES = Dict{Tuple{String,String},Vector{Vector{String}}}(
-    (NS_A, "spPr") => [["custGeom","prstGeom"],
-                       ["noFill","solidFill","gradFill","blipFill","pattFill","grpFill"],
-                       ["effectLst","effectDag"]],
+    (NS_A, "spPr")   => [["custGeom","prstGeom"],
+                         ["noFill","solidFill","gradFill","blipFill","pattFill","grpFill"],
+                         ["effectLst","effectDag"]],
     (NS_C, "catAx")  => [["crosses","crossesAt"]],
     (NS_C, "valAx")  => [["crosses","crossesAt"]],
     (NS_C, "dateAx") => [["crosses","crossesAt"]],
     (NS_C, "serAx")  => [["crosses","crossesAt"]],
     (NS_C, "tx")     => [["strRef","rich"]],
     (NS_A, "ln")     => [["noFill","solidFill","gradFill","pattFill"],
-                        ["prstDash","custDash"],
-                        ["round","bevel","miter"]],
+                         ["prstDash","custDash"],
+                         ["round","bevel","miter"]],
     (NS_A, "defRPr") => [["noFill","solidFill","gradFill","blipFill","pattFill","grpFill"],
                          ["effectLst","effectDag"],
                          ["uLnTx","uLn"],
@@ -194,7 +258,12 @@ const SCHEMA_ALTERNATIVES = Dict{Tuple{String,String},Vector{Vector{String}}}(
     (NS_A, "spcAft") => [["spcPct", "spcPts"]],
     (NS_A, "bodyPr") => [["noAutofit", "normAutofit", "spAutoFit"],
                          ["sp3d", "flatTx"]],
+                             (NS_CX, "tx")       => [["txData","rich"]],
+    (NS_CX, "layoutPr") => [["aggregation","binning"]],
+    (NS_CX, "binning")  => [["binSize","binCount"]],
+    (NS_CX, "axis")     => [["catScaling","valScaling"]],
 )
+
 SCHEMA_ALTERNATIVES[(NS_A, "rPr")]        = SCHEMA_ALTERNATIVES[(NS_A, "defRPr")]
 SCHEMA_ALTERNATIVES[(NS_A, "endParaRPr")] = SCHEMA_ALTERNATIVES[(NS_A, "defRPr")]
 
@@ -451,8 +520,10 @@ Descend `node` by `steps`, apply `f` to the element found there, and rebuild
 every ancestor on the way back so the change appears in the returned root.
 
 Each step is `key => tag` or `key => (tag, predicate)`, where `key` is the
-[`SchemaKey`](@ref) of the element that step names. The key's namespace also
-supplies the prefix for an element this creates.
+[`SchemaKey`](@ref) of the element that step names. The key's namespace supplies
+the prefix for an element this creates, except for`spPr`, `txPr` and `rich`, 
+whose keys name DrawingML because that is where their child order lives while 
+the element itself belongs to the chart schema and takes its parent's prefix.
 
 `parent_key` is the [`SchemaKey`](@ref) of `node` itself, needed when a step has
 to create an element and `insert_child` must know where it goes. It defaults to
@@ -499,7 +570,7 @@ function rebuild_path(node::XML.Node, steps, f;
     if isnothing(i)
         isnothing(pred) ||
             throw(XLSXError("No `$tag` in `$(localname(node))` matches the predicate."))
-        ns = step_key[1]
+        ns = tag in DML_TYPED_CHART_ELEMENTS ? parent_key[1] : step_key[1]
         haskey(prefixes, ns) ||
             throw(XLSXError("Namespace `$ns` is not declared on the chart part."))
         fresh = XML.Element(prefixed_tag(prefixes[ns], tag))
