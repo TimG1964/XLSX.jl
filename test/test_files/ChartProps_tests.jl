@@ -98,7 +98,7 @@
         a = XLSX.getSeriesShapeProps(c, 1)
         b = XLSX.getSeriesShapeProps(c, 1)
         @test a.raw === b.raw
-        @test a.raw === XLSX.first_element_with_tag(c.series[1].raw, "spPr")
+        @test a.raw === XLSX.first_element_with_tag(XLSX.getChartSeries(c)[1].raw, "spPr")
 
         # Two Chart objects from two getCharts calls share their nodes.
         c2 = XLSX.getCharts(f)[1]
@@ -109,7 +109,7 @@
     end
 
     @testset "series appearance" begin
-        @test length(c.series) == 3
+        @test length(XLSX.getChartSeries(c)) == 3
 
         sp1 = XLSX.getSeriesShapeProps(c, 1)
         @test !isnothing(sp1)
@@ -334,7 +334,7 @@
         @test mk.shape.fill.fgcolor.rgb == "FF0000"
 
         # idx round-trips through the 1-based lookup to the same node.
-        for i in 1:length(c.series), d in XLSX.getSeriesDataPoints(c, i)
+        for i in 1:length(XLSX.getChartSeries(c)), d in XLSX.getSeriesDataPoints(c, i)
             @test XLSX.getSeriesDataPoint(c, i, d.idx + 1).raw === d.raw
         end
     end
@@ -427,14 +427,14 @@
 
         # A literal title, reached two ways: the accessor and parse_chart_title.
         @test XLSX.text_content(XLSX.getChartTitleText(cb)) == "Revenue by Region"
-        @test cb.title == "Revenue by Region"
+        @test XLSX.getChartTitle(cb) == "Revenue by Region"
         @test length(XLSX.getChartGroups(cb)) == 1
         @test isempty(XLSX.getSeriesDataPoints(cb, 1))
 
         # Six theme variants, all reached through the accessor.
         ft = XLSX.readxlsx(joinpath(data_directory, "chart_theme_colors.xlsx"))
         ct = XLSX.getCharts(ft)[1]
-        @test length(ct.series) == 6
+        @test length(XLSX.getChartSeries(ct)) == 6
         @test XLSX.getSeriesShapeProps(ct, 1).fill.fgcolor.rgb == "156082"
         @test XLSX.getSeriesShapeProps(ct, 5).fill.fgcolor.rgb == "104862"
 
@@ -685,8 +685,11 @@
         e = XLSX.getMarkerFill(c, 3, 3)
         @test e.site.level === :point && e.value.fgcolor.rgb == "008000"
 
-        # a point Excel never formatted has no c:dPt, and this does not create one
-        @test_throws XLSX.XLSXError XLSX.setMarkerFill(c, 3, 1, "red")
+        # Point 1 of series 3 had no c:dPt; the setter now creates one.
+        XLSX.setMarkerFill(c, 3, 1, "red")
+        d = XLSX.getSeriesDataPoint(c, 3, 1)
+        @test !isnothing(d)
+        @test XLSX.getDataPointMarker(c, d).shape.fill.fgcolor.rgb == "FF0000"
 
         # the sugar is one rebuild
         c = XLSX.setMarker(c, 3; symbol = :square, size = 7, fill = "yellow")
@@ -765,11 +768,17 @@
             @test rp.size ≈ 20.0
         end
 
-        # A deleted label cannot be formatted. Series 1's dLbl at idx 2 is point 3.
-        @test_throws XLSX.XLSXError XLSX.setLabelTextProp(c, 1, 3, :size, 12)
+        # Point 1 of series 2 had no individual c:dLbl; the setter now creates one.
+        XLSX.setLabelTextProp(c, 2, 1, :size, 12)
+        dl = XLSX.getSeriesDataLabel(c, 2, 1)
+        @test !isnothing(dl)
+        @test XLSX.default_run_props(XLSX.getDataLabelTextProps(c, dl)).size ≈ 12.0
 
-        # A point with no individual label throws rather than creating one.
-        @test_throws XLSX.XLSXError XLSX.setLabelTextProp(c, 2, 1, :size, 12)
+        # Point 1 of series 2 had no individual c:dLbl; the setter now creates one.
+        XLSX.setLabelTextProp(c, 2, 1, :size, 12)
+        dl = XLSX.getSeriesDataLabel(c, 2, 1)
+        @test !isnothing(dl)
+        @test XLSX.default_run_props(XLSX.getDataLabelTextProps(c, dl)).size ≈ 12.0
 
         # the group rung. Series 1's txPr sets i="0" explicitly — Excel writes the
         # full attribute set — so the group cannot be reached until that is removed.
@@ -854,12 +863,11 @@
 
         # strip series 1's spPr so the setter has to create one
         root = XLSX.chart_root(c)
-        new = XLSX.rebuild_path(root, XLSX._series_path(c, 1)[1],
+        new = XLSX.rebuild_path(root, XLSX._series_path(c, root, 1)[1],
                                 s -> XLSX.remove_child(s, "spPr");
                                 prefixes = XLSX.ns_prefixes(root))
         XLSX.set_chart_root!(c, new)
-        c = XLSX.getChart(c.package, c.name)
-        c = XLSX.setSeriesFill(c, 1, "FF00B0F0")
+        @test XLSX.setSeriesFill(c, 1, "FF00B0F0") === c
         @test XLSX.XML.tag(XLSX.first_element_with_tag(XLSX._series(c, 1).raw, "spPr")) == "c:spPr"
     end
 
@@ -878,5 +886,128 @@
         end
     end
 
+    @testset "Chart handles are durable" begin
+        path = "chart_durable.xlsx"
+        out  = "chart_durable_out.xlsx"
+        cp(joinpath(data_directory, "chart_basic.xlsx"), path; force=true)
+        xf = XLSX.openxlsx(path; mode = "rw")
+        c  = XLSX.getChart(xf, "chart1")
+        c2 = XLSX.getChart(xf, "chart1")          # obtained before the write
+
+        n = length(XLSX.getChartSeries(c))
+        @test XLSX.setSeriesFill(c, 1, "FFFF0000") === c
+
+        # Both handles see the write; neither needed refreshing.
+        @test XLSX.getSeriesFill(c,  1).value.fgcolor.rgb == "FF0000"
+        @test XLSX.getSeriesFill(c2, 1).value.fgcolor.rgb == "FF0000"
+        @test length(XLSX.getChartSeries(c)) == n
+        @test XLSX.getChartTypes(c) == [:barChart]
+        @test occursin("barChart", sprint(show, c))
+
+        # A second write through the same handle, then a round trip.
+        XLSX.setSeriesLineWidth(c, 2, 2.5)
+        SAVE_FILES && save_outfile(xf)
+        XLSX.writexlsx(out, xf, overwrite = true)
+        c3 = XLSX.getChart(XLSX.readxlsx(out), "chart1")
+        @test XLSX.getSeriesFill(c3, 1).value.fgcolor.rgb == "FF0000"
+        @test XLSX.getSeriesLine(c3, 2).value.width ≈ 2.5
+
+        isfile(path) && rm(path)
+        isfile(out) && rm(out)
+    end
+
+    @testset "data point setters address the same point as the getters" begin
+        path = "chart_appearance_dpt.xlsx"
+        cp(joinpath(data_directory, "chart_appearance.xlsx"), path; force=true)
+        xf = XLSX.openxlsx(path; mode = "rw")
+
+        hit = nothing
+        for c in XLSX.getCharts(xf)
+            c isa XLSX.Chart || continue
+            for i in 1:length(XLSX.getChartSeries(c))
+                dps = XLSX.getSeriesDataPoints(c, i)
+                isempty(dps) || (hit = (c, i, first(dps).idx + 1); break)
+            end
+            isnothing(hit) || break
+        end
+        @test !isnothing(hit)                      # the fixture must have a c:dPt
+        c, i, point = hit
+
+        XLSX.setMarkerSymbol(c, i, point, :diamond)
+        SAVE_FILES && save_outfile(xf)
+        d = XLSX.getSeriesDataPoint(c, i, point)
+        @test XLSX.getDataPointMarker(c, d).symbol === :diamond
+
+        isfile(path) && rm(path)
+    end
+
+    @testset "axis handles survive writes" begin
+        path = "chart_axis_durable.xlsx"
+        cp(joinpath(data_directory, "chart_basic.xlsx"), path; force=true)
+        xf = XLSX.openxlsx(path; mode = "rw")
+        c  = XLSX.getChart(xf, "chart1")
+        ax = only(XLSX.getChartAxes(c, :value))
+
+        @test isnothing(XLSX.getAxisTitleText(c, ax))
+        @test XLSX.setAxisTitleText(c, ax, "Revenue") === c
+        @test XLSX.text_content(XLSX.getAxisTitleText(c, ax)) == "Revenue"
+        XLSX.setAxisTitleTextProp(c, ax, :bold, true)
+        @test XLSX.default_run_props(XLSX.getAxisTitleText(c, ax)).bold === true
+        @test XLSX.getAxisCrossBetween(c, ax) === :between           # scalars still read
+        SAVE_FILES && save_outfile(xf)
+
+        isfile(path) && rm(path)
+    end
+
+    @testset "creating c:dPt and c:dLbl" begin
+        path = "chart_create_points.xlsx"
+        cp(joinpath(data_directory, "chart_gaps.xlsx"), path; force=true)
+        xf = XLSX.openxlsx(path; mode = "rw")
+        c  = XLSX.getCharts(xf)[1]
+        @test isempty(XLSX.getSeriesDataPoints(c, 1))
+
+        # Created out of order; stored in c:idx order. Points 1 and 4 both plot.
+        XLSX.setMarkerSymbol(c, 1, 4, :diamond)
+        XLSX.setMarkerSymbol(c, 1, 1, :square)
+        @test [d.idx for d in XLSX.getSeriesDataPoints(c, 1)] == [0, 3]
+        @test XLSX.getDataPointMarker(c, XLSX.getSeriesDataPoint(c, 1, 4)).symbol === :diamond
+        @test XLSX.getDataPointMarker(c, XLSX.getSeriesDataPoint(c, 1, 1)).symbol === :square
+
+        # A second write to an existing point edits it rather than adding another.
+        XLSX.setMarkerSize(c, 1, 4, 9)
+        @test length(XLSX.getSeriesDataPoints(c, 1)) == 2
+        @test XLSX.getDataPointMarker(c, XLSX.getSeriesDataPoint(c, 1, 4)).size == 9
+
+        # A created label is formatted but not switched on. Point 1 has a value,
+        # so if the flags were wrong the label would be visible.
+        XLSX.setLabelTextProp(c, 1, 1, :bold, true)
+        dl = XLSX.getSeriesDataLabel(c, 1, 1)
+        @test !isnothing(dl)
+        @test XLSX.default_run_props(XLSX.getDataLabelTextProps(c, dl)).bold === true
+        n = XLSX._node(c, dl)
+        @test all(f -> XLSX._bool_val(n, f) === false, XLSX.DLBLS_FLAGS)
+
+        # And one with typed text.
+        XLSX.setLabelText(c, 1, 5, "peak")
+        @test XLSX.text_content(XLSX.getDataLabelText(c, XLSX.getSeriesDataLabel(c, 1, 5))) == "peak"
+
+        # Deleting the typed label at e removes its text; undeleting removes the override.
+        XLSX.setLabelDeleted(c, 1, 5, true)
+        dl = XLSX.getSeriesDataLabel(c, 1, 5)
+        @test dl.delete === true
+        @test isnothing(XLSX.getDataLabelText(c, dl))
+        @test_throws XLSX.XLSXError XLSX.setLabelTextProp(c, 1, 5, :size, 10)
+
+        XLSX.setLabelDeleted(c, 1, 5, false)
+        @test isnothing(XLSX.getSeriesDataLabel(c, 1, 5))
+        XLSX.setLabelDeleted(c, 1, 5, false)                  # undeleting again is a no-op
+        @test isnothing(XLSX.getSeriesDataLabel(c, 1, 5))
+
+        # Delete it once more so the saved file shows the deleted form.
+        XLSX.setLabelDeleted(c, 1, 5, true)
+
+        SAVE_FILES && save_outfile(xf)
+        isfile(path) && rm(path)
+    end
 end
 

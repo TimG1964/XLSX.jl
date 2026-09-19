@@ -294,6 +294,64 @@ const SCHEMA_CHOICES = Dict{Tuple{String,String},Vector{Pair{String,Vector{Strin
                                      "showPercent","showBubbleSize","separator"]],
 )
 
+const CX_NAMESPACES = Dict(
+    "cx1" => "http://schemas.microsoft.com/office/drawing/2015/9/8/chartex",
+    "cx2" => "http://schemas.microsoft.com/office/drawing/2015/10/21/chartex",
+)
+
+const CX_KINDS = (
+    waterfall  = (layouts = (:waterfall,),                   requires = "cx1", style = 395),
+    funnel     = (layouts = (:funnel,),                      requires = "cx2", style = 419),
+    treemap    = (layouts = (:treemap,),                     requires = "cx1", style = 410),
+    sunburst   = (layouts = (:sunburst,),                    requires = "cx1", style = 381),
+    histogram  = (layouts = (:clusteredColumn,),             requires = "cx1", style = 201),
+    pareto     = (layouts = (:clusteredColumn, :paretoLine), requires = "cx1", style = 366),
+    boxWhisker = (layouts = (:boxWhisker,),                  requires = "cx1", style = 406),
+)
+
+const _CHARTKIND_DIR = joinpath(@__DIR__, "data", "chartkinds")
+
+# Excel's default chart part for each c: kind, verbatim, keyed by file stem. addChart
+# takes its shell from the template with the series removed, and addSeries takes
+# each series' formatting from the template's first c:ser.
+const CHART_KIND_TEMPLATES = Dict{Symbol,String}()
+for f in readdir(_CHARTKIND_DIR)
+    endswith(f, ".xml") || continue
+    p = joinpath(_CHARTKIND_DIR, f)
+    include_dependency(p)
+    CHART_KIND_TEMPLATES[Symbol(first(splitext(f)))] = read(p, String)
+end
+
+const C_KINDS = (
+    column        = (template = :column,      style = 201),
+    bar           = (template = :bar,         style = 216),
+    stackedColumn = (template = :stacked,     style = 297),
+    line          = (template = :line,        style = 227),
+    lineMarkers   = (template = :linemarkers, style = 332),
+    area          = (template = :area,        style = 276),
+    pie           = (template = :pie,         style = 251),
+    doughnut      = (template = :doughnut,    style = 251),
+    scatter       = (template = :scatter,     style = 240),
+    bubble        = (template = :bubble,      style = 269),
+    radar         = (template = :radar,       style = 317),
+)
+
+#const CHART_STYLE_REL = "http://schemas.microsoft.com/office/2011/relationships/chartStyle"
+#const CHART_COLOR_REL = "http://schemas.microsoft.com/office/2011/relationships/chartColorStyle"
+
+const _CHARTSTYLE_DIR = joinpath(@__DIR__, "data", "chartstyles")
+
+const CHART_STYLE_TEMPLATES = Dict{Int,String}()
+const CHART_COLOR_TEMPLATES = Dict{Int,String}()
+
+for f in readdir(_CHARTSTYLE_DIR)
+    m = match(r"^(style|colors)(\d+)\.xml$", f)
+    isnothing(m) && continue
+    p = joinpath(_CHARTSTYLE_DIR, f)
+    include_dependency(p)
+    (m[1] == "style" ? CHART_STYLE_TEMPLATES : CHART_COLOR_TEMPLATES)[parse(Int, m[2])] = read(p, String)
+end
+
 # Which series type governs a c:ser's child order, keyed by the group containing
 # it. Not derivable from the group name: stockChart holds lineSer, doughnutChart
 # and ofPieChart hold pieSer, and every 3D variant shares its 2D counterpart's
@@ -542,7 +600,8 @@ throws when nothing matches.
 
 Returns the new `node`. Every node from `node` to the target inclusive is a fresh
 object; nodes off the path are shared. Any `raw` field held against a node on
-that path is stale afterwards.
+that path is stale afterwards. This is why chart values are addressed by key rather 
+than by raw.
 
 Never call this from a reader: it creates intermediates, so a getter built on it
 would grow empty elements into the file just by looking at them.

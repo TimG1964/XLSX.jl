@@ -416,13 +416,13 @@
         @test [string(r.values)     for r in cp_ranges] == ["Copy!B2:B5", "Copy!C2:C5"]
 
         # Series name refs are repointed too, not just categories and values.
-        @test all(s -> startswith(s.name_ref.ref, "Copy!"), cp.series)
+        @test all(s -> startswith(s.name_ref.ref, "Copy!"), XLSX.getChartSeries(cp))
 
         # The original is untouched — catches copynode aliasing the two trees.
         orig_ranges = XLSX.getChartRanges(orig)
         @test [string(r.categories) for r in orig_ranges] == ["Data!A2:A5", "Data!A2:A5"]
         @test [string(r.values)     for r in orig_ranges] == ["Data!B2:B5", "Data!C2:C5"]
-        @test all(s -> startswith(s.name_ref.ref, "Data!"), orig.series)
+        @test all(s -> startswith(s.name_ref.ref, "Data!"), XLSX.getChartSeries(orig))
 
         # The cache is deliberately left alone, so the copy still reads.
         @test XLSX.getChartData(cp) isa XLSX.DataTable

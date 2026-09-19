@@ -572,9 +572,9 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                     if tx !== nothing
                         t = XLSX.parse_drawing_text(wb, tx; tag="rich")
                         if t !== nothing
-                            # `Chart.title` is parsed independently, so this
+                            # `getChartTitle` is parsed independently, so this
                             # cross-checks the two paths agree.
-                            @test XLSX.text_content(t) == c.title
+                            @test XLSX.text_content(t) == XLSX.getChartTitle(c)
                             @test !isempty(XLSX.text_runs(t))
                         end
                     end

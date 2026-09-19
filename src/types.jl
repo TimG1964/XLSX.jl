@@ -923,11 +923,18 @@ end
 """
     ChartSeries
 
-A single `c:ser` element.
+One series (`c:ser`), as read.
 
 `categories` holds `c:cat` for category charts and `c:xVal` for scatter and bubble
 charts; `values` holds `c:val` or `c:yVal` correspondingly, so the two fields mean
 the same thing whatever the chart type.
+
+Identified by `idx`, the series' `c:idx`, which is unique within the chart and
+unaffected by adding series. `order` is the plotting order (`c:order`) and is not
+a key. Functions that take a series position `i` resolve it against the current
+part on each call. The other fields describe the series as it was when read.
+`raw` is the `c:ser` element at that time, or `nothing` for a series built in
+code; it is never used to address the part.
 """
 struct ChartSeries
     idx::Int
@@ -938,7 +945,7 @@ struct ChartSeries
     categories::Union{Nothing,ChartRef}
     values::Union{Nothing,ChartRef}
     bubble_sizes::Union{Nothing,ChartRef}
-    raw::XML.Node          # the c:ser element
+    raw::Union{Nothing,XML.Node}          # the c:ser element
 end
 
 const ChartRange = Union{Nothing,SheetCellRef,SheetCellRange,SheetRowRange,SheetColumnRange,NonContiguousRange}
@@ -965,22 +972,22 @@ abstract type AbstractChart end
 """
     Chart
 
-Metadata for one chart part, plus its series.
+A handle to one `c:` chart part. It holds the part's identity and anchor only;
+everything else is read from the current part on each call, so a `Chart` never
+goes stale and setters return it unchanged.
 
 # Fields
-- `path` - package path, e.g. `"xl/charts/chart1.xml"`.
-- `name` - part name without extension, e.g. `"chart1"`.
-- `rId` - relationship id of the chart within its drawing part, if resolved.
-- `sheet` - name of the sheet the chart is anchored to, if resolved.
-- `from`, `to` - anchor cell references as strings, following `getImages`.
-- `title` - chart title text; `nothing` if auto-generated or deleted.
-- `charttypes` - e.g. `[:barChart]`, or several for a combo chart.
-- `series` - `Vector{ChartSeries}` in document order.
+- `package` — the `XLSXFile` the part belongs to.
+- `path` — package path, e.g. `"xl/charts/chart1.xml"`.
+- `name` — part name without extension, e.g. `"chart1"`.
+- `rId` — relationship id of the chart within its drawing part, if resolved.
+- `sheet` — name of the sheet the chart is anchored to, if resolved.
+- `from`, `to` — anchor cell references as strings, following `getImages`.
 
-    # Stage 6 note: chart-level types keep a non-nullable `raw` because every
-    # accessor assumes a parsed node. Creating charts from scratch will need the
-    # same nullable treatment the DrawingML types have, and every `.raw` use
-    # audited with it.
+Content is reached through accessors: [`getChartTitle`](@ref),
+[`getChartTypes`](@ref), [`getChartSeries`](@ref), [`getChartData`](@ref) and the
+rest of the chart API. The values they return carry keys, so they remain valid
+arguments after later writes; see [`ChartSeries`](@ref).
 """
 struct Chart <: AbstractChart
     package::XLSXFile
@@ -990,9 +997,6 @@ struct Chart <: AbstractChart
     sheet::Union{Nothing,String}
     from::Union{Nothing,String}
     to::Union{Nothing,String}
-    title::Union{Nothing,String}
-    charttypes::Vector{Symbol}
-    series::Vector{ChartSeries}
 end
 
 """
@@ -1017,7 +1021,7 @@ remains valid after the part is written to.
 
 # Reading content
 - [`chartType`](@ref) - e.g. `:waterfall`, `:histogram`.
-- [`charttitle`](@ref) - title text, whether typed or bound to a cell;
+- [`getChartTitle`](@ref) - title text, whether typed or bound to a cell;
   `nothing` if the title has no text of its own.
 - [`getChartRanges`](@ref) - the source range of each data dimension, resolved
   through the workbook's hidden `_xlchart.*` defined names.
@@ -1239,7 +1243,9 @@ on write.
 - `bgcolor` - a pattern's background; `nothing` otherwise.
 - `preset::Union{Nothing,String}` - a pattern's `prst` attribute, e.g. `"pct25"`,
   `"ltUpDiag"`.
-- `raw::XML.Node` - the element as read.
+- `raw::Union{Nothing,XML.Node}` - the element as read, or `nothing` for a fill
+  built in code. Gradient, pattern, picture and group fills are written back from
+  it.
 """
 struct DrawingFill
     kind::Symbol
@@ -1269,17 +1275,22 @@ DrawingFill(kind::Symbol; fgcolor = nothing, bgcolor = nothing, preset = nothing
 A DrawingML outline: `<a:ln>`.
 
 The stroke colour lives in `fill`, since a line is filled the same way a shape
-is - solid, gradient, pattern or none. `width` is in EMU, where 12700 EMU is
-one point.
+is - solid, gradient, pattern or none.
 
 # Fields
 - `fill::Union{Nothing,DrawingFill}` - the stroke; `nothing` where the element
   says nothing about it, `kind === :none` where it explicitly has no outline.
-- `width::Union{Nothing,Int}` - the `w` attribute, in EMU.
+- `width::Union{Nothing,Float64}` - the `w` attribute, in points (the file stores
+  EMU, 12700 to the point).
 - `dash::Union{Nothing,String}` - `"solid"`, `"dash"`, `"sysDot"`, and so on.
 - `cap::Union{Nothing,String}` - `"rnd"`, `"sq"`, `"flat"`.
 - `compound::Union{Nothing,String}` - the `cmpd` attribute: `"sng"`, `"dbl"`, …
-- `raw::XML.Node` - the element as read.
+- `join::Union{Nothing,String}` - `"round"`, `"bevel"` or `"miter"`, from the
+  `a:round`/`a:bevel`/`a:miter` child.
+- `miter_limit::Union{Nothing,Float64}` - the `a:miter` `lim`, as a fraction of
+  the line width; only with a miter join.
+- `raw::Union{Nothing,XML.Node}` - the element as read, or `nothing` for a line
+  built in code.
 """
 struct DrawingLine
     fill::Union{Nothing,DrawingFill}
@@ -1523,26 +1534,49 @@ DrawingText(paras::Union{DrawingParagraph,AbstractString}...;
                                  for p in paras],
                 nothing)
 
+"""
+    ChartMarker
+
+Marker properties (`c:marker` under a `c:ser` or `c:dPt`), as read.
+
+# Fields
+- `series_idx` — `c:idx` of the owning series.
+- `point_idx` — `c:idx` of the owning data point, or `nothing` for the series' own
+  marker.
+- `symbol` — `:circle`, `:square`, `:none`, …; `nothing` means absent.
+- `size` — points, 2 to 72; `nothing` means absent.
+- `shape` — the marker's `c:spPr`, if written.
+- `raw` — the element as read, or `nothing` for a marker built in code.
+
+Identified by `series_idx` and `point_idx`. `raw` is never used to address the part.
+"""
 struct ChartMarker
-    symbol::Union{Nothing,Symbol}   # :circle, :square, :none, ...
-    size::Union{Nothing,Int}        # points, 2–72
+    series_idx::Int
+    point_idx::Union{Nothing,Int}        # nothing for the series' own marker
+    symbol::Union{Nothing,Symbol}
+    size::Union{Nothing,Int}
     shape::Union{Nothing,DrawingShapeProps}
-    raw::XML.Node
+    raw::Union{Nothing,XML.Node}
 end
 
 """
     ChartAxis
 
-One axis element from `c:plotArea` — `c:catAx`, `c:valAx`, `c:dateAx` or `c:serAx`.
+One axis (`c:catAx`, `c:valAx`, `c:dateAx` or `c:serAx`), as read.
 
 # Fields
-- `kind` — `:catAx`, `:valAx`, `:dateAx`, `:serAx`, as written.
-- `axid` — `c:axId`. The identifier chart groups and `c:crossAx` reference.
-- `pos` — `:l`, `:r`, `:t`, `:b` from `c:axPos`.
-- `crossax` — `axId` of the axis this one crosses.
-- `deleted` — `c:delete val="1"`. A deleted axis is still present in the XML
-  and still formattable; Excel just doesn't draw it.
-- `raw` — the axis element.
+- `kind` — the element tag as a Symbol, e.g. `:valAx`.
+- `axid` — `c:axId`, the key.
+- `pos` — `c:axPos`: `:b`, `:t`, `:l` or `:r`.
+- `crossax` — `c:crossAx`, the `axid` of the axis this one crosses.
+- `deleted` — `c:delete`; a deleted axis is not drawn but remains formattable.
+- `raw` — the element as read, or `nothing` for an axis built in code.
+
+Identified by `axid`. Functions taking `(c, ax)` find the axis by it in the
+current part, so `ax` stays usable across writes. The other fields describe the
+axis as it was when read; getters that depend on the axis kind check the current
+element, since Excel keeps the `axId` when a category axis is switched to a date
+axis. `raw` is never used to address the part.
 """
 struct ChartAxis
     kind::Symbol
@@ -1550,95 +1584,98 @@ struct ChartAxis
     pos::Union{Nothing,Symbol}
     crossax::Union{Nothing,Int}
     deleted::Bool
-    raw::XML.Node
+    raw::Union{Nothing,XML.Node}
 end
 
 """
     ChartGroup
 
-One chart-type group inside `c:plotArea` — `c:barChart`, `c:lineChart`,
-`c:scatterChart` and so on. A combo chart has several; a plain chart has one.
-
-The group is what ties series to axes: its `c:axId` children name the axes its
-series are plotted against, so a series on a secondary axis is a series in a
-group that names the secondary axis ids.
+One chart-type group in `c:plotArea` (`c:barChart`, `c:lineChart`, …), as read.
 
 # Fields
-- `kind` — `:barChart`, `:lineChart`, …, as written.
-- `axids` — `c:axId` values in document order. Two for most chart types, three
-  for 3-D charts with a series axis, none for pie and doughnut.
-- `raw` — the group element.
+- `kind` — the element tag as a Symbol, e.g. `:barChart`.
+- `axids` — the `c:axId` values the group plots against, in order; empty for pie
+  and doughnut groups.
+- `raw` — the element as read, or `nothing` for a group built in code.
+
+Identified by `(kind, axids)`: a combo chart's groups plot against different axis
+pairs, so the pair is unique in practice. Functions taking `(c, g)` find the
+group by it in the current part and throw if no group, or more than one, matches.
+Equality and hashing use the key alone. `raw` is never used to address the part.
 """
 struct ChartGroup
     kind::Symbol
     axids::Vector{Int}
-    raw::XML.Node
+    raw::Union{Nothing,XML.Node}
 end
+
+# A group's identity is its key, so equality ignores `raw`.
+Base.:(==)(a::ChartGroup, b::ChartGroup) = a.kind == b.kind && a.axids == b.axids
+Base.hash(g::ChartGroup, h::UInt) = hash(g.axids, hash(g.kind, hash(:ChartGroup, h)))
 
 """
     ChartDataPoint
 
-A per-point formatting override (`c:ser/c:dPt`). Points without an override
-have no `c:dPt` element at all, so a series of ten bars with one recoloured has
-exactly one of these.
+Per-point formatting override on a series (`c:dPt`), as read.
 
 # Fields
-- `idx` — `c:idx`, Excel's 0-based point number. Not a position in any Julia
-  collection; use [`series_data_point`](@ref) to look up by 1-based position.
-- `invert_if_negative`, `bubble3d` — the flags Excel writes alongside.
-- `raw` — the `c:dPt` element.
+- `series_idx` — `c:idx` of the owning series.
+- `idx` — the point's `c:idx`, 0-based as written.
+- `invert_if_negative`, `bubble3d` — as written; `nothing` means absent.
+- `raw` — the element as read, or `nothing` for a point built in code.
+
+Identified by `series_idx` and `idx`. Functions taking `(c, d)` find the element
+by these in the current part, so `d` stays usable across writes. The other fields
+describe the point as it was when read; `raw` is never used to address the part.
 """
 struct ChartDataPoint
-    idx::Int
+    series_idx::Int                      # c:idx of the owning c:ser
+    idx::Int                             # c:idx of the point, 0-based as written
     invert_if_negative::Union{Nothing,Bool}
     bubble3d::Union{Nothing,Bool}
-    raw::XML.Node
+    raw::Union{Nothing,XML.Node}
 end
 
 """
     ChartDataLabel
 
-An individual data label override (`c:ser/c:dLbls/c:dLbl`). Excel writes one
-only for a label the user moved, retyped or reformatted individually; the rest
-of the series' labels come from the series-level `c:dLbls`.
+An individual data label override (`c:dLbl` within a series' `c:dLbls`), as read.
 
 # Fields
-- `idx` — `c:idx`, Excel's 0-based point number. Not a Julia position; use
-  [`series_data_label`](@ref) to look up by 1-based position.
-- `delete` — `c:delete`. `true` hides this one label while the rest of the
-  series keeps its labels, and Excel then writes nothing else in the element,
-  so the other accessors return `nothing`. `nothing` means no `c:delete` was
-  written at all.
-- `raw` — the `c:dLbl` element.
+- `series_idx` — `c:idx` of the owning series.
+- `idx` — the labelled point's `c:idx`, 0-based as written.
+- `delete` — `c:delete`; a deleted label carries no other properties.
+- `raw` — the element as read, or `nothing` for a label built in code.
+
+Identified by `series_idx` and `idx`, as [`ChartDataPoint`](@ref).
 """
 struct ChartDataLabel
+    series_idx::Int
     idx::Int
     delete::Union{Nothing,Bool}
-    raw::XML.Node
+    raw::Union{Nothing,XML.Node}
 end
+
 """
     ChartTrendline
 
-A trendline on a series (`c:ser/c:trendline`). A series can carry several — a
-linear fit and a moving average, say — so accessors return a vector.
+A trendline on a series (`c:trendline`), as read.
 
 # Fields
-- `kind` — `c:trendlineType`: `:linear`, `:log`, `:exp`, `:power`, `:poly`,
-  `:movingAvg`.
-- `name` — `c:name`, the user's label for the line. `nothing` means Excel
-  generates one from the type and series name.
-- `order` — `c:order`, the degree of a polynomial fit. Meaningful for `:poly`.
-- `period` — `c:period`, the window of a moving average. Meaningful for
-  `:movingAvg`.
-- `forward`, `backward` — `c:forward`/`c:backward`, how far the line is
-  extrapolated beyond the data, in category units.
-- `intercept` — `c:intercept`, a forced y-intercept. `nothing` means the fit
-  chooses one.
-- `disp_rsqr`, `disp_eq` — whether the R² value and the fit equation are shown
-  on the chart.
-- `raw` — the `c:trendline` element.
+- `series_idx` — `c:idx` of the owning series.
+- `ordinal` — 1-based position among the series' `c:trendline` elements.
+- `kind` — `c:trendlineType`: `:linear`, `:exp`, `:log`, `:movingAvg`, `:poly`, `:power`.
+- `name`, `order`, `period`, `forward`, `backward`, `intercept`, `disp_rsqr`,
+  `disp_eq` — as written; `nothing` means absent.
+- `raw` — the element as read, or `nothing` for a trendline built in code.
+
+Identified by `series_idx` and `ordinal`. Trendlines have no identifier of their
+own, so the ordinal is positional: it holds as long as no earlier trendline on
+the same series is removed. `raw` is never used to address the part.
 """
 struct ChartTrendline
+    series_idx::Int
+    ordinal::Int                         # 1-based among the series' c:trendline elements
     kind::Union{Nothing,Symbol}
     name::Union{Nothing,String}
     order::Union{Nothing,Int}
@@ -1648,49 +1685,49 @@ struct ChartTrendline
     intercept::Union{Nothing,Float64}
     disp_rsqr::Union{Nothing,Bool}
     disp_eq::Union{Nothing,Bool}
-    raw::XML.Node
+    raw::Union{Nothing,XML.Node}
 end
 
 """
     ChartErrorBars
 
-Error bars on a series (`c:ser/c:errBars`). A series carries at most two, one
-for each of `x` and `y`.
+A set of error bars on a series (`c:errBars`), as read. A series carries at most
+two, one per direction.
 
 # Fields
-- `direction` — `c:errDir`: `:x` or `:y`. `nothing` on a chart type where only
-  one direction is possible, in which case Excel omits it.
-- `bar_type` — `c:errBarType`: `:both`, `:minus`, `:plus`.
-- `value_type` — `c:errValType`: `:cust`, `:fixedVal`, `:percentage`,
-  `:stdDev`, `:stdErr`.
-- `value` — `c:val`, the magnitude, for every `value_type` except `:cust`.
-- `no_end_cap` — `c:noEndCap`.
-- `raw` — the `c:errBars` element.
+- `series_idx` — `c:idx` of the owning series.
+- `ordinal` — 1-based position among the series' `c:errBars` elements.
+- `direction`, `bar_type`, `value_type`, `value`, `no_end_cap` — as written;
+  `nothing` means absent.
+- `raw` — the element as read, or `nothing` for error bars built in code.
+
+Identified by `series_idx` and `ordinal`, as [`ChartTrendline`](@ref).
 """
 struct ChartErrorBars
+    series_idx::Int
+    ordinal::Int                         # 1-based among the series' c:errBars elements
     direction::Union{Nothing,Symbol}
     bar_type::Union{Nothing,Symbol}
     value_type::Union{Nothing,Symbol}
     value::Union{Nothing,Float64}
     no_end_cap::Union{Nothing,Bool}
-    raw::XML.Node
+    raw::Union{Nothing,XML.Node}
 end
 
 """
     ChartUpDownBars
 
-Up and down bars on a line or stock chart (`c:upDownBars`), drawn between the
-first and last series at each category. The two bars are formatted separately:
-`up` is drawn where the last series exceeds the first, `down` where it falls
-short.
+Up-down bars on a line or stock chart group (`c:upDownBars`), as read.
 
 # Fields
-- `gap_width` — `c:gapWidth`, spacing as a percentage of bar width.
-- `raw` — the `c:upDownBars` element.
+- `group` — the owning [`ChartGroup`](@ref), which is the key.
+- `gap_width` — `c:gapWidth`; `nothing` means absent.
+- `raw` — the element as read, or `nothing` for bars built in code.
 """
 struct ChartUpDownBars
+    group::ChartGroup
     gap_width::Union{Nothing,Int}
-    raw::XML.Node
+    raw::Union{Nothing,XML.Node}
 end
 
 """

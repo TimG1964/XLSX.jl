@@ -7,21 +7,26 @@
 # against, where a per-point override lives. Nothing here parses DrawingML
 # itself; it locates a node and hands it to `drawingml.jl`.
 #
-# Entry point. Every accessor starts from a `Chart`, which reaches its XML
-# through `chart_root(c)` — `c.package` plus `c.path` into `xf.data`. Chart
-# parts are parsed eagerly at open, so that lookup is a dict hit, and the node
-# returned is the one `writexlsx` will serialize. Parsed structs keep their
-# element in `raw`, so mutating through `raw` *is* the write; nothing needs to
-# propagate. `Chart` objects are values parsed at a moment in time rather than
-# live handles — `getCharts` re-parses on every call — but the nodes they hold
-# are shared, so two `Chart`s from two calls edit the same tree.
+# Entry point. Every accessor starts from a `Chart`, a handle that reaches its
+# XML through `chart_root(c)` on each call, so it never goes stale. Everything
+# read from a chart — `ChartSeries`, `ChartAxis`, `ChartGroup`, data points,
+# labels, trendlines, error bars, markers — is a value carrying a key: `c:idx`
+# for a series or point, `c:axId` for an axis, `(kind, axids)` for a group, the
+# owning series plus an ordinal for trendlines and error bars. Any function
+# taking `(c, x)` finds `x`'s element by that key in the current part, getters
+# and setters alike, so a value read before a write still addresses the right
+# element afterwards. Its other fields describe the part as it was when read.
 #
-# Indexing is 1-based throughout, over `Chart.series` and over data points as
-# the user sees them. Excel's own identifiers — `c:idx`, `c:order`, `c:axId` —
-# are kept on the structs but are not positions: they need not be contiguous,
-# and a file where series or points were deleted will have gaps. `c:axId` is
-# the exception that is genuinely useful as a key, since `c:crossAx` and a
-# group's `c:axId` children reference it; `getChartAxis(c, axid)` looks up by it.
+# `raw` is kept for partial modelling and is never an address. A setter
+# locates its target in the root it is about to rebuild and builds its path
+# predicates from nodes of that same root, never from a snapshot.#
+# Indexing is 1-based throughout, over the series in document order, as 
+# getChartSeries returns them and over data points as the user sees them. 
+# Excel's own identifiers — `c:idx`, `c:order`, `c:axId` — are kept on the 
+# structs but are not positions: they need not be contiguous, and a file 
+# where series or points were deleted will have gaps. `c:axId` is the exception 
+# that is genuinely useful as a key, since `c:crossAx` and a group's `c:axId` 
+# children reference it; `getChartAxis(c, axid)` looks up by it.
 #
 # Absent is not explicit. Every optional value is `Union{Nothing,T}`, and
 # `nothing` means the element or attribute was not written — which in this
@@ -66,6 +71,19 @@ const AXIS_ROLES = Dict(
     :series   => "serAx",
 )
 
+function _axis_node(c::Chart, root::XML.Node, ax::ChartAxis)
+    isnothing(ax.axid) && throw(XLSXError(
+        "This axis has no `c:axId`, which the schema requires, so it cannot be located."))
+    for el in _plotarea_children(root)
+        localname(el) in AXIS_TAGS && _axis_id(el, "axId") == ax.axid && return el
+    end
+    throw(XLSXError("Chart `$(c.name)` has no axis with axId $(ax.axid)."))
+end
+
+# The axis's node in the current part, for getters. Setters call _axis_node with
+# the root they will rebuild instead.
+_axnode(c::Chart, ax::ChartAxis) = _axis_node(c, chart_root(c), ax)
+
 # c:axId and c:crossAx carry unsigned 32-bit values, which Excel writes near the
 # top of the range. Parse to Int (64-bit on every platform we support) rather
 # than Int32 — see the 32-bit portability bug in table.jl.
@@ -98,12 +116,8 @@ so this returns a vector rather than one axis.
 Axes with `c:delete val="1"` are included. Excel does not draw them, but they
 remain in the XML and remain formattable — check `ax.deleted` to skip them.
 """
-function getChartAxes(c::Chart)::Vector{ChartAxis}
-    plotarea = first_element_with_tag(first_element_with_tag(chart_root(c), "chart"), "plotArea")
-    isnothing(plotarea) && return ChartAxis[]
-    return [parse_chart_axis(el) for el in XML.eachelement(plotarea)
-            if localname(el) in AXIS_TAGS]
-end
+getChartAxes(c::Chart)::Vector{ChartAxis} =
+    [parse_chart_axis(el) for el in _plotarea_children(chart_root(c)) if localname(el) in AXIS_TAGS]
 
 function getChartAxes(c::Chart, role::Symbol)::Vector{ChartAxis}
     haskey(AXIS_ROLES, role) || throw(XLSXError(
@@ -129,9 +143,8 @@ function getChartAxis(c::Chart, axid::Integer)::ChartAxis
     return axes[i]
 end
 
-getAxisShapeProps(c::Chart, ax::ChartAxis) = parse_drawing_shape_props(_wb(c), ax.raw)
-
-getAxisTextProps(c::Chart, ax::ChartAxis) = parse_drawing_text(_wb(c), ax.raw)
+getAxisShapeProps(c::Chart, ax::ChartAxis) = parse_drawing_shape_props(_wb(c), _axnode(c, ax))
+getAxisTextProps(c::Chart, ax::ChartAxis)  = parse_drawing_text(_wb(c), _axnode(c, ax))
 
 """
     getAxisTitleRef(c::Chart, ax::ChartAxis) -> Union{Nothing,String}
@@ -140,7 +153,7 @@ The formula behind an axis title that references a cell
 (`c:title/c:tx/c:strRef/c:f`). `nothing` for a literal or absent title.
 """
 function getAxisTitleRef(c::Chart, ax::ChartAxis)
-    tx = first_element_with_tag(first_element_with_tag(ax.raw, "title"), "tx")
+    tx = first_element_with_tag(first_element_with_tag(_axnode(c, ax), "title"), "tx")
     sr = first_element_with_tag(tx, "strRef")
     return isnothing(sr) ? nothing : child_text(sr, "f")
 end
@@ -153,7 +166,7 @@ element, or a title that references a cell rather than carrying literal text —
 `c:tx/c:strRef` — which this does not resolve.
 """
 function getAxisTitleText(c::Chart, ax::ChartAxis)
-    tx = first_element_with_tag(first_element_with_tag(ax.raw, "title"), "tx")
+    tx = first_element_with_tag(first_element_with_tag(_axnode(c, ax), "title"), "tx")
     return parse_drawing_text(_wb(c), tx; tag="rich")
 end
 
@@ -184,11 +197,14 @@ as a `DrawingShapeProps` with every field absent — so `isnothing` answers "are
 there gridlines?" and the returned value answers "how are they formatted?".
 """
 getAxisGridlines(c::Chart, ax::ChartAxis; minor::Bool=false) =
-    _optional_spPr(c, ax.raw, minor ? "minorGridlines" : "majorGridlines")
+    _optional_spPr(c, _axnode(c, ax), minor ? "minorGridlines" : "majorGridlines")
 
-function _require_kind(ax::ChartAxis, kinds::Tuple, what::AbstractString)
-    ax.kind in kinds || throw(XLSXError(
-        "$what is only defined on $(join(kinds, " or ")); this is a $(ax.kind)."))
+# Checks the kind the axis has now, not when `ax` was read: Excel keeps the axId
+# when a category axis is switched to a date axis.
+function _require_kind(n::XML.Node, kinds::Tuple, what::AbstractString)
+    k = Symbol(localname(n))
+    k in kinds || throw(XLSXError(
+        "$what is only defined on $(join(kinds, " or ")); this is a $k."))
 end
 
 """
@@ -197,29 +213,55 @@ end
 The axis that `ax` crosses (`c:crossAx`). `nothing` if unwritten or dangling.
 """
 function getAxisPartner(c::Chart, ax::ChartAxis)
-    isnothing(ax.crossax) && return nothing
-    i = findfirst(a -> a.axid == ax.crossax, getChartAxes(c))
-    return isnothing(i) ? nothing : getChartAxes(c)[i]
+    cross = _axis_id(_axnode(c, ax), "crossAx")
+    isnothing(cross) && return nothing
+    axes = getChartAxes(c)
+    i = findfirst(a -> a.axid == cross, axes)
+    return isnothing(i) ? nothing : axes[i]
 end
 
 _wb(c::AbstractChart) = get_workbook(c.package)
 
-# Resolve a series index against a chart, with a message that says what went
-# wrong. `c.series[i]` would throw a BoundsError, which is correct but tells an
-# interactive user nothing about which chart or how many series it has.
-function _series(c::Chart, i::Integer)
-    n = length(c.series)
-    n == 0 && throw(XLSXError("Chart `$(c.name)` has no series."))
-    1 <= i <= n || throw(XLSXError(
-        "Chart `$(c.name)` has $n series; asked for series $i."))
-    return c.series[i]
+
+"""
+    getChartSeries(c::Chart; read_cached_values=true, get_external_refs=false) -> Vector{ChartSeries}
+
+The series of `c`, in document order across all chart groups. Each is a value identified by its idx; 
+see [`ChartSeries`](@ref)."
+
+`read_cached_values=false` reads metadata only: names, references and point
+counts, without the cached values. `get_external_refs=true` replaces an external
+workbook index such as `[1]` in each reference with the workbook's path.
+"""
+function getChartSeries(c::Chart; read_cached_values::Bool=true, get_external_refs::Bool=false)
+    out = ChartSeries[]
+    for (g, ser) in _series_nodes(chart_root(c))
+        s = parse_chart_series(ser, Symbol(localname(g)); read_cached_values)
+        push!(out, get_external_refs ? _with_external_refs(c.package, s) : s)
+    end
+    return out
 end
+
+# Resolve a series index against a chart, with a message that says what went
+# wrong. `getChartSeries(c)[i]` would throw a BoundsError, which is correct 
+# but tells an interactive user nothing about which chart or how many series 
+# it has.
+function _series(c::Chart, i::Integer; read_cached_values::Bool=true)
+    g, ser = _series_pick(c, chart_root(c), i)
+    return parse_chart_series(ser, Symbol(localname(g)); read_cached_values)
+end
+
+# One entry per group, duplicates kept (e.g. primary and secondary barChart),
+# including groups with no series. This matches what the constructor cached.
+getChartTypes(c::Chart)::Vector{Symbol} =
+    [Symbol(localname(g)) for g in _group_nodes(chart_root(c))]
+
 
 """
     getSeriesShapeProps(c::Chart, i::Integer) -> Union{Nothing,DrawingShapeProps}
 
 Fill, line and effects for the graphic of series `i` (`c:ser/c:spPr`), where `i`
-is a position in `c.series`, not the `c:idx` value. `nothing` means no `spPr`
+is a position in getChartSeries(c), not the `c:idx` value. `nothing` means no `spPr`
 was written, which in DrawingML means inherit from the chart style — not "no
 formatting". Contrast an explicit `<a:noFill/>`, which `has_fill` reports as
 deliberately off.
@@ -236,21 +278,18 @@ overrides in `c:dLbls/c:dLbl` are not consulted; this is the series-level defaul
 getSeriesLabelTextProps(c::Chart, i::Integer) =
     parse_drawing_text(_wb(c), first_element_with_tag(_series(c, i).raw, "dLbls"))
 
-    # Shared by `getSeriesMarker` and `getDataPointMarker`. `parent` is a `c:ser` or
+# Shared by `getSeriesMarker` and `getDataPointMarker`. `parent` is a `c:ser` or
 # `c:dPt` — anything that may carry a `c:marker` child.
 #
 # Note `c:marker` is ambiguous by tag: as a child of `c:lineChart` or
 # `c:scatterChart` it is a boolean show-markers flag, not this element. Only
 # call this with a series or data point.
-function _parse_marker(wb::Workbook, parent::Union{Nothing,XML.Node})
+function _parse_marker(wb::Workbook, parent::Union{Nothing,XML.Node},
+                       sidx::Int, pidx::Union{Nothing,Int})
     m = first_element_with_tag(parent, "marker")
     isnothing(m) && return nothing
-    sym = _attr(first_element_with_tag(m, "symbol"), "val")
-    sz  = _attr(first_element_with_tag(m, "size"), "val")
-    return ChartMarker(isnothing(sym) ? nothing : Symbol(sym),
-                       isnothing(sz)  ? nothing : parse(Int, sz),
-                       parse_drawing_shape_props(wb, m),
-                       m)
+    return ChartMarker(sidx, pidx, _sym_val(m, "symbol"), _int_val(m, "size"),
+                       parse_drawing_shape_props(wb, m), m)
 end
 
 """
@@ -260,7 +299,14 @@ Marker for series `i` of a line, scatter or radar chart (`c:ser/c:marker`).
 `nothing` means no `c:marker` element; a marker whose `symbol` is `:none` is a
 marker explicitly turned off, which is a different thing.
 """
-getSeriesMarker(c::Chart, i::Integer) = _parse_marker(_wb(c), _series(c, i).raw)
+function getSeriesMarker(c::Chart, i::Integer)
+    _, ser = _series_pick(c, chart_root(c), i)
+    return _parse_marker(_wb(c), ser, _ser_idx(ser), nothing)
+end
+
+function _chart_group(el::XML.Node)::ChartGroup
+    return ChartGroup(Symbol(localname(el)), _group_axids(el), el)
+end
 
 """
     getChartGroups(c::Chart) -> Vector{ChartGroup}
@@ -269,22 +315,17 @@ The chart-type groups in `c:plotArea`, in document order. A combo chart has
 several; a plain chart has one. Use [`getGroupAxes`](@ref) to find which axes a
 group's series are plotted against.
 """
-function getChartGroups(c::Chart)::Vector{ChartGroup}
-    plotarea = first_element_with_tag(
-        first_element_with_tag(chart_root(c), "chart"), "plotArea")
-    isnothing(plotarea) && return ChartGroup[]
+getChartGroups(c::Chart)::Vector{ChartGroup} =
+    [_chart_group(g) for g in _group_nodes(chart_root(c))]
 
-    groups = ChartGroup[]
-    for el in XML.eachelement(plotarea)
-        localname(el) in CHART_GROUP_TAGS || continue
-        ids = Int[]
-        for a in elements_with_tag(el, "axId")
-            v = _attr(a, "val")
-            isnothing(v) || push!(ids, parse(Int, v))
-        end
-        push!(groups, ChartGroup(Symbol(localname(el)), ids, el))
-    end
-    return groups
+"""
+    getSeriesGroup(c::Chart, i::Integer) -> ChartGroup
+
+The chart-type group containing series `i`.
+"""
+function getSeriesGroup(c::Chart, i::Integer)::ChartGroup
+    grp, _ = _series_pick(c, chart_root(c), i)
+    return _chart_group(grp)
 end
 
 """
@@ -313,20 +354,8 @@ inheritance parent for the series-level `c:dLbls`; Excel commonly writes a group
 `nothing`.
 """
 getGroupLabelTextProps(c::Chart, g::ChartGroup) =
-    parse_drawing_text(_wb(c), first_element_with_tag(g.raw, "dLbls"))
+    parse_drawing_text(_wb(c), first_element_with_tag(_node(c, g), "dLbls"))
 
-"""
-    getSeriesGroup(c::Chart, i::Integer) -> ChartGroup
-
-The chart-type group containing series `i`.
-"""
-function getSeriesGroup(c::Chart, i::Integer)::ChartGroup
-    ser = _series(c, i).raw
-    for g in getChartGroups(c)
-        any(s -> s === ser, elements_with_tag(g.raw, "ser")) && return g
-    end
-    throw(XLSXError("Series $i of chart `$(c.name)` is not in any chart group."))
-end
 
 """
     getSeriesAxes(c::Chart, i::Integer) -> Vector{ChartAxis}
@@ -410,18 +439,16 @@ getChartSpaceTextProps(c::Chart)  = parse_drawing_text(_wb(c), chart_root(c))
 # rather than that the feature is off.
 
 # Read a `val` attribute from a child element of `ax`, as a Symbol.
-function _axis_sym(ax::ChartAxis, tag::AbstractString)
-    v = _attr(first_element_with_tag(ax.raw, tag), "val")
-    return isnothing(v) ? nothing : Symbol(v)
-end
+_axis_sym(n::XML.Node, tag::AbstractString) =
+    (v = _attr(first_element_with_tag(n, tag), "val"); isnothing(v) ? nothing : Symbol(v))
+
 
 # Read a `val` attribute from a child element of `ax`, as a Float64.
 # Numeric axis values are xsd:double throughout; dates on a dateAx arrive as
 # serial numbers, matching how the rest of the package handles date cells.
-function _axis_num(ax::ChartAxis, tag::AbstractString)
-    v = _attr(first_element_with_tag(ax.raw, tag), "val")
-    return isnothing(v) ? nothing : parse(Float64, v)
-end
+_axis_num(n::XML.Node, tag::AbstractString) =
+    (v = _attr(first_element_with_tag(n, tag), "val"); isnothing(v) ? nothing : parse(Float64, v))
+
 
 # As `_axis_num`, but reading from a child of `c:scaling` rather than the axis.
 function _scaling_num(sc::XML.Node, tag::AbstractString)
@@ -436,7 +463,7 @@ The format code from `c:numFmt/@formatCode`. Ignored by Excel when
 [`getAxisNumberFormatLinked`](@ref) is `true`.
 """
 getAxisNumberFormatCode(c::Chart, ax::ChartAxis) =
-    _attr(first_element_with_tag(ax.raw, "numFmt"), "formatCode")
+    _attr(first_element_with_tag(_axnode(c, ax), "numFmt"), "formatCode")
 
 """
     getAxisNumberFormatLinked(c::Chart, ax::ChartAxis) -> Union{Nothing,Bool}
@@ -446,7 +473,7 @@ source cells and ignores the axis's own format code. `nothing` means no
 `c:numFmt` element was written.
 """
 function getAxisNumberFormatLinked(c::Chart, ax::ChartAxis)
-    el = first_element_with_tag(ax.raw, "numFmt")
+    el = first_element_with_tag(_axnode(c, ax), "numFmt")
     isnothing(el) && return nothing
     return _attr(el, "sourceLinked") in ("1", "true")
 end
@@ -456,21 +483,22 @@ end
 
 `c:majorTickMark` — `:cross`, `:in`, `:out` or `:none`.
 """
-getAxisMajorTickMark(c::Chart, ax::ChartAxis) = _axis_sym(ax, "majorTickMark")
+getAxisMajorTickMark(c::Chart, ax::ChartAxis) = _axis_sym(_axnode(c, ax), "majorTickMark")
+
 
 """
     getAxisMinorTickMark(c::Chart, ax::ChartAxis) -> Union{Nothing,Symbol}
 
 `c:minorTickMark` — `:cross`, `:in`, `:out` or `:none`.
 """
-getAxisMinorTickMark(c::Chart, ax::ChartAxis) = _axis_sym(ax, "minorTickMark")
+getAxisMinorTickMark(c::Chart, ax::ChartAxis) = _axis_sym(_axnode(c, ax), "minorTickMark")
 
 """
     getAxisTickLabelPos(c::Chart, ax::ChartAxis) -> Union{Nothing,Symbol}
 
 `c:tickLblPos` — `:high`, `:low`, `:nextTo` or `:none`.
 """
-getAxisTickLabelPos(c::Chart, ax::ChartAxis) = _axis_sym(ax, "tickLblPos")
+getAxisTickLabelPos(c::Chart, ax::ChartAxis)  = _axis_sym(_axnode(c, ax), "tickLblPos")
 
 """
     getAxisOrientation(c::Chart, ax::ChartAxis) -> Union{Nothing,Symbol}
@@ -481,9 +509,7 @@ plotted in reverse order.
 Throws if the axis has no `c:scaling`: the schema requires it, so its absence
 means a malformed chart part rather than an inherited value.
 """
-getAxisOrientation(c::Chart, ax::ChartAxis) =
-    (v = _attr(first_element_with_tag(_axis_scaling(ax), "orientation"), "val");
-     isnothing(v) ? nothing : Symbol(v))
+getAxisOrientation(c::Chart, ax::ChartAxis) = _axis_sym(_axis_scaling(_axnode(c, ax)), "orientation")
 
 """
     getAxisMin(c::Chart, ax::ChartAxis) -> Union{Nothing,Float64}
@@ -491,29 +517,29 @@ getAxisOrientation(c::Chart, ax::ChartAxis) =
 Fixed lower bound from `c:scaling/c:min`. `nothing` means Excel scales the axis
 automatically, which is the usual case; a value means the user fixed the bound.
 """
-getAxisMin(c::Chart, ax::ChartAxis) = _scaling_num(_axis_scaling(ax), "min")
+getAxisMin(c::Chart, ax::ChartAxis)     = _scaling_num(_axis_scaling(_axnode(c, ax)), "min")
 
 """
     getAxisMax(c::Chart, ax::ChartAxis) -> Union{Nothing,Float64}
 
 Fixed upper bound from `c:scaling/c:max`. `nothing` means automatic.
 """
-getAxisMax(c::Chart, ax::ChartAxis) = _scaling_num(_axis_scaling(ax), "max")
+getAxisMax(c::Chart, ax::ChartAxis)     = _scaling_num(_axis_scaling(_axnode(c, ax)), "max")
 
 """
     getAxisLogBase(c::Chart, ax::ChartAxis) -> Union{Nothing,Float64}
 
 `c:scaling/c:logBase`. `nothing` means a linear axis.
 """
-getAxisLogBase(c::Chart, ax::ChartAxis) = _scaling_num(_axis_scaling(ax), "logBase")
+getAxisLogBase(c::Chart, ax::ChartAxis) = _scaling_num(_axis_scaling(_axnode(c, ax)), "logBase")
 
-# c:scaling is required by CT_Scaling's parent in the schema, so a missing one
-# is a malformed part, not an absent-means-inherit case.
-function _axis_scaling(ax::ChartAxis)
-    sc = first_element_with_tag(ax.raw, "scaling")
+# c:scaling is required by the schema, so a missing one is a malformed part,
+# not an absent-means-inherit case.
+function _axis_scaling(n::XML.Node)
+    sc = first_element_with_tag(n, "scaling")
     isnothing(sc) && throw(XLSXError(
-        "Axis $(something(ax.axid, "?")) ($(ax.kind)) has no `c:scaling` element, " *
-        "which the schema requires. The chart part is malformed."))
+        "Axis $(something(_axis_id(n, "axId"), "?")) ($(localname(n))) has no `c:scaling` " *
+        "element, which the schema requires. The chart part is malformed."))
     return sc
 end
 
@@ -524,7 +550,7 @@ Where the partner axis crosses this one, as a rule: `:autoZero`, `:min` or
 `:max`. Mutually exclusive with [`getAxisCrossesAt`](@ref) — a chart uses one or
 the other, so at most one of the two is non-`nothing`.
 """
-getAxisCrosses(c::Chart, ax::ChartAxis) = _axis_sym(ax, "crosses")
+getAxisCrosses(c::Chart, ax::ChartAxis)       = _axis_sym(_axnode(c, ax), "crosses")
 
 """
     getAxisCrossesAt(c::Chart, ax::ChartAxis) -> Union{Nothing,Float64}
@@ -532,7 +558,7 @@ getAxisCrosses(c::Chart, ax::ChartAxis) = _axis_sym(ax, "crosses")
 Where the partner axis crosses this one, as a value (`c:crossesAt`). Mutually
 exclusive with [`getAxisCrosses`](@ref).
 """
-getAxisCrossesAt(c::Chart, ax::ChartAxis) = _axis_num(ax, "crossesAt")
+getAxisCrossesAt(c::Chart, ax::ChartAxis)     = _axis_num(_axnode(c, ax), "crossesAt")
 
 """
     getAxisMajorUnit(c::Chart, ax::ChartAxis) -> Union{Nothing,Float64}
@@ -541,8 +567,9 @@ Interval between major ticks and gridlines (`c:majorUnit`). `nothing` means
 Excel chooses automatically. Value and date axes only.
 """
 function getAxisMajorUnit(c::Chart, ax::ChartAxis)
-    _require_kind(ax, (:valAx, :dateAx), "majorUnit")
-    return _axis_num(ax, "majorUnit")
+    n = _axnode(c, ax)
+    _require_kind(n, (:valAx, :dateAx), "majorUnit")
+    return _axis_num(n, "majorUnit")
 end
 
 """
@@ -551,8 +578,9 @@ end
 Interval between minor ticks (`c:minorUnit`). Value and date axes only.
 """
 function getAxisMinorUnit(c::Chart, ax::ChartAxis)
-    _require_kind(ax, (:valAx, :dateAx), "minorUnit")
-    return _axis_num(ax, "minorUnit")
+    n = _axnode(c, ax)
+    _require_kind(n, (:valAx, :dateAx), "minorUnit")
+    return _axis_num(n, "minorUnit")
 end
 
 """
@@ -561,8 +589,9 @@ end
 `c:lblAlgn` — `:ctr`, `:l` or `:r`. Category and date axes only.
 """
 function getAxisLabelAlign(c::Chart, ax::ChartAxis)
-    _require_kind(ax, (:catAx, :dateAx), "lblAlgn")
-    return _axis_sym(ax, "lblAlgn")
+    n = _axnode(c, ax)
+    _require_kind(n, (:catAx, :dateAx), "lblAlgn")
+    return _axis_sym(n, "lblAlgn")
 end
 
 """
@@ -572,9 +601,9 @@ end
 and 1000. Category and date axes only.
 """
 function getAxisLabelOffset(c::Chart, ax::ChartAxis)
-    _require_kind(ax, (:catAx, :dateAx), "lblOffset")
-    v = _attr(first_element_with_tag(ax.raw, "lblOffset"), "val")
-    return isnothing(v) ? nothing : parse(Int, v)
+    n = _axnode(c, ax)
+    _require_kind(n, (:catAx, :dateAx), "lblOffset")
+    return _int_val(n, "lblOffset")
 end
 
 """
@@ -585,11 +614,11 @@ element is `c:noMultiLvlLbl`, so `val="1"` means labels are *not* multi-level
 and this returns `false`. Category and date axes only.
 """
 function getAxisMultiLevelLabels(c::Chart, ax::ChartAxis)
-    _require_kind(ax, (:catAx, :dateAx), "noMultiLvlLbl")
-    v = _bool_val(ax.raw, "noMultiLvlLbl")
+    n = _axnode(c, ax)
+    _require_kind(n, (:catAx, :dateAx), "noMultiLvlLbl")
+    v = _bool_val(n, "noMultiLvlLbl")
     return isnothing(v) ? nothing : !v
 end
-
 
 """
     getAxisCrossBetween(c::Chart, ax::ChartAxis) -> Union{Nothing,Symbol}
@@ -598,8 +627,9 @@ end
 `:midCat` if it crosses at their midpoints. Value axes only.
 """
 function getAxisCrossBetween(c::Chart, ax::ChartAxis)
-    _require_kind(ax, (:valAx,), "crossBetween")
-    return _axis_sym(ax, "crossBetween")
+    n = _axnode(c, ax)
+    _require_kind(n, (:valAx,), "crossBetween")
+    return _axis_sym(n, "crossBetween")
 end
 
 """
@@ -609,15 +639,14 @@ Per-point overrides on series `i`, in document order. Usually empty, or short �
 only points the user formatted individually appear.
 """
 function getSeriesDataPoints(c::Chart, i::Integer)::Vector{ChartDataPoint}
+    _, ser = _series_pick(c, chart_root(c), i)
+    sidx = _ser_idx(ser)
     out = ChartDataPoint[]
-    for el in elements_with_tag(_series(c, i).raw, "dPt")
-        n = _attr(first_element_with_tag(el, "idx"), "val")
+    for el in elements_with_tag(ser, "dPt")
+        n = _int_val(el, "idx")
         isnothing(n) && continue          # a dPt with no idx applies to nothing
-        push!(out, ChartDataPoint(
-            parse(Int, n),
-            _bool_val(el, "invertIfNegative"),
-            _bool_val(el, "bubble3D"),
-            el))
+        push!(out, ChartDataPoint(sidx, n, _bool_val(el, "invertIfNegative"),
+                                  _bool_val(el, "bubble3D"), el))
     end
     return out
 end
@@ -654,8 +683,8 @@ function getSeriesDataPoint(c::Chart, i::Integer, point::Integer)
     return isnothing(j) ? nothing : dps[j]
 end
 
-getDataPointShapeProps(c::Chart, d::ChartDataPoint) =
-    parse_drawing_shape_props(_wb(c), d.raw)
+getDataPointShapeProps(c::Chart, d::ChartDataPoint) = parse_drawing_shape_props(_wb(c), _node(c, d))
+
 
 """
     getDataPointMarker(c::Chart, d::ChartDataPoint) -> Union{Nothing,ChartMarker}
@@ -664,7 +693,8 @@ Marker override for a single data point (`c:dPt/c:marker`). `nothing` means the
 point does not override the series marker — the series-level
 [`getSeriesMarker`](@ref) applies.
 """
-getDataPointMarker(c::Chart, d::ChartDataPoint) = _parse_marker(_wb(c), d.raw)
+getDataPointMarker(c::Chart, d::ChartDataPoint) =
+    _parse_marker(_wb(c), _node(c, d), d.series_idx, d.idx)
 
 # The `c:dLbls` container on a series, group or data point.
 _dlbls(parent::Union{Nothing,XML.Node}) = first_element_with_tag(parent, "dLbls")
@@ -675,15 +705,15 @@ _dlbls(parent::Union{Nothing,XML.Node}) = first_element_with_tag(parent, "dLbls"
 Individual label overrides on series `i`, in document order. Usually empty.
 """
 function getSeriesDataLabels(c::Chart, i::Integer)::Vector{ChartDataLabel}
+    _, ser = _series_pick(c, chart_root(c), i)
+    sidx = _ser_idx(ser)
     out = ChartDataLabel[]
-    dl = _dlbls(_series(c, i).raw)
+    dl = _dlbls(ser)
     isnothing(dl) && return out
     for el in elements_with_tag(dl, "dLbl")
-        n = _attr(first_element_with_tag(el, "idx"), "val")
+        n = _int_val(el, "idx")
         isnothing(n) && continue
-        push!(out, ChartDataLabel(parse(Int, n),
-                            _bool_val(el, "delete"),
-                            el))
+        push!(out, ChartDataLabel(sidx, n, _bool_val(el, "delete"), el))
     end
     return out
 end
@@ -701,11 +731,11 @@ function getSeriesDataLabel(c::Chart, i::Integer, point::Integer)
     return isnothing(j) ? nothing : dls[j]
 end
 
-getDataLabelTextProps(c::Chart, d::ChartDataLabel) =
-    parse_drawing_text(_wb(c), d.raw)
+getDataLabelTextProps(c::Chart, d::ChartDataLabel)  = parse_drawing_text(_wb(c), _node(c, d))
 
-getDataLabelShapeProps(c::Chart, d::ChartDataLabel) =
-    parse_drawing_shape_props(_wb(c), d.raw)
+
+getDataLabelShapeProps(c::Chart, d::ChartDataLabel) = parse_drawing_shape_props(_wb(c), _node(c, d))
+
 
 """
     getDataLabelText(c::Chart, d::ChartDataLabel) -> Union{Nothing,DrawingText}
@@ -715,7 +745,7 @@ the label shows its value rather than typed-over text. Contrast
 [`getDataLabelTextProps`](@ref), which is the label's `c:txPr` formatting.
 """
 getDataLabelText(c::Chart, d::ChartDataLabel) =
-    parse_drawing_text(_wb(c), first_element_with_tag(d.raw, "tx"); tag="rich")
+    parse_drawing_text(_wb(c), first_element_with_tag(_node(c, d), "tx"); tag="rich")
 
 """
     getDataLabelPosition(c::Chart, d::ChartDataLabel) -> Union{Nothing,Symbol}
@@ -723,10 +753,7 @@ getDataLabelText(c::Chart, d::ChartDataLabel) =
 `c:dLblPos` — `:ctr`, `:inEnd`, `:inBase`, `:outEnd`, `:l`, `:r`, `:t`, `:b`,
 `:bestFit`. Which values are legal depends on the chart type.
 """
-function getDataLabelPosition(c::Chart, d::ChartDataLabel)
-    v = _attr(first_element_with_tag(d.raw, "dLblPos"), "val")
-    return isnothing(v) ? nothing : Symbol(v)
-end
+getDataLabelPosition(c::Chart, d::ChartDataLabel) = _sym_val(_node(c, d), "dLblPos")
 
 """
     getDataLabelOffset(c::Chart, d::ChartDataLabel) -> Union{Nothing,NamedTuple}
@@ -738,16 +765,12 @@ puts it. Distinct from [`getDataLabelPosition`](@ref), which is the discrete
 position when you pick one from the menu, so a label usually has one or neither.
 """
 function getDataLabelOffset(c::Chart, d::ChartDataLabel)
-    ml = first_element_with_tag(first_element_with_tag(d.raw, "layout"), "manualLayout")
+    ml = first_element_with_tag(first_element_with_tag(_node(c, d), "layout"), "manualLayout")
     isnothing(ml) && return nothing
-    f(tag) = (v = _attr(first_element_with_tag(ml, tag), "val");
-              isnothing(v) ? nothing : parse(Float64, v))
-    return (x = f("x"), y = f("y"))
+    return (x = _num_val(ml, "x"), y = _num_val(ml, "y"))
 end
 
-
-
-    # --- trendlines -----------------------------------------------------------
+# --- trendlines -----------------------------------------------------------
 
 """
     getSeriesTrendlines(c::Chart, i::Integer) -> Vector{ChartTrendline}
@@ -756,22 +779,14 @@ Trendlines on series `i`, in document order. A series can carry several — a
 linear fit and a moving average, say — so this returns a vector. Usually empty.
 """
 function getSeriesTrendlines(c::Chart, i::Integer)::Vector{ChartTrendline}
-    out = ChartTrendline[]
-    for el in elements_with_tag(_series(c, i).raw, "trendline")
-        t = _attr(first_element_with_tag(el, "trendlineType"), "val")
-        push!(out, ChartTrendline(
-            isnothing(t) ? nothing : Symbol(t),
-            child_text(el, "name"),
-            _int_val(el, "order"),
-            _int_val(el, "period"),
-            _num_val(el, "forward"),
-            _num_val(el, "backward"),
-            _num_val(el, "intercept"),
-            _bool_val(el, "dispRSqr"),
-            _bool_val(el, "dispEq"),
-            el))
-    end
-    return out
+    _, ser = _series_pick(c, chart_root(c), i)
+    sidx = _ser_idx(ser)
+    return [ChartTrendline(sidx, k, _sym_val(el, "trendlineType"), child_text(el, "name"),
+                           _int_val(el, "order"), _int_val(el, "period"),
+                           _num_val(el, "forward"), _num_val(el, "backward"),
+                           _num_val(el, "intercept"), _bool_val(el, "dispRSqr"),
+                           _bool_val(el, "dispEq"), el)
+            for (k, el) in enumerate(elements_with_tag(ser, "trendline"))]
 end
 
 """
@@ -780,8 +795,7 @@ end
 Line properties of the trendline itself (`c:trendline/c:spPr`). Trendlines are
 lines, so the fill is normally absent; the dash pattern lives in `line.dash`.
 """
-getTrendlineShapeProps(c::Chart, t::ChartTrendline) =
-    parse_drawing_shape_props(_wb(c), t.raw)
+getTrendlineShapeProps(c::Chart, t::ChartTrendline) = parse_drawing_shape_props(_wb(c), _node(c, t))
 
 """
     getTrendlineLabelText(c::Chart, t::ChartTrendline) -> Union{Nothing,DrawingText}
@@ -792,26 +806,24 @@ typed-over text — or that there is no label at all. Contrast
 [`getTrendlineLabelTextProps`](@ref), which is the label's `c:txPr` formatting.
 """
 getTrendlineLabelText(c::Chart, t::ChartTrendline) =
-    parse_drawing_text(_wb(c),
-        first_element_with_tag(_trendline_lbl(t), "tx"); tag="rich")
+    parse_drawing_text(_wb(c), first_element_with_tag(_trendline_lbl(_node(c, t)), "tx"); tag="rich")
 
 """
     getTrendlineLabelTextProps(c::Chart, t::ChartTrendline) -> Union{Nothing,DrawingText}
 
 Formatting of the trendline label (`c:trendlineLbl/c:txPr`).
 """
-getTrendlineLabelTextProps(c::Chart, t::ChartTrendline) =
-    parse_drawing_text(_wb(c), _trendline_lbl(t))
+getTrendlineLabelTextProps(c::Chart, t::ChartTrendline)  = parse_drawing_text(_wb(c), _trendline_lbl(_node(c, t)))
 
 """
     getTrendlineLabelShapeProps(c::Chart, t::ChartTrendline) -> Union{Nothing,DrawingShapeProps}
 
 Fill and border of the trendline label's box (`c:trendlineLbl/c:spPr`).
 """
-getTrendlineLabelShapeProps(c::Chart, t::ChartTrendline) =
-    parse_drawing_shape_props(_wb(c), _trendline_lbl(t))
+getTrendlineLabelShapeProps(c::Chart, t::ChartTrendline) = parse_drawing_shape_props(_wb(c), _trendline_lbl(_node(c, t)))
 
-_trendline_lbl(t::ChartTrendline) = first_element_with_tag(t.raw, "trendlineLbl")
+_trendline_lbl(n::XML.Node) = first_element_with_tag(n, "trendlineLbl")
+
 
 # --- error bars -----------------------------------------------------------
 
@@ -822,17 +834,12 @@ Error bars on series `i`, in document order. A series carries at most two, one
 for each of the `x` and `y` directions.
 """
 function getSeriesErrorBars(c::Chart, i::Integer)::Vector{ChartErrorBars}
-    out = ChartErrorBars[]
-    for el in elements_with_tag(_series(c, i).raw, "errBars")
-        push!(out, ChartErrorBars(
-            _sym_val(el, "errDir"),
-            _sym_val(el, "errBarType"),
-            _sym_val(el, "errValType"),
-            _num_val(el, "val"),
-            _bool_val(el, "noEndCap"),
-            el))
-    end
-    return out
+    _, ser = _series_pick(c, chart_root(c), i)
+    sidx = _ser_idx(ser)
+    return [ChartErrorBars(sidx, k, _sym_val(el, "errDir"), _sym_val(el, "errBarType"),
+                           _sym_val(el, "errValType"), _num_val(el, "val"),
+                           _bool_val(el, "noEndCap"), el)
+            for (k, el) in enumerate(elements_with_tag(ser, "errBars"))]
 end
 
 """
@@ -840,8 +847,7 @@ end
 
 Line properties of the error bars (`c:errBars/c:spPr`).
 """
-getErrorBarsShapeProps(c::Chart, e::ChartErrorBars) =
-    parse_drawing_shape_props(_wb(c), e.raw)
+getErrorBarsShapeProps(c::Chart, e::ChartErrorBars) = parse_drawing_shape_props(_wb(c), _node(c, e))
 
 """
     getErrorBarsCustomRefs(c::Chart, e::ChartErrorBars) -> NamedTuple
@@ -854,13 +860,13 @@ magnitude from [`ChartErrorBars`](@ref)`.value` instead, and this returns
 `(nothing, nothing)`. Excel writes both `c:plus` and `c:minus` even for
 one-sided bars, so a `nothing` here means the element was genuinely absent.
 
-Cached values are read, matching `read_cached_values=true` on
-[`getCharts`](@ref) — these ranges are short, so there is nothing to save by
+Cached values are always read, whatever `read_cached_values` is passed to
+[`getChartSeries`](@ref) — these ranges are short, so there is nothing to save by
 skipping them.
 """
 function getErrorBarsCustomRefs(c::Chart, e::ChartErrorBars)
-    f(tag) = parse_chart_ref(first_element_with_tag(e.raw, tag);
-                             read_cached_values=true)
+    n = _node(c, e)
+    f(tag) = parse_chart_ref(first_element_with_tag(n, tag); read_cached_values=true)
     return (plus = f("plus"), minus = f("minus"))
 end
 
@@ -882,7 +888,7 @@ Line properties of the group's drop lines (`c:dropLines`), which run from each
 data point down to the category axis. `nothing` means the group has no drop
 lines. Line, area and stock charts.
 """
-getGroupDropLines(c::Chart, g::ChartGroup) = _optional_spPr(c, g.raw, "dropLines")
+getGroupDropLines(c::Chart, g::ChartGroup)   = _optional_spPr(c, _node(c, g), "dropLines")
 
 """
     getGroupHiLowLines(c::Chart, g::ChartGroup) -> Union{Nothing,DrawingShapeProps}
@@ -890,7 +896,7 @@ getGroupDropLines(c::Chart, g::ChartGroup) = _optional_spPr(c, g.raw, "dropLines
 Line properties of the group's high-low lines (`c:hiLowLines`), which span
 between the highest and lowest series at each category. Line and stock charts.
 """
-getGroupHiLowLines(c::Chart, g::ChartGroup) = _optional_spPr(c, g.raw, "hiLowLines")
+getGroupHiLowLines(c::Chart, g::ChartGroup)  = _optional_spPr(c, _node(c, g), "hiLowLines")
 
 """
     getGroupSeriesLines(c::Chart, g::ChartGroup) -> Union{Nothing,DrawingShapeProps}
@@ -898,27 +904,27 @@ getGroupHiLowLines(c::Chart, g::ChartGroup) = _optional_spPr(c, g.raw, "hiLowLin
 Line properties of the group's series lines (`c:serLines`), which connect
 segments across categories on a stacked bar or an of-pie chart.
 """
-getGroupSeriesLines(c::Chart, g::ChartGroup) = _optional_spPr(c, g.raw, "serLines")
+getGroupSeriesLines(c::Chart, g::ChartGroup) = _optional_spPr(c, _node(c, g), "serLines")
 
 function getGroupUpDownBars(c::Chart, g::ChartGroup)
-    el = first_element_with_tag(g.raw, "upDownBars")
+    el = first_element_with_tag(_node(c, g), "upDownBars")
     isnothing(el) && return nothing
-    return ChartUpDownBars(_int_val(el, "gapWidth"), el)
+    return ChartUpDownBars(g, _int_val(el, "gapWidth"), el)
 end
 
 """
     getUpBarShapeProps(c::Chart, b::ChartUpDownBars) -> Union{Nothing,DrawingShapeProps}
 
-Fill and border of the up bars (`c:upBars/c:spPr`). `nothing` means `c:upBars`
-was written with no formatting, or not written at all — Excel writes an empty
-`<c:upBars/>` for default white bars, so check `b.raw` if the distinction
-matters.
+Fill and border of the up bars (`c:upBars/c:spPr`). `nothing` means `c:upBars` 
+was written with no formatting, or not written at all — Excel writes an empty 
+`<c:upBars/>` for default white bars. The two cases differ only in the XML; 
+both draw Excel's default bars.
 """
 getUpBarShapeProps(c::Chart, b::ChartUpDownBars) =
-    parse_drawing_shape_props(_wb(c), first_element_with_tag(b.raw, "upBars"))
+    parse_drawing_shape_props(_wb(c), first_element_with_tag(_node(c, b), "upBars"))
 
 getDownBarShapeProps(c::Chart, b::ChartUpDownBars) =
-    parse_drawing_shape_props(_wb(c), first_element_with_tag(b.raw, "downBars"))
+    parse_drawing_shape_props(_wb(c), first_element_with_tag(_node(c, b), "downBars"))
 
     #-- Cascade resolution -------------------------------------------------------
 
@@ -1122,25 +1128,122 @@ function _ln_with(ln::XML.Node, pfx::Dict{String,String};
     return ln
 end
 
-"""
-    _series_path(c, i) -> Vector
-
-The `rebuild_path` steps from a chart part's root down to series `i`'s `c:ser`.
-Both the group and the series are matched by node identity rather than by tag,
-since a combo chart may hold several groups of one type and each holds several
-series.
-"""
-function _series_path(c::Chart, i::Integer)
-    ser  = _series(c, i).raw
-    grp  = getSeriesGroup(c, i).raw
+function _series_path(c::Chart, root::XML.Node, i::Integer)
+    grp, ser = _series_pick(c, root, i)
     gtag = String(localname(grp))
     skey = (NS_C, SER_TYPE[gtag])
     steps = [(NS_C, "chart")    => "chart",
              (NS_C, "plotArea") => "plotArea",
              (NS_C, gtag)       => (gtag, n -> n === grp),
              skey               => ("ser", n -> n === ser)]
-    return steps, skey
+    return steps, skey, ser
 end
+
+function _ser_idx(ser::XML.Node)
+    v = _int_val(ser, "idx")
+    isnothing(v) && throw(XLSXError("A `c:ser` has no `c:idx`, which the schema requires."))
+    return v
+end
+
+function _series_by_idx(c::Chart, root::XML.Node, idx::Integer)
+    for (g, s) in _series_nodes(root)
+        _int_val(s, "idx") == idx && return (g, s)
+    end
+    throw(XLSXError("Chart `$(c.name)` has no series with idx $idx."))
+end
+
+# The `tag` child of `parent` whose c:idx is `idx`, as written (0-based).
+function _idx_child(parent::Union{Nothing,XML.Node}, tag::AbstractString, idx::Integer)
+    isnothing(parent) && return nothing
+    for el in elements_with_tag(parent, tag)
+        _int_val(el, "idx") == idx && return el
+    end
+    return nothing
+end
+
+# As _idx_child, for a 1-based user-facing point position.
+function _point_node(parent::Union{Nothing,XML.Node}, tag::AbstractString, point::Integer)
+    point >= 1 || throw(XLSXError("Data point positions start at 1; asked for $point."))
+    return _idx_child(parent, tag, point - 1)
+end
+
+_dpt_node(ser::XML.Node, point::Integer)  = _point_node(ser, "dPt", point)
+_dlbl_node(ser::XML.Node, point::Integer) = _point_node(first_element_with_tag(ser, "dLbls"), "dLbl", point)
+
+_group_axids(n::XML.Node) =
+    Int[parse(Int, v) for a in elements_with_tag(n, "axId") for v in (_attr(a, "val"),) if !isnothing(v)]
+
+function _group_node(c::Chart, root::XML.Node, g::ChartGroup)
+    tag  = String(g.kind)
+    hits = [n for n in _group_nodes(root) if localname(n) == tag && _group_axids(n) == g.axids]
+    isempty(hits) && throw(XLSXError(
+        "Chart `$(c.name)` has no $(g.kind) group plotting against axes $(g.axids)."))
+    length(hits) > 1 && throw(XLSXError(
+        "Chart `$(c.name)` has $(length(hits)) $(g.kind) groups plotting against axes " *
+        "$(g.axids), so the group cannot be identified."))
+    return only(hits)
+end
+
+function _nth(parent::XML.Node, tag::AbstractString, k::Integer, what::AbstractString)
+    els = collect(elements_with_tag(parent, tag))
+    1 <= k <= length(els) || throw(XLSXError(
+        "The series has $(length(els)) $what; asked for number $k."))
+    return els[k]
+end
+
+# The element a sub-object refers to, found by its key in `root`. Getters use the
+# two-argument form; setters pass the root they will rebuild.
+_node(c::Chart, x) = _node(c, chart_root(c), x)
+
+_node(c::Chart, root::XML.Node, g::ChartGroup) = _group_node(c, root, g)
+
+function _node(c::Chart, root::XML.Node, b::ChartUpDownBars)
+    n = first_element_with_tag(_group_node(c, root, b.group), "upDownBars")
+    isnothing(n) && throw(XLSXError("The $(b.group.kind) group no longer has up-down bars."))
+    return n
+end
+
+function _node(c::Chart, root::XML.Node, d::ChartDataPoint)
+    _, ser = _series_by_idx(c, root, d.series_idx)
+    n = _idx_child(ser, "dPt", d.idx)
+    isnothing(n) && throw(XLSXError(
+        "Series idx $(d.series_idx) no longer has formatting for point idx $(d.idx)."))
+    return n
+end
+
+function _node(c::Chart, root::XML.Node, d::ChartDataLabel)
+    _, ser = _series_by_idx(c, root, d.series_idx)
+    n = _idx_child(first_element_with_tag(ser, "dLbls"), "dLbl", d.idx)
+    isnothing(n) && throw(XLSXError(
+        "Series idx $(d.series_idx) no longer has an individual label for point idx $(d.idx)."))
+    return n
+end
+
+_node(c::Chart, root::XML.Node, t::ChartTrendline) =
+    _nth(last(_series_by_idx(c, root, t.series_idx)), "trendline", t.ordinal, "trendlines")
+
+_node(c::Chart, root::XML.Node, e::ChartErrorBars) =
+    _nth(last(_series_by_idx(c, root, e.series_idx)), "errBars", e.ordinal, "error bar sets")
+
+function _node(c::Chart, root::XML.Node, m::ChartMarker)
+    _, ser = _series_by_idx(c, root, m.series_idx)
+    parent = isnothing(m.point_idx) ? ser : _idx_child(ser, "dPt", m.point_idx)
+    n = first_element_with_tag(parent, "marker")
+    isnothing(n) && throw(XLSXError("That marker is no longer in the chart."))
+    return n
+end
+
+function _set_series_shape(c::Chart, i::Integer, f)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    steps, ser_key = _series_path(c, root, i)
+    new = rebuild_path(root, [steps...; (NS_A, "spPr") => "spPr"],
+                       sp -> f(sp, pfx);
+                       prefixes = pfx, parent_key = ser_key)
+    set_chart_root!(c, new)
+    return c
+end
+
 
 """
     setSeriesFill(c, i, color) -> Chart
@@ -1152,8 +1255,9 @@ a `Colors.Colorant`, a [`SchemeColor`](@ref), `:none` for an explicit
 `:none` and `:inherit` are different states. An absent fill inherits; `noFill`
 does not.
 
-Returns a fresh `Chart` — the part is rebuilt, so any `Chart` from before this
-call, including `c`, holds stale nodes.
+Returns `c`. A `Chart` reads its part on every call, so `c` and any other handle
+to the same chart see the change. Values read from it earlier, such as a
+`ChartSeries` or a `ChartDataPoint`, describe the part as it was then.
 """
 setSeriesFill(c::Chart, i::Integer, color::Union{AbstractString,Colors.Colorant,SchemeColor}) =
     _set_series_shape(c, i, (sp, pfx) -> _sp_with_fill(sp, (NS_A, "spPr"), color, pfx))
@@ -1237,26 +1341,6 @@ function setSeriesLine(c::Chart, i::Integer, what::Symbol)
 end
 
 """
-    _set_series_shape(c, i, f) -> Chart
-
-Apply `f` to series `i`'s `c:spPr`, creating one if absent, and rebuild the
-chart part once. `f` takes the `spPr` element and returns its replacement.
-
-Where [`_set_series_line`](@ref) works inside the `a:ln`, this works on its
-parent — needed for changes to the `a:ln` itself, such as removing it.
-"""
-function _set_series_shape(c::Chart, i::Integer, f)
-    root = chart_root(c)
-    pfx  = ns_prefixes(root)
-        steps, ser_key = _series_path(c, i)
-    new = rebuild_path(root, [steps...; (NS_A, "spPr") => "spPr"],
-                       sp -> f(sp, pfx);
-                       prefixes = pfx, parent_key = ser_key)
-    set_chart_root!(c, new)
-    return getChart(c.package, c.name)
-end
-
-"""
     _marker_with_symbol(mk, symbol, pfx) -> XML.Node
 
 Set a `c:marker`'s `c:symbol`. `:none` is a symbol in its own right — a marker
@@ -1289,31 +1373,24 @@ end
     _set_marker(c, i, point, f) -> Chart
 
 Apply `f` to a `c:marker`, creating one if absent, and rebuild the chart part
-once. `point` selects a data point's marker; `nothing` selects the series'.
+once. `point` selects a data point's marker, counting from 1; `nothing` selects
+the series'.
 
-A data point that Excel never formatted has no `c:dPt`, and this does not create
-one — setting a marker on such a point throws. Creating a `c:dPt` means writing
-the `c:idx` that identifies it, which is a different operation from creating the
-empty intermediates `rebuild_path` makes.
+A point with no `c:dPt` gets one, written with its `c:idx` and placed in index
+order among the series' other `c:dPt` elements.
 """
 function _set_marker(c::Chart, i::Integer, point::Union{Nothing,Integer}, f)
     root = chart_root(c)
     pfx  = ns_prefixes(root)
-    steps, ser_key = _series_path(c, i)
-
-    if !isnothing(point)
-        dp = getSeriesDataPoint(c, i, point)
-        isnothing(dp) && throw(XLSXError(
-            "Series $i has no formatting for data point $point, and creating one " *
-            "is not supported yet."))
-        push!(steps, (NS_C, "dPt") => ("dPt", n -> n === dp.raw))
-    end
-    push!(steps, (NS_C, "marker") => "marker")
-
-    new = rebuild_path(root, steps, mk -> f(mk, pfx);
-                       prefixes = pfx, parent_key = ser_key)
+    steps, ser_key = _series_path(c, root, i)
+    marker_in(parent, key) = rebuild_path(parent, [(NS_C, "marker") => "marker"],
+                                          mk -> f(mk, pfx); prefixes = pfx, parent_key = key)
+    new = rebuild_path(root, steps,
+              ser -> isnothing(point) ? marker_in(ser, ser_key) :
+                     _with_dpt(ser, ser_key, point, pfx, dp -> marker_in(dp, (NS_C, "dPt")));
+              prefixes = pfx)
     set_chart_root!(c, new)
-    return getChart(c.package, c.name)
+    return c
 end
 
 """
@@ -1461,6 +1538,11 @@ formatting a series' labels does not make them appear. A `c:dLbls` that names no
 flags shows labels with Excel's own defaults — legend key, series name and value
 — which would turn them on for a series that had none.
 
+The per-point form creates the individual `c:dLbl` if the point has none, placed
+in index order and carrying the same `show*` flags as its `c:dLbls`, so it
+displays exactly what its sibling labels display. Formatting one label on a
+series whose labels are off does not make that label appear.
+
 Two fields take compound values. `:fill` accepts anything
 [`setSeriesFill`](@ref) does — a color, a [`SchemeColor`](@ref), `:none` or
 `:inherit`. `:line` accepts a color, or a `NamedTuple` of the
@@ -1472,36 +1554,28 @@ undeleting it is a separate operation.
 function setLabelTextProp(c::Chart, i::Integer, field::Symbol, value)
     root = chart_root(c)
     pfx  = ns_prefixes(root)
-    steps, ser_key = _series_path(c, i)
+    steps, ser_key = _series_path(c, root, i)
     new = rebuild_path(root, [steps...; (NS_C, "dLbls") => "dLbls"],
                        lbl -> _label_transform(lbl, field, value, pfx);
                        prefixes = pfx, parent_key = ser_key)
     set_chart_root!(c, new)
-    return getChart(c.package, c.name)
+    return c
 end
 
 function setLabelTextProp(c::Chart, i::Integer, point::Integer, field::Symbol, value)
-    dl = getSeriesDataLabel(c, i, point)
-    isnothing(dl) && throw(XLSXError(
-        "Series $i has no individual formatting for label $point, and creating " *
-        "one is not supported yet."))
-
-    dl.delete === true && throw(XLSXError(
-        "Label $point of series $i is deleted, so it has no formatting to set. " *
-        "A deleted `c:dLbl` carries only `c:delete`, which the schema makes " *
-        "exclusive of every display property."))
-
     root = chart_root(c)
     pfx  = ns_prefixes(root)
-    steps, ser_key = _series_path(c, i)
-    new = rebuild_path(root,
-                       [steps...;
-                        (NS_C, "dLbls") => "dLbls";
-                        (NS_C, "dLbl")  => ("dLbl", n -> n === dl.raw)],
-                       lbl -> _label_transform(lbl, field, value, pfx);
-                           prefixes = pfx, parent_key = ser_key)
+    steps, _, ser = _series_path(c, root, i)
+    dl = _dlbl_node(ser, point)
+    !isnothing(dl) && _bool_val(dl, "delete") === true && throw(XLSXError(
+        "Label $point of series $i is deleted, so it has no formatting to set. " *
+        "Undelete it first with `setLabelDeleted(c, $i, $point, false)`."))
+    new = rebuild_path(root, [steps...; (NS_C, "dLbls") => "dLbls"],
+              lbls -> _with_dlbl(_dlbls_flags_off(lbls, (NS_C, "dLbls"), pfx), point, pfx,
+                                 lbl -> _label_transform(lbl, field, value, pfx));
+              prefixes = pfx)
     set_chart_root!(c, new)
-    return getChart(c.package, c.name)
+    return c
 end
 
 """
@@ -1513,17 +1587,18 @@ the group inherits from.
 function setGroupLabelTextProp(c::Chart, g::ChartGroup, field::Symbol, value)
     root = chart_root(c)
     pfx  = ns_prefixes(root)
-    gtag = String(localname(g.raw))
+    gn   = _group_node(c, root, g)
+    gtag = String(localname(gn))
     new  = rebuild_path(root,
                [(NS_C, "chart")    => "chart",
                 (NS_C, "plotArea") => "plotArea",
-                (NS_C, gtag)       => (gtag, n -> n === g.raw),
+                (NS_C, gtag)       => (gtag, n -> n === gn),
                 (NS_C, "dLbls")    => "dLbls"],
-                lbl -> _both_with_run_prop(lbl, (NS_C, String(localname(lbl))),
-                            field, value, pfx);
+               lbl -> _both_with_run_prop(lbl, (NS_C, String(localname(lbl))),
+                                          field, value, pfx);
                prefixes = pfx)
     set_chart_root!(c, new)
-    return getChart(c.package, c.name)
+    return c
 end
 
 """
@@ -1539,7 +1614,7 @@ function setChartSpaceTextProp(c::Chart, field::Symbol, value)
     new  = insert_child(root, (NS_C, "chartSpace"),
                         _text_with_run_prop(txpr, field, value, pfx))
     set_chart_root!(c, new)
-    return getChart(c.package, c.name)
+    return c
 end
 
 """
@@ -1567,7 +1642,7 @@ function setChartTitleText(c::Chart, text::DrawingText)
                                   (NS_C, "tx"), _text_from(text, "rich", pfx));
                prefixes = pfx)
     set_chart_root!(c, new)
-    return getChart(c.package, c.name)
+    return c
 end
 
 setChartTitleText(c::Chart, text::AbstractString) =
@@ -1583,18 +1658,19 @@ literal text.
 function setAxisTitleText(c::Chart, ax::ChartAxis, text::DrawingText)
     root = chart_root(c)
     pfx  = ns_prefixes(root)
-    atag = String(localname(ax.raw))
+    axn  = _axis_node(c, root, ax)
+    atag = String(localname(axn))
     new  = rebuild_path(root,
                [(NS_C, "chart")    => "chart",
                 (NS_C, "plotArea") => "plotArea",
-                (NS_C, atag)       => (atag, n -> n === ax.raw),
+                (NS_C, atag)       => (atag, n -> n === axn),
                 (NS_C, "title")    => "title",
                 (NS_C, "tx")       => "tx"],
                tx -> insert_child(remove_choice(tx, (NS_C, "tx"), TX_GROUP),
                                   (NS_C, "tx"), _text_from(text, "rich", pfx));
                prefixes = pfx)
     set_chart_root!(c, new)
-    return getChart(c.package, c.name)
+    return c
 end
 
 setAxisTitleText(c::Chart, ax::ChartAxis, text::AbstractString) =
@@ -1606,30 +1682,27 @@ setAxisTitleText(c::Chart, ax::ChartAxis, text::AbstractString) =
 Replace one data label's typed-over text and all its formatting, so the label
 shows `text` instead of its value.
 
-The label must already exist as a `c:dLbl` — Excel writes one when you edit or
-format a label individually. Creating one is not supported yet.
+If the point has no `c:dLbl`, one is created with the same `show*` flags as its
+`c:dLbls`. Typed text is displayed whatever those flags say, so this shows the
+label even on a series whose labels are off.
 """
 function setLabelText(c::Chart, i::Integer, point::Integer, text::DrawingText)
-    dl = getSeriesDataLabel(c, i, point)
-    isnothing(dl) && throw(XLSXError(
-        "Series $i has no individual label $point, and creating one is not " *
-        "supported yet."))
-    dl.delete === true && throw(XLSXError(
-        "Label $point of series $i is deleted, so it has no text to set."))
-
     root = chart_root(c)
     pfx  = ns_prefixes(root)
-    steps, ser_key = _series_path(c, i)
-    new = rebuild_path(root,
-              [steps...;
-               (NS_C, "dLbls") => "dLbls";
-               (NS_C, "dLbl")  => ("dLbl", n -> n === dl.raw);
-               (NS_C, "tx")    => "tx"],
-              tx -> insert_child(remove_choice(tx, (NS_C, "tx"), TX_GROUP),
-                                 (NS_C, "tx"), _text_from(text, "rich", pfx));
-              prefixes = pfx, parent_key = ser_key)
+    steps, _, ser = _series_path(c, root, i)
+    dl = _dlbl_node(ser, point)
+    !isnothing(dl) && _bool_val(dl, "delete") === true && throw(XLSXError(
+        "Label $point of series $i is deleted, so it has no text to set." *
+        "Undelete it first with `setLabelDeleted(c, $i, $point, false)`."))
+    settx(lbl) = rebuild_path(lbl, [(NS_C, "tx") => "tx"],
+                     tx -> insert_child(remove_choice(tx, (NS_C, "tx"), TX_GROUP),
+                                        (NS_C, "tx"), _text_from(text, "rich", pfx));
+                     prefixes = pfx, parent_key = (NS_C, "dLbl"))
+    new = rebuild_path(root, [steps...; (NS_C, "dLbls") => "dLbls"],
+              lbls -> _with_dlbl(_dlbls_flags_off(lbls, (NS_C, "dLbls"), pfx), point, pfx, settx);
+              prefixes = pfx)
     set_chart_root!(c, new)
-    return getChart(c.package, c.name)
+    return c
 end
 
 setLabelText(c::Chart, i::Integer, point::Integer, text::AbstractString) =
@@ -1655,7 +1728,7 @@ function setChartTitleTextProp(c::Chart, field::Symbol, value)
                t -> _both_with_run_prop(t, (NS_C, "title"), field, value, pfx);
                prefixes = pfx)
     set_chart_root!(c, new)
-    return getChart(c.package, c.name)
+    return c
 end
 
 """
@@ -1666,16 +1739,17 @@ Set one text property of an axis title. As [`setChartTitleTextProp`](@ref).
 function setAxisTitleTextProp(c::Chart, ax::ChartAxis, field::Symbol, value)
     root = chart_root(c)
     pfx  = ns_prefixes(root)
-    atag = String(localname(ax.raw))
+    axn  = _axis_node(c, root, ax)
+    atag = String(localname(axn))
     new  = rebuild_path(root,
                [(NS_C, "chart")    => "chart",
                 (NS_C, "plotArea") => "plotArea",
-                (NS_C, atag)       => (atag, n -> n === ax.raw),
+                (NS_C, atag)       => (atag, n -> n === axn),
                 (NS_C, "title")    => "title"],
                t -> _both_with_run_prop(t, (NS_C, "title"), field, value, pfx);
                prefixes = pfx)
     set_chart_root!(c, new)
-    return getChart(c.package, c.name)
+    return c
 end
 
 """
@@ -1694,7 +1768,7 @@ function setLegendTextProp(c::Chart, field::Symbol, value)
                lg -> _txpr_with_run_prop(lg, (NS_C, "legend"), field, value, pfx);
                prefixes = pfx)
     set_chart_root!(c, new)
-    return getChart(c.package, c.name)
+    return c
 end
 
 """
@@ -1721,3 +1795,74 @@ function _label_transform(lbl, field, value, pfx)
     localname(lbl) == "dLbls" && (lbl = _dlbls_flags_off(lbl, key, pfx))
     return _both_with_run_prop(lbl, key, field, value, pfx)
 end
+
+# <c:TAG><c:idx val="idx"/></c:TAG>: the minimum a c:dPt or c:dLbl needs.
+_new_idx_element(tag::AbstractString, idx::Integer, pfx) =
+    XML.Element(prefixed_tag(pfx[NS_C], tag),
+                XML.Element(prefixed_tag(pfx[NS_C], "idx"); val = string(idx)))
+
+_c_idx(n::XML.Node) = _int_val(n, "idx")
+
+function _with_dpt(ser::XML.Node, ser_key::SchemaKey, point::Integer, pfx, f)
+    point >= 1 || throw(XLSXError("Data point positions start at 1; asked for $point."))
+    return _with_indexed_child(ser, ser_key, "dPt", point - 1, _c_idx,
+                               () -> _new_idx_element("dPt", point - 1, pfx), f)
+end
+
+# A created c:dLbl copies the show* flags of its c:dLbls, so it displays what its
+# siblings display. A dLbl naming no flags would fall back to Excel's defaults and
+# turn the label on, the same trap _dlbls_flags_off avoids at the dLbls level.
+function _with_dlbl(lbls::XML.Node, point::Integer, pfx, f)
+    point >= 1 || throw(XLSXError("Data point positions start at 1; asked for $point."))
+    make() = _copy_label_flags(_new_idx_element("dLbl", point - 1, pfx), lbls, pfx)
+    return _with_indexed_child(lbls, (NS_C, "dLbls"), "dLbl", point - 1, _c_idx, make, f)
+end
+
+function _copy_label_flags(lbl::XML.Node, from::XML.Node, pfx)
+    for f in DLBLS_FLAGS
+        src = first_element_with_tag(from, f)
+        isnothing(src) && continue
+        lbl = insert_child(lbl, (NS_C, "dLbl"),
+                           XML.Element(prefixed_tag(pfx[NS_C], f); val = _attr(src, "val")))
+    end
+    return lbl
+end
+
+"""
+    setLabelDeleted(c, i, point, deleted::Bool) -> Chart
+
+Delete or undelete the data label of point `point` (counting from 1) of series
+`i`.
+
+Deleting writes a `c:dLbl` carrying only `c:idx` and `c:delete`, replacing any
+individual formatting or typed text the label had: the schema makes `c:delete`
+exclusive of every display property. Undeleting removes that `c:dLbl`, so the
+point shows whatever its series' `c:dLbls` does. Undeleting a label that is not
+deleted does nothing.
+"""
+function setLabelDeleted(c::Chart, i::Integer, point::Integer, deleted::Bool)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    steps, _, ser = _series_path(c, root, i)
+    lbl_steps = [steps...; (NS_C, "dLbls") => "dLbls"]
+
+    if !deleted
+        dl = _dlbl_node(ser, point)
+        (isnothing(dl) || _bool_val(dl, "delete") !== true) && return c
+        new = rebuild_path(root, lbl_steps,
+                  lbls -> _with_children(lbls, filter(k -> k !== dl, lbls.children));
+                  prefixes = pfx)
+    else
+        new = rebuild_path(root, lbl_steps,
+                  lbls -> _with_dlbl(_dlbls_flags_off(lbls, (NS_C, "dLbls"), pfx), point, pfx,
+                                     lbl -> _deleted_dlbl(lbl, pfx));
+                  prefixes = pfx)
+    end
+    set_chart_root!(c, new)
+    return c
+end
+
+# <c:dLbl><c:idx/><c:delete val="1"/></c:dLbl>, keeping the label's own c:idx.
+_deleted_dlbl(lbl::XML.Node, pfx) =
+    _with_children(lbl, XML.Node[first_element_with_tag(lbl, "idx"),
+                                 XML.Element(prefixed_tag(pfx[NS_C], "delete"); val = "1")])

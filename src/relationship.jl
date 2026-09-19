@@ -210,7 +210,9 @@ function new_table_filename(xf::XLSXFile)::String
     return "xl/tables/table$(i).xml"
 end
 
-function get_or_create_worksheet_rels!(xf::XLSXFile, sheet_path::String)
+get_or_create_worksheet_rels!(xf::XLSXFile, sheet_path::String) = get_or_create_rels!(xf, sheet_path)
+
+function get_or_create_rels!(xf::XLSXFile, sheet_path::String)
     sheet_dir, sheet_file = rsplit(sheet_path, "/"; limit=2)
     rels_path = "$sheet_dir/_rels/$sheet_file.rels"
     if !haskey(xf.data, rels_path)
@@ -241,8 +243,9 @@ end
 # chart1.xml -> chart2.xml, chartEx1.xml -> chartEx2.xml, style1.xml -> style2.xml
 function _next_part_name(xl::XLSXFile, dir::AbstractString, fname::AbstractString)::String
     stem = replace(fname, r"\d*\.xml$" => "")
+    taken(p) = haskey(xl.data, p) || haskey(xl.files, p)
     i = 1
-    while haskey(xl.data, "$dir/$stem$i.xml"); i += 1; end
+    while taken("$dir/$stem$i.xml"); i += 1; end
     return "$stem$i.xml"
 end
 
@@ -401,4 +404,18 @@ function _clone_xlchart_name!(wb::Workbook, ref::String, old_sheet::String,
         DefinedNameValue(rename_sheet(dnv.value, new_sheet), dnv.isabs, dnv.hidden)
     cloned[ref] = new_name
     return new_name
+end
+
+# Add a relationship from part `from` to part `to`, reusing an existing one with
+# the same type and target. Returns its Id.
+function add_part_rel!(xf::XLSXFile, from::String, to::String, type::String)::String
+    rels_path, root = get_or_create_rels!(xf, from)
+    target = make_relative_target(first(_split_zip_path(from)), to)
+    for n in elements_with_tag(root, "Relationship")
+        get_attr(n, "Type") == type && get_attr(n, "Target") == target && return get_attr(n, "Id")
+    end
+    rid = new_relationship_id(root)
+    push!(root, XML.Element(prefixed_tag(get_prefix(rels_path, xf), "Relationship");
+                            Id = rid, Type = type, Target = target))
+    return rid
 end

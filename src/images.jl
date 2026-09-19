@@ -236,30 +236,8 @@ function ensure_drawing!(xf::XLSXFile, sheet_path::String)::String
     return drawing_path
 end
 
-function add_image_rel!(xf::XLSXFile, drawing_path::String, media_name::String)::String
-    drawing_file = rsplit(drawing_path, "/"; limit=2)[2]
-    rels_path    = "xl/drawings/_rels/$drawing_file.rels"
-
-    if !haskey(xf.data, rels_path)
-        xf.data[rels_path]  = empty_rels_doc()
-        xf.files[rels_path] = true
-    end
-    rels_root = xml_root_element(xf.data[rels_path])
-
-    # Reuse existing rel if the same media is already referenced
-    for node in elements_with_tag(rels_root, "Relationship")
-        get_attr(node, "Target") == "../media/$media_name" && return get_attr(node, "Id")
-    end
-
-    rid = new_relationship_id(rels_root)
-    pfx = get_prefix(rels_path, xf)
-    push!(rels_root, XML.Element(prefixed_tag(pfx, "Relationship");
-        Id     = rid,
-        Type   = REL_IMAGE,
-        Target = "../media/$media_name",
-    ))
-    return rid
-end
+add_image_rel!(xf::XLSXFile, drawing_path::String, media_name::String) =
+    add_part_rel!(xf, drawing_path, "xl/media/$media_name", REL_IMAGE)
 
 # ===========================================================================
 # Anchor
@@ -289,14 +267,11 @@ function add_anchor!(
         col_to, row_to = column_number(cellref.stop),  row_number(cellref.stop)
     end
 
-    root_el   = xml_root_element(xf.data[drawing_path])
-    n_anchors = count(_ -> true, xml_elements(root_el))
-
+    root_el = xml_root_element(xf.data[drawing_path])
     push!(root_el, build_two_cell_anchor(
         col - 1, row - 1,  # 0-based inclusive from
         col_to,  row_to,   # 0-based exclusive to
-        img_rid;
-        shape_id = n_anchors + 2,
+        _pic_node(img_rid, _next_shape_id(root_el)),
     ))
 
     return col, row, col_to, row_to
@@ -319,6 +294,9 @@ function register_content_type!(
     return nothing
 end
 
+const _AFTER_DRAWING = ("legacyDrawing", "legacyDrawingHF", "drawingHF", "picture",
+                        "oleObjects", "controls", "webPublishItems", "tableParts", "extLst")
+
 function ensure_drawing_element!(xf::XLSXFile, sheet_doc::XML.Node, sheet_path::String, rid::String)
     sheet_root = xml_root_element(sheet_doc)
     any(n -> localname(XML.tag(n)) == "drawing", xml_elements(sheet_root)) && return nothing
@@ -328,7 +306,9 @@ function ensure_drawing_element!(xf::XLSXFile, sheet_doc::XML.Node, sheet_path::
     pfx = get_prefix(sheet_path, xf)
     el  = XML.Element(prefixed_tag(pfx, "drawing"))
     el["r:id"] = rid
-    push!(sheet_root, el)
+    kids = sheet_root.children
+    j = findfirst(k -> XML.nodetype(k) == XML.Element && localname(k) in _AFTER_DRAWING, kids)
+    isnothing(j) ? push!(sheet_root, el) : insert!(kids, j, el)
     return nothing
 end
 
@@ -336,49 +316,53 @@ end
 # Low-level XML builder
 # ===========================================================================
 
+_text_el(tag, text) = XML.Element(tag, XML.Text(text))
+
+function _cell_marker(tag, c, r)
+    XML.Element(tag,
+        _text_el("xdr:col",    string(c)),
+        _text_el("xdr:colOff", "0"),
+        _text_el("xdr:row",    string(r)),
+        _text_el("xdr:rowOff", "0"),
+    )
+end
+
+# A two-cell anchor around any drawing object: an xdr:pic, an xdr:graphicFrame,
+# or an mc:AlternateContent wrapping one.
 function build_two_cell_anchor(
     col::Int, row::Int,       # 0-based inclusive
     col_to::Int, row_to::Int, # 0-based exclusive
-    img_rid::String;
-    shape_id::Int,
+    content::XML.Node,
 )::XML.Node
-    tel(tag, text) = XML.Element(tag, XML.Text(text))
+    return XML.Element("xdr:twoCellAnchor",
+        _cell_marker("xdr:from", col,    row),
+        _cell_marker("xdr:to",   col_to, row_to),
+        content,
+        XML.Element("xdr:clientData"),
+    )
+end
 
-    function cell_marker(tag, c, r)
-        XML.Element(tag,
-            tel("xdr:col",    string(c)),
-            tel("xdr:colOff", "0"),
-            tel("xdr:row",    string(r)),
-            tel("xdr:rowOff", "0"),
-        )
-    end
-
+function _pic_node(img_rid::String, shape_id::Int)::XML.Node
     blip = XML.Element("a:blip")
     blip["r:embed"] = img_rid
-
-    return XML.Element("xdr:twoCellAnchor",
-        cell_marker("xdr:from", col,    row),
-        cell_marker("xdr:to",   col_to, row_to),
-        XML.Element("xdr:pic",
-            XML.Element("xdr:nvPicPr",
-                XML.Element("xdr:cNvPr"; id=string(shape_id), name="Image $shape_id"),
-                XML.Element("xdr:cNvPicPr",
-                    XML.Element("a:picLocks"; noChangeAspect="1"),
-                ),
-            ),
-            XML.Element("xdr:blipFill",
-                blip,
-                XML.Element("a:stretch", XML.Element("a:fillRect")),
-            ),
-            XML.Element("xdr:spPr",
-                XML.Element("a:xfrm",
-                    XML.Element("a:off";  x="0", y="0"),
-                    XML.Element("a:ext"; cx="0", cy="0"),
-                ),
-                XML.Element("a:prstGeom", XML.Element("a:avLst"); prst="rect"),
+    return XML.Element("xdr:pic",
+        XML.Element("xdr:nvPicPr",
+            XML.Element("xdr:cNvPr"; id=string(shape_id), name="Image $shape_id"),
+            XML.Element("xdr:cNvPicPr",
+                XML.Element("a:picLocks"; noChangeAspect="1"),
             ),
         ),
-        XML.Element("xdr:clientData"),
+        XML.Element("xdr:blipFill",
+            blip,
+            XML.Element("a:stretch", XML.Element("a:fillRect")),
+        ),
+        XML.Element("xdr:spPr",
+            XML.Element("a:xfrm",
+                XML.Element("a:off";  x="0", y="0"),
+                XML.Element("a:ext"; cx="0", cy="0"),
+            ),
+            XML.Element("a:prstGeom", XML.Element("a:avLst"); prst="rect"),
+        ),
     )
 end
 

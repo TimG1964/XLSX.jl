@@ -34,7 +34,7 @@
             @test XLSX.getLabelFlag(c, 1, :value) === true
             @test XLSX.getLabelFlag(c, 1, :seriesName) === false
             @test_throws XLSX.XLSXError XLSX.getLabelFlag(c, 1, :nonsense)
-            @test isnothing(XLSX.charttitle(c))
+            @test isnothing(XLSX.getChartTitle(c))
             @test isnothing(XLSX.getSeriesName(c, 1))
         end
 
@@ -67,7 +67,7 @@
             @test XLSX.chartType(c) == :histogram                    # binning read inside layoutPr
             @test XLSX.getSeriesLayout(c, 1) == :clusteredColumn
             @test XLSX.getSeriesBinning(c, 1) == XLSX.ChartExBinning(:r, 0.0, 100.0, 10.0, nothing)
-            @test XLSX.charttitle(c) == "Chart Title"                 # typed: txData without f
+            @test XLSX.getChartTitle(c) == "Chart Title"                 # typed: txData without f
             @test isnothing(XLSX.getChartTitleRange(c))
             @test XLSX.getSeriesName(c, 1) == "Values"
         end
@@ -103,7 +103,7 @@
 
         @testset "bound title and series name" begin
             c = chart("bound")
-            @test XLSX.charttitle(c) == "Title here"
+            @test XLSX.getChartTitle(c) == "Title here"
             @test !isnothing(XLSX.getChartTitleRange(c))
             @test XLSX.getSeriesName(c, 1) == "Series name"
             @test !isnothing(XLSX.getSeriesNameRange(c, 1))
@@ -358,9 +358,9 @@
 
         # histogram: a typed title, with the text also in the txPr runs
         h = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "histogram", XLSX.getCharts(xf)))
-        @test XLSX.charttitle(h) == "Chart Title"
+        @test XLSX.getChartTitle(h) == "Chart Title"
         XLSX.setChartTitleText(h, "Distribution of values")
-        @test XLSX.charttitle(h) == "Distribution of values"
+        @test XLSX.getChartTitle(h) == "Distribution of values"
         @test XLSX.text_content(XLSX.getChartTitleTextProps(h)) == "Distribution of values"
         @test XLSX.default_run_props(XLSX.getChartTitleTextProps(h)).size ≈ 14.0  # formatting kept
 
@@ -368,14 +368,14 @@
         b = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "bound", XLSX.getCharts(xf)))
         @test !isnothing(XLSX.getChartTitleRange(b))
         XLSX.setChartTitleText(b, "Typed over")
-        @test XLSX.charttitle(b) == "Typed over"
+        @test XLSX.getChartTitle(b) == "Typed over"
         @test isnothing(XLSX.getChartTitleRange(b))
 
         # waterfall: no title text at all, so this creates it
         w = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "waterfall", XLSX.getCharts(xf)))
-        @test isnothing(XLSX.charttitle(w))
+        @test isnothing(XLSX.getChartTitle(w))
         XLSX.setChartTitleText(w, "Cash flow")
-        @test XLSX.charttitle(w) == "Cash flow"
+        @test XLSX.getChartTitle(w) == "Cash flow"
 
         # series names
         @test XLSX.getSeriesName(b, 1) == "Series name"
@@ -390,7 +390,7 @@
         XLSX.writexlsx(out, xf, overwrite = true)
         f = XLSX.readxlsx(out)
         d = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "histogram", XLSX.getCharts(f)))
-        @test XLSX.charttitle(d) == "Distribution of values"
+        @test XLSX.getChartTitle(d) == "Distribution of values"
     end
 
     @testset "setSeriesSubtotals" begin

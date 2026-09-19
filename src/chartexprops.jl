@@ -11,12 +11,15 @@
 
 # ---- small readers ---------------------------------------------------------
 
-function _cx_series_node(c::ChartEx, i::Integer)
-    s = _cx_series_nodes(c)
-    1 <= i <= length(s) ||
-        throw(XLSXError("Series $i out of range: chart `$(c.name)` has $(length(s)) series."))
-    return s[i]
+function _cx_series_node(c::ChartEx, root::XML.Node, i::Integer)
+    sers = _cx_series_nodes(root)
+    n = length(sers)
+    n == 0 && throw(XLSXError("Chart `$(c.name)` has no series."))
+    1 <= i <= n || throw(XLSXError("Chart `$(c.name)` has $n series; asked for series $i."))
+    return sers[i]
 end
+
+_cx_series_node(c::ChartEx, i::Integer) = _cx_series_node(c, _cx_root(c), i)
 
 _cx_layoutpr(c::ChartEx, i::Integer) = first_element_with_tag(_cx_series_node(c, i), "layoutPr")
 _cx_datalabels(c::ChartEx, i::Integer) = first_element_with_tag(_cx_series_node(c, i), "dataLabels")
@@ -334,17 +337,19 @@ for how fields inherit.
 getLabelTextProp(c::ChartEx, i::Integer, field::Symbol) =
     _resolve_text_field(_wb(c), _cx_text_chain(c, i), field)
 
-    # ---- write path -------------------------------------------------------------
+# ---- write path -------------------------------------------------------------
 #
-# A ChartEx is durable, so setters write the part and return `c` itself, which
-# remains valid. Handles to nodes (anything holding `raw`) are still invalidated,
-# as for c:.
+# Chart and ChartEx are both handles, so setters write the part and return `c`
+# itself, which remains valid. The cx value types (`ChartExData`,
+# `ChartExBinning`, …) hold no nodes: everything is addressed by position or key
+# against the current part on each call.
 
 const _CX_ROOT_KEY = (NS_CX, "chartSpace")
 
-# rebuild_path steps from the root to series `i`, matched by node identity.
-function _cx_series_path(c::ChartEx, i::Integer)
-    ser = _cx_series_node(c, i)
+# rebuild_path steps from `root` to series `i`. Matches by node identity, so the
+# series node must come from the same root the path is applied to.
+function _cx_series_path(c::ChartEx, root::XML.Node, i::Integer)
+    ser = _cx_series_node(c, root, i)
     return [(NS_CX, "chart")          => "chart",
             (NS_CX, "plotArea")       => "plotArea",
             (NS_CX, "plotAreaRegion") => "plotAreaRegion",
@@ -356,7 +361,7 @@ end
 function _cx_edit_series!(c::ChartEx, i::Integer, f)
     root = _cx_root(c)
     pfx  = ns_prefixes(root)
-    new  = rebuild_path(root, _cx_series_path(c, i), ser -> f(ser, pfx);
+    new  = rebuild_path(root, _cx_series_path(c, root, i), ser -> f(ser, pfx);
                         prefixes = pfx, parent_key = _CX_ROOT_KEY)
     set_chart_root!(c, new)
     return c
@@ -367,27 +372,44 @@ _cx_idx(n) = tryparse(Int, get_attr(n, "idx"))
 # Apply `f` to the cx:dataPt for 1-based `point`, creating it if absent. A new
 # one is inserted in idx order among its siblings: before the first dataPt with a
 # larger idx, or in schema position (after the last dataPt) if there is none.
-function _cx_with_datapt(ser::XML.Node, point::Integer, pfx, f)
-    idx  = point - 1
-    kids = isnothing(ser.children) ? XML.Node[] : ser.children
-    j = findfirst(k -> localname(k) == "dataPt" && _cx_idx(k) == idx, kids)
+# Apply `f` to the `tag` child of `parent` whose index is `idx`, creating it with
+# `make()` if absent. A created child goes in index order among its `tag`
+# siblings, or at its schema position if it is the first. `idx_of` reads an
+# index from a sibling; `parent_key` is `parent`'s SchemaKey.
+function _with_indexed_child(parent::XML.Node, parent_key::SchemaKey, tag::AbstractString,
+                             idx::Integer, idx_of, make, f)
+    kids = isnothing(parent.children) ? XML.Node[] : parent.children
+    j = findfirst(k -> localname(k) == tag && idx_of(k) == idx, kids)
     if isnothing(j)
-        fresh = XML.Element(prefixed_tag(pfx[NS_CX], "dataPt"); idx = string(idx))
-        pts = findall(k -> localname(k) == "dataPt", kids)
-        if isempty(pts)
-            ser = insert_child(ser, (NS_CX, "series"), fresh)      # first one: schema position
+        fresh = make()
+        sibs = findall(k -> localname(k) == tag, kids)
+        if isempty(sibs)
+            parent = insert_child(parent, parent_key, fresh)       # first one: schema position
         else
-            # before the first dataPt with a larger idx, else after the last dataPt
-            k = findfirst(p -> something(_cx_idx(kids[p]), -1) > idx, pts)
-            at = isnothing(k) ? last(pts) + 1 : pts[k]
+            # before the first sibling with a larger index, else after the last
+            k  = findfirst(p -> something(idx_of(kids[p]), -1) > idx, sibs)
+            at = isnothing(k) ? last(sibs) + 1 : sibs[k]
             new_kids = Vector{eltype(kids)}(undef, 0)
             append!(new_kids, kids[1:at-1]); push!(new_kids, fresh); append!(new_kids, kids[at:end])
-            ser = _with_children(ser, new_kids)
+            parent = _with_children(parent, new_kids)
         end
-        j = findfirst(n -> n === fresh, ser.children)
+        j = findfirst(n -> n === fresh, parent.children)
     end
-    dp = ser.children[j]
-    return replace_child(ser, dp, f(dp))
+    node = parent.children[j]
+    return replace_child(parent, node, f(node))
+end
+
+# Apply `f` to the cx:dataPt for 1-based `point`, creating it if absent. A new
+# one is inserted in idx order among its siblings: before the first dataPt with a
+# larger idx, or in schema position (after the last dataPt) if there is none.
+# Apply `f` to the `tag` child of `parent` whose index is `idx`, creating it with
+# `make()` if absent. A created child goes in index order among its `tag`
+# siblings, or at its schema position if it is the first. `idx_of` reads an
+# index from a sibling; `parent_key` is `parent`'s SchemaKey.
+function _cx_with_datapt(ser::XML.Node, point::Integer, pfx, f)
+    point >= 1 || throw(XLSXError("Data point positions start at 1; asked for $point."))
+    return _with_indexed_child(ser, (NS_CX, "series"), "dataPt", point - 1, _cx_idx,
+        () -> XML.Element(prefixed_tag(pfx[NS_CX], "dataPt"); idx = string(point - 1)), f)
 end
 
 # Apply `f(spPr, pfx)` to the spPr of series `i`, or of one of its points.
