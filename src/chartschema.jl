@@ -276,6 +276,10 @@ const EFFECT_GROUP = "effectLst"
 const DASH_GROUP = "prstDash"
 # c:tx is a choice of c:strRef or c:rich; either member names the group.
 const TX_GROUP = "rich"
+# cx:layoutPr is a choice of cx:aggregation or cx:binning; either member names the group.
+const AGGREGATION_GROUP = "aggregation"
+# cx:binning is a choice of cx:binSize or cx:binCount.
+const BIN_GROUP         = "binSize"
 
 # xsd:choice where one member excludes a whole group whose own members coexist.
 # In CT_DLbls, `delete` excludes every display property, but those properties

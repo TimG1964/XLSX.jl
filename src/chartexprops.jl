@@ -635,3 +635,233 @@ function _cx_axis_node(c::ChartEx, id::Integer)
     end
     throw(XLSXError("Chart `$(c.name)` has no axis with id $id."))
 end
+
+# ---- text content -----------------------------------------------------------
+
+# Replace cx:tx with a typed cx:txData/cx:v holding `text`. Any cx:f is dropped:
+# typing text unbinds the element from its cell.
+function _cx_tx_typed(tx::XML.Node, text::AbstractString, pfx::Dict{String,String})
+    v  = XML.Element(prefixed_tag(pfx[NS_CX], "v"), XML.Text(text))
+    td = XML.Element(prefixed_tag(pfx[NS_CX], "txData"), v)
+    return _with_children(tx, [td])
+end
+
+# Excel writes a title's text twice: in cx:txData/cx:v and as runs in the sibling
+# cx:txPr, which is what it renders. Collapse the body to a single run carrying
+# `text`, keeping the first run's formatting where there was one, so the words
+# change and the appearance does not.
+function _cx_txpr_retext(el::XML.Node, text::AbstractString, pfx::Dict{String,String})
+    tx = first_element_with_tag(el, "txPr")
+    isnothing(tx) && return el
+    isnothing(tx.children) && return el
+    kids = map(tx.children) do p
+        localname(p) != "p" && return p
+        old  = first_element_with_tag(p, "r")
+        rpr  = isnothing(old) ? nothing : first_element_with_tag(old, "rPr")
+        run  = XML.Element(prefixed_tag(pfx[NS_A], "r"),
+                           filter(!isnothing, [rpr,
+                               XML.Element(prefixed_tag(pfx[NS_A], "t"), XML.Text(text))])...)
+        keep = filter(n -> localname(n) in ("pPr", "endParaRPr"),
+                      isnothing(p.children) ? XML.Node[] : p.children)
+        ppr  = filter(n -> localname(n) == "pPr", keep)
+        epr  = filter(n -> localname(n) == "endParaRPr", keep)
+        return _with_children(p, [ppr; run; epr])
+    end
+    return replace_child(el, tx, _with_children(tx, kids))
+end
+
+"""
+    setChartTitleText(c::ChartEx, text::AbstractString) -> ChartEx
+
+Set the chart title to `text`, typed rather than bound to a cell. Creates the
+title if the chart has none, and drops any `cx:f` binding it had.
+
+Excel stores a typed title both as `cx:tx/cx:txData/cx:v` and as runs in the
+title's `cx:txPr`, and renders the latter, so both are updated. Run formatting
+is preserved; use [`setChartTitleTextProp`](@ref) to change it.
+
+Returns `c`, which remains valid.
+"""
+setChartTitleText(c::ChartEx, text::AbstractString) =
+    _cx_edit_at!(c, [(NS_CX, "chart") => "chart",
+                     (NS_CX, "title") => "title"],
+                 (t, pfx) -> begin
+                     t = rebuild_path(t, [(NS_CX, "tx") => "tx"],
+                                      tx -> _cx_tx_typed(tx, text, pfx);
+                                      prefixes = pfx, parent_key = (NS_CX, "title"))
+                     return _cx_txpr_retext(t, text, pfx)
+                 end)
+
+"""
+    setSeriesName(c::ChartEx, i, name::AbstractString) -> ChartEx
+
+Set the name of series `i` to `name`, typed rather than bound to a cell.
+Creates the series' `cx:tx` if it has none, and drops any `cx:f` binding.
+
+Returns `c`, which remains valid.
+"""
+setSeriesName(c::ChartEx, i::Integer, name::AbstractString) =
+    _cx_edit_series!(c, i, (ser, pfx) ->
+        rebuild_path(ser, [(NS_CX, "tx") => "tx"],
+                     tx -> _cx_tx_typed(tx, name, pfx);
+                     prefixes = pfx, parent_key = (NS_CX, "series")))
+ 
+# ---- layout properties (write) ----------------------------------------------
+
+# Apply `f(layoutPr, pfx)` to series `i`'s cx:layoutPr, creating it if absent.
+_cx_set_layoutpr!(c::ChartEx, i::Integer, f) =
+    _cx_edit_series!(c, i, (ser, pfx) ->
+        rebuild_path(ser, [(NS_CX, "layoutPr") => "layoutPr"], lp -> f(lp, pfx);
+                     prefixes = pfx, parent_key = (NS_CX, "series")))
+
+"""
+    setSeriesSubtotals(c::ChartEx, i, points) -> ChartEx
+
+Mark the given points of a waterfall series as totals, replacing whatever was
+marked before. `points` counts from 1, in any order; an empty collection writes
+`<cx:subtotals/>`, which is what Excel writes for a waterfall with no totals.
+
+Pass `:inherit` to remove `cx:subtotals` entirely.
+
+Returns `c`, which remains valid.
+"""
+function setSeriesSubtotals(c::ChartEx, i::Integer, points)
+    if points === :inherit
+        return _cx_set_layoutpr!(c, i, (lp, _) -> remove_child(lp, "subtotals"))
+    end
+    idx = sort(unique(Int[p for p in points]))
+    isempty(idx) || first(idx) >= 1 ||
+        throw(XLSXError("Data point positions start at 1; asked for $(first(idx))."))
+    return _cx_set_layoutpr!(c, i, (lp, pfx) -> begin
+        st = XML.Element(prefixed_tag(pfx[NS_CX], "subtotals"),
+                         (XML.Element(prefixed_tag(pfx[NS_CX], "idx"); val = string(p - 1))
+                          for p in idx)...)
+        return insert_child(lp, (NS_CX, "layoutPr"), st)
+    end)
+end
+
+# Set or remove one attribute on a single-purpose cx:layoutPr child, creating the
+# child if needed. `:inherit` removes the attribute, and the child with it when
+# that leaves it empty, since these elements exist only to carry their attributes.
+function _cx_set_layout_attr!(c::ChartEx, i::Integer, tag::AbstractString,
+                              attr::AbstractString, value)
+    return _cx_set_layoutpr!(c, i, (lp, pfx) -> begin
+        if value === :inherit
+            return remove_child(lp, tag)
+        end
+        node = something(first_element_with_tag(lp, tag),
+                         XML.Element(prefixed_tag(pfx[NS_CX], tag)))
+        return insert_child(lp, (NS_CX, "layoutPr"), with_attribute(node, attr, value))
+    end)
+end
+
+const _CX_QUARTILE_METHODS = (:inclusive, :exclusive)
+
+"""
+    setSeriesQuartileMethod(c::ChartEx, i, method) -> ChartEx
+
+Set the quartile calculation of a box & whisker series to `:inclusive` or
+`:exclusive`, or `:inherit` to remove `cx:statistics`.
+"""
+function setSeriesQuartileMethod(c::ChartEx, i::Integer, method::Symbol)
+    method === :inherit || method in _CX_QUARTILE_METHODS ||
+        throw(XLSXError("`$method` is not a quartile method. Use " *
+                        join(_CX_QUARTILE_METHODS, " or ") * "."))
+    return _cx_set_layout_attr!(c, i, "statistics", "quartileMethod",
+                                method === :inherit ? :inherit : String(method))
+end
+
+const _CX_PARENT_LABEL_LAYOUTS = (:none, :banner, :overlapping)
+
+"""
+    setSeriesParentLabelLayout(c::ChartEx, i, layout) -> ChartEx
+
+Set a treemap series' parent label placement to `:none`, `:banner` or
+`:overlapping`, or `:inherit` to remove `cx:parentLabelLayout`.
+"""
+function setSeriesParentLabelLayout(c::ChartEx, i::Integer, layout::Symbol)
+    layout === :inherit || layout in _CX_PARENT_LABEL_LAYOUTS ||
+        throw(XLSXError("`$layout` is not a parent label layout. Valid values: " *
+                        join(_CX_PARENT_LABEL_LAYOUTS, ", ") * "."))
+    return _cx_set_layout_attr!(c, i, "parentLabelLayout", "val",
+                                layout === :inherit ? :inherit : String(layout))
+end
+
+"""
+    setSeriesLayoutFlag(c::ChartEx, i, flag, value) -> ChartEx
+
+Set one attribute of `cx:layoutPr/cx:visibility`: `:meanLine`, `:meanMarker`,
+`:nonoutliers`, `:outliers` (box & whisker) or `:connectorLines` (waterfall).
+`value` is a `Bool`, or `:inherit` to remove the attribute.
+"""
+function setSeriesLayoutFlag(c::ChartEx, i::Integer, flag::Symbol, value)
+    flag in _CX_LAYOUT_FLAGS ||
+        throw(XLSXError("Unknown layout flag `$flag`. Expected one of $(join(_CX_LAYOUT_FLAGS, ", "))."))
+    value isa Bool || value === :inherit ||
+        throw(XLSXError("A layout flag takes a Bool or `:inherit`; got `$value`."))
+    return _cx_set_layoutpr!(c, i, (lp, pfx) -> begin
+        vis = something(first_element_with_tag(lp, "visibility"),
+                        XML.Element(prefixed_tag(pfx[NS_CX], "visibility")))
+        vis = with_attribute(vis, String(flag), value === :inherit ? nothing : (value ? "1" : "0"))
+        return isnothing(vis.attributes) || isempty(vis.attributes) ?
+               remove_child(lp, "visibility") :
+               insert_child(lp, (NS_CX, "layoutPr"), vis)
+    end)
+end
+
+"""
+    setSeriesAggregation(c::ChartEx, i, on::Bool) -> ChartEx
+
+Turn category aggregation on or off for series `i`. `cx:aggregation` carries no
+value, so its presence is the setting. It excludes `cx:binning`, which is
+removed when this is turned on.
+"""
+setSeriesAggregation(c::ChartEx, i::Integer, on::Bool) =
+    _cx_set_layoutpr!(c, i, (lp, pfx) -> on ?
+        insert_child(remove_choice(lp, (NS_CX, "layoutPr"), AGGREGATION_GROUP),
+                     (NS_CX, "layoutPr"),
+                     XML.Element(prefixed_tag(pfx[NS_CX], "aggregation"))) :
+        remove_child(lp, "aggregation"))
+
+"""
+    setSeriesBinning(c::ChartEx, i; intervalClosed, underflow, overflow, binSize, binCount) -> ChartEx
+
+Set histogram binning for series `i` in one rebuild. A keyword left unspecified
+is left alone; pass `:inherit` to remove one that is set.
+
+`intervalClosed` is `:r` or `:l`. `underflow` and `overflow` take a number or
+`:auto`. `binSize` and `binCount` are alternatives: setting one removes the
+other. `cx:binning` excludes `cx:aggregation`, which is removed if present.
+"""
+function setSeriesBinning(c::ChartEx, i::Integer;
+                          intervalClosed = nothing, underflow = nothing, overflow = nothing,
+                          binSize = nothing, binCount = nothing)
+    all(isnothing, (intervalClosed, underflow, overflow, binSize, binCount)) && return c
+    isnothing(binSize) || isnothing(binCount) ||
+        throw(XLSXError("`binSize` and `binCount` are alternatives; set only one."))
+    isnothing(intervalClosed) || intervalClosed === :inherit || intervalClosed in (:r, :l) ||
+        throw(XLSXError("`intervalClosed` is `:r` or `:l`; got `$intervalClosed`."))
+
+    fmt(v) = v === :auto ? "auto" : string(v)
+
+    return _cx_set_layoutpr!(c, i, (lp, pfx) -> begin
+        lp = remove_child(lp, "aggregation")
+        b  = something(first_element_with_tag(lp, "binning"),
+                       XML.Element(prefixed_tag(pfx[NS_CX], "binning")))
+        isnothing(intervalClosed) ||
+            (b = with_attribute(b, "intervalClosed",
+                                intervalClosed === :inherit ? nothing : String(intervalClosed)))
+        isnothing(underflow) ||
+            (b = with_attribute(b, "underflow", underflow === :inherit ? nothing : fmt(underflow)))
+        isnothing(overflow) ||
+            (b = with_attribute(b, "overflow", overflow === :inherit ? nothing : fmt(overflow)))
+        for (kw, tag) in ((binSize, "binSize"), (binCount, "binCount"))
+            isnothing(kw) && continue
+            b = remove_choice(b, (NS_CX, "binning"), BIN_GROUP)
+            kw === :inherit && continue
+            b = insert_child(b, (NS_CX, "binning"),
+                             XML.Element(prefixed_tag(pfx[NS_CX], tag); val = fmt(kw)))
+        end
+        return insert_child(lp, (NS_CX, "layoutPr"), b)
+    end)
+end

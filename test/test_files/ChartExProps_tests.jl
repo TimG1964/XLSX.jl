@@ -350,4 +350,173 @@
                         XLSX.getCharts(XLSX.readxlsx(out))))
         @test XLSX.default_run_props(XLSX.getChartTitleTextProps(d)).size ≈ 16.0
     end
+
+    @testset "setChartTitleText and setSeriesName" begin
+        tmp = joinpath(mktempdir(), "cx_text_set.xlsx")
+        cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp)
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+
+        # histogram: a typed title, with the text also in the txPr runs
+        h = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "histogram", XLSX.getCharts(xf)))
+        @test XLSX.charttitle(h) == "Chart Title"
+        XLSX.setChartTitleText(h, "Distribution of values")
+        @test XLSX.charttitle(h) == "Distribution of values"
+        @test XLSX.text_content(XLSX.getChartTitleTextProps(h)) == "Distribution of values"
+        @test XLSX.default_run_props(XLSX.getChartTitleTextProps(h)).size ≈ 14.0  # formatting kept
+
+        # bound: typing replaces the binding
+        b = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "bound", XLSX.getCharts(xf)))
+        @test !isnothing(XLSX.getChartTitleRange(b))
+        XLSX.setChartTitleText(b, "Typed over")
+        @test XLSX.charttitle(b) == "Typed over"
+        @test isnothing(XLSX.getChartTitleRange(b))
+
+        # waterfall: no title text at all, so this creates it
+        w = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "waterfall", XLSX.getCharts(xf)))
+        @test isnothing(XLSX.charttitle(w))
+        XLSX.setChartTitleText(w, "Cash flow")
+        @test XLSX.charttitle(w) == "Cash flow"
+
+        # series names
+        @test XLSX.getSeriesName(b, 1) == "Series name"
+        XLSX.setSeriesName(b, 1, "Renamed")
+        @test XLSX.getSeriesName(b, 1) == "Renamed"
+        @test isnothing(XLSX.getSeriesNameRange(b, 1))
+        @test isnothing(XLSX.getSeriesName(w, 1))
+        XLSX.setSeriesName(w, 1, "Movement")
+        @test XLSX.getSeriesName(w, 1) == "Movement"
+
+        out = joinpath(mktempdir(), "cx_text_set_out.xlsx")
+        XLSX.writexlsx(out, xf, overwrite = true)
+        f = XLSX.readxlsx(out)
+        d = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "histogram", XLSX.getCharts(f)))
+        @test XLSX.charttitle(d) == "Distribution of values"
+    end
+
+    @testset "setSeriesSubtotals" begin
+        tmp = joinpath(mktempdir(), "cx_subtotals.xlsx")
+        cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp)
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+        w = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "waterfall", XLSX.getCharts(xf)))
+
+        @test XLSX.getSeriesSubtotals(w, 1) == [2, 5]     # what Excel wrote
+        XLSX.setSeriesSubtotals(w, 1, [5, 3])
+        @test XLSX.getSeriesSubtotals(w, 1) == [3, 5]     # sorted, replaced not appended
+        XLSX.setSeriesSubtotals(w, 1, Int[])
+        @test XLSX.getSeriesSubtotals(w, 1) == Int[]
+        @test !isnothing(XLSX.first_element_with_tag(
+                  XLSX._cx_layoutpr(w, 1), "subtotals"))  # present but empty
+        XLSX.setSeriesSubtotals(w, 1, :inherit)
+        @test isnothing(XLSX.getSeriesSubtotals(w, 1))
+        @test_throws XLSX.XLSXError XLSX.setSeriesSubtotals(w, 1, [0, 2])
+
+        # a series with no cx:layoutPr at all: the funnel
+        fn = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "funnel", XLSX.getCharts(xf)))
+        @test isnothing(XLSX._cx_layoutpr(fn, 1))
+        XLSX.setSeriesSubtotals(fn, 1, [2])
+        @test XLSX.getSeriesSubtotals(fn, 1) == [2]
+        @test XLSX.XML.tag(XLSX._cx_layoutpr(fn, 1)) == "cx:layoutPr"
+
+        out = joinpath(mktempdir(), "cx_subtotals_out.xlsx")
+        XLSX.writexlsx(out, xf, overwrite = true)
+        d = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "waterfall",
+                        XLSX.getCharts(XLSX.readxlsx(out))))
+        @test isnothing(XLSX.getSeriesSubtotals(d, 1))
+    end
+
+    @testset "layoutPr setters" begin
+        tmp = joinpath(mktempdir(), "cx_layoutpr.xlsx")
+        cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp)
+        xf = XLSX.openxlsx(tmp; mode = "rw")
+        chart(sheet) = only(filter(x -> x isa XLSX.ChartEx && x.sheet == sheet,
+                                   XLSX.getCharts(xf)))
+
+        @testset "quartile method and parent label layout" begin
+            b = chart("boxwhisker")
+            @test XLSX.getSeriesQuartileMethod(b, 1) == :exclusive
+            XLSX.setSeriesQuartileMethod(b, 1, :inclusive)
+            @test XLSX.getSeriesQuartileMethod(b, 1) == :inclusive
+            XLSX.setSeriesQuartileMethod(b, 1, :inherit)
+            @test isnothing(XLSX.getSeriesQuartileMethod(b, 1))
+            @test_throws XLSX.XLSXError XLSX.setSeriesQuartileMethod(b, 1, :median)
+
+            t = chart("treemap")
+            @test XLSX.getSeriesParentLabelLayout(t, 1) == :overlapping
+            XLSX.setSeriesParentLabelLayout(t, 1, :banner)
+            @test XLSX.getSeriesParentLabelLayout(t, 1) == :banner
+            @test_throws XLSX.XLSXError XLSX.setSeriesParentLabelLayout(t, 1, :sideways)
+
+            # a series with no cx:layoutPr: the sunburst
+            s = chart("sunburst")
+            @test isnothing(XLSX._cx_layoutpr(s, 1))
+            XLSX.setSeriesParentLabelLayout(s, 1, :none)
+            @test XLSX.getSeriesParentLabelLayout(s, 1) == :none
+        end
+
+        @testset "layout flags" begin
+            b = chart("boxwhisker")
+            @test XLSX.getSeriesLayoutFlag(b, 2, :outliers) === false
+            XLSX.setSeriesLayoutFlag(b, 2, :outliers, true)
+            @test XLSX.getSeriesLayoutFlag(b, 2, :outliers) === true
+            # the other attributes on the same cx:visibility are untouched
+            @test XLSX.getSeriesLayoutFlag(b, 2, :meanMarker) === false
+            XLSX.setSeriesLayoutFlag(b, 2, :outliers, :inherit)
+            @test isnothing(XLSX.getSeriesLayoutFlag(b, 2, :outliers))
+            @test XLSX.getSeriesLayoutFlag(b, 2, :meanMarker) === false
+
+            # a waterfall flag on a series whose cx:visibility does not exist
+            w = chart("waterfall")
+            @test isnothing(XLSX.getSeriesLayoutFlag(w, 1, :connectorLines))
+            XLSX.setSeriesLayoutFlag(w, 1, :connectorLines, false)
+            @test XLSX.getSeriesLayoutFlag(w, 1, :connectorLines) === false
+            # removing the only attribute removes the element
+            XLSX.setSeriesLayoutFlag(w, 1, :connectorLines, :inherit)
+            @test isnothing(XLSX.first_element_with_tag(XLSX._cx_layoutpr(w, 1), "visibility"))
+
+            @test_throws XLSX.XLSXError XLSX.setSeriesLayoutFlag(w, 1, :nonsense, true)
+            @test_throws XLSX.XLSXError XLSX.setSeriesLayoutFlag(w, 1, :connectorLines, 1)
+        end
+
+        @testset "binning and aggregation" begin
+            h = chart("histogram")
+            @test XLSX.getSeriesBinning(h, 1) ==
+                  XLSX.ChartExBinning(:r, 0.0, 100.0, 10.0, nothing)
+
+            XLSX.setSeriesBinning(h, 1; binSize = 20, overflow = 80, intervalClosed = :l)
+            @test XLSX.getSeriesBinning(h, 1) ==
+                  XLSX.ChartExBinning(:l, 0.0, 80.0, 20.0, nothing)
+
+            # binCount replaces binSize
+            XLSX.setSeriesBinning(h, 1; binCount = 7)
+            b = XLSX.getSeriesBinning(h, 1)
+            @test isnothing(b.binSize) && b.binCount == 7
+
+            XLSX.setSeriesBinning(h, 1; underflow = :auto, overflow = :inherit)
+            b = XLSX.getSeriesBinning(h, 1)
+            @test b.underflow === :auto && isnothing(b.overflow)
+
+            @test XLSX.setSeriesBinning(h, 1) === h        # no keywords is a no-op
+            @test_throws XLSX.XLSXError XLSX.setSeriesBinning(h, 1; binSize = 5, binCount = 5)
+            @test_throws XLSX.XLSXError XLSX.setSeriesBinning(h, 1; intervalClosed = :x)
+
+            # aggregation and binning exclude each other
+            p = chart("pareto")
+            @test XLSX.getSeriesAggregation(p, 1) === true
+            XLSX.setSeriesBinning(p, 1; binSize = 5)
+            @test XLSX.getSeriesAggregation(p, 1) === false
+            XLSX.setSeriesAggregation(p, 1, true)
+            @test isnothing(XLSX.getSeriesBinning(p, 1))
+            XLSX.setSeriesAggregation(p, 1, false)
+            @test XLSX.getSeriesAggregation(p, 1) === false
+        end
+
+        @testset "reaches disk" begin
+            out = joinpath(mktempdir(), "cx_layoutpr_out.xlsx")
+            XLSX.writexlsx(out, xf, overwrite = true)
+            f = XLSX.readxlsx(out)
+            h = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "histogram",
+                            XLSX.getCharts(f)))
+            @test XLSX.getSeriesBinning(h, 1).binCount == 7
+        end
+    end
 end
