@@ -535,4 +535,23 @@
     end
 
     isfile("mytest.xlsx") && rm("mytest.xlsx")
+
+    @testset "renaming a sheet repoints chart references" begin
+        path = "chart_rename.xlsx"
+        cp(joinpath(data_directory, "chart_basic.xlsx"), path; force = true)
+        xf = XLSX.openxlsx(path; mode = "rw")
+        XLSX.renamesheet!(xf["Data"], "Sales")
+        c = only(XLSX.getCharts(xf))
+        @test all(r -> startswith(string(r.values), "Sales!"), XLSX.getChartRanges(c))
+        SAVE_FILES && save_outfile(xf)
+        isfile(path) && rm(path)
+    end
+
+    @testset "chart reference repointing matches whole sheet names" begin
+        @test XLSX._repoint_ref_string("Data!\$A\$1:\$A\$5", "Data!", "Sales!") == "Sales!\$A\$1:\$A\$5"
+        @test XLSX._repoint_ref_string("MyData!\$A\$1", "Data!", "Sales!") == "MyData!\$A\$1"
+        @test XLSX._repoint_ref_string("(Data!\$A\$1,Data!\$C\$1)", "Data!", "Sales!") == "(Sales!\$A\$1,Sales!\$C\$1)"
+        @test XLSX._repoint_ref_string("'My Sheet'!\$B\$2", "'My Sheet'!", "Sales!") == "Sales!\$B\$2"
+        @test XLSX._repoint_ref_string("[1]Data!\$A\$1", "Data!", "Sales!") == "[1]Data!\$A\$1"
+    end
 end

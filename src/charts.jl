@@ -1050,29 +1050,36 @@ end
 
 # The xdr:graphicFrame for a chart, as Excel writes it: zero xfrm (the anchor
 # carries the position), and for cx the frame wrapped in mc:AlternateContent with
-# no Fallback, which Excel accepts.
-function _chart_frame(rid::String, shape_id::Int, name::String; cx_requires::Union{Nothing,String}=nothing)
-    ischx = !isnothing(cx_requires)
-    chart = XML.Element(ischx ? "cx:chart" : "c:chart")
-    chart[ischx ? "xmlns:cx" : "xmlns:c"] = ischx ? NS_CX : NS_C
+# no Fallback, which Excel accepts. `locked` adds the graphicFrameLocks Excel
+# writes for a chartsheet's chart.
+function _chart_frame(rid::String, shape_id::Int, name::String;
+                      cx_requires::Union{Nothing,String} = nothing,
+                      locked::Bool = false)
+    iscx = !isnothing(cx_requires)
+    chart = XML.Element(iscx ? "cx:chart" : "c:chart")
+    chart[iscx ? "xmlns:cx" : "xmlns:c"] = iscx ? NS_CX : NS_C
     chart["xmlns:r"] = NS_R
     chart["r:id"]    = rid
 
     data = XML.Element("a:graphicData", chart)
-    data["uri"] = ischx ? "http://schemas.microsoft.com/office/drawing/2014/chartex" :
-                          "http://schemas.openxmlformats.org/drawingml/2006/chart"
+    data["uri"] = iscx ? "http://schemas.microsoft.com/office/drawing/2014/chartex" :
+                         "http://schemas.openxmlformats.org/drawingml/2006/chart"
+
+    cnv_frame = locked ?
+        XML.Element("xdr:cNvGraphicFramePr", XML.Element("a:graphicFrameLocks"; noGrp = "1")) :
+        XML.Element("xdr:cNvGraphicFramePr")
 
     frame = XML.Element("xdr:graphicFrame",
         XML.Element("xdr:nvGraphicFramePr",
             XML.Element("xdr:cNvPr"; id = string(shape_id), name = name),
-            XML.Element("xdr:cNvGraphicFramePr")),
+            cnv_frame),
         XML.Element("xdr:xfrm",
             XML.Element("a:off"; x = "0", y = "0"),
             XML.Element("a:ext"; cx = "0", cy = "0")),
         XML.Element("a:graphic", data))
     frame["macro"] = ""               # `macro` is a Julia keyword, so not a kwarg
 
-    ischx || return frame
+    iscx || return frame
     choice = XML.Element("mc:Choice", frame)
     choice["xmlns:$cx_requires"] = CX_NAMESPACES[cx_requires]
     choice["Requires"] = cx_requires
@@ -1096,11 +1103,12 @@ end
 
 _next_shape_id(drawing_root::XML.Node) = max(_max_shape_id(drawing_root), 1) + 1
 
-# Add a new part at the next free `stemN.xml` in `dir`, parsed from `xml`, with its
-# content-type override. Returns its package path.
-function _new_part!(xf::XLSXFile, dir::String, first_name::String, xml::AbstractString, mime::String)::String
+# Add a new part at the next free `stemN.xml` in `dir`, from `xml` (a string, or an
+# already-parsed document), with its content-type override. Returns its path.
+function _new_part!(xf::XLSXFile, dir::String, first_name::String,
+                    xml::Union{AbstractString,XML.Node}, mime::String)::String
     path = "$dir/$(_next_part_name(xf, dir, first_name))"
-    xf.data[path]  = parse(xml, XML.Node)
+    xf.data[path]  = xml isa XML.Node ? xml : parse(xml, XML.Node)
     xf.files[path] = true
     register_content_type!(xf, "[Content_Types].xml";
                            tag="Override", key="PartName", val="/$path", content_type=mime)
@@ -1110,15 +1118,18 @@ end
 """
     _add_chart_part!(ws, xml, style_id; anchor, cx_requires=nothing) -> String
 
-Add `xml` as a new chart part on `ws`, with its style and colour parts, and anchor
-it over `anchor`. `cx_requires` is `nothing` for a `c:` chart, or the `Requires`
-prefix (`"cx1"`, `"cx2"`) for a `cx:` one. Returns the chart part's path.
+Add `xml` as a new chart part on `ws`, with its style and colour parts, and place
+it in the sheet's drawing. `anchor` is a cell range for a worksheet, or `nothing`
+for a chartsheet, whose chart is absolutely anchored and fills the sheet.
+`cx_requires` is `nothing` for a `c:` chart, or the `Requires` prefix (`"cx1"`,
+`"cx2"`) for a `cx:` one. Returns the chart part's path.
 
 This writes the part as given: it neither checks nor rewrites what the XML
 refers to.
 """
-function _add_chart_part!(ws::Worksheet, xml::AbstractString, style_id::Integer;
-                          anchor::CellRange, cx_requires::Union{Nothing,String}=nothing)::String
+function _add_chart_part!(ws::Worksheet, xml::Union{AbstractString,XML.Node}, style_id::Integer;
+                          anchor::Union{Nothing,CellRange},
+                          cx_requires::Union{Nothing,String} = nothing)::String
     xf   = get_xlsxfile(ws)
     iscx = !isnothing(cx_requires)
     drawing = ensure_drawing!(xf, get_worksheet_internal_file(ws))
@@ -1133,9 +1144,127 @@ function _add_chart_part!(ws::Worksheet, xml::AbstractString, style_id::Integer;
     rid  = add_part_rel!(xf, drawing, path, iscx ? REL_CHARTEX : REL_CHART)
     root = xml_root_element(xf.data[drawing])
     id   = _next_shape_id(root)
-    push!(root, build_two_cell_anchor(
-        column_number(anchor.start) - 1, row_number(anchor.start) - 1,   # 0-based inclusive
-        column_number(anchor.stop),      row_number(anchor.stop),        # 0-based exclusive
-        _chart_frame(rid, id, "Chart $(id - 1)"; cx_requires)))
+    content = _chart_frame(rid, id, "Chart $(id - 1)"; cx_requires, locked = isnothing(anchor))
+
+    push!(root, isnothing(anchor) ?
+        build_absolute_anchor(content) :
+        build_two_cell_anchor(
+            column_number(anchor.start) - 1, row_number(anchor.start) - 1,   # 0-based inclusive
+            column_number(anchor.stop),      row_number(anchor.stop),        # 0-based exclusive
+            content))
     return path
+end
+
+# Rebuild `node` bottom-up, replacing each element `e` with `f(e)` once its
+# children have been rebuilt.
+function _rewrite(f, node::XML.Node)
+    kids = XML.children(node)
+    if !isnothing(kids) && !isempty(kids)
+        node = _with_children(node, [_rewrite(f, k) for k in kids])
+    end
+    return XML.nodetype(node) == XML.Element ? f(node) : node
+end
+
+_is_el(k, tag) = XML.nodetype(k) == XML.Element && localname(k) == tag
+
+# The template with its series removed and fresh axis ids, as a document node.
+function _chart_shell(template::AbstractString; title)
+    ids  = Dict{String,String}()
+    next = Ref(500_000_000)
+    newid(v) = get!(() -> string(next[] += 1), ids, v)
+
+    doc = _rewrite(parse(template, XML.Node)) do e
+        t = localname(e)
+        t in CHART_GROUP_TAGS && return _with_children(e, [k for k in e.children if !_is_el(k, "ser")])
+        t in ("axId", "crossAx") && return with_attribute(e, "val", newid(_attr(e, "val")))
+        return e
+    end
+    isnothing(title) && return doc
+
+    return _rewrite(doc) do e
+        localname(e) == "chart" || return e
+        t = first_element_with_tag(e, "title")
+        if title === false
+            e   = remove_child(e, "title")
+            atd = first_element_with_tag(e, "autoTitleDeleted")
+            return replace_child(e, atd, with_attribute(atd, "val", "1"))
+        end
+        return replace_child(e, t, _title_with_text(t, title))
+    end
+end
+
+# A typed title in the template's formatting: c:txPr's body, with its end-of-
+# paragraph properties replaced by a run.
+function _title_with_text(t::XML.Node, text::AbstractString)
+    txpr = first_element_with_tag(t, "txPr")
+    p    = first_element_with_tag(txpr, "p")
+    run  = XML.Element("a:r", XML.Element("a:rPr"; lang = "en-US"),
+                              XML.Element("a:t", XML.Text(text)))
+    pk   = [k for k in p.children if !_is_el(k, "endParaRPr")]
+    push!(pk, run)
+    newp = _with_children(p, pk)
+    rich = XML.Element("c:rich", [k === p ? newp : k for k in txpr.children]...)
+    return insert_child(t, (NS_C, "title"), XML.Element("c:tx", rich))
+end
+
+"""
+    addChart(ws::Worksheet, kind::Symbol; anchor, title=nothing) -> Chart
+
+Add an empty chart of `kind` to `ws`, covering the cells in `anchor` (a range
+such as `"F2:M18"`). Add data with [`addSeries`](@ref).
+
+`kind` is one of `:column`, `:bar`, `:stackedColumn`, `:line`, `:lineMarkers`,
+`:area`, `:pie`, `:doughnut`, `:scatter`, `:bubble` or `:radar`. The chart
+starts as Excel's own default for that kind, formatted by the workbook's theme.
+
+`title` is `nothing` for Excel's automatic title, a string for typed text, or
+`false` for no title.
+"""
+function addChart(ws::Worksheet, kind::Symbol;
+                  anchor::Union{AbstractString,CellRange},
+                  title::Union{Nothing,Bool,AbstractString} = nothing)::Chart
+    haskey(C_KINDS, kind) || throw(XLSXError(
+        "Unknown chart kind `:$kind`. Use one of " * join((":$k" for k in keys(C_KINDS)), ", ") * "."))
+    title === true && throw(XLSXError("`title` is a string, `nothing` for Excel's automatic title, or `false` for none."))
+    k    = C_KINDS[kind]
+    path = _add_chart_part!(ws, _chart_shell(CHART_KIND_TEMPLATES[k.template]; title), k.style;
+                            anchor = anchor isa CellRange ? anchor : CellRange(anchor))
+    return getChart(ws, path)
+end
+
+const CHARTSHEET_TEMPLATE = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<chartsheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="xr" xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision"><sheetPr/><sheetViews><sheetView workbookViewId="0" zoomToFit="1"/></sheetViews><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></chartsheet>"""
+
+# Excel's anchor for a chartsheet's chart; with zoomToFit the size is nominal.
+build_absolute_anchor(content::XML.Node)::XML.Node =
+    XML.Element("xdr:absoluteAnchor",
+        XML.Element("xdr:pos"; x = "0", y = "0"),
+        XML.Element("xdr:ext"; cx = "9295876", cy = "6068505"),
+        content,
+        XML.Element("xdr:clientData"))
+
+        function _check_chart_args(kind::Symbol, title)
+    haskey(C_KINDS, kind) || throw(XLSXError(
+        "Unknown chart kind `:$kind`. Use one of " * join((":$k" for k in keys(C_KINDS)), ", ") * "."))
+    title === true && throw(XLSXError(
+        "`title` is a string, `nothing` for Excel's automatic title, or `false` for none."))
+    return C_KINDS[kind]
+end
+
+"""
+    addChart(xf::XLSXFile, kind::Symbol; sheetname="", title=nothing) -> Chart
+
+Add an empty chart of `kind` on a new chartsheet, placed after the existing
+sheets. `sheetname` defaults to `Chart1`, `Chart2`, … as Excel names them. See
+the worksheet method for `kind` and `title`.
+"""
+function addChart(xf::XLSXFile, kind::Symbol; sheetname::AbstractString = "",
+                  title::Union{Nothing,Bool,AbstractString} = nothing)::Chart
+    k  = _check_chart_args(kind, title)
+    ws = _register_sheet!(get_workbook(xf), parse(CHARTSHEET_TEMPLATE, XML.Node), sheetname;
+                          dir = "xl/chartsheets", reltype = REL_CHARTSHEET,
+                          mime = MIME_CHARTSHEET, default_name = "Chart")
+    path = _add_chart_part!(ws, _chart_shell(CHART_KIND_TEMPLATES[k.template]; title), k.style;
+                            anchor = nothing)
+    return getChart(xf, path)
 end

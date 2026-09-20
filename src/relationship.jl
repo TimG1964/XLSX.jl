@@ -319,6 +319,15 @@ function repoint_chart_refs!(xl::XLSXFile, chart_path::String,
     return nothing
 end
 
+# `s` with every reference to the sheet in `old_prefix` (e.g. `Data!` or
+# `'My Sheet'!`) pointed at `new_prefix` instead. The prefix must start a
+# reference: not preceded by a name character or quote, so `Data!` does not
+# match inside `MyData!`. Formulas naming an external workbook are left alone.
+function _repoint_ref_string(s::AbstractString, old_prefix::String, new_prefix::String)::String
+    occursin('[', s) && return String(s)
+    return replace(s, Regex("(?<![\\w.'])\\Q" * old_prefix * "\\E") => new_prefix)
+end
+
 # Any element named `f` in a chart part is a formula reference — series data,
 # titles, data labels in extLst, trendlines. Walking the whole tree rather than
 # enumerating paths means the extLst cases are covered too.
@@ -327,10 +336,8 @@ function _repoint_refs!(node::XML.Node, old_prefix::String, new_prefix::String)
         if localname(child) == "f"
             s = XML.is_simple_value(child)
             isnothing(s) && continue
-            s = String(s)
-            occursin('[', s) && continue            # external workbook
-            occursin(old_prefix, s) || continue
-            child[end] = XML.Text(replace(s, old_prefix => new_prefix))
+            t = _repoint_ref_string(s, old_prefix, new_prefix)
+            t == s || (child[end] = XML.Text(t))
         else
             _repoint_refs!(child, old_prefix, new_prefix)
         end
@@ -374,7 +381,12 @@ function _repoint_cx_refs!(node::XML.Node, wb::Workbook, old_sheet::String,
             isnothing(s) && continue
             new_name = _clone_xlchart_name!(wb, String(s), old_sheet, new_sheet,
                                             series, counter, cloned)
-            isnothing(new_name) || (child[end] = XML.Text(new_name))
+            if isnothing(new_name)          # a direct reference, as stage 6 writes
+                t = _repoint_ref_string(s, quoteit(old_sheet) * "!", quoteit(new_sheet) * "!")
+                t == s || (child[end] = XML.Text(t))
+            else
+                child[end] = XML.Text(new_name)
+            end
         else
             _repoint_cx_refs!(child, wb, old_sheet, new_sheet, series, counter, cloned)
         end

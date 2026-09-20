@@ -586,4 +586,73 @@
         SAVE_FILES && save_outfile(xf)
         isfile(path) && rm(path)
     end
+
+        @testset "addChart on a worksheet" begin
+        path = "chart_add.xlsx"
+        xf = XLSX.newxlsx("data")
+        ws = xf["data"]
+
+        c = XLSX.addChart(ws, :column; anchor = "F2:M18", title = "Revenue")
+        @test c isa XLSX.Chart
+        @test XLSX.getChartTypes(c) == [:barChart]
+        @test isempty(XLSX.getChartSeries(c))
+        @test XLSX.getChartTitle(c) == "Revenue"
+
+        # Fresh axis ids, consistently wired.
+        axes = XLSX.getChartAxes(c)
+        @test length(axes) == 2
+        @test only(XLSX.getChartGroups(c)).axids == [ax.axid for ax in axes]
+        @test XLSX.getAxisPartner(c, axes[1]).axid == axes[2].axid
+
+        # Every kind builds, and the title options work.
+        for (i, kind) in enumerate(keys(XLSX.C_KINDS))
+            k = XLSX.addChart(ws, kind; anchor = "O$(20i):V$(20i + 15)", title = i == 1 ? false : nothing)
+            @test isempty(XLSX.getChartSeries(k))
+        end
+        @test length(XLSX.getCharts(ws)) == 1 + length(XLSX.C_KINDS)
+
+        XLSX.writexlsx(path, xf, overwrite = true)
+        @test length(XLSX.getCharts(XLSX.readxlsx(path))) == 1 + length(XLSX.C_KINDS)
+
+        SAVE_FILES && save_outfile(xf)
+        isfile(path) && rm(path)
+    end
+
+    @testset "addChart as a chartsheet" begin
+        path = "chart_chartsheet_add.xlsx"
+        xf = XLSX.newxlsx("data")
+
+        c = XLSX.addChart(xf, :line; sheetname = "Trend", title = "Trend")
+        @test c isa XLSX.Chart
+        @test XLSX.sheetnames(xf) == ["data", "Trend"]
+        @test XLSX.is_chartsheet(XLSX.get_workbook(xf), "Trend")
+        @test c.sheet == "Trend"
+        @test isnothing(c.from)
+        @test XLSX.getChartTypes(c) == [:lineChart]
+
+        d = XLSX.addChart(xf, :pie)
+        @test d.sheet == "Chart1"
+
+        XLSX.writexlsx(path, xf, overwrite = true)
+        g = XLSX.readxlsx(path)
+        @test XLSX.sheetnames(g) == ["data", "Trend", "Chart1"]
+        @test length(XLSX.getCharts(g)) == 2
+
+        SAVE_FILES && save_outfile(xf)
+        isfile(path) && rm(path)
+    end
+
+    @testset "a new sheet's content type names its own part" begin
+        path = "chart_chartsheet_ct.xlsx"
+        cp(joinpath(data_directory, "chart_chartsheet.xlsx"), path; force = true)
+        xf = XLSX.openxlsx(path; mode = "rw")        # sheetIds 2 and 1, one worksheet file
+        ws = XLSX.addsheet!(xf, "More")
+        part = XLSX.get_worksheet_internal_file(ws)
+        @test ws.sheetId == 3
+        @test part == "xl/worksheets/sheet2.xml"
+        @test XLSX.content_type_for_part(xf, part) == XLSX.MIME_WORKSHEET
+
+        SAVE_FILES && save_outfile(xf)
+        isfile(path) && rm(path)
+    end
 end

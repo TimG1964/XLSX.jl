@@ -1307,9 +1307,19 @@ See also [addsheet!](@ref), [copysheet!](@ref), [deletesheet!](@ref)
 """
 function renamesheet!(ws::Worksheet, name::AbstractString)
 
+    xf = get_xlsxfile(ws)
+
     # no-op if the name has not changed
     if ws.name == name
         return
+    end
+    
+    name ∈ sheetnames(xf) && throw(XLSXError("Sheetname $name is already in use."))
+    isempty(name) && throw(XLSXError("A sheet name cannot be empty."))
+    check_valid_sheetname(name)
+
+    for p in (parts_with_content_type(xf, MIME_CHART)..., parts_with_content_type(xf, MIME_CHARTEX)...)
+        repoint_chart_refs!(xf, p, ws.name, name)
     end
 
     xf = get_xlsxfile(ws)
@@ -1590,86 +1600,75 @@ function copysheet!(ws::Worksheet, name::AbstractString="")::Worksheet
     return new_ws
 end
 
-function insertsheet!(wb::Workbook, xdoc::XML.Node, new_cache::WorksheetCache, sst_count::Int, pfx::String, name::AbstractString=""; dim=CellRange("A1:A1"))::Worksheet
+const REL_WORKSHEET   = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+const REL_CHARTSHEET  = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet"
+const MIME_WORKSHEET  = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
+const MIME_CHARTSHEET = "application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml"
+
+# A sheet name Excel accepts: at most 31 characters, none of : \ / ? * [ ].
+function check_valid_sheetname(n::AbstractString)
+    max_length = 31
+    if length(n) > max_length
+        throw(XLSXError("Invalid sheetname $n: must have at most $max_length characters. Found $(length(n))"))
+    end
+    if occursin(r"[:\\/\?\*\[\]]+", n)
+        throw(XLSXError("Sheetname cannot contain characters: ':', '\\', '/', '?', '*', '[' or ']'."))
+    end
+end
+
+# Register `xdoc` as a new sheet: unique name, next sheetId, a free file in `dir`,
+# the workbook relationship, the content-type override (for the file actually
+# written), and <sheets>. Returns the Worksheet entry; the caller adds a cache
+# if the sheet holds cells.
+function _register_sheet!(wb::Workbook, xdoc::XML.Node, name::AbstractString;
+                          dir::String, reltype::String, mime::String,
+                          default_name::String, pfx::String = "",
+                          dim::CellRange = CellRange("A1:A1"))::Worksheet
     xf = get_xlsxfile(wb)
     !is_writable(xf) && throw(XLSXError("XLSXFile instance is not writable."))
 
-    if name == ""
-        new_name = ""
-    else
-        new_name = name
-    end
-    # ensure name is unique.
+    new_name = name
+    existing = sheetnames(wb)
     i = 1
-    current_sheet_names = sheetnames(wb)
-    while new_name ∈ current_sheet_names || new_name == ""
-        new_name = (name == "" ? "Sheet" : name * " ") * string(i)
+    while new_name == "" || new_name in existing
+        new_name = (name == "" ? default_name : name * " ") * string(i)
         i += 1
     end
-
-    new_name == "" && throw(XLSXError("Something wrong here!"))
-
-    # checks if name is a unique sheet name
-    function check_valid_sheetname(n::AbstractString)
-        max_length = 31
-        if length(n) > max_length
-            throw(XLSXError("Invalid sheetname $n: must have at most $max_length characters. Found $(length(n))"))
-        end
-
-        if occursin(r"[:\\/\?\*\[\]]+", n)
-            throw(XLSXError("Sheetname cannot contain characters: ':', '\\', '/', '?', '*', '[' or ']'."))
-        end
-    end
-
     check_valid_sheetname(new_name)
 
-    # generate sheetId
-    current_sheet_ids = [ws.sheetId for ws in wb.sheets]
-    sheetId = max(current_sheet_ids...) + 1
+    sheetId = maximum((ws.sheetId for ws in wb.sheets); init = 0) + 1
 
-    # generate a unique ID for the new sheet
-    let sheet_root = xml_root_element(xdoc)
-        !haskey(sheet_root, "xmlns:xr") && (sheet_root["xmlns:xr"] = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision")
-        sheet_root["xr:uid"] = "{" * uppercase(string(UUIDs.uuid4(wb.package.uuid_rng))) * "}"
+    let root = xml_root_element(xdoc)
+        haskey(root, "xmlns:xr") || (root["xmlns:xr"] = "http://schemas.microsoft.com/office/spreadsheetml/2014/revision")
+        root["xr:uid"] = "{" * uppercase(string(UUIDs.uuid4(wb.package.uuid_rng))) * "}"
     end
 
-    # generate a unique name for the XML
-    local xml_filename::String
-    i = 1
-    while true
-        xml_filename = "xl/worksheets/sheet" * string(i) * ".xml"
-        #        if !in(xml_filename, keys(xf.files))
-        if !haskey(xf.files, xml_filename)
-            break
-        end
-        i += 1
-    end
+    j = 1
+    while haskey(xf.files, "$dir/sheet$j.xml") || haskey(xf.data, "$dir/sheet$j.xml"); j += 1; end
+    xml_filename = "$dir/sheet$j.xml"
 
-    # adds doc do XLSXFile
-    xf.files[xml_filename] = true # is read
-    xf.data[xml_filename] = xdoc
+    xf.files[xml_filename]     = true
+    xf.data[xml_filename]      = xdoc
     xf.namespace[xml_filename] = pfx
 
-    # adds workbook-level relationship
-    # <Relationship Id="rId1" Target="worksheets/sheet1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
-    rId = add_relationship!(wb, xml_filename[4:end], "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet")
-
-    # creates Worksheet instance
-    ws = Worksheet(xf, sheetId, rId, new_name, dim, false)
-    ws.cache = new_cache
-    ws.sst_count = sst_count
-
-    # adds the new sheet to the list of sheets in the workbook
+    rId = add_relationship!(wb, xml_filename[4:end], reltype)
+    ws  = Worksheet(xf, sheetId, rId, new_name, dim, false)
     push!(wb.sheets, ws)
 
-    # update [Content_Types].xml (fix for issue #275)
-    add_override!(get_xlsxfile(wb), "/xl/worksheets/sheet" * string(sheetId) * ".xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml")
-
+    register_content_type!(xf, "[Content_Types].xml";
+                           tag = "Override", key = "PartName", val = "/$xml_filename", content_type = mime)
     update_workbook_xml!(xf)
-
     return ws
 end
 
+function insertsheet!(wb::Workbook, xdoc::XML.Node, new_cache::WorksheetCache, sst_count::Int,
+                      pfx::String, name::AbstractString = ""; dim = CellRange("A1:A1"))::Worksheet
+    ws = _register_sheet!(wb, xdoc, name; dir = "xl/worksheets", reltype = REL_WORKSHEET,
+                          mime = MIME_WORKSHEET, default_name = "Sheet", pfx, dim)
+    ws.cache     = new_cache
+    ws.sst_count = sst_count
+    return ws
+end
 
 # Deletes `path` and, recursively, everything transitively reachable through
 # its own `_rels` file — i.e. second/third/... order orphans. Used for parts
