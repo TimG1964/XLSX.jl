@@ -18,7 +18,7 @@ using Colors
 # by manually opening each output file.
 # If TRUE, approx 220 files are created in `outdir`.
 # This flag should be reserved for local use and **never** left as TRUE for CI.
-const SAVE_FILES = true
+const SAVE_FILES = false
 
 const src_data_directory = joinpath(dirname(pathof(XLSX)), "data")
 const data_directory = joinpath(dirname(pathof(XLSX)), "..", "test", "data")
