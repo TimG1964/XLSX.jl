@@ -581,7 +581,13 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 end
             end
         end
-
+        @testset "text_content reads a raw body as it reads a parsed one" begin
+            xml = """<c:rich xmlns:c="$(XLSX.NS_C)" xmlns:a="$(XLSX.NS_A)"><a:bodyPr/><a:lstStyle/>""" *
+                """<a:p><a:r><a:t>One</a:t></a:r></a:p>""" *
+                """<a:p><a:r><a:t>Two</a:t></a:r><a:fld id="{0}" type="x"><a:t>!</a:t></a:fld></a:p></c:rich>"""
+            node = XLSX.xml_root_element(parse(xml, XLSX.XML.Node))
+            @test XLSX.text_content(node) == "One\nTwo!"
+        end
         @testset "theme fonts" begin
             XLSX.openxlsx(joinpath(data_directory, "chart_theme_colors.xlsx")) do xf
                 wb = XLSX.get_workbook(xf)

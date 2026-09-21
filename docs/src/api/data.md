@@ -61,7 +61,7 @@ workbook-scoped names, even though those can be used from `ws` in a formula.
 Use [`XLSX.getAllDefinedNames`](@ref) to see every name in a file at once.
 
 Names are matched case-insensitively, as in Excel. Defined names also share a
-namespace with Excel Table names — see [Excel Tables](@ref).
+namespace with Excel Table names — see [`Excel Tables`](@ref).
 
 ```@docs
 XLSX.DefinedName

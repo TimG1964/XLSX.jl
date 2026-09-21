@@ -621,6 +621,27 @@ function text_content(t::DrawingText)
     return String(take!(io))
 end
 
+"""
+    text_content(node::XML.Node) -> String
+
+The text of a DrawingML text body (`c:rich`, `cx:rich`, `a:txBody`, …) read directly
+from the XML: the text of its runs and fields, with paragraphs separated by `"\\n"`.
+Agrees with `text_content(::DrawingText)` for the same body, without resolving any
+formatting.
+"""
+function text_content(node::XML.Node)::String
+    io = IOBuffer()
+    n  = 0
+    for p in XML.eachelement(node)
+        localname(p) == "p" || continue
+        (n += 1) > 1 && print(io, "\n")
+        for r in XML.eachelement(p)
+            localname(r) in ("r", "fld") && print(io, something(child_text(r, "t"), ""))
+        end
+    end
+    return String(take!(io))
+end
+
 text_runs(t::DrawingText) = [r for p in t.paragraphs for r in p.runs]
 
 # Comparable identity for run properties, ignoring `lang` and `raw`: two runs

@@ -371,7 +371,7 @@ end
     opentemplate(source::Union{AbstractString, IO}) :: XLSXFile
 
 Read an existing Excel (`.xlsx`) file as a template and return as a writable `XLSXFile` for editing 
-and saving to another file with [XLSX.writexlsx](@ref).
+and saving to another file with [`XLSX.writexlsx`](@ref).
 
 A convenience function equivalent to `openxlsx(source; mode="rw", enable_cache=true)`
 
@@ -389,7 +389,7 @@ opentemplate(source::Union{AbstractString,IO})::XLSXFile = open_or_read_xlsx(sou
     newxlsx([sheetname::AbstractString]; update_timestamp::Bool) :: XLSXFile
 
 Return an empty, writable `XLSXFile` with 1 worksheet for editing and 
-subsequent saving to a file with [XLSX.writexlsx](@ref).
+subsequent saving to a file with [`XLSX.writexlsx`](@ref).
 By default, the worksheet is `Sheet1`. Specify `sheetname` to give the worksheet a different name.
 
 Use keyword argument `update_timestamp=false` to prevent timestamps in the file properties from being 
@@ -1140,7 +1140,11 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
     end
 
     consumer = @async begin
-        fill_tasks = Task[]
+        # Sheets to fill once reading is complete, with their raw XML. Spawning the
+        # fills inside this loop let them read xf.data and friends on other threads
+        # while this task was still inserting into those Dicts: a data race, seen as
+        # a rare KeyError for a part stored long before.
+        pending = Tuple{Worksheet,Any}[]
 
         for file in read_files
             if !isnothing(file.node)
@@ -1165,21 +1169,12 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
                     xf.data[file.name] = file.node
                     xf.files[file.name] = true
                     for sheet in wb.sheets
-                        target = get_relationship_target_by_id("xl", wb, sheet.relationship_id)
-                        if target == file.name
-                            local captured_sheet = sheet
-                            local captured_raw = file.raw
-                            t = Threads.@spawn begin
-                                lznode = parse(captured_raw, XML.LazyNode)
-                                first_cache_fill!(captured_sheet, lznode)
-                            end
-                            push!(fill_tasks, t)
-                        end
+                        get_relationship_target_by_id("xl", wb, sheet.relationship_id) == file.name &&
+                            push!(pending, (sheet, file.raw))
                     end
                 elseif xf.use_cache_for_sheet_data
                     # cache-on, read-only: keep full raw resident so streaming/lazy-fill/
                     # dimension lookups can use it without re-reading from ZIP.
-                    # (unchanged from prior behaviour)
                     xf.data[file.name] = file.raw
                     xf.files[file.name] = true
                 else
@@ -1198,9 +1193,10 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
             end
         end
 
-        for t in fill_tasks
-            wait(t)
-        end
+        # Every write to xf's Dicts is done; the fills now only read them.
+        fill_tasks = [Threads.@spawn(first_cache_fill!(sheet, parse(raw, XML.LazyNode)))
+                      for (sheet, raw) in pending]
+        foreach(wait, fill_tasks)
     end
 
     #@sync for _ in 1:MAX_THREADS

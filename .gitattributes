@@ -3,3 +3,4 @@
 *.[bB][aA][tT] text eol=crlf
 src/data/chartstyles/*.xml -text
 src/data/chartkinds/*.xml -text
+src/data/chartexkinds/*.xml -text

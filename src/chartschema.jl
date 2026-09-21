@@ -99,13 +99,33 @@ const CHILD_ORDER = Dict{Tuple{String,String},Vector{Union{String,Vector{String}
                             "barChart","bar3DChart","ofPieChart","surfaceChart","surface3DChart",
                             "bubbleChart"],
                            ["valAx","catAx","dateAx","serAx"],
-                           "dTable","spPr","extLst"],
+                            "dTable","spPr","extLst"],
 
-    # Groups
+    # Groups - the entries are from ECMA-376 Part 1, dml-chart.xsd, with the EG_*Shared groups expanded in place
     (NS_C, "barChart")  => ["barDir","grouping","varyColors","ser","dLbls","gapWidth",
                             "overlap","serLines","axId","extLst"],
     (NS_C, "lineChart") => ["grouping","varyColors","ser","dLbls","dropLines","hiLowLines",
                             "upDownBars","marker","smooth","axId","extLst"],
+    (NS_C, "areaChart") => ["grouping", "varyColors", "ser", "dLbls", "dropLines", "axId", "extLst"],
+    (NS_C, "pieChart") => ["varyColors", "ser", "dLbls", "firstSliceAng", "extLst"],
+    (NS_C, "doughnutChart") => ["varyColors", "ser", "dLbls", "firstSliceAng", "holeSize", "extLst"],
+    (NS_C, "scatterChart") => ["scatterStyle", "varyColors", "ser", "dLbls", "axId", "extLst"],
+    (NS_C, "bubbleChart") => ["varyColors", "ser", "dLbls", "bubble3D", "bubbleScale",
+                              "showNegBubbles", "sizeRepresents", "axId", "extLst"],
+    (NS_C, "radarChart") => ["radarStyle", "varyColors", "ser", "dLbls", "axId", "extLst"],
+    (NS_C, "area3DChart")    => ["grouping","varyColors","ser","dLbls","dropLines","gapDepth",
+                                 "axId","extLst"],
+    (NS_C, "bar3DChart")     => ["barDir","grouping","varyColors","ser","dLbls","gapWidth",
+                                 "gapDepth","shape","axId","extLst"],
+    (NS_C, "line3DChart")    => ["grouping","varyColors","ser","dLbls","dropLines","gapDepth",
+                                 "axId","extLst"],
+    (NS_C, "ofPieChart")     => ["ofPieType","varyColors","ser","dLbls","gapWidth","splitType",
+                                 "splitPos","custSplit","secondPieSize","serLines","extLst"],
+    (NS_C, "pie3DChart")     => ["varyColors","ser","dLbls","extLst"],
+    (NS_C, "stockChart")     => ["ser","dLbls","dropLines","hiLowLines","upDownBars","axId",
+                                 "extLst"],
+    (NS_C, "surfaceChart")   => ["wireframe","ser","bandFmts","axId","extLst"],
+    (NS_C, "surface3DChart") => ["wireframe","ser","bandFmts","axId","extLst"],
 
     # CT_LineProperties. Three choice groups then the ends. Note the line fill
     # group has four members, not the six of CT_ShapeProperties — a line cannot
@@ -183,6 +203,7 @@ const CHILD_ORDER = Dict{Tuple{String,String},Vector{Union{String,Vector{String}
     (NS_CX, "minorGridlines") => ["spPr","extLst"],
     (NS_CX, "fmtOvrs")        => ["fmtOvr"],
     (NS_CX, "fmtOvr")         => ["spPr","extLst"],
+    
 )
 
 CHILD_ORDER[(NS_A, "rPr")]         = CHILD_ORDER[(NS_A, "defRPr")]
@@ -206,11 +227,25 @@ const REPEATABLE = Dict{Tuple{String,String},Set{String}}(
     (NS_C, "radarSer")   => Set(["dPt"]),
     (NS_C, "scatterSer") => Set(["dPt", "trendline", "errBars"]),
     (NS_C, "surfaceSer") => Set{String}(),
+    (NS_C, "areaChart")     => Set(["ser", "axId"]),
+    (NS_C, "barChart")      => Set(["ser", "serLines", "axId"]),
+    (NS_C, "bubbleChart")   => Set(["ser", "axId"]),
+    (NS_C, "doughnutChart") => Set(["ser"]),
+    (NS_C, "lineChart")     => Set(["ser", "axId"]),
+    (NS_C, "pieChart")      => Set(["ser"]),
+    (NS_C, "radarChart")    => Set(["ser", "axId"]),
+    (NS_C, "scatterChart")  => Set(["ser", "axId"]),
+    (NS_C, "area3DChart")    => Set(["ser", "axId"]),
+    (NS_C, "bar3DChart")     => Set(["ser", "axId"]),
+    (NS_C, "line3DChart")    => Set(["ser", "axId"]),
+    (NS_C, "ofPieChart")     => Set(["ser", "serLines"]),
+    (NS_C, "pie3DChart")     => Set(["ser"]),
+    (NS_C, "stockChart")     => Set(["ser", "axId"]),
+    (NS_C, "surfaceChart")   => Set(["ser", "axId"]),
+    (NS_C, "surface3DChart") => Set(["ser", "axId"]),
     (NS_C, "dLbls")      => Set(["dLbl"]),
     (NS_A, "txPr")       => Set(["p"]),
     (NS_A, "rich")       => Set(["p"]),
-    (NS_C, "barChart")  => Set(["ser", "axId"]),
-    (NS_C, "lineChart") => Set(["ser", "axId"]),
     (NS_C, "plotArea")  => Set(["areaChart","area3DChart","lineChart","line3DChart",
                                 "stockChart","radarChart","scatterChart","pieChart",
                                 "pie3DChart","doughnutChart","barChart","bar3DChart",
@@ -299,6 +334,18 @@ const CX_NAMESPACES = Dict(
     "cx2" => "http://schemas.microsoft.com/office/drawing/2015/10/21/chartex",
 )
 
+const _CHARTEXKIND_DIR = joinpath(@__DIR__, "data", "chartexkinds")
+
+# Excel's chartEx part for each layout, verbatim, keyed by kind as in CX_KINDS.
+# addChartEx takes its shell from these with the series and data removed.
+const CHARTEX_KIND_TEMPLATES = Dict{Symbol,String}()
+for f in readdir(_CHARTEXKIND_DIR)
+    endswith(f, ".xml") || continue
+    p = joinpath(_CHARTEXKIND_DIR, f)
+    include_dependency(p)
+    CHARTEX_KIND_TEMPLATES[Symbol(first(splitext(f)))] = read(p, String)
+end
+
 const CX_KINDS = (
     waterfall  = (layouts = (:waterfall,),                   requires = "cx1", style = 395),
     funnel     = (layouts = (:funnel,),                      requires = "cx2", style = 419),
@@ -307,6 +354,16 @@ const CX_KINDS = (
     histogram  = (layouts = (:clusteredColumn,),             requires = "cx1", style = 201),
     pareto     = (layouts = (:clusteredColumn, :paretoLine), requires = "cx1", style = 366),
     boxWhisker = (layouts = (:boxWhisker,),                  requires = "cx1", style = 406),
+)
+
+const _CX_SERIES_RULES = (
+    waterfall  = (valtype = "val",  categories = :optional, multi = false),
+    funnel     = (valtype = "val",  categories = :optional, multi = false),
+    treemap    = (valtype = "size", categories = :required, multi = false),
+    sunburst   = (valtype = "size", categories = :required, multi = false),
+    histogram  = (valtype = "val",  categories = :none,     multi = false),
+    pareto     = (valtype = "val",  categories = :optional, multi = false),
+    boxWhisker = (valtype = "val",  categories = :optional, multi = true),
 )
 
 const _CHARTKIND_DIR = joinpath(@__DIR__, "data", "chartkinds")

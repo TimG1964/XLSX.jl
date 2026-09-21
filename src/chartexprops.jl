@@ -50,7 +50,10 @@ end
 function _cx_tx_text(tx)::Union{Nothing,String}
     isnothing(tx) && return nothing
     rich = first_element_with_tag(tx, "rich")
-    isnothing(rich) || return drawingml_text(rich)
+    if !isnothing(rich)
+        t = text_content(rich)
+        return isempty(t) ? nothing : t
+    end
     return child_text(first_element_with_tag(tx, "txData"), "v")
 end
 

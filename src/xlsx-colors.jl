@@ -10,15 +10,15 @@ function get_colorant(color_string::String)
     end
 end
 get_color(s::Symbol)::String = get_color(String(s))
-function get_color(str::String)::String
-    if occursin(r"^[0-9A-F]{8}$"i, str) # is a valid 8 digit hexadecimal color
-        return uppercase(str)
-    end
+function get_color(str::AbstractString)::String
+    h = lstrip(str, '#')
+    occursin(r"^[0-9A-F]{8}$"i, h) && return uppercase(h)          # AARRGGBB
+    occursin(r"^[0-9A-F]{6}$"i, h) && return "FF" * uppercase(h)   # RRGGBB, opaque
     s = replace(lowercase(str), "grey" => "gray")
     c = get_colorant(s)
-    if isnothing(c)
-        throw(XLSXError("Invalid color specified: $s. Either give a valid color name (from Colors.jl) or an 8-digit rgb color in the form AARRGGBB"))
-    end
+    isnothing(c) && throw(XLSXError(
+        "Invalid color specified: $str. Give a color name from Colors.jl, or a hex " *
+        "color as RRGGBB or AARRGGBB, with or without a leading #."))
     return c
 end
 
@@ -383,3 +383,4 @@ function _linear_map(c::Colors.RGB{Float64}, f)
     b = _linear_to_srgb(clamp(f(_srgb_to_linear(c.b)), 0.0, 1.0))
     return Colors.RGB{Float64}(r, g, b)
 end
+

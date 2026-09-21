@@ -423,10 +423,10 @@ const RGX_SINGLE_ROW = r"^[1-9][0-9]*$"
 end
 
 @inline function combine_sheet_range(s::Worksheet, rng::CellRange)
-    return string(s.name, "!", encode_column_number(rng.start.column_number), rng.start.row_number, ":", encode_column_number(rng.stop.column_number), rng.stop.row_number)
+    return string(quoteit(s.name), "!", encode_column_number(rng.start.column_number), rng.start.row_number, ":", encode_column_number(rng.stop.column_number), rng.stop.row_number)
 end
 @inline function combine_sheet_ref(s::Worksheet, ref::CellRef)
-    return string(s.name, "!", encode_column_number(ref.column_number), ref.row_number)
+    return string(quoteit(s.name), "!", encode_column_number(ref.column_number), ref.row_number)
 end
 
 function is_valid_column_range(r::AbstractString) :: Bool

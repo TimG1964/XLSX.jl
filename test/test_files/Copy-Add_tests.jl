@@ -191,6 +191,20 @@
         SAVE_FILES && save_outfile(f)
 
     end
+    @testset "deletesheet! keeps the active tab on the same sheet" begin
+        xf = XLSX.newxlsx("A")
+        XLSX.addsheet!(xf, "B"); XLSX.addsheet!(xf, "C")
+        active(x) = parse(Int, XLSX.XML.attributes(first(XLSX.elements_with_tag(first(XLSX.elements_with_tag(
+                        XLSX.xml_root_element(XLSX.xmlroot(x, "xl/workbook.xml")), "bookViews")), "workbookView")))["activeTab"])
+        XLSX.xmlroot(xf, "xl/workbook.xml")                                    # ensure loaded
+        wv = first(XLSX.elements_with_tag(first(XLSX.elements_with_tag(
+                 XLSX.xml_root_element(XLSX.xmlroot(xf, "xl/workbook.xml")), "bookViews")), "workbookView"))
+        wv["activeTab"] = "2"                                                  # C is active
+        XLSX.deletesheet!(xf, "A")
+        @test active(xf) == 1                                                  # still C
+        XLSX.deletesheet!(xf, "C")
+        @test active(xf) == 0                                                  # C gone: clamped to B
+    end
     @testset "renamesheet!" begin
 
         f=XLSX.openxlsx("renamedelete.xlsx", mode="w")

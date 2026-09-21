@@ -466,15 +466,14 @@ function first_cache_fill!(ws::Worksheet, lznode::XML.LazyNode)
     end
 
     # Update next_formula_id from merged formulas
-    if !isempty(wb.formulas)
-        ws_name = ws.name
-        max_id = -1
-        lock(wb.formulas_lock) do
+      lock(wb.formulas_lock) do
+          isempty(wb.formulas) && return
+            ws_name = ws.name
+            max_id = -1
             for (ref, f) in wb.formulas
                 if ref.sheet == ws_name && f isa ReferencedFormula
-                    max_id = max(max_id, f.id)
-                end
-            end
+                max_id = max(max_id, f.id)
+            end             
         end
         if max_id >= ws.next_formula_id
             ws.next_formula_id = max_id + 1

@@ -3,6 +3,18 @@
     sh = xf["Sheet1"]
     wb = XLSX.get_workbook(xf)
 
+    @testset "get_color accepts every hex form" begin
+        @test XLSX.get_color("FF0000")    == "FFFF0000"
+        @test XLSX.get_color("ff0000")    == "FFFF0000"
+        @test XLSX.get_color("#FF0000")   == "FFFF0000"
+        @test XLSX.get_color("80FF0000")  == "80FF0000"
+        @test XLSX.get_color("#FFFF0000") == "FFFF0000"      # ARGB red, not CSS yellow
+        @test XLSX.get_color("red")       == "FFFF0000"
+        @test XLSX.get_color(:red)        == "FFFF0000"
+        @test XLSX.get_color("grey")      == "FF808080"
+        @test_throws XLSX.XLSXError XLSX.get_color("notacolour")
+    end
+    
     @testset "theme_xmlroot" begin
         # theme1.xml parses cleanly and has the correct root element
         theme_root = XLSX.theme_xmlroot(wb)

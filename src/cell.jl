@@ -233,11 +233,25 @@ function Cell(c::XML.LazyNode, ws::Worksheet, sst_pfx::String,
             end
             break
         else
-            if tag == "v"
-                sv = XML.is_simple_value(child)
-                if !isnothing(sv) && !isempty(sv)
-                    datatype, value = process_tv(wb, t, sv, num_style)
+        if tag == "v"
+            sv = XML.is_simple_value(child)
+            if isnothing(sv)
+                has_children = false
+                for ch in XML.eachchildnode(child)
+                    has_children = true
+                    nt = XML.nodetype(ch)
+                    if nt === XML.Text || nt === XML.CData
+                        sv = XML.value(ch)
+                        break
+                    end
                 end
+                if isnothing(sv) && has_children
+                    @warn "Could not read value of cell $ref_str: `<v>` element has no text content. Treating as empty." maxlog=1
+                end
+            end
+            if !isnothing(sv) && !isempty(sv)
+                datatype, value = process_tv(wb, t, sv, num_style)
+            end
             elseif tag == "f"
                 if load_formulas
                     f = parse_formula_from_element(wb, child)

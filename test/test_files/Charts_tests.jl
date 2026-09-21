@@ -554,7 +554,16 @@
             @test haskey(XLSX.CHART_STYLE_TEMPLATES, t.style)
         end
     end
-
+    @testset "cx: chart kind templates match Excel" begin
+        fx  = joinpath(data_directory, "chartex_kinds.xlsx")
+        raw = XLSX.ZipArchives.ZipReader(read(fx))
+        for c in XLSX.getCharts(XLSX.readxlsx(fx))
+            c isa XLSX.ChartEx || continue
+            k = XLSX.chartType(c)
+            @test haskey(XLSX.CX_KINDS, k)
+            @test XLSX.ZipArchives.zip_readentry(raw, c.path, String) == XLSX.CHARTEX_KIND_TEMPLATES[k]
+        end
+    end
     @testset "chart plumbing: a verbatim template on a new sheet" begin
         path = "chart_plumbing.xlsx"
         xf = XLSX.newxlsx("column")
@@ -655,4 +664,177 @@
         SAVE_FILES && save_outfile(xf)
         isfile(path) && rm(path)
     end
+
+    @testset "addSeries" begin
+        path = "chart_addseries.xlsx"
+        xf = XLSX.newxlsx("data")
+        ws = xf["data"]
+        ws["A1"] = "Region"; ws["B1"] = "Alpha"; ws["C1"] = "Beta"
+        for (i, r) in enumerate(("North", "South", "East", "West"))
+            ws[i + 1, 1] = r; ws[i + 1, 2] = 10i; ws[i + 1, 3] = 5i
+        end
+
+        c = XLSX.addChart(ws, :column; anchor = "F2:M18")
+        XLSX.addSeries(c, "B2:B5"; categories = "A2:A5", name_ref = "B1")
+        XLSX.addSeries(c, "C2:C5"; categories = "A2:A5", name_ref = "C1")
+
+        s = XLSX.getChartSeries(c)
+        @test [x.name for x in s] == ["Alpha", "Beta"]
+        @test [x.idx for x in s] == [0, 1]
+        @test s[1].values.data == [10, 20, 30, 40]
+        @test s[1].categories.data == ["North", "South", "East", "West"]
+        @test XLSX.getSeriesFill(c, 1).value.fgcolor.val == "accent1"
+        @test XLSX.getSeriesFill(c, 2).value.fgcolor.val == "accent2"
+        @test XLSX.getChartData(c).data[2] == [10, 20, 30, 40]
+
+        XLSX.writexlsx(path, xf, overwrite = true)
+        @test length(XLSX.getChartSeries(only(XLSX.getCharts(XLSX.readxlsx(path))))) == 2
+
+        SAVE_FILES && save_outfile(xf)
+        isfile(path) && rm(path)
+    end
+    @testset "addSeries for every kind" begin
+        path = "chart_addseries_kinds.xlsx"
+        xf = XLSX.newxlsx("data")
+        ws = xf["data"]
+        ws["A1"] = "Region"; ws["B1"] = "Alpha"; ws["C1"] = "Beta"; ws["D1"] = "Size"
+        for (i, r) in enumerate(("North", "South", "East", "West"))
+            ws[i + 1, 1] = r; ws[i + 1, 2] = 10i; ws[i + 1, 3] = 5i; ws[i + 1, 4] = i
+        end
+
+        row = 1
+        for kind in keys(XLSX.C_KINDS)
+            c = XLSX.addChart(ws, kind; anchor = "F$row:M$(row + 15)", title = string(kind))
+            row += 16
+            if kind === :bubble
+                XLSX.addSeries(c, "C2:C5"; categories = "B2:B5", bubble_sizes = "D2:D5", name = "Bubbles")
+            else
+                XLSX.addSeries(c, "B2:B5"; categories = "A2:A5", name_ref = "B1")
+                kind in (:pie, :doughnut) ||
+                    XLSX.addSeries(c, "C2:C5"; categories = "A2:A5", name_ref = "C1")
+            end
+            s = XLSX.getChartSeries(c)
+            @test s[1].values.data == [10, 20, 30, 40] || kind === :bubble
+            @test !isnothing(s[1].categories)
+            @test length(s) == (kind in (:pie, :doughnut, :bubble) ? 1 : 2)
+        end
+
+        # Per-point colours on a pie, one per category.
+        pie = XLSX.getCharts(ws)[findfirst(x -> XLSX.chartType(x) === :pieChart, XLSX.getCharts(ws))]
+        @test length(XLSX.getSeriesDataPoints(pie, 1)) == 4
+
+        # Rejected options.
+        col = XLSX.getCharts(ws)[1]
+        @test_throws XLSX.XLSXError XLSX.addSeries(col, "B2:B5"; smooth = true)
+        @test_throws XLSX.XLSXError XLSX.addSeries(col, "B2:B5"; bubble_sizes = "D2:D5")
+        @test_throws XLSX.XLSXError XLSX.addSeries(col, "B2:B5"; name = "x", name_ref = "B1")
+
+        XLSX.writexlsx(path, xf, overwrite = true)
+        @test length(XLSX.getCharts(XLSX.readxlsx(path))) == length(XLSX.C_KINDS)
+
+        SAVE_FILES && save_outfile(xf)
+        isfile(path) && rm(path)
+    end
+
+        @testset "addSeries options" begin
+        path = "chart_addseries_options.xlsx"
+        xf = XLSX.newxlsx("data")
+        ws = xf["data"]
+        ws["A1"] = "Region"; ws["B1"] = "Alpha"; ws["C1"] = "Beta"
+        for (i, r) in enumerate(("North", "South", "East", "West"))
+            ws[i + 1, 1] = r; ws[i + 1, 2] = 10i; ws[i + 1, 3] = 5i
+        end
+        smooth_of(c, i) = XLSX._bool_val(last(XLSX._series_nodes(XLSX.chart_root(c))[i]), "smooth")
+
+        # Line: markers bring in the lineMarkers pattern; the default stays plain.
+        c = XLSX.addChart(ws, :line; anchor = "F1:M16")
+        XLSX.addSeries(c, "B2:B5"; categories = "A2:A5", markers = :diamond, smooth = true)
+        XLSX.addSeries(c, "C2:C5"; categories = "A2:A5")
+        @test XLSX.getSeriesMarker(c, 1).symbol === :diamond
+        @test !isnothing(XLSX.getSeriesMarker(c, 1).shape)
+        @test smooth_of(c, 1) === true
+        @test XLSX.getSeriesMarker(c, 2).symbol === :none
+        @test smooth_of(c, 2) === false
+
+        # Scatter: a line, and no markers only when there is a line.
+        s = XLSX.addChart(ws, :scatter; anchor = "F18:M33")
+        XLSX.addSeries(s, "C2:C5"; categories = "B2:B5", line = true)
+        @test XLSX.getSeriesLine(s, 1).value.fill.kind === :solid
+        @test_throws XLSX.XLSXError XLSX.addSeries(s, "C2:C5"; categories = "B2:B5", markers = false)
+        XLSX.addSeries(s, "C2:C5"; categories = "B2:B5", markers = false, line = true)
+        @test XLSX.getSeriesMarker(s, 2).symbol === :none
+
+        # Radar markers.
+        r = XLSX.addChart(ws, :radar; anchor = "F35:M50")
+        XLSX.addSeries(r, "B2:B5"; categories = "A2:A5", markers = :square)
+        @test XLSX.getSeriesMarker(r, 1).symbol === :square
+
+        # Colour, in each accepted form.
+        col = XLSX.addChart(ws, :column; anchor = "O1:V16")
+        XLSX.addSeries(col, "B2:B5"; categories = "A2:A5", color = "FFFF0000")
+        XLSX.addSeries(col, "C2:C5"; categories = "A2:A5", color = "accent6")
+        @test XLSX.getSeriesFill(col, 1).value.fgcolor.rgb == "FF0000"
+
+        # Rejected.
+        pie = XLSX.addChart(ws, :pie; anchor = "O18:V33")
+        @test_throws XLSX.XLSXError XLSX.addSeries(pie, "B2:B5"; color = "FF0000")
+        @test_throws XLSX.XLSXError XLSX.addSeries(c, "B2:B5"; markers = :nonsense)
+        @test_throws XLSX.XLSXError XLSX.addSeries(c, "B2:B5"; smooth = "yes")
+        @test_throws XLSX.XLSXError XLSX.addSeries(col, "B2:B5"; color = "notacolor")
+
+        XLSX.writexlsx(path, xf, overwrite = true)
+        SAVE_FILES && save_outfile(xf)
+        isfile(path) && rm(path)
+    end
+
+    @testset "addChartEx" begin
+        path = "chart_addchartex.xlsx"
+        xf = XLSX.newxlsx("data")
+        ws = xf["data"]
+        ws["A1"] = "Region"; ws["B1"] = "Item"; ws["C1"] = "Amount"; ws["D1"] = "Beta"
+        for (i, row) in enumerate((("Europe", "France", 30, 12), ("Europe", "Spain", 20, 15),
+                                   ("Asia", "Japan", 50, 17), ("Asia", "India", 35, 19),
+                                   ("Americas", "USA", 60, 21)))
+            for (j, v) in enumerate(row); ws[i + 1, j] = v; end
+        end
+
+        row = 1
+        for kind in keys(XLSX.CX_KINDS)
+            cats = kind in (:treemap, :sunburst) ? "A2:B6" :
+                   kind === :histogram            ? nothing :
+                   kind === :boxWhisker           ? "A2:A6" : "B2:B6"
+            c = XLSX.addChartEx(ws, kind, "C2:C6"; anchor = "F$row:M$(row + 15)",
+                                categories = cats, name_ref = "C1")
+            row += 16
+            @test c isa XLSX.ChartEx
+            @test XLSX.chartType(c) === kind
+            @test XLSX.getChartSeriesCount(c) == (kind === :pareto ? 2 : 1)
+            @test XLSX.getSeriesName(c, 1) == "Amount"
+        end
+
+        charts = XLSX.getCharts(ws)
+        bw = charts[findfirst(c -> XLSX.chartType(c) === :boxWhisker, charts)]
+        XLSX.addSeries(bw, "D2:D6"; name_ref = "D1")
+        @test XLSX.getChartSeriesCount(bw) == 2
+
+        wf = charts[findfirst(c -> XLSX.chartType(c) === :waterfall, charts)]
+        @test_throws XLSX.XLSXError XLSX.addSeries(wf, "D2:D6")
+        @test_throws XLSX.XLSXError XLSX.addChartEx(ws, :histogram, "C2:C6"; anchor = "O1:V16", categories = "B2:B6")
+        @test_throws XLSX.XLSXError XLSX.addChartEx(ws, :treemap, "C2:C6"; anchor = "O1:V16")
+
+        XLSX.writexlsx(path, xf, overwrite = true)
+        @test length(XLSX.getCharts(XLSX.readxlsx(path))) == length(XLSX.CX_KINDS)
+
+        SAVE_FILES && save_outfile(xf)
+        isfile(path) && rm(path)
+    end
+
+    @testset "a failed addChartEx leaves no chartsheet behind" begin
+        xf = XLSX.newxlsx("data")
+        @test_throws XLSX.XLSXError XLSX.addChartEx(xf, :waterfall, "B2:B6")          # unqualified
+        @test_throws XLSX.XLSXError XLSX.addChartEx(xf, :waterfall, "Nowhere!B2:B6")  # no such sheet
+        @test XLSX.sheetnames(xf) == ["data"]
+        @test isempty(XLSX.getCharts(xf))
+    end
+    
 end
