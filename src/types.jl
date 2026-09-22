@@ -844,6 +844,26 @@ struct XPathInfo
     end
 end
 
+"""
+    XLSXError(msg::String)
+
+The exception type XLSX.jl throws for every error it raises itself: a malformed
+or unsupported file, an argument that names something the workbook does not
+contain, a value outside what the format allows, or an operation the file's mode
+does not permit.
+
+One type covers all of them, so `e isa XLSXError` in a `catch` distinguishes an
+error the package raised from one escaping out of Julia or a dependency. The
+message says what went wrong and, where it helps, what was found instead.
+
+# Fields
+- `msg::String` — the message, printed after `XLSXError: `.
+
+# Example
+
+    julia> XLSX.Charts.getChartAxis(c, 99)
+    ERROR: XLSXError: Chart `chart1` has no axis with axId 99. Found: 1, 2.
+"""
 struct XLSXError <: Exception
     msg::String
 end

@@ -86,7 +86,7 @@ export
            getFormat, getFont, getBorder, getFill, getAlignment,
            DataTable, Table, TableStyleInfo, table, tables,
            getDefinedNames, getAllDefinedNames,
-           Workbook
+           Workbook, XLSXError
     """))
 end
  
@@ -125,13 +125,15 @@ include("charts/Charts.jl")
  
 # Names released as `XLSX.x` before the sub-module existed.
 using .Charts: AbstractChart, Chart, ChartEx, ChartRef, ChartSeries,
-               chartSchema, chartType, getCharts, getChart, getChartData, getChartRanges
+               chartSchema, getChartSchema, chartType, getChartType, 
+               getCharts, getChart, getChartData, getChartRanges
  
 @static if VERSION >= v"1.11"
     eval(Meta.parse("""
     public Charts,
-           AbstractChart, Chart, ChartEx, ChartRef, ChartSeries,
-           chartSchema, chartType, getCharts, getChart, getChartData, getChartRanges
+            AbstractChart, Chart, ChartEx, ChartRef, ChartSeries,
+            chartSchema, getChartSchema, chartType, getChartType, 
+            getCharts, getChart, getChartData, getChartRanges
     """))
 end
  

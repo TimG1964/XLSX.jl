@@ -522,15 +522,17 @@ end
 # ===========================================================================
 
 """
-    chartSchema(c::AbstractChart) -> Symbol
+    getChartSchema(c::AbstractChart) -> Symbol
 
 `:c` for charts in the original schema, `:cx` for newer `chartEx` charts.
 """
-chartSchema(::Chart)   = :c
-chartSchema(::ChartEx) = :cx
+getChartSchema(::Chart)   = :c
+getChartSchema(::ChartEx) = :cx
+
+@deprecate chartSchema(c::AbstractChart) getChartSchema(c)
 
 """
-    chartType(c::AbstractChart) -> Symbol
+    getChartType(c::AbstractChart) -> Symbol
 
 The kind of chart, as a single symbol, whatever the schema.
 
@@ -544,13 +546,13 @@ or `:clusteredColumn`. Histogram and Pareto are not distinct layouts in the
 file - a histogram is a clustered column series carrying `cx:binning`, and a
 Pareto adds a second `paretoLine` series - so both are derived here.
 """
-function chartType(c::Chart)::Symbol
+function getChartType(c::Chart)::Symbol
     ct = getChartTypes(c)
     isempty(ct) && return :unknown
     return length(ct) == 1 ? only(ct) : :combo
 end
 
-function chartType(c::ChartEx)::Symbol
+function getChartType(c::ChartEx)::Symbol
     ls = unique(_cx_layouts(c))
     isempty(ls) && return :unknown
     "paretoLine" in ls && return :pareto
@@ -559,10 +561,32 @@ function chartType(c::ChartEx)::Symbol
     return Symbol(only(ls))
 end
 
+@deprecate chartType(c::AbstractChart) getChartType(c)
+
 chartpath(c::AbstractChart)  = c.path
 chartname(c::AbstractChart)  = c.name
+
+"""
+    getChartTitle(c::Chart) -> Union{Nothing,String}
+    getChartTitle(c::ChartEx) -> Union{Nothing,String}
+
+The chart's title as plain text, whether typed into the chart or bound to a
+cell. A cell-bound title comes from the string Excel cached with the reference,
+so it is the text as of the last save rather than the cell's current value.
+
+`nothing` where the chart has no title, where the title element carries no text
+of its own, or where Excel generates the title from the single series' name and
+so writes no text at all. Paragraphs are joined with newlines, as are the line
+breaks within one.
+
+Returns text only. [`getChartTitleText`](@ref) gives a `c:` title's rich text
+with its formatting, [`getChartTitleRef`](@ref) the formula behind a cell-bound
+one, [`getChartTitleRange`](@ref) the same for a `cx:` chart, and
+[`getChartTitleTextProps`](@ref) the `c:txPr` or `cx:txPr` that formats it.
+"""
 getChartTitle(c::Chart)   = parse_chart_title(first_element_with_tag(chart_root(c), "chart"))
 getChartTitle(c::ChartEx) = _cx_title(c)
+
 sheetname(c::AbstractChart)  = c.sheet
 
 
@@ -614,11 +638,11 @@ julia> dfs = Dict(c.name => DataFrame(XLSX.Charts.getChartData(c))
     sunburst, histogram, Pareto, box & whisker, region map - are returned as
     [`XLSX.Charts.ChartEx`](@ref) rather than [`XLSX.Charts.Chart`](@ref). Their type, title
     and source ranges are available; their cached values are not, and
-    [`XLSX.Charts.getChartData`](@ref) throws for them. Use [`XLSX.Charts.chartSchema`](@ref) or
+    [`XLSX.Charts.getChartData`](@ref) throws for them. Use [`XLSX.Charts.getChartSchema`](@ref) or
     `isa` to tell the two apart, and [`XLSX.Charts.getChartRanges`](@ref) to find their
     source cells.
 
-See also [`XLSX.Charts.getChart`](@ref), [`XLSX.Charts.getChartData`](@ref), [`XLSX.Charts.chartType`](@ref).
+See also [`XLSX.Charts.getChart`](@ref), [`XLSX.Charts.getChartData`](@ref), [`XLSX.Charts.getChartType`](@ref).
 """
 function getCharts(x::Union{Worksheet,XLSXFile})::Vector{AbstractChart}
     xf = get_xlsxfile(x)
@@ -801,7 +825,7 @@ end
 [`XLSX.XLSXError`](@ref).
 """
 getChartData(c::ChartEx) =
-    throw(XLSXError("Cannot get data for chart `$(c.name)`: it is a $(chartType(c)) chart, " *
+    throw(XLSXError("Cannot get data for chart `$(c.name)`: it is a $(getChartType(c)) chart, " *
                     "which uses the `chartEx` schema and carries no readable value cache. " *
                     "Use `getChartRanges` to find its source cells and `getdata` to read them."))
 
@@ -980,7 +1004,7 @@ Base.show(io::IO, c::ChartEx) =
     print(io, "XLSX.Charts.ChartEx(\"", c.name, "\"",
           isnothing(c.sheet) ? "" : ", \"" * c.sheet * "\"",
           isnothing(c.from) ? "" : ", " * c.from,
-          ", ", chartType(c), ", ", length(_cx_refs(c)), " refs)")
+          ", ", getChartType(c), ", ", length(_cx_refs(c)), " refs)")
 
 function Base.show(io::IO, ::MIME"text/plain", c::ChartEx)
     # header, e.g.  XLSX.Charts.ChartEx "chartEx1" on sheet "Sheet1" at K9:R23
@@ -991,7 +1015,7 @@ function Base.show(io::IO, ::MIME"text/plain", c::ChartEx)
 
     t = getChartTitle(c)
     isnothing(t) || println(io, "  title: ", repr(t))
-    println(io, "  type: ", chartType(c))
+    println(io, "  type: ", getChartType(c))
     ls = unique(_cx_layouts(c))
     isempty(ls) || println(io, "  layouts: ", join(ls, ", "))
     println(io, "  series: ", getChartSeriesCount(c))

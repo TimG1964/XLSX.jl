@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add support for reading `chartEx` charts (waterfall, funnel, treemap, sunburst,
   histogram, Pareto, box & whisker, region map). These are returned as `ChartEx`
   from `getCharts`, which now returns `Vector{AbstractChart}`. New: `AbstractChart`,
-  `ChartEx`, `chartSchema`, `chartType`.
+  `ChartEx`, `getChartSchema`, `getChartType`.
 - fix bug preventing system (Excel-private) defined names surviving a read/write 
   round trip.
 - `getDefinedNames` and `getAllDefinedNames` now exclude names Excel maintains for

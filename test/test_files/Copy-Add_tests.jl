@@ -457,7 +457,7 @@
         @test all(c -> c isa XLSX.Charts.ChartEx, charts)
         @test issetequal((c.sheet for c in charts), ["Data", "Copy"])
         @test allunique(c.path for c in charts)
-        @test all(c -> XLSX.Charts.chartType(c) === :waterfall, charts)
+        @test all(c -> XLSX.Charts.getChartType(c) === :waterfall, charts)
 
         cp = only(filter(c -> c.sheet == "Copy", charts))
 
@@ -525,7 +525,7 @@
         @test length(charts) == 4
         @test allunique(c.path for c in charts)
         @test count(c -> c.sheet == "Copy", charts) == 2
-        @test issetequal((XLSX.Charts.chartType(c) for c in charts if c.sheet == "Copy"),
+        @test issetequal((XLSX.Charts.getChartType(c) for c in charts if c.sheet == "Copy"),
                         [:waterfall, :barChart])
 
         # Stems are handled per family: chart1 -> chart2, chartEx1 -> chartEx2.

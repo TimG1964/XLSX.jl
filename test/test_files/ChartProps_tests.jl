@@ -681,12 +681,12 @@
                         for k in XML.eachelement(mk)])
 
         # the point marker: series 3's dPt at idx 2 is point 3
-        c = XLSX.Charts.setMarkerFill(c, 3, 3, "green")
+        c = XLSX.Charts.setMarkerFill(c, 3, "green"; point = 3)
         e = XLSX.Charts.getMarkerFill(c, 3, 3)
         @test e.site.level === :point && e.value.fgcolor.rgb == "008000"
 
         # Point 1 of series 3 had no c:dPt; the setter now creates one.
-        XLSX.Charts.setMarkerFill(c, 3, 1, "red")
+        XLSX.Charts.setMarkerFill(c, 3, "red"; point = 1)
         d = XLSX.Charts.getSeriesDataPoint(c, 3, 1)
         @test !isnothing(d)
         @test XLSX.Charts.getDataPointMarker(c, d).shape.fill.fgcolor.rgb == "FF0000"
@@ -933,7 +933,7 @@
         @test !isnothing(hit)                      # the fixture must have a c:dPt
         c, i, point = hit
 
-        XLSX.Charts.setMarkerSymbol(c, i, point, :diamond)
+        XLSX.Charts.setMarkerSymbol(c, i, :diamond; point = point)
         SAVE_FILES && save_outfile(xf)
         d = XLSX.Charts.getSeriesDataPoint(c, i, point)
         @test XLSX.Charts.getDataPointMarker(c, d).symbol === :diamond
@@ -967,14 +967,14 @@
         @test isempty(XLSX.Charts.getSeriesDataPoints(c, 1))
 
         # Created out of order; stored in c:idx order. Points 1 and 4 both plot.
-        XLSX.Charts.setMarkerSymbol(c, 1, 4, :diamond)
-        XLSX.Charts.setMarkerSymbol(c, 1, 1, :square)
+        XLSX.Charts.setMarkerSymbol(c, 1, :diamond; point = 4)
+        XLSX.Charts.setMarkerSymbol(c, 1, :square; point = 1)
         @test [d.idx for d in XLSX.Charts.getSeriesDataPoints(c, 1)] == [0, 3]
         @test XLSX.Charts.getDataPointMarker(c, XLSX.Charts.getSeriesDataPoint(c, 1, 4)).symbol === :diamond
         @test XLSX.Charts.getDataPointMarker(c, XLSX.Charts.getSeriesDataPoint(c, 1, 1)).symbol === :square
 
         # A second write to an existing point edits it rather than adding another.
-        XLSX.Charts.setMarkerSize(c, 1, 4, 9)
+        XLSX.Charts.setMarkerSize(c, 1, 9; point = 4)
         @test length(XLSX.Charts.getSeriesDataPoints(c, 1)) == 2
         @test XLSX.Charts.getDataPointMarker(c, XLSX.Charts.getSeriesDataPoint(c, 1, 4)).size == 9
 

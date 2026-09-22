@@ -6,6 +6,7 @@
 XLSX.getFormat
 XLSX.setFormat
 XLSX.setUniformFormat
+XLSX.getFont
 XLSX.setFont
 XLSX.setUniformFont
 XLSX.getBorder

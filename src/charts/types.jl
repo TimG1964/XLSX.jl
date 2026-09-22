@@ -3,7 +3,7 @@
 # ===========================================================================
 
 """
-`ChartRef`
+    ChartRef
 
 One cached reference from a chart series: the formula it came from, the number
 format Excel recorded for it, and the cached values themselves.
@@ -18,8 +18,8 @@ format Excel recorded for it, and the cached values themselves.
   the chart was read with `cache=false`.
 - `errors::Dict{Int,UInt64}` - index => error code for cached error values.
 
-Excel only caches the error values `#N/A` in the chart data cache. Others are written 
-a 0 and become indistinguishable from real zero in the chart cache.
+Excel caches only `#N/A` as an error. Other error values are cached as 0, so they
+cannot be told apart from a real zero.
 
 `ChartRef` only applies to `c:` charts and not `cx:` charts.
 
@@ -59,12 +59,16 @@ One series (`c:ser`), as read.
 charts; `values` holds `c:val` or `c:yVal` correspondingly, so the two fields mean
 the same thing whatever the chart type.
 
-Identified by `idx`, the series' `c:idx`, which is unique within the chart and
-unaffected by adding series. `order` is the plotting order (`c:order`) and is not
-a key. Functions that take a series position `i` resolve it against the current
-part on each call. The other fields describe the series as it was when read.
-`raw` is the `c:ser` element at that time, or `nothing` for a series built in
-code; it is never used to address the part.
+`idx` is the series' `c:idx`, unique within the chart and unaffected by adding
+series. It is the key the value types carry as `series_idx`, so a
+[`ChartDataPoint`](@ref) or [`ChartTrendline`](@ref) read from this series still
+addresses it after later writes. `order` is the plotting order (`c:order`) and is
+not a key.
+
+A series position `i`, as taken by the setter functions and the setters, counts
+from 1 in document order and is resolved afresh on each call. It is not `idx`;
+the two agree only where Excel has numbered the series from 0 in order, as it
+normally does.
 """
 struct ChartSeries
     idx::Int
@@ -78,8 +82,26 @@ struct ChartSeries
     raw::Union{Nothing,XML.Node}          # the c:ser element
 end
 
+"""
+    ChartRange
+
+A resolved series reference: a `SheetCellRef`, `SheetCellRange`, `SheetRowRange`,
+`SheetColumnRange` or `NonContiguousRange`, or `nothing` where the series has no
+reference of that kind or it could not be resolved.
+"""
 const ChartRange = Union{Nothing,SheetCellRef,SheetCellRange,SheetRowRange,SheetColumnRange,NonContiguousRange}
 
+"""
+    ChartRanges
+
+What [`getChartRanges`](@ref) returns for one series: a named tuple of `idx`,
+`name`, and the `categories`, `values` and `bubble_sizes` references, each a
+[`ChartRange`](@ref).
+
+`idx` is the series' `c:idx`; see [`ChartSeries`](@ref). A field is `nothing`
+where the series has no reference of that kind — `bubble_sizes` on anything but
+a bubble chart, for instance.
+"""
 const ChartRanges = @NamedTuple{
     idx::Int,
     name::Union{Nothing,String},
@@ -150,13 +172,13 @@ remains valid after the part is written to.
 - `from`, `to` - anchor cell references as strings, following `getImages`.
 
 # Reading content
-- [`chartType`](@ref) - e.g. `:waterfall`, `:histogram`.
+- [`getChartType`](@ref) - e.g. `:waterfall`, `:histogram`.
 - [`getChartTitle`](@ref) - title text, whether typed or bound to a cell;
   `nothing` if the title has no text of its own.
 - [`getChartRanges`](@ref) - the source range of each data dimension, resolved
   through the workbook's hidden `_xlchart.*` defined names.
 
-See also [`getCharts`](@ref), [`chartSchema`](@ref).
+See also [`getCharts`](@ref), [`getChartSchema`](@ref).
 """
 struct ChartEx <: AbstractChart
     package::XLSXFile
@@ -217,19 +239,6 @@ struct ChartExBinning
     binSize::Union{Nothing,Float64,Symbol}
     binCount::Union{Nothing,Int,Symbol}
 end
-
-Base.:(==)(a::ChartExDimension, b::ChartExDimension) =
-    a.kind == b.kind && a.type == b.type && a.formula == b.formula && a.range == b.range
-Base.hash(d::ChartExDimension, h::UInt) =
-    hash((d.kind, d.type, d.formula, d.range), hash(:ChartExDimension, h))
-
-Base.:(==)(a::ChartExData, b::ChartExData) = a.id == b.id && a.dimensions == b.dimensions
-Base.hash(d::ChartExData, h::UInt) = hash((d.id, d.dimensions), hash(:ChartExData, h))
-
-Base.:(==)(a::ChartExBinning, b::ChartExBinning) =
-    all(getfield(a, f) == getfield(b, f) for f in fieldnames(ChartExBinning))
-Base.hash(b::ChartExBinning, h::UInt) =
-    hash(Tuple(getfield(b, f) for f in fieldnames(ChartExBinning)), hash(:ChartExBinning, h))
 
 const SCHEME_TOKENS = (:bg1, :tx1, :bg2, :tx2, :accent1, :accent2, :accent3,
                        :accent4, :accent5, :accent6, :hlink, :folHlink,
@@ -328,7 +337,9 @@ know what it looks like.
 - `kind::Symbol` - `:srgb`, `:scheme`, `:sys`, `:prst`, `:hsl` or `:scrgb`.
 - `val::String` - the `val` attribute: `"FF0000"`, `"accent1"`, `"windowText"`.
 - `transforms::Vector{Pair{Symbol,Int}}` - e.g. `[:lumMod => 60000, :lumOff => 40000]`,
-  in thousandths of a percent, in the order DrawingML applies them.
+  in thousandths of a percent, in the order DrawingML applies them. A
+  [`SchemeColor`](@ref) built in code holds the same transforms as percentages,
+  so `60000` here is `lumMod = 60` there.
 - `rgb::String` - the resolved colour as `"RRGGBB"`.
 - `alpha::Float64` - `1.0` unless an `alpha` transform applies.
 
@@ -417,7 +428,7 @@ is - solid, gradient, pattern or none.
 - `compound::Union{Nothing,String}` - the `cmpd` attribute: `"sng"`, `"dbl"`, …
 - `join::Union{Nothing,String}` - `"round"`, `"bevel"` or `"miter"`, from the
   `a:round`/`a:bevel`/`a:miter` child.
-- `miter_limit::Union{Nothing,Float64}` - the `a:miter` `lim`, as a fraction of
+- `miter_limit::Union{Nothing,Float64}` - the `a:miter` `lim`, as a multiple of
   the line width; only with a miter join.
 - `raw::Union{Nothing,XML.Node}` - the element as read, or `nothing` for a line
   built in code.
@@ -429,7 +440,7 @@ struct DrawingLine
     cap::Union{Nothing,String}
     compound::Union{Nothing,String}
     join::Union{Nothing,String}           # :round, :bevel, :miter
-    miter_limit::Union{Nothing,Float64}   # fraction of line width; only with miter
+    miter_limit::Union{Nothing,Float64}   # multiple of line width; only with miter
     raw::Union{Nothing,XML.Node}
 end
 
@@ -455,11 +466,11 @@ The same applies to `line.fill`: `<a:ln><a:noFill/></a:ln>` is how Excel writes
 "no border", which is not the same as omitting `a:ln` entirely.
 
 `effects` holds `a:effectLst` or `a:effectDag` as an unparsed node — enough to
-report that a shape has effects without modelling shadows and glows. Geometry
-(`a:xfrm`, `a:prstGeom`, `a:custGeom`) and 3-D (`a:scene3d`, `a:sp3d`) are not
-modelled at all; they stay in `raw`, which is where chart creation (stage 6)
-will find them. Chart parts rarely carry geometry — it belongs to the drawing
-shapes that host the chart, not the chart itself.
+report that a shape has effects without modelling shadows and glows. Geometry 
+(`a:xfrm`, `a:prstGeom`, `a:custGeom`) and 3-D (`a:scene3d`, `a:sp3d`) are
+not modelled; they stay in `raw` and are written back from it unchanged. Chart parts
+rarely carry geometry — it belongs to the drawing shapes that host the chart, not the
+chart itself.
 """
 struct DrawingShapeProps
     fill::Union{Nothing,DrawingFill}
@@ -480,8 +491,8 @@ end
 
 Character-level properties: `a:rPr`, `a:defRPr` or `a:endParaRPr`.
 
-Sizes are points (the file stores 1/100 pt), `baseline` is a percentage, and
-`under` / `strike` / `caps` keep the DrawingML vocabulary as written
+Sizes are points (the file stores 1/100 pt), `baseline` is a fraction of the font
+size, and `under` / `strike` / `caps` keep the DrawingML vocabulary as written
 (`"sng"`, `"noStrike"`, `"small"`). Typefaces may be theme references —
 `"+mn-lt"` for the minor latin font, `"+mj-lt"` for major.
 """
@@ -671,8 +682,8 @@ Marker properties (`c:marker` under a `c:ser` or `c:dPt`), as read.
 
 # Fields
 - `series_idx` — `c:idx` of the owning series.
-- `point_idx` — `c:idx` of the owning data point, or `nothing` for the series' own
-  marker.
+- `point_idx` — `c:idx` of the owning data point, 0-based as written, or
+  `nothing` for the series' own marker.
 - `symbol` — `:circle`, `:square`, `:none`, …; `nothing` means absent.
 - `size` — points, 2 to 72; `nothing` means absent.
 - `shape` — the marker's `c:spPr`, if written.
@@ -750,7 +761,8 @@ Per-point formatting override on a series (`c:dPt`), as read.
 
 # Fields
 - `series_idx` — `c:idx` of the owning series.
-- `idx` — the point's `c:idx`, 0-based as written.
+- `idx` — the point's `c:idx`, 0-based as written. Functions taking a point
+  position count from 1, so a point at `idx == 0` is position 1.
 - `invert_if_negative`, `bubble3d` — as written; `nothing` means absent.
 - `raw` — the element as read, or `nothing` for a point built in code.
 
@@ -773,7 +785,8 @@ An individual data label override (`c:dLbl` within a series' `c:dLbls`), as read
 
 # Fields
 - `series_idx` — `c:idx` of the owning series.
-- `idx` — the labelled point's `c:idx`, 0-based as written.
+- `idx` — the labelled point's `c:idx`, 0-based as written, one less than the
+  position the setters take, as [`ChartDataPoint`](@ref).
 - `delete` — `c:delete`; a deleted label carries no other properties.
 - `raw` — the element as read, or `nothing` for a label built in code.
 
@@ -911,11 +924,14 @@ const SchemaKey = Tuple{String,String}
 
 # Value equality for the chart and DrawingML value types: every field except `raw`,
 # which is a snapshot of the XML rather than part of the value. Fields compare with
-# isequal, so `missing` (error cells in a cache) and NaN behave, and hash agrees.
-# Chart and ChartEx are handles, compared by package and path in charts.jl;
-# ChartGroup, SchemeColor and the ChartEx value types define their own.
+# isequal, so `missing` (error cells in a cache) and NaN behave, and hash agrees --
+# comparing with == would make -0.0 and 0.0 equal but hash differently.
+# Chart and ChartEx are handles, compared by package and path in discovery.jl;
+# ChartGroup is its key alone and SchemeColor normalizes its token, so both define
+# their own.
 for T in (ChartRef, ChartSeries, ChartAxis, ChartDataPoint, ChartDataLabel, ChartTrendline,
           ChartErrorBars, ChartMarker, ChartUpDownBars,
+          ChartExDimension, ChartExData, ChartExBinning,
           DrawingColor, DrawingFill, DrawingLine, DrawingShapeProps, DrawingText,
           DrawingBodyProps, DrawingParagraph, DrawingParaProps, DrawingRun, DrawingRunProps)
     @eval begin

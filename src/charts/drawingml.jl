@@ -1,5 +1,5 @@
 #
-# drawingml.jl
+# charts/drawingml.jl
 #
 # Shared DrawingML parsing: the `a:` namespace elements that appear throughout
 # chart parts, drawings and themes.
@@ -11,6 +11,9 @@
 # axis, the legend, the title, data labels, gridlines, trendlines and error
 # bars.
 #
+# It lives in Charts because nothing outside the chart code uses it yet; if
+# images or other drawing objects need it, it can move to the core or become a
+# sub-module of its own.
 
 # The six colour elements. All carry a `val` attribute except `scrgbClr`, which
 # uses separate r/g/b percentage attributes.

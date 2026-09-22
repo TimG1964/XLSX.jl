@@ -7,7 +7,9 @@
 # series, and both count.
 #
 # Discovery readers (_cx_root, _cx_chart, _cx_series_nodes, _cx_layouts,
-# _cx_has_binning, _cx_refs, _cx_title) live in charts.jl.
+# _cx_has_binning, _cx_refs, _cx_title) live in discovery.jl, and the creation
+# helpers (_chartex_shell, _cx_add_series and friends) in creation.jl.
+#
 
 # ---- small readers ---------------------------------------------------------
 
@@ -80,7 +82,7 @@ getChartSeriesCount(c::ChartEx)::Int = length(_cx_series_nodes(c))
 The layout of series `i` as written in its `layoutId` attribute, e.g.
 `:waterfall`, `:funnel`, `:treemap`, `:clusteredColumn`, `:paretoLine`.
 
-See also [`chartType`](@ref), which describes the chart as a whole.
+See also [`getChartType`](@ref), which describes the chart as a whole.
 """
 function getSeriesLayout(c::ChartEx, i::Integer)::Symbol
     lid = get_attr(_cx_series_node(c, i), "layoutId")

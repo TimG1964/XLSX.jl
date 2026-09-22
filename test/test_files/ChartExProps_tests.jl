@@ -64,7 +64,7 @@
 
         @testset "histogram" begin
             c = chart("histogram")
-            @test XLSX.Charts.chartType(c) == :histogram                    # binning read inside layoutPr
+            @test XLSX.Charts.getChartType(c) == :histogram                    # binning read inside layoutPr
             @test XLSX.Charts.getSeriesLayout(c, 1) == :clusteredColumn
             @test XLSX.Charts.getSeriesBinning(c, 1) == XLSX.Charts.ChartExBinning(:r, 0.0, 100.0, 10.0, nothing)
             @test XLSX.Charts.getChartTitle(c) == "Chart Title"                 # typed: txData without f
@@ -86,7 +86,7 @@
             @test length(blocks) == 2
             @test blocks[1].dimensions[1].formula == blocks[2].dimensions[1].formula  # shared name
             @test XLSX.Charts.getSeriesData(c, 3) == blocks[2]
-            @test XLSX.Charts.chartType(c) == :pareto
+            @test XLSX.Charts.getChartType(c) == :pareto
         end
 
         @testset "box and whisker" begin
@@ -98,7 +98,7 @@
             @test [XLSX.Charts.getSeriesLayoutFlag(c, i, :outliers) for i in 1:3] == [true, false, true]
             @test all(i -> XLSX.Charts.getSeriesLayoutFlag(c, i, :meanLine) === false, 1:3)
             @test [XLSX.Charts.getSeriesData(c, i).id for i in 1:3] == [0, 1, 2]
-            @test XLSX.Charts.chartType(c) == :boxWhisker
+            @test XLSX.Charts.getChartType(c) == :boxWhisker
         end
 
         @testset "bound title and series name" begin

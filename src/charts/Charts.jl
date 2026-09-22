@@ -26,6 +26,17 @@ module Charts
 # belongs to, not the argument used to reach it: `getMarkerFill(c, i, point)`
 # takes a series index but describes the marker.
 #
+# Positions count from 1 throughout — series in document order, data points as
+# the user sees them — and are resolved afresh on each call. Excel's own
+# identifiers (`c:idx`, `c:axId`) are the keys the value types carry, and need
+# not agree with a position.
+#
+# A data point is a keyword, `point`, where it is optional, because the series
+# form means something on its own: `setMarkerSize(c, i, size; point)`,
+# `getSeriesFill(c, i; point)`. It is positional where it is required, because
+# the function means nothing without it: `setLabelDeleted(c, i, point, deleted)`,
+# `getMarkerFill(c, i, point)`.
+#
 # `get…TextProp` (singular) resolves one run property up the cascade and returns
 # an `Effective`; `get…TextProps` (plural) returns the text-properties struct as
 # written at that site.
@@ -42,7 +53,7 @@ module Charts
 # ---------------------------------------------------------------------------
 
 import ..XLSX
-import ..XLSX: iserror, geterror      # core generics; charts.jl adds methods
+import ..XLSX: iserror, geterror      # core generics; discovery.jl adds methods
 import Colors
 import Dates
 import XML
@@ -83,7 +94,7 @@ using ..XLSX:
 export
     # Finding and reading charts
     getCharts, getChart, getChartData, getChartRanges, getChartTitle,
-    chartType, chartSchema,
+    getChartType, getChartSchema,
     # Creating charts
     addChart, addChartEx, addSeries,
     # Chart level

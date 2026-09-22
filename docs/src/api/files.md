@@ -41,3 +41,9 @@ XLSX.deletesheet!
 XLSX.addImage
 XLSX.getImages
 ```
+
+## Errors
+
+```@docs
+XLSX.XLSXError
+```

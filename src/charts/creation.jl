@@ -667,7 +667,7 @@ function _place_chartex!(ws::Worksheet, doc::XML.Node, kind::Symbol, anchor, tit
 end
 
 function addSeries(c::ChartEx, values; categories = nothing, name = nothing, name_ref = nothing)::ChartEx
-    set_chart_root!(c, _cx_add_series(_cx_root(c), c.package, c.sheet, chartType(c), values;
+    set_chart_root!(c, _cx_add_series(_cx_root(c), c.package, c.sheet, getChartType(c), values;
                                       categories, name, name_ref))
     return c
 end

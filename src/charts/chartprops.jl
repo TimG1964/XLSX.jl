@@ -19,14 +19,16 @@
 #
 # `raw` is kept for partial modelling and is never an address. A setter
 # locates its target in the root it is about to rebuild and builds its path
-# predicates from nodes of that same root, never from a snapshot.#
+# predicates from nodes of that same root, never from a snapshot.
+#
 # Indexing is 1-based throughout, over the series in document order, as 
 # getChartSeries returns them and over data points as the user sees them. 
 # Excel's own identifiers — `c:idx`, `c:order`, `c:axId` — are kept on the 
 # structs but are not positions: they need not be contiguous, and a file 
-# where series or points were deleted will have gaps. `c:axId` is the exception 
-# that is genuinely useful as a key, since `c:crossAx` and a group's `c:axId` 
-# children reference it; `getChartAxis(c, axid)` looks up by it.
+# where series or points were deleted will have gaps. `c:axId` is the 
+# exception that is genuinely useful as a key, since `c:crossAx` and a group's 
+# `c:axId` children reference it; `getChartAxis(c, axid)` looks up by it. 
+# `chart_idx_gaps.xlsx` is the fixture where positions and `c:idx` differ.
 #
 # Absent is not explicit. Every optional value is `Union{Nothing,T}`, and
 # `nothing` means the element or attribute was not written — which in this
@@ -47,14 +49,20 @@
 #     formatting in both `c:tx/c:rich` and `c:txPr`, so a write must update both
 #     or Excel shows the `rich` version and the edit appears to do nothing.
 #
-# The resolution of the inheritance cascade is stage 4 work. Nothing here
-# returns a resolved value: an accessor reports what one node says, and
-# `nothing` means that node is silent, not that a default applies.
+# Two kinds of accessor live here. Most report what one node says, and
+# `nothing` means that node is silent, not that a default applies. The
+# cascade resolvers — `getSeriesFill`, `getSeriesLine`, `getMarkerFill`,
+# `getLabelTextProp` — walk the rungs instead and return an `Effective`
+# carrying the value, the rung that answered and the whole chain.
 #
 # Cascade resolution deliberately stops at the chart XML. Where a property is
 # written at no rung, `Effective.value` is `nothing`, which means Excel takes it
-# from `xl/charts/style1.xml` and `colors1.xml`. Those parts are out of scope
-# for stage 4 and are not read here.
+# from `xl/charts/style1.xml` and `colors1.xml`. 
+# The reason is that Excel's precedence between them is underdocumented:
+# style1.xml is keyed by a series-index-modulo scheme that varies by chart type,
+# and colors1.xml layers on top. Pinning that down is research in its own right.
+# `FormatSite.level` already accepts `:style`, so adding the rung later is
+# additive, not breaking.
 #
 # The reason is that Excel's precedence between them is underdocumented:
 # style1.xml is keyed by a series-index-modulo scheme that varies by chart type,
@@ -143,7 +151,21 @@ function getChartAxis(c::Chart, axid::Integer)::ChartAxis
     return axes[i]
 end
 
+"""
+    getAxisShapeProps(c::Chart, ax::ChartAxis) -> Union{Nothing,DrawingShapeProps}
+
+Fill and line for the axis itself (`c:spPr`) — the axis line and its tick marks.
+`nothing` means no `c:spPr` was written, so Excel takes the formatting from the
+chart style. Gridlines are separate; see [`getAxisGridlines`](@ref).
+"""
 getAxisShapeProps(c::Chart, ax::ChartAxis) = parse_drawing_shape_props(_wb(c), _axnode(c, ax))
+
+"""
+    getAxisTextProps(c::Chart, ax::ChartAxis) -> Union{Nothing,DrawingText}
+
+Text body for the axis tick labels (`c:txPr`). `nothing` means none was written.
+The axis title's text is separate; see [`getAxisTitleText`](@ref).
+"""
 getAxisTextProps(c::Chart, ax::ChartAxis)  = parse_drawing_text(_wb(c), _axnode(c, ax))
 
 """
@@ -251,8 +273,14 @@ function _series(c::Chart, i::Integer; read_cached_values::Bool=true)
     return parse_chart_series(ser, Symbol(localname(g)); read_cached_values)
 end
 
-# One entry per group, duplicates kept (e.g. primary and secondary barChart),
-# including groups with no series. This matches what the constructor cached.
+"""
+    getChartTypes(c::Chart) -> Vector{Symbol}
+
+The tag of each chart-type group in `c:plotArea`, in document order:
+`:barChart`, `:lineChart` and so on. One entry per group, duplicates kept — a
+primary and a secondary bar group both appear — and groups holding no series are
+included. Contrast [`getChartType`](@ref), which names the chart as a whole.
+"""
 getChartTypes(c::Chart)::Vector{Symbol} =
     [Symbol(localname(g)) for g in _group_nodes(chart_root(c))]
 
@@ -387,9 +415,30 @@ function getLegendPos(c::Chart)
     return isnothing(v) ? nothing : Symbol(v)
 end
 
+"""
+    getLegendOverlay(c::Chart) -> Union{Nothing,Bool}
+
+`c:overlay` — `true` where the legend is drawn on top of the plot area rather
+than beside it. `nothing` means the chart has no legend, or the element was not
+written, in which case Excel treats it as `false`.
+"""
 getLegendOverlay(c::Chart) = _bool_val(getChartLegend(c), "overlay")
 
+"""
+    getLegendShapeProps(c::Chart) -> Union{Nothing,DrawingShapeProps}
+
+Fill and border of the legend box (`c:legend/c:spPr`). `nothing` means the chart
+has no legend, or none was written.
+"""
 getLegendShapeProps(c::Chart) = parse_drawing_shape_props(_wb(c), getChartLegend(c))
+
+"""
+    getLegendTextProps(c::Chart) -> Union{Nothing,DrawingText}
+    getLegendTextProps(c::ChartEx) -> Union{Nothing,DrawingText}
+
+Text body for the legend entries (`c:legend/c:txPr`). `nothing` means the chart
+has no legend, or none was written.
+"""
 getLegendTextProps(c::Chart)  = parse_drawing_text(_wb(c), getChartLegend(c))
 
 _chartnode(c::Chart) = first_element_with_tag(chart_root(c), "chart")
@@ -420,15 +469,57 @@ function getChartTitleRef(c::Chart)
     return isnothing(sr) ? nothing : child_text(sr, "f")
 end
 
+"""
+    getChartTitleShapeProps(c::Chart) -> Union{Nothing,DrawingShapeProps}
+
+Fill and border of the title box (`c:title/c:spPr`). `nothing` means there is no
+title element, or none was written.
+"""
 getChartTitleShapeProps(c::Chart) = parse_drawing_shape_props(_wb(c), getChartTitleNode(c))
+
+"""
+    getChartTitleTextProps(c::Chart) -> Union{Nothing,DrawingText}
+    getChartTitleTextProps(c::ChartEx) -> Union{Nothing,DrawingText}
+
+Text body for the title (`c:title/c:txPr`) — its formatting, which applies
+whether the title is typed, bound to a cell or generated by Excel. Contrast
+[`getChartTitleText`](@ref), which is the literal text in `c:tx/c:rich`.
+"""
 getChartTitleTextProps(c::Chart)  = parse_drawing_text(_wb(c), getChartTitleNode(c))
 
+"""
+    getAutoTitleDeleted(c::Chart) -> Union{Nothing,Bool}
+
+`c:autoTitleDeleted` — `true` where the user removed the title Excel would
+otherwise generate from the single series' name. `nothing` means the element was
+not written, which Excel treats as `false`.
+"""
 getAutoTitleDeleted(c::Chart) = _bool_val(_chartnode(c), "autoTitleDeleted")
 
+"""
+    getPlotAreaShapeProps(c::Chart) -> Union{Nothing,DrawingShapeProps}
+
+Fill and border of the plot area (`c:plotArea/c:spPr`) — the region the data is
+drawn in, inside the axes. `nothing` means none was written.
+"""
 getPlotAreaShapeProps(c::Chart) =
     parse_drawing_shape_props(_wb(c), first_element_with_tag(_chartnode(c), "plotArea"))
 
+"""
+    getChartSpaceShapeProps(c::Chart) -> Union{Nothing,DrawingShapeProps}
+
+Fill and border of the chart as a whole (`c:chartSpace/c:spPr`) — the outer
+frame, not the plot area. `nothing` means none was written.
+"""
 getChartSpaceShapeProps(c::Chart) = parse_drawing_shape_props(_wb(c), chart_root(c))
+
+"""
+    getChartSpaceTextProps(c::Chart) -> Union{Nothing,DrawingText}
+
+Text body at the chart space (`c:chartSpace/c:txPr`), the default every other
+text element inherits from and the last rung of the text cascade; see
+[`getLabelTextProp`](@ref). `nothing` means none was written.
+"""
 getChartSpaceTextProps(c::Chart)  = parse_drawing_text(_wb(c), chart_root(c))
 
 # --- axis scalars ---------------------------------------------------------
@@ -683,6 +774,13 @@ function getSeriesDataPoint(c::Chart, i::Integer, point::Integer)
     return isnothing(j) ? nothing : dps[j]
 end
 
+"""
+    getDataPointShapeProps(c::Chart, d::ChartDataPoint) -> Union{Nothing,DrawingShapeProps}
+
+Fill and line overriding the series' own, for one data point (`c:dPt/c:spPr`).
+`nothing` means the point writes no `c:spPr`, so the series' formatting applies;
+[`getSeriesFill`](@ref) resolves that cascade.
+"""
 getDataPointShapeProps(c::Chart, d::ChartDataPoint) = parse_drawing_shape_props(_wb(c), _node(c, d))
 
 
@@ -731,9 +829,21 @@ function getSeriesDataLabel(c::Chart, i::Integer, point::Integer)
     return isnothing(j) ? nothing : dls[j]
 end
 
+"""
+    getDataLabelTextProps(c::Chart, d::ChartDataLabel) -> Union{Nothing,DrawingText}
+
+Text body for one label (`c:dLbl/c:txPr`) — its formatting. `nothing` means the
+label writes none, so the series' [`getSeriesLabelTextProps`](@ref) applies.
+Contrast [`getDataLabelText`](@ref), which is typed-over text.
+"""
 getDataLabelTextProps(c::Chart, d::ChartDataLabel)  = parse_drawing_text(_wb(c), _node(c, d))
 
+"""
+    getDataLabelShapeProps(c::Chart, d::ChartDataLabel) -> Union{Nothing,DrawingShapeProps}
 
+Fill and border of one label's box (`c:dLbl/c:spPr`). `nothing` means none was
+written.
+"""
 getDataLabelShapeProps(c::Chart, d::ChartDataLabel) = parse_drawing_shape_props(_wb(c), _node(c, d))
 
 
@@ -906,6 +1016,16 @@ segments across categories on a stacked bar or an of-pie chart.
 """
 getGroupSeriesLines(c::Chart, g::ChartGroup) = _optional_spPr(c, _node(c, g), "serLines")
 
+"""
+    getGroupUpDownBars(c::Chart, g::ChartGroup) -> Union{Nothing,ChartUpDownBars}
+
+The group's up-down bars (`c:upDownBars`), which span between the first and last
+series at each category. `nothing` means the group has none. Line and stock
+charts.
+
+The result carries the gap width and is the handle the two formatting getters
+take: [`getUpBarShapeProps`](@ref) and [`getDownBarShapeProps`](@ref).
+"""
 function getGroupUpDownBars(c::Chart, g::ChartGroup)
     el = first_element_with_tag(_node(c, g), "upDownBars")
     isnothing(el) && return nothing
@@ -923,6 +1043,12 @@ both draw Excel's default bars.
 getUpBarShapeProps(c::Chart, b::ChartUpDownBars) =
     parse_drawing_shape_props(_wb(c), first_element_with_tag(_node(c, b), "upBars"))
 
+"""
+    getDownBarShapeProps(c::Chart, b::ChartUpDownBars) -> Union{Nothing,DrawingShapeProps}
+
+Fill and border of the down bars (`c:downBars/c:spPr`), as
+[`getUpBarShapeProps`](@ref) is for the up bars.
+"""
 getDownBarShapeProps(c::Chart, b::ChartUpDownBars) =
     parse_drawing_shape_props(_wb(c), first_element_with_tag(_node(c, b), "downBars"))
 
@@ -1295,21 +1421,84 @@ draws nothing, which is what Excel writes and is distinct from
 setSeriesLineColor(c::Chart, i::Integer, color) =
     _set_series_line(c, i, (ln, pfx) -> _ln_with_color(ln, color, pfx))
 
+"""
+    setSeriesLineWidth(c, i, points) -> Chart
+
+Set the width of series `i`'s outline, in points — the unit Excel's width box
+uses. `:inherit` removes the width so the chart style supplies it.
+
+DrawingML caps a line width at 1584 pt; a wider one is rejected rather than
+written.
+
+One of the single-property line setters; [`setSeriesLine`](@ref) sets several at
+once in a single rebuild.
+"""
 setSeriesLineWidth(c::Chart, i::Integer, points) =
     _set_series_line(c, i, (ln, _) -> _ln_with_width(ln, points))
 
+
+"""
+    setSeriesLineDash(c, i, dash) -> Chart
+
+Set the dash pattern of series `i`'s outline: `"solid"`, `"dash"`, `"sysDot"`
+and the other DrawingML presets, or Excel's own names for them. `:inherit`
+removes the pattern.
+
+One of the single-property line setters; see [`setSeriesLine`](@ref).
+"""
 setSeriesLineDash(c::Chart, i::Integer, dash) =
     _set_series_line(c, i, (ln, pfx) -> _ln_with_dash(ln, dash, pfx))
 
+"""
+    setSeriesLineCap(c, i, cap) -> Chart
+
+Set how series `i`'s outline ends: `"rnd"`, `"sq"` or `"flat"`, or Excel's names
+for them. `:inherit` removes the setting.
+
+One of the single-property line setters; see [`setSeriesLine`](@ref).
+"""
 setSeriesLineCap(c::Chart, i::Integer, cap) =
     _set_series_line(c, i, (ln, _) -> _ln_with_cap(ln, cap))
 
+"""
+    setSeriesLineCompound(c, i, cmpd) -> Chart
+
+Set the compound line type of series `i`'s outline — how many parallel strokes
+it draws: `"sng"`, `"dbl"`, `"thickThin"`, `"thinThick"` or `"tri"`, or Excel's
+names for them. `:inherit` removes the setting.
+
+One of the single-property line setters; see [`setSeriesLine`](@ref).
+"""
 setSeriesLineCompound(c::Chart, i::Integer, cmpd) =
     _set_series_line(c, i, (ln, _) -> _ln_with_compound(ln, cmpd))
 
+"""
+    setSeriesLineJoin(c, i, join) -> Chart
+
+Set how the segments of series `i`'s outline meet: `:round`, `:bevel` or
+`:miter`. `:inherit` removes the join. Excel uses the same three words, so there
+are no aliases.
+
+A miter join takes a limit as well, set separately with
+[`setSeriesLineMiterLimit`](@ref); changing the join afterwards discards it.
+
+One of the single-property line setters; see [`setSeriesLine`](@ref).
+"""
 setSeriesLineJoin(c::Chart, i::Integer, join) =
     _set_series_line(c, i, (ln, pfx) -> _ln_with_join(ln, join, pfx))
 
+"""
+    setSeriesLineMiterLimit(c, i, limit) -> Chart
+
+Set the miter limit of series `i`'s outline, as a multiple of the line width:
+how far a sharp corner may extend before the join is cut off. Excel's default is
+8. `:inherit` removes the limit.
+
+The limit belongs to the `a:miter` element, so the series' outline must already
+have a miter join ([`setSeriesLineJoin`](@ref)); otherwise this throws.
+
+One of the single-property line setters; see [`setSeriesLine`](@ref).
+"""
 setSeriesLineMiterLimit(c::Chart, i::Integer, limit) =
     _set_series_line(c, i, (ln, _) -> _ln_with_miter_limit(ln, limit))
 
@@ -1320,6 +1509,9 @@ setSeriesLineMiterLimit(c::Chart, i::Integer, limit) =
 
 Set several line properties at once, in one rebuild of the chart part. A keyword
 left unspecified is left alone; pass `:inherit` to remove one that is set.
+
+`miterLimit` needs a miter join. Passing `join = :miter` and `miterLimit` in one
+call works, since the join is applied first.
 
 The symbol form acts on the whole outline: `:none` writes an `a:ln` whose fill is
 `<a:noFill/>`, and `:inherit` removes the `a:ln` so the chart style supplies it.
@@ -1394,27 +1586,30 @@ function _set_marker(c::Chart, i::Integer, point::Union{Nothing,Integer}, f)
 end
 
 """
-    setMarkerSymbol(c, i, symbol) -> Chart
-    setMarkerSymbol(c, i, point, symbol) -> Chart
-
-Set the marker shape for series `i`, or for one of its data points. One of
-`:circle`, `:dash`, `:diamond`, `:dot`, `:none`, `:picture`, `:plus`, `:square`,
-`:star`, `:triangle`, `:x` or `:auto`.
-
+    setMarkerSymbol(c, i, symbol; point = nothing) -> Chart
+ 
+Set the marker shape for series `i`, or for one of its data points when `point`
+is given, counting from 1. One of `:circle`, `:dash`, `:diamond`, `:dot`,
+`:none`, `:picture`, `:plus`, `:square`, `:star`, `:triangle`, `:x` or `:auto`.
+ 
 `:none` draws no marker and `:auto` lets Excel choose; both are settings.
 `:inherit` removes the element so the chart style decides.
 """
-setMarkerSymbol(c::Chart, i::Integer, symbol) =
-    _set_marker(c, i, nothing, (mk, pfx) -> _marker_with_symbol(mk, symbol, pfx))
-
-setMarkerSymbol(c::Chart, i::Integer, point::Integer, symbol) =
+setMarkerSymbol(c::Chart, i::Integer, symbol; point::Union{Nothing,Integer} = nothing) =
     _set_marker(c, i, point, (mk, pfx) -> _marker_with_symbol(mk, symbol, pfx))
-
-
-setMarkerSize(c::Chart, i::Integer, size) =
-    _set_marker(c, i, nothing, (mk, pfx) -> _marker_with_size(mk, size, pfx))
-
-setMarkerSize(c::Chart, i::Integer, point::Integer, size) =
+ 
+"""
+    setMarkerSize(c, i, size; point = nothing) -> Chart
+ 
+Set the marker size for series `i`, or for one of its data points when `point`
+is given, counting from 1. In points, rounded to the nearest whole point.
+DrawingML allows 2 to 72; anything outside that is rejected rather than written.
+`:inherit` removes the setting so the chart style decides.
+ 
+One of the single-property marker setters; [`setMarker`](@ref) sets several at
+once in a single rebuild.
+"""
+setMarkerSize(c::Chart, i::Integer, size; point::Union{Nothing,Integer} = nothing) =
     _set_marker(c, i, point, (mk, pfx) -> _marker_with_size(mk, size, pfx))
 
 _marker_with_fill(mk, color, pfx) =
@@ -1424,14 +1619,18 @@ _marker_with_fill(mk, color, pfx) =
 _marker_sp(mk, pfx) = something(first_element_with_tag(mk, "spPr"),
                                 XML.Element(prefixed_tag(pfx[NS_C], "spPr")))
 
-
-
-setMarkerFill(c::Chart, i::Integer, color) =
-    _set_marker(c, i, nothing, (mk, pfx) -> _marker_with_fill(mk, color, pfx))
-
-setMarkerFill(c::Chart, i::Integer, point::Integer, color) =
+"""
+    setMarkerFill(c, i, color; point = nothing) -> Chart
+ 
+Set the fill of series `i`'s marker, or of one data point's when `point` is
+given, counting from 1. Takes the same values as [`setSeriesFill`](@ref): a
+colour, a [`SchemeColor`](@ref), `:none` for an explicit `<a:noFill/>`, or
+`:inherit` to remove it.
+ 
+One of the single-property marker setters; see [`setMarker`](@ref).
+"""
+setMarkerFill(c::Chart, i::Integer, color; point::Union{Nothing,Integer} = nothing) =
     _set_marker(c, i, point, (mk, pfx) -> _marker_with_fill(mk, color, pfx))
-
 
 """
     _marker_with_line(mk, f, pfx) -> XML.Node
@@ -1442,30 +1641,58 @@ _marker_with_line(mk::XML.Node, f, pfx::Dict{String,String}) =
     insert_child(mk, (NS_C, "marker"),
                  _sp_with_line(_marker_sp(mk, pfx), (NS_A, "spPr"), f, pfx))
 
-setMarkerLineColor(c::Chart, i::Integer, color) =
-    _set_marker(c, i, nothing, (mk, pfx) ->
-        _marker_with_line(mk, ln -> _ln_with_color(ln, color, pfx), pfx))
-
-setMarkerLineColor(c::Chart, i::Integer, point::Integer, color) =
+"""
+    setMarkerLineColor(c, i, color; point = nothing) -> Chart
+ 
+Set the outline colour of series `i`'s marker, or of one data point's when
+`point` is given, counting from 1. Takes the same values as
+[`setSeriesFill`](@ref): a colour, a [`SchemeColor`](@ref), `:none` for an
+explicit `<a:noFill/>`, or `:inherit` to remove it.
+ 
+As with [`setSeriesLineColor`](@ref), `:none` leaves the outline in place
+drawing nothing, which is not the same as removing it.
+ 
+One of the single-property marker setters; see [`setMarker`](@ref).
+"""
+setMarkerLineColor(c::Chart, i::Integer, color; point::Union{Nothing,Integer} = nothing) =
     _set_marker(c, i, point, (mk, pfx) ->
         _marker_with_line(mk, ln -> _ln_with_color(ln, color, pfx), pfx))
-
-setMarkerLineWidth(c::Chart, i::Integer, points) =
-    _set_marker(c, i, nothing, (mk, pfx) ->
-        _marker_with_line(mk, ln -> _ln_with_width(ln, points), pfx))
-
-setMarkerLineWidth(c::Chart, i::Integer, point::Integer, points) =
+ 
+"""
+    setMarkerLineWidth(c, i, width; point = nothing) -> Chart
+ 
+Set the outline width of series `i`'s marker, or of one data point's when
+`point` is given, counting from 1. In points. `:inherit` removes the width.
+ 
+DrawingML caps a line width at 1584 pt; a wider one is rejected rather than
+written.
+ 
+One of the single-property marker setters; see [`setMarker`](@ref).
+"""
+setMarkerLineWidth(c::Chart, i::Integer, width; point::Union{Nothing,Integer} = nothing) =
     _set_marker(c, i, point, (mk, pfx) ->
-        _marker_with_line(mk, ln -> _ln_with_width(ln, points), pfx))
-
+        _marker_with_line(mk, ln -> _ln_with_width(ln, width), pfx))
+ 
 """
-    setMarker(c, i; symbol, size, fill, lineColor, lineWidth) -> Chart
-    setMarker(c, i, point; ...) -> Chart
-
-Set several marker properties at once, in one rebuild. A keyword left
-unspecified is left alone; pass `:inherit` to remove one that is set.
+    setMarker(c, i; point, symbol, size, fill, lineColor, lineWidth) -> Chart
+ 
+Set several marker properties at once, in one rebuild of the chart part. Sets
+the marker for series `i`, or overrides it for one of its data points when
+`point` is given, counting from 1.
+ 
+A keyword left unspecified is left alone; pass `:inherit` to remove one that is
+set. Each keyword takes the values its single-property setter does:
+[`setMarkerSymbol`](@ref), [`setMarkerSize`](@ref), [`setMarkerFill`](@ref),
+[`setMarkerLineColor`](@ref) and [`setMarkerLineWidth`](@ref).
+ 
+Nothing is written if every property keyword is `nothing`.
+ 
+# Example
+ 
+    setMarker(c, 1; symbol = :circle, size = 7, fill = "FF0000", lineColor = :none)
 """
-function setMarker(c::Chart, i::Integer, point::Union{Nothing,Integer} = nothing;
+function setMarker(c::Chart, i::Integer;
+                   point::Union{Nothing,Integer} = nothing,
                    symbol = nothing, size = nothing, fill = nothing,
                    lineColor = nothing, lineWidth = nothing)
     all(isnothing, (symbol, size, fill, lineColor, lineWidth)) && return c

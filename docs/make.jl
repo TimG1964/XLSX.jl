@@ -1,7 +1,7 @@
 using Documenter, XLSX
 makedocs(
     sitename = "XLSX.jl",
-    modules = [ XLSX ],
+    modules = [XLSX, XLSX.Charts],
     pages = [
         "Home" => "index.md",
         "Tutorial" => Any[
@@ -25,9 +25,10 @@ makedocs(
             "Cells and data" => "api/data.md",
             "Formats" => "api/formats.md",
             "Charts" => "api/charts.md",
+            "Chart types" => "api/chartTypes.md",
         ]
-     ],
-    checkdocs=:none,
+    ],
+    checkdocs = :public,
 )
 deploydocs(
     repo = "github.com/JuliaData/XLSX.jl.git",
