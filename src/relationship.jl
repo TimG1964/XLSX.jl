@@ -345,6 +345,19 @@ function _repoint_refs!(node::XML.Node, old_prefix::String, new_prefix::String)
     return nothing
 end
 
+# Excel names a chartEx chart's sources `_xlchart.v<N>.<M>`, where N is a
+# counter it bumps per batch of charts and M runs within the batch. Pick a
+# fresh N so a copied chart's names cannot collide with the original's.
+function _next_xlchart_series(wb::Workbook)::Int
+    n = 0
+    for name in keys(wb.workbook_names)
+        m = match(r"^_xlchart\.v(\d+)\.\d+$", name)
+        isnothing(m) && continue
+        n = max(n, parse(Int, m.captures[1]))
+    end
+    return n + 1
+end
+
 """
 Repoint a cloned `chartEx` part's source references at `new_sheet`.
 

@@ -243,6 +243,21 @@ add_image_rel!(xf::XLSXFile, drawing_path::String, media_name::String) =
 # Anchor
 # ===========================================================================
 
+function _max_shape_id(n::XML.Node)::Int
+    m = 0
+    for k in something(XML.children(n), XML.Node[])
+        XML.nodetype(k) == XML.Element || continue
+        if localname(k) == "cNvPr"
+            v = tryparse(Int, something(get_attr(k, "id"), ""))
+            isnothing(v) || (m = max(m, v))
+        end
+        m = max(m, _max_shape_id(k))
+    end
+    return m
+end
+
+_next_shape_id(drawing_root::XML.Node) = max(_max_shape_id(drawing_root), 1) + 1
+
 function add_anchor!(
     xf::XLSXFile,
     drawing_path::String,
@@ -292,6 +307,17 @@ function register_content_type!(
         xml_elements(ct_root)) && return nothing
     push!(ct_root, XML.Element(prefixed_tag(pfx, tag); Symbol(key) => val, ContentType=content_type))
     return nothing
+end
+
+# Part names declared in [Content_Types].xml with the given content type.
+function parts_with_content_type(xf::XLSXFile, ctype::String)::Vector{String}
+    paths = String[]
+    haskey(xf.data, "[Content_Types].xml") || return paths
+    for n in elements_with_tag(xml_root_element(xf.data["[Content_Types].xml"]), "Override")
+        get_attr(n, "ContentType") == ctype || continue
+        push!(paths, String(lstrip(get_attr(n, "PartName"), '/')))
+    end
+    return sort!(paths)
 end
 
 const _AFTER_DRAWING = ("legacyDrawing", "legacyDrawingHF", "drawingHF", "picture",

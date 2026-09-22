@@ -1602,8 +1602,13 @@ end
 
 const REL_WORKSHEET   = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
 const REL_CHARTSHEET  = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet"
+const REL_CHART       = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart"
+const REL_CHARTEX     = "http://schemas.microsoft.com/office/2014/relationships/chartEx"
 const MIME_WORKSHEET  = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
 const MIME_CHARTSHEET = "application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml"
+const MIME_CHART      = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+const MIME_CHART      = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+const MIME_CHARTEX    = "application/vnd.ms-office.chartex+xml"
 
 # A sheet name Excel accepts: at most 31 characters, none of : \ / ? * [ ].
 function check_valid_sheetname(n::AbstractString)

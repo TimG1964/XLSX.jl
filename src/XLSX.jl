@@ -1,6 +1,6 @@
 
 module XLSX
-
+ 
 import Base.convert
 import Base.Threads
 import Colors
@@ -12,9 +12,9 @@ import Unicode
 import UUIDs
 import XML
 import ZipArchives
-
+ 
 import PrecompileTools as PCT    # this is a small dependency.
-
+ 
 # ---------------------------------------------------------------------------
 # Naming conventions
 #
@@ -49,24 +49,9 @@ import PrecompileTools as PCT    # this is a small dependency.
 # formatting and feature layer is camelCase (`setFont`, `freezePanes`,
 # `getCharts`). Match the neighbours.
 #
-# Chart property accessors follow `get<Subject><Property>`, and their setters
-# `set<Subject><Property>` — `getSeriesFill`/`setSeriesFill`,
-# `getAxisShapeProps`/`setAxisShapeProps`. The subject is the thing the property
-# belongs to, not the argument used to reach it: `getMarkerFill(c, i, point)`
-# takes a series index but describes the marker.
-#
-# This is the chart-props reader/writer surface only. The DrawingML layer keeps
-# snake_case — `parse_drawing_fill`, `has_line`, `text_content`,
-# `resolve_color_base` — because those are parsers and predicates rather than
-# accessors, and sit with the package's other internals.
-#
-# Note two senses of "resolve", deliberately kept apart. `resolve_color_base`
-# and `apply_drawingml_transforms` resolve a colour to RGB. The `get<Subject>`
-# accessors that return an `Effective` resolve a property up the inheritance
-# cascade. A cascade-resolved fill may still hold a scheme colour, which is then
-# a separate step.
+# Chart naming and the chart export rule are documented in src/charts/Charts.jl.
 # ---------------------------------------------------------------------------
-
+ 
 export
     # Files and worksheets
     XLSXFile,
@@ -93,26 +78,24 @@ export
     freezePanes, splitFreeze, splitPanes, removePanes,
     # Excel Tables
     addtable!, deletetable!, settotals!, gettotals, removetotals!, appendtable!, gettablerange
-
+ 
 @static if VERSION >= v"1.11"
     eval(Meta.parse("""
     public getcell, getcellrange, getFormula, getRichTextString,
            getConditionalFormats, getColumnWidth, getRowHeight,
            getFormat, getFont, getBorder, getFill, getAlignment,
            DataTable, Table, TableStyleInfo, table, tables,
-           AbstractChart, Chart, ChartEx, chartSchema, chartType,
-           getCharts, getChart, getChartData, getChartRanges, ChartSeries, ChartRef,
            getDefinedNames, getAllDefinedNames,
            Workbook
     """))
 end
-
+ 
 const SPREADSHEET_NAMESPACE_XPATH_ARG = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-
+ 
 const EXCEL_MAX_COLS =    16_384           # total columns supported by Excel per sheet
 const EXCEL_MAX_ROWS = 1_048_576           # total rows supported by Excel per sheet (including headers)
 const ROW_CHUNKSIZE  =     1_000           # number of rows to be processed in each thread
-
+ 
 include("types.jl")
 include("xmlutil.jl")
 include("xlsx-colors.jl") # must load before sst.jl and cellformat-helpers.jl
@@ -134,14 +117,24 @@ include("panes.jl")
 include("conditional-format-helpers.jl") # must load before conditional-formats.jl
 include("conditional-formats.jl")
 include("images.jl")
-include("drawingml.jl")
-include("charts.jl")
-include("chartschema.jl")
-include("chartprops.jl")
-include("chartexprops.jl")
 include("write.jl")
 include("fileArray.jl")
-
+ 
+# Charts depends on the core and must load after it; the core never refers to Charts.
+include("charts/Charts.jl")
+ 
+# Names released as `XLSX.x` before the sub-module existed.
+using .Charts: AbstractChart, Chart, ChartEx, ChartRef, ChartSeries,
+               chartSchema, chartType, getCharts, getChart, getChartData, getChartRanges
+ 
+@static if VERSION >= v"1.11"
+    eval(Meta.parse("""
+    public Charts,
+           AbstractChart, Chart, ChartEx, ChartRef, ChartSeries,
+           chartSchema, chartType, getCharts, getChart, getChartData, getChartRanges
+    """))
+end
+ 
 PCT.@setup_workload begin
     # Putting some things in `@setup_workload` instead of `@compile_workload` can reduce the size of the
     # precompile file and potentially make loading faster.
@@ -165,5 +158,6 @@ PCT.@setup_workload begin
         writexlsx(t, f)
     end
 end
-
+ 
 end # module XLSX
+ 

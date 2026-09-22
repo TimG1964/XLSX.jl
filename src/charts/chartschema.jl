@@ -334,7 +334,7 @@ const CX_NAMESPACES = Dict(
     "cx2" => "http://schemas.microsoft.com/office/drawing/2015/10/21/chartex",
 )
 
-const _CHARTEXKIND_DIR = joinpath(@__DIR__, "data", "chartexkinds")
+const _CHARTEXKIND_DIR = joinpath(DATA_DIR, "chartexkinds")
 
 # Excel's chartEx part for each layout, verbatim, keyed by kind as in CX_KINDS.
 # addChartEx takes its shell from these with the series and data removed.
@@ -366,7 +366,7 @@ const _CX_SERIES_RULES = (
     boxWhisker = (valtype = "val",  categories = :optional, multi = true),
 )
 
-const _CHARTKIND_DIR = joinpath(@__DIR__, "data", "chartkinds")
+const _CHARTKIND_DIR = joinpath(DATA_DIR, "chartkinds")
 
 # Excel's default chart part for each c: kind, verbatim, keyed by file stem. addChart
 # takes its shell from the template with the series removed, and addSeries takes
@@ -396,7 +396,7 @@ const C_KINDS = (
 #const CHART_STYLE_REL = "http://schemas.microsoft.com/office/2011/relationships/chartStyle"
 #const CHART_COLOR_REL = "http://schemas.microsoft.com/office/2011/relationships/chartColorStyle"
 
-const _CHARTSTYLE_DIR = joinpath(@__DIR__, "data", "chartstyles")
+const _CHARTSTYLE_DIR = joinpath(DATA_DIR, "chartstyles")
 
 const CHART_STYLE_TEMPLATES = Dict{Int,String}()
 const CHART_COLOR_TEMPLATES = Dict{Int,String}()
