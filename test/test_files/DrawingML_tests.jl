@@ -8,7 +8,7 @@
     # Parse a colour from an XML fragment, as it appears inside a fill.
     function color_of(xml::String)
         doc = parse(xml, XML.Node)
-        XLSX.parse_drawing_color(wb, XLSX.xml_root_element(doc))
+        XLSX.Charts.parse_drawing_color(wb, XLSX.xml_root_element(doc))
     end
 
     @testset "theme colour map" begin
@@ -130,18 +130,18 @@
 
     @testset "no colour child" begin
         doc = parse("""<a:noFill xmlns:a="$(XLSX.NS_A)"/>""", XML.Node)
-        @test isnothing(XLSX.parse_drawing_color(wb, XLSX.xml_root_element(doc)))
-        @test isnothing(XLSX.parse_drawing_color(wb, nothing))
+        @test isnothing(XLSX.Charts.parse_drawing_color(wb, XLSX.xml_root_element(doc)))
+        @test isnothing(XLSX.Charts.parse_drawing_color(wb, nothing))
     end
 
     @testset "parent element is searched for its colour child" begin
         doc = parse("""
             <a:solidFill xmlns:a="$(XLSX.NS_A)"><a:srgbClr val="ABCDEF"/></a:solidFill>""", XML.Node)
-        c = XLSX.parse_drawing_color(wb, XLSX.xml_root_element(doc))
+        c = XLSX.Charts.parse_drawing_color(wb, XLSX.xml_root_element(doc))
         @test c.rgb == "ABCDEF"
     end
 
-    fill_of(xml) = XLSX.parse_drawing_fill(wb, XLSX.xml_root_element(XML.parse(xml, XML.Node)))
+    fill_of(xml) = XLSX.Charts.parse_drawing_fill(wb, XLSX.xml_root_element(XML.parse(xml, XML.Node)))
 
     @testset "solid fill" begin
         fl = fill_of("""
@@ -186,16 +186,16 @@
 
     @testset "parent element is searched for its fill child" begin
         fl = fill_of("""
-            <c:spPr xmlns:c="$(XLSX.NS_C)" xmlns:a="$(XLSX.NS_A)">
+            <c:spPr xmlns:c="$(XLSX.Charts.NS_C)" xmlns:a="$(XLSX.NS_A)">
                 <a:solidFill><a:srgbClr val="ABCDEF"/></a:solidFill>
             </c:spPr>""")
         @test fl.fgcolor.rgb == "ABCDEF"
     end
 
     @testset "no fill child" begin
-        doc = XML.parse("""<c:spPr xmlns:c="$(XLSX.NS_C)"/>""", XML.Node)
-        @test isnothing(XLSX.parse_drawing_fill(wb, XLSX.xml_root_element(doc)))
-        @test isnothing(XLSX.parse_drawing_fill(wb, nothing))
+        doc = XML.parse("""<c:spPr xmlns:c="$(XLSX.Charts.NS_C)"/>""", XML.Node)
+        @test isnothing(XLSX.Charts.parse_drawing_fill(wb, XLSX.xml_root_element(doc)))
+        @test isnothing(XLSX.Charts.parse_drawing_fill(wb, nothing))
     end
 
     @testset "parent element is searched for its fill child" begin
@@ -208,11 +208,11 @@
 
     @testset "no fill child" begin
         doc = XML.parse("""<a:spPr xmlns:a="$(XLSX.NS_A)"/>""", XML.Node)
-        @test isnothing(XLSX.parse_drawing_fill(wb, XLSX.xml_root_element(doc)))
-        @test isnothing(XLSX.parse_drawing_fill(wb, nothing))
+        @test isnothing(XLSX.Charts.parse_drawing_fill(wb, XLSX.xml_root_element(doc)))
+        @test isnothing(XLSX.Charts.parse_drawing_fill(wb, nothing))
     end
 
-    line_of(xml) = XLSX.parse_drawing_line(wb, XLSX.xml_root_element(XML.parse(xml, XML.Node)))
+    line_of(xml) = XLSX.Charts.parse_drawing_line(wb, XLSX.xml_root_element(XML.parse(xml, XML.Node)))
 
     @testset "solid line with width and dash" begin
         ln = line_of("""
@@ -258,7 +258,7 @@
 
     @testset "parent element is searched for its ln child" begin
         ln = line_of("""
-            <c:spPr xmlns:c="$(XLSX.NS_C)" xmlns:a="$(XLSX.NS_A)">
+            <c:spPr xmlns:c="$(XLSX.Charts.NS_C)" xmlns:a="$(XLSX.NS_A)">
                 <a:solidFill><a:srgbClr val="ABCDEF"/></a:solidFill>
                 <a:ln w="12700"><a:solidFill><a:srgbClr val="123456"/></a:solidFill></a:ln>
             </c:spPr>""")
@@ -269,11 +269,11 @@
 
     @testset "no ln child" begin
         doc = XML.parse("""
-            <c:spPr xmlns:c="$(XLSX.NS_C)" xmlns:a="$(XLSX.NS_A)">
+            <c:spPr xmlns:c="$(XLSX.Charts.NS_C)" xmlns:a="$(XLSX.NS_A)">
                 <a:solidFill><a:srgbClr val="ABCDEF"/></a:solidFill>
             </c:spPr>""", XML.Node)
-        @test isnothing(XLSX.parse_drawing_line(wb, XLSX.xml_root_element(doc)))
-        @test isnothing(XLSX.parse_drawing_line(wb, nothing))
+        @test isnothing(XLSX.Charts.parse_drawing_line(wb, XLSX.xml_root_element(doc)))
+        @test isnothing(XLSX.Charts.parse_drawing_line(wb, nothing))
         ln_bare = line_of("""<a:ln xmlns:a="$(XLSX.NS_A)"/>""")
         @test ln_bare !== nothing
         @test isnothing(ln_bare.width)
@@ -310,21 +310,21 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                       kern="1200" spc="-50" lvl="2" rot="-2700000" marL="228600"/>""")
 
         # units
-        @test XLSX._attr_pt(el, "sz") == 11.97           # 1/100 pt
-        @test XLSX._attr_pt(el, "kern") == 12.0
-        @test XLSX._attr_pt(el, "spc") == -0.5
-        @test XLSX._attr_pct_opt(el, "baseline") == 0.3  # thousandths of a percent -> fraction
-        @test XLSX._attr_deg(el, "rot") == -45.0         # 1/60000 deg
-        @test XLSX._attr_emu(el, "marL") == 18.0         # EMU -> pt
-        @test XLSX._attr_int(el, "lvl") == 2
+        @test XLSX.Charts._attr_pt(el, "sz") == 11.97           # 1/100 pt
+        @test XLSX.Charts._attr_pt(el, "kern") == 12.0
+        @test XLSX.Charts._attr_pt(el, "spc") == -0.5
+        @test XLSX.Charts._attr_pct_opt(el, "baseline") == 0.3  # thousandths of a percent -> fraction
+        @test XLSX.Charts._attr_deg(el, "rot") == -45.0         # 1/60000 deg
+        @test XLSX.Charts._attr_emu(el, "marL") == 18.0         # EMU -> pt
+        @test XLSX.Charts._attr_int(el, "lvl") == 2
 
         # absent stays distinct from explicit
-        @test XLSX._attr_bool(el, "b") === false         # written as 0
-        @test XLSX._attr_bool(el, "i") === true
-        @test XLSX._attr_bool(el, "u") === nothing       # not written at all
+        @test XLSX.Charts._attr_bool(el, "b") === false         # written as 0
+        @test XLSX.Charts._attr_bool(el, "i") === true
+        @test XLSX.Charts._attr_bool(el, "u") === nothing       # not written at all
         @test XLSX._attr(el, "missing") === nothing
-        @test XLSX._attr_pt(el, "missing") === nothing
-        @test XLSX._attr_pct_opt(el, "missing") === nothing
+        @test XLSX.Charts._attr_pt(el, "missing") === nothing
+        @test XLSX.Charts._attr_pct_opt(el, "missing") === nothing
 
         # tolerates a missing child element
         @test XLSX._attr(nothing, "typeface") === nothing
@@ -332,13 +332,13 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
 
         # bool spellings
         b2 = _frag("""<a:rPr $_NSDECL b="true" i="on" u="none"/>""")
-        @test XLSX._attr_bool(b2, "b") === true
-        @test XLSX._attr_bool(b2, "i") === true
+        @test XLSX.Charts._attr_bool(b2, "b") === true
+        @test XLSX.Charts._attr_bool(b2, "i") === true
         @test XLSX._attr(b2, "u") == "none"              # enum stays a string
 
         # unparseable reads as absent, not as zero
         bad = _frag("""<a:rPr $_NSDECL sz="large"/>""")
-        @test XLSX._attr_pt(bad, "sz") === nothing
+        @test XLSX.Charts._attr_pt(bad, "sz") === nothing
     end
 
     # -----------------------------------------------------------------------
@@ -347,9 +347,9 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                          <a:lnSpc><a:spcPct val="150000"/></a:lnSpc>
                          <a:spcBef><a:spcPts val="1200"/></a:spcBef>
                        </a:pPr>""")
-        @test XLSX._attr_spacing(pPr, "lnSpc") == (:frac, 1.5)
-        @test XLSX._attr_spacing(pPr, "spcBef") == (:pts, 12.0)
-        @test XLSX._attr_spacing(pPr, "spcAft") === nothing
+        @test XLSX.Charts._attr_spacing(pPr, "lnSpc") == (:frac, 1.5)
+        @test XLSX.Charts._attr_spacing(pPr, "spcBef") == (:pts, 12.0)
+        @test XLSX.Charts._attr_spacing(pPr, "spcAft") === nothing
     end
 
     # -----------------------------------------------------------------------
@@ -359,7 +359,7 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
             wb = XLSX.get_workbook(xf)
 
             @testset "formatting-only txPr (the common shape)" begin
-                node = _frag("""<c:txPr xmlns:c="$(XLSX.NS_C)" $_NSDECL>
+                node = _frag("""<c:txPr xmlns:c="$(XLSX.Charts.NS_C)" $_NSDECL>
                       <a:bodyPr rot="-60000000" vert="horz" wrap="square" anchor="ctr"/>
                       <a:lstStyle/>
                       <a:p>
@@ -370,11 +370,11 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                       </a:p>
                     </c:txPr>""")
 
-                t = XLSX.parse_drawing_text(wb, node)
-                @test t isa XLSX.DrawingText
+                t = XLSX.Charts.parse_drawing_text(wb, node)
+                @test t isa XLSX.Charts.DrawingText
                 @test length(t.paragraphs) == 1
                 @test isempty(t.paragraphs[1].runs)
-                @test XLSX.text_content(t) == ""
+                @test XLSX.Charts.text_content(t) == ""
                 @test t.liststyle !== nothing              # preserved, even empty
 
                 @test t.body.rotation == -1000.0
@@ -382,7 +382,7 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 @test t.body.autofit === nothing           # absent, not :none
 
                 # the font lives in defRPr, and default_run_props finds it
-                p = XLSX.default_run_props(t)
+                p = XLSX.Charts.default_run_props(t)
                 @test p !== nothing
                 @test p.size == 9.0
                 @test p.bold === true
@@ -390,11 +390,11 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 @test p.under == "none"
                 @test t.paragraphs[1].props.align == "ctr"
 
-                @test XLSX.is_uniform(t)                        # no runs: uniform
+                @test XLSX.Charts.is_uniform(t)                        # no runs: uniform
             end
 
             @testset "uniform multi-run rich text" begin
-                node = _frag("""<c:rich xmlns:c="$(XLSX.NS_C)" $_NSDECL>
+                node = _frag("""<c:rich xmlns:c="$(XLSX.Charts.NS_C)" $_NSDECL>
                       <a:bodyPr/><a:lstStyle/>
                       <a:p>
                         <a:r><a:rPr lang="en-GB" sz="1400" b="1"/><a:t>Quarterly </a:t></a:r>
@@ -402,19 +402,19 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                       </a:p>
                     </c:rich>""")
 
-                t = XLSX.parse_drawing_text(wb, node; tag="rich")
-                @test length(XLSX.text_runs(t)) == 2
-                @test XLSX.text_content(t) == "Quarterly Revenue"
+                t = XLSX.Charts.parse_drawing_text(wb, node; tag="rich")
+                @test length(XLSX.Charts.text_runs(t)) == 2
+                @test XLSX.Charts.text_content(t) == "Quarterly Revenue"
 
                 # differing only by lang — Excel splits runs on spellcheck
                 # boundaries, and that must not read as mixed formatting
-                @test XLSX.is_uniform(t)
-                @test XLSX.default_run_props(t) !== nothing
-                @test XLSX.default_run_props(t).size == 14.0
+                @test XLSX.Charts.is_uniform(t)
+                @test XLSX.Charts.default_run_props(t) !== nothing
+                @test XLSX.Charts.default_run_props(t).size == 14.0
             end
 
             @testset "mixed formatting" begin
-                node = _frag("""<c:rich xmlns:c="$(XLSX.NS_C)" $_NSDECL>
+                node = _frag("""<c:rich xmlns:c="$(XLSX.Charts.NS_C)" $_NSDECL>
                       <a:bodyPr/><a:lstStyle/>
                       <a:p>
                         <a:r><a:rPr sz="1400" b="0"/><a:t>Revenue </a:t></a:r>
@@ -422,34 +422,34 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                       </a:p>
                     </c:rich>""")
 
-                t = XLSX.parse_drawing_text(wb, node; tag="rich")
-                @test XLSX.text_content(t) == "Revenue 2024"
-                @test !XLSX.is_uniform(t)
+                t = XLSX.Charts.parse_drawing_text(wb, node; tag="rich")
+                @test XLSX.Charts.text_content(t) == "Revenue 2024"
+                @test !XLSX.Charts.is_uniform(t)
 
                 # no single answer, so no answer
-                @test XLSX.default_run_props(t) === nothing
+                @test XLSX.Charts.default_run_props(t) === nothing
                 # ...but the first fragment is still reachable
-                @test XLSX.first_run_props(t).bold === false
-                @test XLSX.text_runs(t)[2].props.bold === true
+                @test XLSX.Charts.first_run_props(t).bold === false
+                @test XLSX.Charts.text_runs(t)[2].props.bold === true
             end
 
             @testset "breaks and paragraphs" begin
-                node = _frag("""<c:rich xmlns:c="$(XLSX.NS_C)" $_NSDECL>
+                node = _frag("""<c:rich xmlns:c="$(XLSX.Charts.NS_C)" $_NSDECL>
                       <a:bodyPr/><a:lstStyle/>
                       <a:p><a:r><a:t>One</a:t></a:r><a:br/><a:r><a:t>Two</a:t></a:r></a:p>
                       <a:p><a:r><a:t>Three</a:t></a:r></a:p>
                     </c:rich>""")
 
-                t = XLSX.parse_drawing_text(wb, node; tag="rich")
+                t = XLSX.Charts.parse_drawing_text(wb, node; tag="rich")
                 @test length(t.paragraphs) == 2
-                @test XLSX.text_content(t) == "One\nTwo\nThree"
+                @test XLSX.Charts.text_content(t) == "One\nTwo\nThree"
                 @test [r.kind for r in t.paragraphs[1].runs] == [:run, :br, :run]
             end
 
             @testset "indented XML (nodetype guard)" begin
                 # Excel writes chart parts unindented; a formatted or
                 # hand-edited part has whitespace text nodes between runs.
-                node = _frag("""<c:rich xmlns:c="$(XLSX.NS_C)" $_NSDECL>
+                node = _frag("""<c:rich xmlns:c="$(XLSX.Charts.NS_C)" $_NSDECL>
                       <a:bodyPr/>
                       <a:lstStyle/>
                       <a:p>
@@ -458,28 +458,28 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                       </a:p>
                     </c:rich>""")
 
-                t = XLSX.parse_drawing_text(wb, node; tag="rich")
-                @test length(XLSX.text_runs(t)) == 2          # not 2 + whitespace nodes
-                @test XLSX.text_content(t) == "Spaced out"
+                t = XLSX.Charts.parse_drawing_text(wb, node; tag="rich")
+                @test length(XLSX.Charts.text_runs(t)) == 2          # not 2 + whitespace nodes
+                @test XLSX.Charts.text_content(t) == "Spaced out"
             end
 
             @testset "parse from parent, and absent txPr" begin
-                parent = _frag("""<c:valAx xmlns:c="$(XLSX.NS_C)" $_NSDECL>
+                parent = _frag("""<c:valAx xmlns:c="$(XLSX.Charts.NS_C)" $_NSDECL>
                       <c:delete val="0"/>
                       <c:txPr><a:bodyPr/><a:lstStyle/>
                         <a:p><a:pPr><a:defRPr sz="1000"/></a:pPr></a:p>
                       </c:txPr>
                     </c:valAx>""")
-                t = XLSX.parse_drawing_text(wb, parent)          # searches for txPr
+                t = XLSX.Charts.parse_drawing_text(wb, parent)          # searches for txPr
                 @test t !== nothing
-                @test XLSX.default_run_props(t).size == 10.0
+                @test XLSX.Charts.default_run_props(t).size == 10.0
 
-                bare = _frag("""<c:valAx xmlns:c="$(XLSX.NS_C)"><c:delete val="0"/></c:valAx>""")
-                @test XLSX.parse_drawing_text(wb, bare) === nothing
+                bare = _frag("""<c:valAx xmlns:c="$(XLSX.Charts.NS_C)"><c:delete val="0"/></c:valAx>""")
+                @test XLSX.Charts.parse_drawing_text(wb, bare) === nothing
             end
 
             @testset "solidFill inside defRPr" begin
-                node = _frag("""<c:txPr xmlns:c="$(XLSX.NS_C)" $_NSDECL>
+                node = _frag("""<c:txPr xmlns:c="$(XLSX.Charts.NS_C)" $_NSDECL>
                       <a:bodyPr/><a:lstStyle/>
                       <a:p><a:pPr><a:defRPr sz="900">
                         <a:solidFill><a:schemeClr val="tx1">
@@ -489,8 +489,8 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                       </a:defRPr></a:pPr></a:p>
                     </c:txPr>""")
 
-                t = XLSX.parse_drawing_text(wb, node)
-                p = XLSX.default_run_props(t)
+                t = XLSX.Charts.parse_drawing_text(wb, node)
+                p = XLSX.Charts.default_run_props(t)
                 @test p.fill !== nothing
                 @test p.fill.kind == :solid
                 # same transform the colour tests already pin
@@ -515,7 +515,7 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
 
         XLSX.openxlsx(joinpath(data_directory, "chart_basic.xlsx")) do xf
             wb = XLSX.get_workbook(xf)
-            c = first(XLSX.getCharts(xf["Data"]))
+            c = first(XLSX.Charts.getCharts(xf["Data"]))
 
             root = _chart_root(xf, c)                          # c:chartSpace
             chart = XLSX.first_element_with_tag(root, "chart")
@@ -528,11 +528,11 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 ax = XLSX.first_element_with_tag(plotarea, "valAx")
                 @test ax !== nothing
 
-                t = XLSX.parse_drawing_text(wb, ax)
+                t = XLSX.Charts.parse_drawing_text(wb, ax)
                 @test t !== nothing
-                @test XLSX.text_content(t) == ""          # formatting only
-                @test isempty(XLSX.text_runs(t))
-                @test XLSX.is_uniform(t)
+                @test XLSX.Charts.text_content(t) == ""          # formatting only
+                @test isempty(XLSX.Charts.text_runs(t))
+                @test XLSX.Charts.is_uniform(t)
                 @test t.raw !== nothing              # kept for write-back
 
                 # <a:bodyPr rot="-60000000" spcFirstLastPara="1"
@@ -551,7 +551,7 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
 
                 # The font is on a:pPr/a:defRPr — this txPr has no runs.
                 @test t.paragraphs[1].props.defprops !== nothing
-                p = XLSX.default_run_props(t)
+                p = XLSX.Charts.default_run_props(t)
                 @test p === t.paragraphs[1].props.defprops
 
                 # <a:defRPr sz="900" b="0" i="0" u="none" strike="noStrike"
@@ -588,23 +588,23 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 if title !== nothing
                     tx = XLSX.first_element_with_tag(title, "tx")
                     if tx !== nothing
-                        t = XLSX.parse_drawing_text(wb, tx; tag="rich")
+                        t = XLSX.Charts.parse_drawing_text(wb, tx; tag="rich")
                         if t !== nothing
                             # `getChartTitle` is parsed independently, so this
                             # cross-checks the two paths agree.
-                            @test XLSX.text_content(t) == XLSX.getChartTitle(c)
-                            @test !isempty(XLSX.text_runs(t))
+                            @test XLSX.Charts.text_content(t) == XLSX.Charts.getChartTitle(c)
+                            @test !isempty(XLSX.Charts.text_runs(t))
                         end
                     end
                 end
             end
         end
         @testset "text_content reads a raw body as it reads a parsed one" begin
-            xml = """<c:rich xmlns:c="$(XLSX.NS_C)" xmlns:a="$(XLSX.NS_A)"><a:bodyPr/><a:lstStyle/>""" *
+            xml = """<c:rich xmlns:c="$(XLSX.Charts.NS_C)" xmlns:a="$(XLSX.NS_A)"><a:bodyPr/><a:lstStyle/>""" *
                 """<a:p><a:r><a:t>One</a:t></a:r></a:p>""" *
                 """<a:p><a:r><a:t>Two</a:t></a:r><a:fld id="{0}" type="x"><a:t>!</a:t></a:fld></a:p></c:rich>"""
             node = XLSX.xml_root_element(parse(xml, XLSX.XML.Node))
-            @test XLSX.text_content(node) == "One\nTwo!"
+            @test XLSX.Charts.text_content(node) == "One\nTwo!"
         end
         @testset "theme fonts" begin
             XLSX.openxlsx(joinpath(data_directory, "chart_theme_colors.xlsx")) do xf
@@ -625,19 +625,19 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
 
     @testset "run properties overlay defRPr" begin
         f = XLSX.readxlsx(joinpath(data_directory, "chartex_formatted.xlsx"))
-        c = only(filter(x -> x isa XLSX.ChartEx, XLSX.getCharts(f)))
-        wb = XLSX._wb(c)
+        c = only(filter(x -> x isa XLSX.Charts.ChartEx, XLSX.Charts.getCharts(f)))
+        wb = XLSX.Charts._wb(c)
 
         # Empty defRPr, formatting on the run: the run answers.
-        title = XLSX.parse_drawing_text(wb, first(XLSX.elements_with_tag(XLSX._cx_chart(c), "title")))
-        rp = XLSX.default_run_props(title)
+        title = XLSX.Charts.parse_drawing_text(wb, first(XLSX.elements_with_tag(XLSX.Charts._cx_chart(c), "title")))
+        rp = XLSX.Charts.default_run_props(title)
         @test rp.size ≈ 18.0
         @test rp.fill.fgcolor.val == "8C8026"
         @test rp.latin == "Comic Sans MS"
 
         # No run: defRPr answers as written; endParaRPr does not contribute.
-        labels = XLSX.parse_drawing_text(wb, XLSX._cx_datalabels(c, 1))
-        lp = XLSX.default_run_props(labels)
+        labels = XLSX.Charts.parse_drawing_text(wb, XLSX.Charts._cx_datalabels(c, 1))
+        lp = XLSX.Charts.default_run_props(labels)
         @test lp.size ≈ 11.0
         @test lp.bold === true
         @test lp.fill.fgcolor.val == "7030A0"
@@ -651,7 +651,7 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                      <a:r><a:rPr sz="1800"/><a:t>x</a:t></a:r>
                    </a:p></cx:txPr></cx:title>"""
         node = XLSX.xml_root_element(parse(xml, XLSX.XML.Node))
-        mp = XLSX.default_run_props(XLSX.parse_drawing_text(wb, node))
+        mp = XLSX.Charts.default_run_props(XLSX.Charts.parse_drawing_text(wb, node))
         @test mp.size ≈ 18.0                   # from the run
         @test mp.bold === true                 # from defRPr
     end
@@ -659,12 +659,12 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
         tmp = joinpath(mktempdir(), "runclear.xlsx")
         cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp)
         xf = XLSX.openxlsx(tmp; mode = "rw")
-        h = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "histogram", XLSX.getCharts(xf)))
+        h = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "histogram", XLSX.Charts.getCharts(xf)))
 
         # Excel wrote this title with sz on both a:defRPr and the run's a:rPr
-        XLSX.setChartTitleTextProp(h, :size, 20)
+        XLSX.Charts.setChartTitleTextProp(h, :size, 20)
         tx = XLSX.first_element_with_tag(
-                XLSX.first_element_with_tag(XLSX._cx_chart(h), "title"), "txPr")
+                XLSX.first_element_with_tag(XLSX.Charts._cx_chart(h), "title"), "txPr")
         p   = XLSX.first_element_with_tag(tx, "p")
         def = XLSX.first_element_with_tag(XLSX.first_element_with_tag(p, "pPr"), "defRPr")
         rpr = XLSX.first_element_with_tag(XLSX.first_element_with_tag(p, "r"), "rPr")
@@ -674,28 +674,28 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
         @test XLSX.get_attr(rpr, "lang") == "en-GB"      # the run keeps everything else
 
         # what the reader resolves now matches what Excel will render
-        @test XLSX.default_run_props(XLSX.getChartTitleTextProps(h)).size ≈ 20.0
+        @test XLSX.Charts.default_run_props(XLSX.Charts.getChartTitleTextProps(h)).size ≈ 20.0
 
         # a composite field: the run's own solidFill must go too
-        XLSX.setChartTitleTextProp(h, :fill, "FFC00000")
+        XLSX.Charts.setChartTitleTextProp(h, :fill, "FFC00000")
         rpr = XLSX.first_element_with_tag(XLSX.first_element_with_tag(
                 XLSX.first_element_with_tag(
-                    XLSX.first_element_with_tag(XLSX._cx_chart(h), "title"), "txPr"), "p"), "r")
+                    XLSX.first_element_with_tag(XLSX.Charts._cx_chart(h), "title"), "txPr"), "p"), "r")
         @test isnothing(XLSX.first_element_with_tag(
                 XLSX.first_element_with_tag(rpr, "rPr"), "solidFill"))
-        @test XLSX.default_run_props(XLSX.getChartTitleTextProps(h)).fill.fgcolor.rgb == "C00000"
+        @test XLSX.Charts.default_run_props(XLSX.Charts.getChartTitleTextProps(h)).fill.fgcolor.rgb == "C00000"
     end
     @testset "formatting cascade" begin
         f = XLSX.readxlsx(joinpath(data_directory, "chartex_formatted.xlsx"))
-        c = only(filter(x -> x isa XLSX.ChartEx, XLSX.getCharts(f)))
+        c = only(filter(x -> x isa XLSX.Charts.ChartEx, XLSX.Charts.getCharts(f)))
 
         # Series fill: theme colour with a transform.
-        e = XLSX.getSeriesFill(c, 1)
+        e = XLSX.Charts.getSeriesFill(c, 1)
         @test e.site.level == :series
         @test e.value.fgcolor.val == "accent2"
 
         # Point 5 (idx 4) has its own fill: explicit colour with transforms.
-        e5 = XLSX.getSeriesFill(c, 1; point=5)
+        e5 = XLSX.Charts.getSeriesFill(c, 1; point=5)
         @test e5.site.level == :point
         @test [s.level for s in e5.chain] == [:point, :series]
         @test e5.value.fgcolor.kind == :srgb
@@ -704,28 +704,28 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
         @test e5.value.fgcolor.rgb == "8ED973"                                  # transforms applied
 
         # Point 1 has no dataPt: no point rung, resolves at the series.
-        e1 = XLSX.getSeriesFill(c, 1; point=1)
+        e1 = XLSX.Charts.getSeriesFill(c, 1; point=1)
         @test e1.site.level == :series
         @test [s.level for s in e1.chain] == [:series]
-        @test_throws XLSX.XLSXError XLSX.getSeriesFill(c, 1; point=0)
+        @test_throws XLSX.XLSXError XLSX.Charts.getSeriesFill(c, 1; point=0)
 
         # Label text: set on dataLabels/txPr defRPr.
-        s = XLSX.getLabelTextProp(c, 1, :size)
+        s = XLSX.Charts.getLabelTextProp(c, 1, :size)
         @test s.value ≈ 11.0
         @test s.site.level == :series
         @test [x.level for x in s.chain] == [:series, :chartspace]
-        @test XLSX.getLabelTextProp(c, 1, :bold).value === true
-        @test XLSX.getLabelTextProp(c, 1, :fill).value.fgcolor.val == "7030A0"
-        @test_throws XLSX.XLSXError XLSX.getLabelTextProp(c, 1, :nonsense)
+        @test XLSX.Charts.getLabelTextProp(c, 1, :bold).value === true
+        @test XLSX.Charts.getLabelTextProp(c, 1, :fill).value.fgcolor.val == "7030A0"
+        @test_throws XLSX.XLSXError XLSX.Charts.getLabelTextProp(c, 1, :nonsense)
 
         # Nothing written anywhere: no value, no site, but a full chain.
         g = XLSX.readxlsx(joinpath(data_directory, "chartex_layouts.xlsx"))
-        w = only(filter(x -> x isa XLSX.ChartEx && x.sheet == "waterfall", XLSX.getCharts(g)))
-        u = XLSX.getSeriesFill(w, 1)
+        w = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "waterfall", XLSX.Charts.getCharts(g)))
+        u = XLSX.Charts.getSeriesFill(w, 1)
         @test isnothing(u.value) && isnothing(u.site)
         @test length(u.chain) == 1
         @test isnothing(only(u.chain).props)
-        @test isnothing(XLSX.getLabelTextProp(w, 1, :size).value)
+        @test isnothing(XLSX.Charts.getLabelTextProp(w, 1, :size).value)
     end
     @testset "DrawingML shape properties" begin
 
@@ -733,21 +733,21 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
             wb = XLSX.get_workbook(xf)
 
             @testset "solid fill and line" begin
-                node = _frag("""<c:spPr xmlns:c="$(XLSX.NS_C)" $_NSDECL>
+                node = _frag("""<c:spPr xmlns:c="$(XLSX.Charts.NS_C)" $_NSDECL>
                       <a:solidFill><a:srgbClr val="4472C4"/></a:solidFill>
                       <a:ln w="19050"><a:solidFill><a:srgbClr val="203864"/></a:solidFill>
                         <a:prstDash val="dash"/></a:ln>
                     </c:spPr>""")
 
-                sp = XLSX.parse_drawing_shape_props(wb, node)
-                @test sp isa XLSX.DrawingShapeProps
+                sp = XLSX.Charts.parse_drawing_shape_props(wb, node)
+                @test sp isa XLSX.Charts.DrawingShapeProps
                 @test sp.fill.kind == :solid
                 @test sp.fill.fgcolor.rgb == "4472C4"
                 @test sp.line.width == 1.5              # points, converted at parse
                 @test sp.line.dash == "dash"
                 @test sp.line.fill.fgcolor.rgb == "203864"
-                @test XLSX.has_fill(sp)
-                @test XLSX.has_line(sp)
+                @test XLSX.Charts.has_fill(sp)
+                @test XLSX.Charts.has_line(sp)
                 @test sp.effects === nothing
                 @test sp.bwmode === nothing
                 @test sp.raw !== nothing
@@ -756,78 +756,78 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
             @testset "noFill is not absence" begin
                 # Chart-area shape: transparent background, no border. Both are
                 # deliberate, and neither is the same as omitting the element.
-                node = _frag("""<c:spPr xmlns:c="$(XLSX.NS_C)" $_NSDECL>
+                node = _frag("""<c:spPr xmlns:c="$(XLSX.Charts.NS_C)" $_NSDECL>
                       <a:noFill/>
                       <a:ln><a:noFill/></a:ln>
                     </c:spPr>""")
 
-                sp = XLSX.parse_drawing_shape_props(wb, node)
+                sp = XLSX.Charts.parse_drawing_shape_props(wb, node)
                 @test sp.fill !== nothing               # present...
                 @test sp.fill.kind == :none             # ...and explicitly invisible
-                @test !XLSX.has_fill(sp)
+                @test !XLSX.Charts.has_fill(sp)
 
                 @test sp.line !== nothing
                 @test sp.line.fill.kind == :none
-                @test !XLSX.has_line(sp)
+                @test !XLSX.Charts.has_line(sp)
             end
 
             @testset "absence is inheritance" begin
-                node = _frag("""<c:spPr xmlns:c="$(XLSX.NS_C)" $_NSDECL/>""")
+                node = _frag("""<c:spPr xmlns:c="$(XLSX.Charts.NS_C)" $_NSDECL/>""")
 
-                sp = XLSX.parse_drawing_shape_props(wb, node)
+                sp = XLSX.Charts.parse_drawing_shape_props(wb, node)
                 @test sp !== nothing                    # the element exists
                 @test sp.fill === nothing               # but sets nothing
                 @test sp.line === nothing
-                @test !XLSX.has_fill(sp)
-                @test !XLSX.has_line(sp)
+                @test !XLSX.Charts.has_fill(sp)
+                @test !XLSX.Charts.has_line(sp)
             end
 
             @testset "parse from parent, and no spPr at all" begin
-                ser = _frag("""<c:ser xmlns:c="$(XLSX.NS_C)" $_NSDECL>
+                ser = _frag("""<c:ser xmlns:c="$(XLSX.Charts.NS_C)" $_NSDECL>
                       <c:idx val="0"/>
                       <c:spPr><a:solidFill><a:schemeClr val="accent1"/></a:solidFill></c:spPr>
                     </c:ser>""")
-                sp = XLSX.parse_drawing_shape_props(wb, ser)
+                sp = XLSX.Charts.parse_drawing_shape_props(wb, ser)
                 @test sp !== nothing
                 @test sp.fill.fgcolor.rgb == "156082"   # accent1, as pinned elsewhere
 
-                bare = _frag("""<c:ser xmlns:c="$(XLSX.NS_C)"><c:idx val="0"/></c:ser>""")
-                @test XLSX.parse_drawing_shape_props(wb, bare) === nothing
+                bare = _frag("""<c:ser xmlns:c="$(XLSX.Charts.NS_C)"><c:idx val="0"/></c:ser>""")
+                @test XLSX.Charts.parse_drawing_shape_props(wb, bare) === nothing
 
                 # chains without a guard
-                @test XLSX.parse_drawing_shape_props(wb, nothing) === nothing
+                @test XLSX.Charts.parse_drawing_shape_props(wb, nothing) === nothing
             end
 
             @testset "effects preserved, not modelled" begin
-                node = _frag("""<c:spPr xmlns:c="$(XLSX.NS_C)" $_NSDECL>
+                node = _frag("""<c:spPr xmlns:c="$(XLSX.Charts.NS_C)" $_NSDECL>
                       <a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>
                       <a:effectLst><a:outerShdw blurRad="50800" dist="38100"/></a:effectLst>
                     </c:spPr>""")
 
-                sp = XLSX.parse_drawing_shape_props(wb, node)
+                sp = XLSX.Charts.parse_drawing_shape_props(wb, node)
                 @test sp.effects !== nothing
                 @test XLSX.localname(sp.effects) == "effectLst"
             end
 
             @testset "pattern fill keeps DrawingML vocabulary" begin
-                node = _frag("""<c:spPr xmlns:c="$(XLSX.NS_C)" $_NSDECL>
+                node = _frag("""<c:spPr xmlns:c="$(XLSX.Charts.NS_C)" $_NSDECL>
                       <a:pattFill prst="ltUpDiag">
                         <a:fgClr><a:srgbClr val="000000"/></a:fgClr>
                         <a:bgClr><a:srgbClr val="FFFFFF"/></a:bgClr>
                       </a:pattFill>
                     </c:spPr>""")
 
-                sp = XLSX.parse_drawing_shape_props(wb, node)
+                sp = XLSX.Charts.parse_drawing_shape_props(wb, node)
                 @test sp.fill.kind == :pattern
                 @test sp.fill.preset == "ltUpDiag"      # not "lightUp"
-                @test XLSX.has_fill(sp)
+                @test XLSX.Charts.has_fill(sp)
             end
         end
 
         @testset "fixture: series spPr" begin
             XLSX.openxlsx(joinpath(data_directory, "chart_basic.xlsx")) do xf
                 wb = XLSX.get_workbook(xf)
-                c = first(XLSX.getCharts(xf["Data"]))
+                c = first(XLSX.Charts.getCharts(xf["Data"]))
 
                 root = XLSX.xml_root_element(XLSX.get_xml_data(xf, c.path))
                 chart = XLSX.first_element_with_tag(root, "chart")
@@ -838,11 +838,11 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 ser = XLSX.first_element_with_tag(barchart, "ser")
                 @test ser !== nothing
 
-                sp = XLSX.parse_drawing_shape_props(wb, ser)
+                sp = XLSX.Charts.parse_drawing_shape_props(wb, ser)
                 @test sp !== nothing
                 @test sp.raw !== nothing
 
-                @test XLSX.has_fill(sp)
+                @test XLSX.Charts.has_fill(sp)
                 @test sp.fill.kind == :solid
                 @test sp.fill.fgcolor.rgb == "156082"     # accent1
 
@@ -850,7 +850,7 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 # omitting a:ln. has_line must be false while sp.line is not nothing.
                 @test sp.line !== nothing
                 @test sp.line.fill.kind == :none
-                @test !XLSX.has_line(sp)
+                @test !XLSX.Charts.has_line(sp)
 
                 @test sp.effects !== nothing
                 @test XLSX.localname(sp.effects) == "effectLst"
@@ -863,53 +863,53 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
 
     @testset "SchemeColor" begin
         @testset "construction" begin
-            @test XLSX.SchemeColor(:accent1).token === :accent1
-            @test isempty(XLSX.SchemeColor(:accent1).transforms)
-            @test XLSX.SchemeColor(:accent1; lumMod=75).transforms == [:lumMod => 75.0]
-            @test XLSX.SchemeColor(:tx1; lumMod=65, lumOff=35).transforms ==
+            @test XLSX.Charts.SchemeColor(:accent1).token === :accent1
+            @test isempty(XLSX.Charts.SchemeColor(:accent1).transforms)
+            @test XLSX.Charts.SchemeColor(:accent1; lumMod=75).transforms == [:lumMod => 75.0]
+            @test XLSX.Charts.SchemeColor(:tx1; lumMod=65, lumOff=35).transforms ==
                 [:lumMod => 65.0, :lumOff => 35.0]
             # integers convert
-            @test XLSX.SchemeColor(:accent1; alpha=80).transforms == [:alpha => 80.0]
+            @test XLSX.Charts.SchemeColor(:accent1; alpha=80).transforms == [:alpha => 80.0]
             # vector form takes any order
-            @test XLSX.SchemeColor(:accent2, [:shade => 50.0, :alpha => 80.0]).transforms ==
+            @test XLSX.Charts.SchemeColor(:accent2, [:shade => 50.0, :alpha => 80.0]).transforms ==
                 [:shade => 50.0, :alpha => 80.0]
         end
 
         @testset "validation" begin
-            @test_throws XLSX.XLSXError XLSX.SchemeColor(:accent7)
-            @test_throws XLSX.XLSXError XLSX.SchemeColor(:acccent1)          # typo, not silently accepted
-            @test_throws XLSX.XLSXError XLSX.SchemeColor(:accent1, [:lumMud => 75.0])
-            @test_throws XLSX.XLSXError XLSX.SchemeColor(:theme1)            # spreadsheet vocabulary, not DrawingML
+            @test_throws XLSX.XLSXError XLSX.Charts.SchemeColor(:accent7)
+            @test_throws XLSX.XLSXError XLSX.Charts.SchemeColor(:acccent1)          # typo, not silently accepted
+            @test_throws XLSX.XLSXError XLSX.Charts.SchemeColor(:accent1, [:lumMud => 75.0])
+            @test_throws XLSX.XLSXError XLSX.Charts.SchemeColor(:theme1)            # spreadsheet vocabulary, not DrawingML
         end
 
         @testset "aliases" begin
             # preserved as written
-            @test XLSX.SchemeColor(:lt1).token === :lt1
-            @test XLSX.SchemeColor(:dk2).token === :dk2
+            @test XLSX.Charts.SchemeColor(:lt1).token === :lt1
+            @test XLSX.Charts.SchemeColor(:dk2).token === :dk2
             # but equal and equally hashed
-            @test XLSX.SchemeColor(:lt1) == XLSX.SchemeColor(:bg1)
-            @test XLSX.SchemeColor(:dk1) == XLSX.SchemeColor(:tx1)
-            @test XLSX.SchemeColor(:lt2) == XLSX.SchemeColor(:bg2)
-            @test XLSX.SchemeColor(:dk2) == XLSX.SchemeColor(:tx2)
-            @test hash(XLSX.SchemeColor(:lt1)) == hash(XLSX.SchemeColor(:bg1))
-            @test isequal(XLSX.SchemeColor(:lt1), XLSX.SchemeColor(:bg1))
+            @test XLSX.Charts.SchemeColor(:lt1) == XLSX.Charts.SchemeColor(:bg1)
+            @test XLSX.Charts.SchemeColor(:dk1) == XLSX.Charts.SchemeColor(:tx1)
+            @test XLSX.Charts.SchemeColor(:lt2) == XLSX.Charts.SchemeColor(:bg2)
+            @test XLSX.Charts.SchemeColor(:dk2) == XLSX.Charts.SchemeColor(:tx2)
+            @test hash(XLSX.Charts.SchemeColor(:lt1)) == hash(XLSX.Charts.SchemeColor(:bg1))
+            @test isequal(XLSX.Charts.SchemeColor(:lt1), XLSX.Charts.SchemeColor(:bg1))
             # so one Dict slot, not two
-            d = Dict(XLSX.SchemeColor(:lt1) => 1)
-            d[XLSX.SchemeColor(:bg1)] = 2
+            d = Dict(XLSX.Charts.SchemeColor(:lt1) => 1)
+            d[XLSX.Charts.SchemeColor(:bg1)] = 2
             @test length(d) == 1
             # aliases with matching transforms are still equal
-            @test XLSX.SchemeColor(:lt1; lumMod=50) == XLSX.SchemeColor(:bg1; lumMod=50)
+            @test XLSX.Charts.SchemeColor(:lt1; lumMod=50) == XLSX.Charts.SchemeColor(:bg1; lumMod=50)
             # different slots are not
-            @test XLSX.SchemeColor(:accent1) != XLSX.SchemeColor(:accent2)
+            @test XLSX.Charts.SchemeColor(:accent1) != XLSX.Charts.SchemeColor(:accent2)
         end
 
         @testset "transform order is significant" begin
-            a = XLSX.SchemeColor(:accent1; lumMod=75, lumOff=25)
-            b = XLSX.SchemeColor(:accent1, [:lumOff => 25.0, :lumMod => 75.0])
+            a = XLSX.Charts.SchemeColor(:accent1; lumMod=75, lumOff=25)
+            b = XLSX.Charts.SchemeColor(:accent1, [:lumOff => 25.0, :lumMod => 75.0])
             @test a.transforms != b.transforms
             @test a != b
-            @test XLSX.SchemeColor(:accent1; lumMod=75) != XLSX.SchemeColor(:accent1; lumMod=50)
-            @test XLSX.SchemeColor(:accent1) != XLSX.SchemeColor(:accent1; lumMod=75)
+            @test XLSX.Charts.SchemeColor(:accent1; lumMod=75) != XLSX.Charts.SchemeColor(:accent1; lumMod=50)
+            @test XLSX.Charts.SchemeColor(:accent1) != XLSX.Charts.SchemeColor(:accent1; lumMod=75)
         end
 
         xf = XLSX.openxlsx(joinpath(data_directory, "chart_appearance.xlsx"))
@@ -919,82 +919,82 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
             # resolve_color_base does the theme lookup only; the transforms are applied
             # separately, so composing the two is what a reader effectively does.
             resolved(wb, n) = first(XLSX.apply_drawingml_transforms(
-                XLSX.resolve_color_base(wb, n),
-                XLSX.parse_drawing_color(wb, n).transforms))
+                XLSX.Charts.resolve_color_base(wb, n),
+                XLSX.Charts.parse_drawing_color(wb, n).transforms))
 
             # accent1, untransformed
-            n = XLSX._scheme_color_node(XLSX.SchemeColor(:accent1))
+            n = XLSX.Charts._scheme_color_node(XLSX.Charts.SchemeColor(:accent1))
             @test XML.write(n) == """<a:schemeClr val="accent1"/>"""
-            dc = XLSX.parse_drawing_color(wb, n)
+            dc = XLSX.Charts.parse_drawing_color(wb, n)
             @test dc.kind === :scheme && dc.val == "accent1"
 
             # accent1 + lumMod 75% — 104862 against the Office theme, verified in stage 2
-            n = XLSX._scheme_color_node(XLSX.SchemeColor(:accent1; lumMod=75))
+            n = XLSX.Charts._scheme_color_node(XLSX.Charts.SchemeColor(:accent1; lumMod=75))
             @test occursin("""val="75000\"""", XML.write(n))
-            dc = XLSX.parse_drawing_color(wb, n)
+            dc = XLSX.Charts.parse_drawing_color(wb, n)
             @test length(dc.transforms) == 1
-            @test XLSX.resolve_color_base(wb, n) == "156082"
+            @test XLSX.Charts.resolve_color_base(wb, n) == "156082"
 
             # tx1 + lumMod 65 / lumOff 35 — 595959, and order is preserved through the XML
-            n = XLSX._scheme_color_node(XLSX.SchemeColor(:tx1; lumMod=65, lumOff=35))
+            n = XLSX.Charts._scheme_color_node(XLSX.Charts.SchemeColor(:tx1; lumMod=65, lumOff=35))
             @test XLSX.localname.(collect(XML.eachelement(n))) == ["lumMod", "lumOff"]
-            @test XLSX.resolve_color_base(wb, n) == "000000"
+            @test XLSX.Charts.resolve_color_base(wb, n) == "000000"
 
             # what we build parses back to what we built
-            for sc in (XLSX.SchemeColor(:accent1), XLSX.SchemeColor(:accent1; lumMod=75),
-                XLSX.SchemeColor(:tx1; lumMod=65, lumOff=35),
-                XLSX.SchemeColor(:accent2, [:shade => 50.0, :alpha => 80.0]))
-                dc = XLSX.parse_drawing_color(wb, XLSX._scheme_color_node(sc))
+            for sc in (XLSX.Charts.SchemeColor(:accent1), XLSX.Charts.SchemeColor(:accent1; lumMod=75),
+                XLSX.Charts.SchemeColor(:tx1; lumMod=65, lumOff=35),
+                XLSX.Charts.SchemeColor(:accent2, [:shade => 50.0, :alpha => 80.0]))
+                dc = XLSX.Charts.parse_drawing_color(wb, XLSX.Charts._scheme_color_node(sc))
                 @test dc.val == String(sc.token)
                 @test length(dc.transforms) == length(sc.transforms)
             end
 
-            @test XLSX.resolve_color_base(wb, XLSX._scheme_color_node(XLSX.SchemeColor(:accent1))) == "156082"
-            @test resolved(wb, XLSX._scheme_color_node(XLSX.SchemeColor(:accent1; lumMod=75))) == "104862"
-            @test resolved(wb, XLSX._scheme_color_node(XLSX.SchemeColor(:tx1; lumMod=65, lumOff=35))) == "595959"
+            @test XLSX.Charts.resolve_color_base(wb, XLSX.Charts._scheme_color_node(XLSX.Charts.SchemeColor(:accent1))) == "156082"
+            @test resolved(wb, XLSX.Charts._scheme_color_node(XLSX.Charts.SchemeColor(:accent1; lumMod=75))) == "104862"
+            @test resolved(wb, XLSX.Charts._scheme_color_node(XLSX.Charts.SchemeColor(:tx1; lumMod=65, lumOff=35))) == "595959"
 
             # solidFill wrapper
-            f = XLSX.parse_drawing_fill(wb, XLSX._solid_fill_node(XLSX._scheme_color_node(XLSX.SchemeColor(:accent1))))
+            f = XLSX.Charts.parse_drawing_fill(wb, XLSX.Charts._solid_fill_node(XLSX.Charts._scheme_color_node(XLSX.Charts.SchemeColor(:accent1))))
             @test f.kind === :solid && f.fgcolor.val == "accent1"
 
             # alpha rides alongside the hex rather than altering it
-            n = XLSX._scheme_color_node(XLSX.SchemeColor(:accent1; alpha=50))
+            n = XLSX.Charts._scheme_color_node(XLSX.Charts.SchemeColor(:accent1; alpha=50))
             hex, alpha = XLSX.apply_drawingml_transforms(
-                XLSX.resolve_color_base(wb, n), XLSX.parse_drawing_color(wb, n).transforms)
+                XLSX.Charts.resolve_color_base(wb, n), XLSX.Charts.parse_drawing_color(wb, n).transforms)
             @test hex == "156082"
             @test alpha ≈ 0.5
         end
 
         @testset "srgb color nodes" begin
             # 8-digit hex passes through, split into six digits plus alpha
-            @test XML.write(XLSX._srgb_color_node("FFFF0000")) == """<a:srgbClr val="FF0000"/>"""
-            @test XML.write(XLSX._srgb_color_node("ffff0000")) == """<a:srgbClr val="FF0000"/>"""   # case
+            @test XML.write(XLSX.Charts._srgb_color_node("FFFF0000")) == """<a:srgbClr val="FF0000"/>"""
+            @test XML.write(XLSX.Charts._srgb_color_node("ffff0000")) == """<a:srgbClr val="FF0000"/>"""   # case
 
             # Colors.jl names
-            @test XML.write(XLSX._srgb_color_node("red")) == """<a:srgbClr val="FF0000"/>"""
-            @test XML.write(XLSX._srgb_color_node(:red)) == """<a:srgbClr val="FF0000"/>"""
-            @test XML.write(XLSX._srgb_color_node("grey")) == XML.write(XLSX._srgb_color_node("gray"))
+            @test XML.write(XLSX.Charts._srgb_color_node("red")) == """<a:srgbClr val="FF0000"/>"""
+            @test XML.write(XLSX.Charts._srgb_color_node(:red)) == """<a:srgbClr val="FF0000"/>"""
+            @test XML.write(XLSX.Charts._srgb_color_node("grey")) == XML.write(XLSX.Charts._srgb_color_node("gray"))
 
             # opaque emits no alpha child
-            @test isnothing(XLSX._srgb_color_node("FF0000FF").children) ||
-                isempty(XLSX._srgb_color_node("FF0000FF").children)
+            @test isnothing(XLSX.Charts._srgb_color_node("FF0000FF").children) ||
+                isempty(XLSX.Charts._srgb_color_node("FF0000FF").children)
 
             # partial alpha becomes a transform
-            n = XLSX._srgb_color_node("800000FF")
+            n = XLSX.Charts._srgb_color_node("800000FF")
             @test XLSX.localname.(collect(XML.eachelement(n))) == ["alpha"]
             @test XLSX.get_attr(first(XML.eachelement(n)), "val") == "50196"   # 128/255
 
             # colorants, opaque and transparent
-            @test XML.write(XLSX._srgb_color_node(Colors.RGB(1, 0, 0))) == """<a:srgbClr val="FF0000"/>"""
-            n = XLSX._srgb_color_node(Colors.ARGB(1, 0, 0, 0.5))
+            @test XML.write(XLSX.Charts._srgb_color_node(Colors.RGB(1, 0, 0))) == """<a:srgbClr val="FF0000"/>"""
+            n = XLSX.Charts._srgb_color_node(Colors.ARGB(1, 0, 0, 0.5))
             @test XLSX.get_attr(n, "val") == "FF0000"
             @test !isempty(XML.children(n))
 
             # invalid names throw get_color's message
-            @test_throws XLSX.XLSXError XLSX._srgb_color_node("notacolor")
+            @test_throws XLSX.XLSXError XLSX.Charts._srgb_color_node("notacolor")
 
             # round trip through the parser
-            dc = XLSX.parse_drawing_color(wb, XLSX._srgb_color_node("red"))
+            dc = XLSX.Charts.parse_drawing_color(wb, XLSX.Charts._srgb_color_node("red"))
             @test dc.kind === :srgb && dc.rgb == "FF0000"
         end
 
@@ -1002,121 +1002,121 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
             pfx = Dict(XLSX.NS_A => "a")
             ln() = XML.Element("a:ln")
 
-            @test XLSX.get_attr(XLSX._ln_with_width(ln(), 2), "w") == "25400"
-            @test_throws XLSX.XLSXError XLSX._ln_with_width(ln(), 2000)
-            @test_throws XLSX.XLSXError XLSX._ln_with_width(ln(), -1)
-            @test XLSX.get_attr(XLSX._ln_with_width(XLSX._ln_with_width(ln(), 2), :inherit), "w") == ""
+            @test XLSX.get_attr(XLSX.Charts._ln_with_width(ln(), 2), "w") == "25400"
+            @test_throws XLSX.XLSXError XLSX.Charts._ln_with_width(ln(), 2000)
+            @test_throws XLSX.XLSXError XLSX.Charts._ln_with_width(ln(), -1)
+            @test XLSX.get_attr(XLSX.Charts._ln_with_width(XLSX.Charts._ln_with_width(ln(), 2), :inherit), "w") == ""
 
             # Excel names and DrawingML names both work, and resolve to the same thing
-            @test XML.write(XLSX._ln_with_dash(ln(), :roundDot, pfx)) ==
-                XML.write(XLSX._ln_with_dash(ln(), :sysDot, pfx))
-            @test_throws XLSX.XLSXError XLSX._ln_with_dash(ln(), :dotted, pfx)
+            @test XML.write(XLSX.Charts._ln_with_dash(ln(), :roundDot, pfx)) ==
+                XML.write(XLSX.Charts._ln_with_dash(ln(), :sysDot, pfx))
+            @test_throws XLSX.XLSXError XLSX.Charts._ln_with_dash(ln(), :dotted, pfx)
 
-            @test XLSX.get_attr(XLSX._ln_with_cap(ln(), :round), "cap") == "rnd"
-            @test XLSX.get_attr(XLSX._ln_with_cap(ln(), :rnd), "cap") == "rnd"
-            @test XLSX.get_attr(XLSX._ln_with_compound(ln(), :double), "cmpd") == "dbl"
+            @test XLSX.get_attr(XLSX.Charts._ln_with_cap(ln(), :round), "cap") == "rnd"
+            @test XLSX.get_attr(XLSX.Charts._ln_with_cap(ln(), :rnd), "cap") == "rnd"
+            @test XLSX.get_attr(XLSX.Charts._ln_with_compound(ln(), :double), "cmpd") == "dbl"
 
             # join, and the limit that depends on it
-            l = XLSX._ln_with_join(ln(), :miter, pfx)
+            l = XLSX.Charts._ln_with_join(ln(), :miter, pfx)
             @test XLSX.localname.(collect(XML.eachelement(l))) == ["miter"]
-            @test XLSX.get_attr(first(XML.eachelement(XLSX._ln_with_miter_limit(l, 8))), "lim") == "800000"
-            @test_throws XLSX.XLSXError XLSX._ln_with_miter_limit(ln(), 8)
-            @test_throws XLSX.XLSXError XLSX._ln_with_miter_limit(XLSX._ln_with_join(ln(), :bevel, pfx), 8)
+            @test XLSX.get_attr(first(XML.eachelement(XLSX.Charts._ln_with_miter_limit(l, 8))), "lim") == "800000"
+            @test_throws XLSX.XLSXError XLSX.Charts._ln_with_miter_limit(ln(), 8)
+            @test_throws XLSX.XLSXError XLSX.Charts._ln_with_miter_limit(XLSX.Charts._ln_with_join(ln(), :bevel, pfx), 8)
 
             # schema order: fill, dash, join
-            full = XLSX._ln_with_join(XLSX._ln_with_dash(XLSX._ln_with_color(ln(), "red", pfx), :dash, pfx), :round, pfx)
+            full = XLSX.Charts._ln_with_join(XLSX.Charts._ln_with_dash(XLSX.Charts._ln_with_color(ln(), "red", pfx), :dash, pfx), :round, pfx)
             @test XLSX.localname.(collect(XML.eachelement(full))) == ["solidFill", "prstDash", "round"]
 
             # each choice group replaces rather than accumulates
             @test XLSX.localname.(collect(XML.eachelement(
-                XLSX._ln_with_color(XLSX._ln_with_color(ln(), "red", pfx), :none, pfx)))) == ["noFill"]
+                XLSX.Charts._ln_with_color(XLSX.Charts._ln_with_color(ln(), "red", pfx), :none, pfx)))) == ["noFill"]
         end
 
         @testset "text body round trip" begin
-            pfx = Dict(XLSX.NS_A => "a", XLSX.NS_C => "c")
+            pfx = Dict(XLSX.NS_A => "a", XLSX.Charts.NS_C => "c")
 
-            rt(t) = XLSX.parse_drawing_text(wb, XLSX._text_from(t, "txPr", pfx))
+            rt(t) = XLSX.Charts.parse_drawing_text(wb, XLSX.Charts._text_from(t, "txPr", pfx))
 
             # plain text
-            t = XLSX.DrawingText("Revenue by Region")
+            t = XLSX.Charts.DrawingText("Revenue by Region")
             g = rt(t)
             @test length(g.paragraphs) == 1
-            @test XLSX.text_content(g) == "Revenue by Region"
+            @test XLSX.Charts.text_content(g) == "Revenue by Region"
 
             # run properties survive, in both directions
-            t = XLSX.DrawingText(XLSX.DrawingParagraph(
-                XLSX.DrawingRun("Revenue", props=XLSX.DrawingRunProps(size=14.0, bold=true,
+            t = XLSX.Charts.DrawingText(XLSX.Charts.DrawingParagraph(
+                XLSX.Charts.DrawingRun("Revenue", props=XLSX.Charts.DrawingRunProps(size=14.0, bold=true,
                     latin="Calibri"))))
             g = rt(t)
-            rp = XLSX.first_run_props(g)
+            rp = XLSX.Charts.first_run_props(g)
             @test rp.size ≈ 14.0 && rp.bold === true && rp.latin == "Calibri"
             @test isnothing(rp.italic)          # absent stays absent
 
             # paragraph defaults
-            t = XLSX.DrawingText(XLSX.DrawingParagraph("x",
-                props=XLSX.DrawingParaProps(align="ctr",
-                    defprops=XLSX.DrawingRunProps(size=10.5))))
+            t = XLSX.Charts.DrawingText(XLSX.Charts.DrawingParagraph("x",
+                props=XLSX.Charts.DrawingParaProps(align="ctr",
+                    defprops=XLSX.Charts.DrawingRunProps(size=10.5))))
             g = rt(t)
             @test g.paragraphs[1].props.align == "ctr"
             @test g.paragraphs[1].props.defprops.size ≈ 10.5
 
             # a solid fill on a run, scheme and srgb
-            for color in (XLSX.DrawingColor(:srgb, "FF0000", Pair{Symbol,Int}[], "FF0000", 1.0),
-                XLSX.DrawingColor(:scheme, "accent1", [:lumMod => 75000], "104862", 1.0))
-                t = XLSX.DrawingText(XLSX.DrawingParagraph(XLSX.DrawingRun("x",
-                    props=XLSX.DrawingRunProps(fill=XLSX.DrawingFill(:solid; fgcolor=color)))))
-                f = XLSX.first_run_props(rt(t)).fill
+            for color in (XLSX.Charts.DrawingColor(:srgb, "FF0000", Pair{Symbol,Int}[], "FF0000", 1.0),
+                XLSX.Charts.DrawingColor(:scheme, "accent1", [:lumMod => 75000], "104862", 1.0))
+                t = XLSX.Charts.DrawingText(XLSX.Charts.DrawingParagraph(XLSX.Charts.DrawingRun("x",
+                    props=XLSX.Charts.DrawingRunProps(fill=XLSX.Charts.DrawingFill(:solid; fgcolor=color)))))
+                f = XLSX.Charts.first_run_props(rt(t)).fill
                 @test f.kind === :solid
                 @test f.fgcolor.val == color.val
                 @test f.fgcolor.transforms == color.transforms
             end
 
             # a text outline
-            t = XLSX.DrawingText(XLSX.DrawingParagraph(XLSX.DrawingRun("x",
-                props=XLSX.DrawingRunProps(line=XLSX.DrawingLine(width=1.5, dash="sysDot")))))
-            l = XLSX.first_run_props(rt(t)).line
+            t = XLSX.Charts.DrawingText(XLSX.Charts.DrawingParagraph(XLSX.Charts.DrawingRun("x",
+                props=XLSX.Charts.DrawingRunProps(line=XLSX.Charts.DrawingLine(width=1.5, dash="sysDot")))))
+            l = XLSX.Charts.first_run_props(rt(t)).line
             @test l.width ≈ 1.5 && l.dash == "sysDot"
 
             # body properties, including the three-way autofit
             for (af, extra) in ((:none, ()), (:shape, ()),
                 (:normal, (fontscale=0.9, linespacereduction=0.1)))
-                t = XLSX.DrawingText("x"; body=XLSX.DrawingBodyProps(; rotation=-45.0, anchor="ctr",
+                t = XLSX.Charts.DrawingText("x"; body=XLSX.Charts.DrawingBodyProps(; rotation=-45.0, anchor="ctr",
                     autofit=af, extra...))
                 b = rt(t).body
                 @test b.rotation ≈ -45.0 && b.anchor == "ctr" && b.autofit === af
             end
-            b = rt(XLSX.DrawingText("x"; body=XLSX.DrawingBodyProps(autofit=:normal, fontscale=0.9))).body
+            b = rt(XLSX.Charts.DrawingText("x"; body=XLSX.Charts.DrawingBodyProps(autofit=:normal, fontscale=0.9))).body
             @test b.fontscale ≈ 0.9
 
             # several runs keep document order
-            t = XLSX.DrawingText(XLSX.DrawingParagraph("one", XLSX.DrawingRun("\n", kind=:br), "two"))
+            t = XLSX.Charts.DrawingText(XLSX.Charts.DrawingParagraph("one", XLSX.Charts.DrawingRun("\n", kind=:br), "two"))
             g = rt(t)
             @test [r.kind for r in g.paragraphs[1].runs] == [:run, :br, :run]
-            @test XLSX.text_content(g) == "one\ntwo"
+            @test XLSX.Charts.text_content(g) == "one\ntwo"
 
             # schema order inside a:p and a:defRPr
-            n = XLSX._text_from(XLSX.DrawingText(XLSX.DrawingParagraph("x",
-                props=XLSX.DrawingParaProps(defprops=XLSX.DrawingRunProps(size=10.0)))), "txPr", pfx)
+            n = XLSX.Charts._text_from(XLSX.Charts.DrawingText(XLSX.Charts.DrawingParagraph("x",
+                props=XLSX.Charts.DrawingParaProps(defprops=XLSX.Charts.DrawingRunProps(size=10.0)))), "txPr", pfx)
             p = XLSX.first_element_with_tag(n, "p")
             @test XLSX.localname.(collect(XML.eachelement(p))) == ["pPr", "r"]
 
             # what cannot be written says so
-            @test_throws XLSX.XLSXError XLSX._fill_node_from(XLSX.DrawingFill(:gradient), pfx)
-            @test_throws XLSX.XLSXError XLSX._color_node_from(
-                XLSX.DrawingColor(:scrgb, "", Pair{Symbol,Int}[], "000000", 1.0), pfx)
+            @test_throws XLSX.XLSXError XLSX.Charts._fill_node_from(XLSX.Charts.DrawingFill(:gradient), pfx)
+            @test_throws XLSX.XLSXError XLSX.Charts._color_node_from(
+                XLSX.Charts.DrawingColor(:scrgb, "", Pair{Symbol,Int}[], "000000", 1.0), pfx)
         end
 
     end
 
     @testset "text_content reads a raw body as it reads a parsed one" begin
-        xml = """<c:tx xmlns:c="$(XLSX.NS_C)" xmlns:a="$(XLSX.NS_A)"><c:rich><a:bodyPr/><a:lstStyle/>""" *
+        xml = """<c:tx xmlns:c="$(XLSX.Charts.NS_C)" xmlns:a="$(XLSX.NS_A)"><c:rich><a:bodyPr/><a:lstStyle/>""" *
             """<a:p><a:r><a:t>One</a:t></a:r><a:br/><a:r><a:t>Two</a:t></a:r></a:p>""" *
             """<a:p><a:r><a:t>Three</a:t></a:r><a:fld id="{0}" type="x"><a:t>!</a:t></a:fld></a:p>""" *
             """</c:rich></c:tx>"""
         tx   = XLSX.xml_root_element(parse(xml, XLSX.XML.Node))
         rich = XLSX.first_element_with_tag(tx, "rich")
         wb   = XLSX.get_workbook(XLSX.newxlsx())
-        @test XLSX.text_content(rich) == "One\nTwo\nThree!"
-        @test XLSX.text_content(rich) == XLSX.text_content(XLSX.parse_drawing_text(wb, tx; tag = "rich"))
+        @test XLSX.Charts.text_content(rich) == "One\nTwo\nThree!"
+        @test XLSX.Charts.text_content(rich) == XLSX.Charts.text_content(XLSX.Charts.parse_drawing_text(wb, tx; tag = "rich"))
     end
 end

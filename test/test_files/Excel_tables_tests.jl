@@ -3765,11 +3765,11 @@ end
         @test_throws XLSX.XLSXError XLSX.gettablerange(t, 4)
 
         # A chart from table columns.
-        c = XLSX.addChart(ws, :column; anchor = "E2:L18")
-        XLSX.addSeries(c, XLSX.gettablerange(t, "Amount");
+        c = XLSX.Charts.addChart(ws, :column; anchor = "E2:L18")
+        XLSX.Charts.addSeries(c, XLSX.gettablerange(t, "Amount");
                        categories = XLSX.gettablerange(t, "Item"),
                        name_ref   = XLSX.gettablerange(t, "Amount"; header = true))
-        s = only(XLSX.getChartSeries(c))
+        s = only(XLSX.Charts.getChartSeries(c))
         @test s.name == "Amount"
         @test s.values.data == [30, 20, 50, 35, 60]
     end

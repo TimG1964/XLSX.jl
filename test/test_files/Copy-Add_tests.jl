@@ -384,8 +384,8 @@
         XLSX.addsheet!(f, "Keep")
         XLSX.deletesheet!(f, "Data")
 
-        @test isempty(XLSX.getCharts(f))
-        @test isempty(XLSX.chart_parts(f))
+        @test isempty(XLSX.Charts.getCharts(f))
+        @test isempty(XLSX.Charts.chart_parts(f))
         @test !haskey(f.data, "xl/charts/chart1.xml")
         @test !haskey(f.data, "xl/drawings/drawing1.xml")
     end
@@ -396,26 +396,26 @@
 
         XLSX.deletesheet!(f, "Data")
         @test !XLSX.hassheet(f, "Data")
-        @test isempty(XLSX.getCharts(f))
+        @test isempty(XLSX.Charts.getCharts(f))
 
         # The chartEx cluster and the drawing must all go.
         for p in ("xl/charts/chartEx1.xml", "xl/charts/style1.xml",
                 "xl/charts/colors1.xml", "xl/drawings/drawing1.xml")
             @test !haskey(f.data, p)
         end
-        @test isempty(XLSX.chartex_parts(f))
+        @test isempty(XLSX.Charts.chartex_parts(f))
 
         # And the file must still be writable and readable.
         g = XLSX.writexlsx("mytest.xlsx", f, overwrite=true)          # your save_outfile helper
         h = XLSX.readxlsx(g)
-        @test isempty(XLSX.getCharts(h))
+        @test isempty(XLSX.Charts.getCharts(h))
     end
 
     @testset "copysheet! clones and repoints c: chart parts" begin
         f = XLSX.opentemplate(joinpath(data_directory, "chart_basic.xlsx"))
         XLSX.copysheet!(f["Data"], "Copy")
 
-        charts = XLSX.getCharts(f)
+        charts = XLSX.Charts.getCharts(f)
         @test length(charts) == 2
         @test allunique(c.path for c in charts)
         @test issetequal((c.sheet for c in charts), ["Data", "Copy"])
@@ -425,50 +425,50 @@
 
         # The copy plots the copied sheet. getChartRanges returns one named
         # tuple per series for a `c:` chart, so the ranges are in its fields.
-        cp_ranges = XLSX.getChartRanges(cp)
+        cp_ranges = XLSX.Charts.getChartRanges(cp)
         @test [string(r.categories) for r in cp_ranges] == ["Copy!A2:A5", "Copy!A2:A5"]
         @test [string(r.values)     for r in cp_ranges] == ["Copy!B2:B5", "Copy!C2:C5"]
 
         # Series name refs are repointed too, not just categories and values.
-        @test all(s -> startswith(s.name_ref.ref, "Copy!"), XLSX.getChartSeries(cp))
+        @test all(s -> startswith(s.name_ref.ref, "Copy!"), XLSX.Charts.getChartSeries(cp))
 
         # The original is untouched — catches copynode aliasing the two trees.
-        orig_ranges = XLSX.getChartRanges(orig)
+        orig_ranges = XLSX.Charts.getChartRanges(orig)
         @test [string(r.categories) for r in orig_ranges] == ["Data!A2:A5", "Data!A2:A5"]
         @test [string(r.values)     for r in orig_ranges] == ["Data!B2:B5", "Data!C2:C5"]
-        @test all(s -> startswith(s.name_ref.ref, "Data!"), XLSX.getChartSeries(orig))
+        @test all(s -> startswith(s.name_ref.ref, "Data!"), XLSX.Charts.getChartSeries(orig))
 
         # The cache is deliberately left alone, so the copy still reads.
-        @test XLSX.getChartData(cp) isa XLSX.DataTable
+        @test XLSX.Charts.getChartData(cp) isa XLSX.DataTable
 
         # And it survives a round trip.
         g = XLSX.writexlsx("mytest.xlsx", f; overwrite=true)
         h = XLSX.readxlsx(g)
-        cp2 = only(filter(c -> c.sheet == "Copy", XLSX.getCharts(h)))
-        @test [string(r.values) for r in XLSX.getChartRanges(cp2)] ==
+        cp2 = only(filter(c -> c.sheet == "Copy", XLSX.Charts.getCharts(h)))
+        @test [string(r.values) for r in XLSX.Charts.getChartRanges(cp2)] ==
               ["Copy!B2:B5", "Copy!C2:C5"]
     end
     @testset "copysheet! with a chartEx chart" begin
         f = XLSX.opentemplate(joinpath(data_directory, "chart_ex.xlsx"))
         XLSX.copysheet!(f["Data"], "Copy")
 
-        charts = XLSX.getCharts(f)
+        charts = XLSX.Charts.getCharts(f)
         @test length(charts) == 2
-        @test all(c -> c isa XLSX.ChartEx, charts)
+        @test all(c -> c isa XLSX.Charts.ChartEx, charts)
         @test issetequal((c.sheet for c in charts), ["Data", "Copy"])
         @test allunique(c.path for c in charts)
-        @test all(c -> XLSX.chartType(c) === :waterfall, charts)
+        @test all(c -> XLSX.Charts.chartType(c) === :waterfall, charts)
 
         cp = only(filter(c -> c.sheet == "Copy", charts))
 
         # The copy gets its own hidden defined names, pointing at the copy.
-        @test XLSX._cx_refs(cp) == ["_xlchart.v2.0", "_xlchart.v2.1"]
-        @test all(r -> startswith(string(r), "Copy!"), XLSX.getChartRanges(cp))
+        @test XLSX.Charts._cx_refs(cp) == ["_xlchart.v2.0", "_xlchart.v2.1"]
+        @test all(r -> startswith(string(r), "Copy!"), XLSX.Charts.getChartRanges(cp))
 
         # The original's names and ranges are untouched.
         orig = only(filter(c -> c.sheet == "Data", charts))
-        @test XLSX._cx_refs(orig) == ["_xlchart.v1.0", "_xlchart.v1.1"]
-        @test all(r -> startswith(string(r), "Data!"), XLSX.getChartRanges(orig))
+        @test XLSX.Charts._cx_refs(orig) == ["_xlchart.v1.0", "_xlchart.v1.1"]
+        @test all(r -> startswith(string(r), "Data!"), XLSX.Charts.getChartRanges(orig))
 
         # Two names added, all still hidden and none user-visible.
         all_names = XLSX.getAllDefinedNames(f; include_system=true)
@@ -478,8 +478,8 @@
         
         g = XLSX.writexlsx("mytest.xlsx", f; overwrite=true)
         h = XLSX.readxlsx(g)
-        @test length(XLSX.getCharts(h)) == 2
-        @test allunique(c.path for c in XLSX.getCharts(h))
+        @test length(XLSX.Charts.getCharts(h)) == 2
+        @test allunique(c.path for c in XLSX.Charts.getCharts(h))
     end
 
     @testset "copysheet! keeps a shared chartEx name shared" begin
@@ -489,12 +489,12 @@
         SAVE_FILES && save_outfile("mytest.xlsx")
 
         f = XLSX.readxlsx("mytest.xlsx")
-        cxs = filter(x -> x isa XLSX.ChartEx, XLSX.getCharts(f))
+        cxs = filter(x -> x isa XLSX.Charts.ChartEx, XLSX.Charts.getCharts(f))
         orig = only(filter(x -> x.sheet == "pareto",  cxs))
         copy = only(filter(x -> x.sheet == "pareto2", cxs))
 
-        ob = XLSX.getChartDataBlocks(orig)
-        cb = XLSX.getChartDataBlocks(copy)
+        ob = XLSX.Charts.getChartDataBlocks(orig)
+        cb = XLSX.Charts.getChartDataBlocks(copy)
 
         # the original is untouched: its two blocks still share one name
         @test ob[1].dimensions[1].formula == ob[2].dimensions[1].formula == "_xlchart.v1.18"
@@ -508,12 +508,12 @@
         for d in vcat(cb[1].dimensions, cb[2].dimensions)
             @test d.range.sheet == "pareto2"
         end
-        @test XLSX.getSeriesNameRange(copy, 1).sheet == "pareto2"
-        @test XLSX.getSeriesNameRange(copy, 3).sheet == "pareto2"
+        @test XLSX.Charts.getSeriesNameRange(copy, 1).sheet == "pareto2"
+        @test XLSX.Charts.getSeriesNameRange(copy, 3).sheet == "pareto2"
 
         # data: cat (shared), val, val; series names: two. Five names, not six.
-        @test length(unique(XLSX._cx_refs(copy))) == 3                      # data dimensions
-        @test length(XLSX._cx_refs(copy)) == 4                              # cat appears twice
+        @test length(unique(XLSX.Charts._cx_refs(copy))) == 3                      # data dimensions
+        @test length(XLSX.Charts._cx_refs(copy)) == 4                              # cat appears twice
         isfile("mytest.xlsx") && rm("mytest.xlsx")
     end
     
@@ -521,11 +521,11 @@
         f = XLSX.opentemplate(joinpath(data_directory, "chart_mixed.xlsx"))
         XLSX.copysheet!(f["Data"], "Copy")
 
-        charts = XLSX.getCharts(f)
+        charts = XLSX.Charts.getCharts(f)
         @test length(charts) == 4
         @test allunique(c.path for c in charts)
         @test count(c -> c.sheet == "Copy", charts) == 2
-        @test issetequal((XLSX.chartType(c) for c in charts if c.sheet == "Copy"),
+        @test issetequal((XLSX.Charts.chartType(c) for c in charts if c.sheet == "Copy"),
                         [:waterfall, :barChart])
 
         # Stems are handled per family: chart1 -> chart2, chartEx1 -> chartEx2.
@@ -536,16 +536,16 @@
         @test issetequal((c.from for c in charts), ["F1", "F17"])
 
         # The c: chart is repointed at the copy; the cx: one is not yet.
-        bar = only(filter(c -> c.sheet == "Copy" && c isa XLSX.Chart, charts))
-        @test all(r -> startswith(string(r.values), "Copy!"), XLSX.getChartRanges(bar))
+        bar = only(filter(c -> c.sheet == "Copy" && c isa XLSX.Charts.Chart, charts))
+        @test all(r -> startswith(string(r.values), "Copy!"), XLSX.Charts.getChartRanges(bar))
 
-        wf = only(filter(c -> c.sheet == "Copy" && c isa XLSX.ChartEx, charts))
-        @test all(r -> startswith(string(r), "Copy!"), XLSX.getChartRanges(wf))
+        wf = only(filter(c -> c.sheet == "Copy" && c isa XLSX.Charts.ChartEx, charts))
+        @test all(r -> startswith(string(r), "Copy!"), XLSX.Charts.getChartRanges(wf))
 
         g = XLSX.writexlsx("mytest.xlsx", f; overwrite=true)
         h = XLSX.readxlsx(g)
-        @test length(XLSX.getCharts(h)) == 4
-        @test allunique(c.path for c in XLSX.getCharts(h))
+        @test length(XLSX.Charts.getCharts(h)) == 4
+        @test allunique(c.path for c in XLSX.Charts.getCharts(h))
     end
 
     isfile("mytest.xlsx") && rm("mytest.xlsx")
@@ -555,8 +555,8 @@
         cp(joinpath(data_directory, "chart_basic.xlsx"), path; force = true)
         xf = XLSX.openxlsx(path; mode = "rw")
         XLSX.renamesheet!(xf["Data"], "Sales")
-        c = only(XLSX.getCharts(xf))
-        @test all(r -> startswith(string(r.values), "Sales!"), XLSX.getChartRanges(c))
+        c = only(XLSX.Charts.getCharts(xf))
+        @test all(r -> startswith(string(r.values), "Sales!"), XLSX.Charts.getChartRanges(c))
         SAVE_FILES && save_outfile(xf)
         isfile(path) && rm(path)
     end

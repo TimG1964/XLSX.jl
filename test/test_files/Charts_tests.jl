@@ -14,23 +14,23 @@
     @testset "basic chart" begin  # chart_basic.xlsx
         f = XLSX.readxlsx(joinpath(data_directory, "chart_basic.xlsx"))
 
-        c = XLSX.getChart(f["Data"], "chart1")
+        c = XLSX.Charts.getChart(f["Data"], "chart1")
         @test occursin("chart1", repr(c))
         @test occursin("series", repr(MIME"text/plain"(), c))
-        @test occursin("ChartSeries", repr(XLSX.getChartSeries(c)[1]))
-        @test occursin("pts", repr(MIME"text/plain"(), XLSX.getChartSeries(c)[1].values))
-        @test occursin("pts", sprint(show, XLSX.getChartSeries(c)[1].values))
-        @test occursin("categories", repr(MIME"text/plain"(), XLSX.getChartSeries(c)[1]))
+        @test occursin("ChartSeries", repr(XLSX.Charts.getChartSeries(c)[1]))
+        @test occursin("pts", repr(MIME"text/plain"(), XLSX.Charts.getChartSeries(c)[1].values))
+        @test occursin("pts", sprint(show, XLSX.Charts.getChartSeries(c)[1].values))
+        @test occursin("categories", repr(MIME"text/plain"(), XLSX.Charts.getChartSeries(c)[1]))
 
-        charts = XLSX.getCharts(f)
+        charts = XLSX.Charts.getCharts(f)
         @test length(charts) == 1
 
         c = charts[1]
         @test c.name == "chart1"
         @test c.path == "xl/charts/chart1.xml"
         @test c.sheet == "Data"
-        @test XLSX.getChartTitle(c) == "Revenue by Region"
-        @test XLSX.getChartTypes(c) == [:barChart]
+        @test XLSX.Charts.getChartTitle(c) == "Revenue by Region"
+        @test XLSX.Charts.getChartTypes(c) == [:barChart]
         @test !isnothing(c.rId)
 
         # Anchored to cells, so both markers parse. The exact cells depend on
@@ -40,14 +40,14 @@
         @test XLSX.CellRef(c.from) isa XLSX.CellRef
         @test XLSX.CellRef(c.to) isa XLSX.CellRef
 
-        @test length(XLSX.getChartSeries(c)) == 2
-        @test [s.name for s in XLSX.getChartSeries(c)] == ["2024", "2025"]
-        @test [s.order for s in XLSX.getChartSeries(c)] == [0, 1]
-        @test [s.idx for s in XLSX.getChartSeries(c)] == [0, 1]
-        @test all(s -> s.charttype == :barChart, XLSX.getChartSeries(c))
-        @test all(s -> isnothing(s.bubble_sizes), XLSX.getChartSeries(c))
+        @test length(XLSX.Charts.getChartSeries(c)) == 2
+        @test [s.name for s in XLSX.Charts.getChartSeries(c)] == ["2024", "2025"]
+        @test [s.order for s in XLSX.Charts.getChartSeries(c)] == [0, 1]
+        @test [s.idx for s in XLSX.Charts.getChartSeries(c)] == [0, 1]
+        @test all(s -> s.charttype == :barChart, XLSX.Charts.getChartSeries(c))
+        @test all(s -> isnothing(s.bubble_sizes), XLSX.Charts.getChartSeries(c))
 
-        s1, s2 = XLSX.getChartSeries(c)
+        s1, s2 = XLSX.Charts.getChartSeries(c)
         @test s1.categories.kind == :str
         @test s1.categories.ref == "Data!\$A\$2:\$A\$5"
         @test s1.categories.data == ["North", "South", "East", "West"]
@@ -63,7 +63,7 @@
         @test s2.values.data == [12.0, 18.0, 25.0, 9.0]
 
         # Both series share one category reference, so one `categories` column.
-        dt = XLSX.getChartData(c)
+        dt = XLSX.Charts.getChartData(c)
         @test dt.column_labels == [:categories, Symbol("2024"), Symbol("2025")]
         @test dt.data[1] == ["North", "South", "East", "West"]
         @test dt.data[2] == [10.0, 20.0, 15.0, 5.0]
@@ -82,49 +82,49 @@
 
     @testset "chart lookup" begin  # chart_basic.xlsx
         f = XLSX.readxlsx(joinpath(data_directory, "chart_basic.xlsx"))
-        c = XLSX.getCharts(f)[1]
+        c = XLSX.Charts.getCharts(f)[1]
 
-        @test XLSX.getChart(f, "chart1").path == c.path
-        @test XLSX.getChart(f, "chart1.xml").path == c.path
-        @test XLSX.getChart(f, "xl/charts/chart1.xml").path == c.path
-        @test XLSX.getChart(f, c.rId).path == c.path
-        @test_throws XLSX.XLSXError XLSX.getChart(f, "nosuchchart")
+        @test XLSX.Charts.getChart(f, "chart1").path == c.path
+        @test XLSX.Charts.getChart(f, "chart1.xml").path == c.path
+        @test XLSX.Charts.getChart(f, "xl/charts/chart1.xml").path == c.path
+        @test XLSX.Charts.getChart(f, c.rId).path == c.path
+        @test_throws XLSX.XLSXError XLSX.Charts.getChart(f, "nosuchchart")
 
         # Worksheet-scoped discovery walks the sheet's own drawing.
-        ws_charts = XLSX.getCharts(f["Data"])
+        ws_charts = XLSX.Charts.getCharts(f["Data"])
         @test length(ws_charts) == 1
         @test ws_charts[1].path == c.path
 
-        @test XLSX.getChartData(f, "chart1").column_labels == XLSX.getChartData(c).column_labels
+        @test XLSX.Charts.getChartData(f, "chart1").column_labels == XLSX.Charts.getChartData(c).column_labels
     end
 
     @testset "metadata only" begin  # chart_basic.xlsx
         f = XLSX.readxlsx(joinpath(data_directory, "chart_basic.xlsx"))
-        c = XLSX.getCharts(f)[1]
+        c = XLSX.Charts.getCharts(f)[1]
 
         # Metadata survives; values do not.
-        @test XLSX.getChartTitle(c) == "Revenue by Region"
-        @test [s.name for s in XLSX.getChartSeries(c; read_cached_values=false)] == ["2024", "2025"]   # names come from c:tx regardless
-        @test XLSX.getChartSeries(c; read_cached_values=false)[1].values.ref == "Data!\$B\$2:\$B\$5"
-        @test XLSX.getChartSeries(c; read_cached_values=false)[1].values.format_code == "General"
-        @test XLSX.getChartSeries(c; read_cached_values=false)[1].values.ptCount == 4
-        @test isempty(XLSX.getChartSeries(c; read_cached_values=false)[1].values.data)
-        @test isempty(XLSX.getChartSeries(c; read_cached_values=false)[1].categories.data)
+        @test XLSX.Charts.getChartTitle(c) == "Revenue by Region"
+        @test [s.name for s in XLSX.Charts.getChartSeries(c; read_cached_values=false)] == ["2024", "2025"]   # names come from c:tx regardless
+        @test XLSX.Charts.getChartSeries(c; read_cached_values=false)[1].values.ref == "Data!\$B\$2:\$B\$5"
+        @test XLSX.Charts.getChartSeries(c; read_cached_values=false)[1].values.format_code == "General"
+        @test XLSX.Charts.getChartSeries(c; read_cached_values=false)[1].values.ptCount == 4
+        @test isempty(XLSX.Charts.getChartSeries(c; read_cached_values=false)[1].values.data)
+        @test isempty(XLSX.Charts.getChartSeries(c; read_cached_values=false)[1].categories.data)
 
         # Reading options belong to the accessors, not the chart, so the data table
         # is always available.
-        @test XLSX.getChartData(c) isa XLSX.DataTable
-        @test XLSX.getChartData(f, "chart1") isa XLSX.DataTable
+        @test XLSX.Charts.getChartData(c) isa XLSX.DataTable
+        @test XLSX.Charts.getChartData(f, "chart1") isa XLSX.DataTable
     end
 
     @testset "gaps and errors" begin  # chart_gaps.xlsx
         f = XLSX.readxlsx(joinpath(data_directory, "chart_gaps.xlsx"))
-        c = XLSX.getCharts(f)[1]
+        c = XLSX.Charts.getCharts(f)[1]
 
-        @test XLSX.getChartTypes(c) == [:lineChart]
-        @test length(XLSX.getChartSeries(c; read_cached_values=false)) == 1
+        @test XLSX.Charts.getChartTypes(c) == [:lineChart]
+        @test length(XLSX.Charts.getChartSeries(c; read_cached_values=false)) == 1
 
-        v = XLSX.getChartSeries(c)[1].values
+        v = XLSX.Charts.getChartSeries(c)[1].values
         @test v.ptCount == 5
         @test length(v.data) == 5
 
@@ -148,37 +148,37 @@
         @test length(XLSX.geterror(v)) == length(v.data)
 
         # Categories are complete even where values are not.
-        @test XLSX.getChartSeries(c)[1].categories.data == ["a", "b", "c", "d", "e"]
+        @test XLSX.Charts.getChartSeries(c)[1].categories.data == ["a", "b", "c", "d", "e"]
     end
 
     @testset "combo chart" begin  # chart_combo.xlsx
         f = XLSX.readxlsx(joinpath(data_directory, "chart_combo.xlsx"))
-        c = XLSX.getCharts(f)[1]
+        c = XLSX.Charts.getCharts(f)[1]
 
         # Two group elements in one plotArea. Excel writes them in schema order,
         # so compare as a set rather than pinning the sequence.
-        @test length(XLSX.getChartTypes(c)) == 2
-        @test issetequal(XLSX.getChartTypes(c), [:barChart, :lineChart])
+        @test length(XLSX.Charts.getChartTypes(c)) == 2
+        @test issetequal(XLSX.Charts.getChartTypes(c), [:barChart, :lineChart])
 
         # Series are collected across both groups, with `order` continuing rather
         # than restarting per group.
-        @test length(XLSX.getChartSeries(c; read_cached_values=false)) == 2
-        @test sort([s.order for s in XLSX.getChartSeries(c; read_cached_values=false)]) == [0, 1]
-        @test issetequal([s.charttype for s in XLSX.getChartSeries(c; read_cached_values=false)], [:barChart, :lineChart])
+        @test length(XLSX.Charts.getChartSeries(c; read_cached_values=false)) == 2
+        @test sort([s.order for s in XLSX.Charts.getChartSeries(c; read_cached_values=false)]) == [0, 1]
+        @test issetequal([s.charttype for s in XLSX.Charts.getChartSeries(c; read_cached_values=false)], [:barChart, :lineChart])
 
-        dt = XLSX.getChartData(c)
+        dt = XLSX.Charts.getChartData(c)
         @test length(dt.column_labels) == 3   # shared categories + two series
     end
 
     @testset "scatter chart" begin  # chart_scatter.xlsx
         f = XLSX.readxlsx(joinpath(data_directory, "chart_scatter.xlsx"))
-        c = XLSX.getCharts(f)[1]
+        c = XLSX.Charts.getCharts(f)[1]
 
-        @test XLSX.getChartTypes(c) == [:scatterChart]
-        @test length(XLSX.getChartSeries(c; read_cached_values=false)) == 2
+        @test XLSX.Charts.getChartTypes(c) == [:scatterChart]
+        @test length(XLSX.Charts.getChartSeries(c; read_cached_values=false)) == 2
 
         # c:xVal folds into `categories`, c:yVal into `values`.
-        s1, s2 = XLSX.getChartSeries(c)
+        s1, s2 = XLSX.Charts.getChartSeries(c)
         @test s1.categories.data == [1.0, 2.0, 3.0, 4.0]
         @test s1.values.data == [10.0, 20.0, 30.0, 40.0]
         @test s2.categories.data == [2.0, 4.0, 6.0, 8.0]
@@ -187,7 +187,7 @@
         # Differing x references, so no shared `categories` column: each series
         # brings its own.
         @test s1.categories.ref != s2.categories.ref
-        dt = XLSX.getChartData(c)
+        dt = XLSX.Charts.getChartData(c)
         @test length(dt.column_labels) == 4
         @test endswith(String(dt.column_labels[1]), "_x")
         @test endswith(String(dt.column_labels[3]), "_x")
@@ -195,29 +195,29 @@
 
     @testset "bubble chart and document order" begin  # chart_bubble.xlsx
         f = XLSX.readxlsx(joinpath(data_directory, "chart_bubble.xlsx"))
-        charts = XLSX.getCharts(f)
+        charts = XLSX.Charts.getCharts(f)
         @test length(charts) == 2
 
         # FIXTURE: the pie chart was inserted first but positioned to the right
         # of the bubble chart. Anchor order is creation order, not reading order,
         # so the pie comes back first.
-        @test XLSX.getChartTypes(charts[1]) == [:pieChart]
-        @test XLSX.getChartTypes(charts[2]) == [:bubbleChart]
+        @test XLSX.Charts.getChartTypes(charts[1]) == [:pieChart]
+        @test XLSX.Charts.getChartTypes(charts[2]) == [:bubbleChart]
 
         bub = charts[2]
-        s = XLSX.getChartSeries(bub)[1]
+        s = XLSX.Charts.getChartSeries(bub)[1]
         @test !isnothing(s.bubble_sizes)
         @test length(s.bubble_sizes.data) == length(s.values.data)
 
-        dt = XLSX.getChartData(bub)
+        dt = XLSX.Charts.getChartData(bub)
         @test any(l -> endswith(String(l), "_size"), dt.column_labels)
     end
 
     @testset "multi-level categories" begin  # chart_multilevel.xlsx
         f = XLSX.readxlsx(joinpath(data_directory, "chart_multilevel.xlsx"))
-        c = XLSX.getCharts(f)[1]
+        c = XLSX.Charts.getCharts(f)[1]
 
-        cat = XLSX.getChartSeries(c)[1].categories
+        cat = XLSX.Charts.getChartSeries(c)[1].categories
         @test cat.kind == :multiLvlStr
         @test cat.ptCount == 4
         @test length(cat.data) == 2          # two levels, each a vector
@@ -232,7 +232,7 @@
         @test levels[1] == ["Q1", "Q2", "Q1", "Q2"]
         @test levels[2] == ["North", "North", "South", "South"]
 
-        dt = XLSX.getChartData(c)
+        dt = XLSX.Charts.getChartData(c)
         @test dt.column_labels[1] == :categories_1
         @test dt.column_labels[2] == :categories_2
         @test length(dt.column_labels) == 3   # two levels + one series
@@ -240,7 +240,7 @@
 
     @testset "chartsheet" begin  # chart_chartsheet.xlsx
         f = XLSX.readxlsx(joinpath(data_directory, "chart_chartsheet.xlsx"))
-        charts = XLSX.getCharts(f)
+        charts = XLSX.Charts.getCharts(f)
         @test length(charts) == 1
 
         c = charts[1]
@@ -252,92 +252,92 @@
         @test isnothing(c.to)
 
         # The data still reads exactly as when the chart was on a worksheet.
-        @test length(XLSX.getChartSeries(c)) == 2
-        @test XLSX.getChartSeries(c)[1].values.data == [10.0, 20.0, 15.0, 5.0]
+        @test length(XLSX.Charts.getChartSeries(c)) == 2
+        @test XLSX.Charts.getChartSeries(c)[1].values.data == [10.0, 20.0, 15.0, 5.0]
     end
 
     @testset "strict OOXML" begin  # chart_strict.xlsx
         f = XLSX.readxlsx(joinpath(data_directory, "chart_strict.xlsx"))
-        charts = XLSX.getCharts(f)
+        charts = XLSX.Charts.getCharts(f)
 
         # Strict files are remapped to transitional at read, so the transitional
         # chart relationship type still resolves and the chart is found.
         @test length(charts) == 1
         c = charts[1]
         @test c.sheet == "Data"
-        @test XLSX.getChartTypes(c) == [:barChart]
-        @test XLSX.getChartSeries(c)[1].categories.data == ["North", "South", "East", "West"]
-        @test XLSX.getChartSeries(c)[1].values.data == [10.0, 20.0, 15.0, 5.0]
+        @test XLSX.Charts.getChartTypes(c) == [:barChart]
+        @test XLSX.Charts.getChartSeries(c)[1].categories.data == ["North", "South", "East", "West"]
+        @test XLSX.Charts.getChartSeries(c)[1].values.data == [10.0, 20.0, 15.0, 5.0]
     end
 
     @testset "chartEx is read for discovery" begin
         f = XLSX.readxlsx(joinpath(data_directory, "chart_ex.xlsx"))   # your path
 
-        charts = @test_nowarn XLSX.getCharts(f)
+        charts = @test_nowarn XLSX.Charts.getCharts(f)
         @test length(charts) == 1
 
         c = charts[1]
-        @test c isa XLSX.ChartEx
-        @test XLSX.chartSchema(c) === :cx
-        @test XLSX.chartType(c) === :waterfall
+        @test c isa XLSX.Charts.ChartEx
+        @test XLSX.Charts.chartSchema(c) === :cx
+        @test XLSX.Charts.chartType(c) === :waterfall
         @test c.name == "chartEx1"
         @test c.sheet == "Data"
         @test c.from == "G9"
-        @test length(XLSX._cx_refs(c)) == 2
-        @test XLSX._cx_refs(c) == ["_xlchart.v1.0", "_xlchart.v1.1"]
-        ranges = XLSX.getChartRanges(c)
+        @test length(XLSX.Charts._cx_refs(c)) == 2
+        @test XLSX.Charts._cx_refs(c) == ["_xlchart.v1.0", "_xlchart.v1.1"]
+        ranges = XLSX.Charts.getChartRanges(c)
         @test length(ranges) == 2
         @test all(!isnothing, ranges)
         @test string(ranges[1]) == "Data!A2:A5"
         @test string(ranges[2]) == "Data!B2:B5"        
 
         # Ranges resolve; cached values do not exist.
-        ranges = XLSX.getChartRanges(c)
+        ranges = XLSX.Charts.getChartRanges(c)
         @test length(ranges) == 2
         @test all(!isnothing, ranges)
 
-        err = @test_throws XLSX.XLSXError XLSX.getChartData(c)
+        err = @test_throws XLSX.XLSXError XLSX.Charts.getChartData(c)
         @test occursin("waterfall", err.value.msg)
         @test occursin("chartEx", err.value.msg)
 
         # Reachable by name and by rId, like a c: chart.
-        @test XLSX.getChart(f, "chartEx1") isa XLSX.ChartEx
-        @test XLSX.getChart(f, "chartEx1.xml") isa XLSX.ChartEx
+        @test XLSX.Charts.getChart(f, "chartEx1") isa XLSX.Charts.ChartEx
+        @test XLSX.Charts.getChart(f, "chartEx1.xml") isa XLSX.Charts.ChartEx
 
         # Sheet-scoped discovery finds it too.
-        @test length(XLSX.getCharts(f["Data"])) == 1
+        @test length(XLSX.Charts.getCharts(f["Data"])) == 1
     end
     @testset "external reference" begin  # chart_external.xlsx
         f = XLSX.readxlsx(joinpath(data_directory, "chart_external.xlsx"))
-        c = XLSX.getCharts(f)[1]
+        c = XLSX.Charts.getCharts(f)[1]
 
-        @test XLSX.getChartTypes(c) == [:lineChart]
-        @test length(XLSX.getChartSeries(c)) == 2
+        @test XLSX.Charts.getChartTypes(c) == [:lineChart]
+        @test length(XLSX.Charts.getChartSeries(c)) == 2
 
         # Source lives in another workbook: the `[1]` indexes the workbook's
         # external references.
-        @test XLSX.getChartSeries(c)[1].values.ref == "[1]Feuil1!\$A\$1:\$A\$10"
-        @test XLSX.getChartSeries(c)[2].values.ref == "[1]Feuil1!\$B\$1:\$B\$10"
+        @test XLSX.Charts.getChartSeries(c)[1].values.ref == "[1]Feuil1!\$A\$1:\$A\$10"
+        @test XLSX.Charts.getChartSeries(c)[2].values.ref == "[1]Feuil1!\$B\$1:\$B\$10"
 
         # No c:cat at all - Excel plots against an implicit index and caches
         # nothing for it - and no c:tx, so the series are unnamed.
-        @test all(s -> isnothing(s.categories), XLSX.getChartSeries(c; read_cached_values=false))
-        @test all(s -> isnothing(s.name), XLSX.getChartSeries(c; read_cached_values=false))
+        @test all(s -> isnothing(s.categories), XLSX.Charts.getChartSeries(c; read_cached_values=false))
+        @test all(s -> isnothing(s.name), XLSX.Charts.getChartSeries(c; read_cached_values=false))
 
-        @test XLSX.getChartSeries(c)[1].values.data == collect(1.0:10.0)
-        @test XLSX.getChartSeries(c)[2].values.data == [1.0, 10.0, 5.0, 2.0, 3.0, 45.0, 6.0, 8.0, 7.0, 2.0]
+        @test XLSX.Charts.getChartSeries(c)[1].values.data == collect(1.0:10.0)
+        @test XLSX.Charts.getChartSeries(c)[2].values.data == [1.0, 10.0, 5.0, 2.0, 3.0, 45.0, 6.0, 8.0, 7.0, 2.0]
 
         # No categories, so no leading column, and positional series labels.
-        dt = XLSX.getChartData(c)
+        dt = XLSX.Charts.getChartData(c)
         @test dt.column_labels == [:Series1, :Series2]
         @test length(dt.data[1]) == 10
 
         # Materialising the reference resolves `[1]` through xl/externalLinks and
         # its relationships (regression test for get_external_workbook_path,
         # which previously ignored the externalBook r:id).
-        c = XLSX.getCharts(f)[1]
-        @test XLSX.getChartSeries(c; get_external_refs=true)[1].values.ref == "[Test2.xlsx]Feuil1!\$A\$1:\$A\$10"
-        @test XLSX.getChartSeries(c; get_external_refs=true)[1].values.data == XLSX.getChartSeries(c)[1].values.data   # unchanged by materialising
+        c = XLSX.Charts.getCharts(f)[1]
+        @test XLSX.Charts.getChartSeries(c; get_external_refs=true)[1].values.ref == "[Test2.xlsx]Feuil1!\$A\$1:\$A\$10"
+        @test XLSX.Charts.getChartSeries(c; get_external_refs=true)[1].values.data == XLSX.Charts.getChartSeries(c)[1].values.data   # unchanged by materialising
     end
 
     @testset "chart cache agrees with external link cache" begin  # chart_external.xlsx
@@ -364,9 +364,9 @@
             return out
         end
 
-        c = XLSX.getCharts(f)[1]
-        @test XLSX.getChartSeries(c)[1].values.data == external_column(f, "A")
-        @test XLSX.getChartSeries(c)[2].values.data == external_column(f, "B")
+        c = XLSX.Charts.getCharts(f)[1]
+        @test XLSX.Charts.getChartSeries(c)[1].values.data == external_column(f, "A")
+        @test XLSX.Charts.getChartSeries(c)[2].values.data == external_column(f, "B")
     end
 
     @testset "round trip" begin  # chart_basic.xlsx
@@ -374,7 +374,7 @@
         # save byte for byte, and read back identically.
         original = joinpath(data_directory, "chart_basic.xlsx")
         f = XLSX.openxlsx(original; mode="rw")
-        before = XLSX.getChartData(XLSX.getCharts(f)[1])
+        before = XLSX.Charts.getChartData(XLSX.Charts.getCharts(f)[1])
 
         tmp = joinpath(tempdir(), "chart_basic_roundtrip.xlsx")
         isfile(tmp) && rm(tmp; force=true)
@@ -389,10 +389,10 @@
               strip_ws(String(zip_readentry(ZipReader(read(tmp)), part)))
 
         g = XLSX.readxlsx(tmp)
-        c = XLSX.getCharts(g)[1]
+        c = XLSX.Charts.getCharts(g)[1]
         @test c.sheet == "Data"
-        @test XLSX.getChartTitle(c) == "Revenue by Region"
-        after = XLSX.getChartData(c)
+        @test XLSX.Charts.getChartTitle(c) == "Revenue by Region"
+        after = XLSX.Charts.getChartData(c)
         @test after.column_labels == before.column_labels
         @test after.data == before.data
 
@@ -401,10 +401,10 @@
     end
 
     @testset "chart_range" begin
-        cr(ref) = XLSX.chart_range(XLSX.ChartRef(:num, ref, nothing, 0, Any[], Dict{Int,UInt64}()))
+        cr(ref) = XLSX.Charts.chart_range(XLSX.Charts.ChartRef(:num, ref, nothing, 0, Any[], Dict{Int,UInt64}()))
 
         @test cr(nothing) === nothing
-        @test XLSX.chart_range(nothing) === nothing
+        @test XLSX.Charts.chart_range(nothing) === nothing
         @test cr("[1]Sheet1!\$A\$1:\$A\$5") === nothing        # external
         @test cr("MyDefinedName") === nothing                  # defined name
         @test cr("Sheet1!\$A\$1:\$A\$5") isa XLSX.SheetCellRange
@@ -415,70 +415,70 @@
         @test cr("Sheet1!\$A\$1:\$A\$3,Sheet1!\$C\$1:\$C\$3")   isa XLSX.NonContiguousRange
     end
     @testset "row-range source (ChartRange union)" begin
-        rr(ref) = XLSX.ChartRef(:num, ref, nothing, 0, Any[], Dict{Int,UInt64}())
+        rr(ref) = XLSX.Charts.ChartRef(:num, ref, nothing, 0, Any[], Dict{Int,UInt64}())
 
-        @test XLSX.chart_range(rr("Sheet1!\$2:\$5")) isa XLSX.SheetRowRange
-        @test XLSX.chart_range(rr("Sheet1!2:5"))     isa XLSX.SheetRowRange
-        @test XLSX.chart_range(rr("Sheet1!\$A:\$C")) isa XLSX.SheetColumnRange
+        @test XLSX.Charts.chart_range(rr("Sheet1!\$2:\$5")) isa XLSX.SheetRowRange
+        @test XLSX.Charts.chart_range(rr("Sheet1!2:5"))     isa XLSX.SheetRowRange
+        @test XLSX.Charts.chart_range(rr("Sheet1!\$A:\$C")) isa XLSX.SheetColumnRange
 
         # the conversion that used to throw
-        s = XLSX.ChartSeries(0, 0, :barChart, "S", nothing,
+        s = XLSX.Charts.ChartSeries(0, 0, :barChart, "S", nothing,
                              rr("Sheet1!\$2:\$2"), rr("Sheet1!\$3:\$3"), nothing,
                              XML.Element("c:ser"))
-        ranges = XLSX._chart_ranges([s])
+        ranges = XLSX.Charts._chart_ranges([s])
         @test ranges[1].categories isa XLSX.SheetRowRange
         @test ranges[1].values     isa XLSX.SheetRowRange
     end
     @testset "ChartRange union covers chart_range" begin
-        @test XLSX.SheetCellRef       <: XLSX.ChartRange
-        @test XLSX.SheetCellRange     <: XLSX.ChartRange
-        @test XLSX.SheetColumnRange   <: XLSX.ChartRange
-        @test XLSX.SheetRowRange      <: XLSX.ChartRange
-        @test XLSX.NonContiguousRange <: XLSX.ChartRange
-        @test Nothing                 <: XLSX.ChartRange
+        @test XLSX.SheetCellRef       <: XLSX.Charts.ChartRange
+        @test XLSX.SheetCellRange     <: XLSX.Charts.ChartRange
+        @test XLSX.SheetColumnRange   <: XLSX.Charts.ChartRange
+        @test XLSX.SheetRowRange      <: XLSX.Charts.ChartRange
+        @test XLSX.NonContiguousRange <: XLSX.Charts.ChartRange
+        @test Nothing                 <: XLSX.Charts.ChartRange
     end
 
     @testset "unique labels" begin
         labels = Symbol[]
-        @test XLSX.unique_label!(labels, "Sales") === :Sales
-        @test XLSX.unique_label!(labels, "Sales") === :Sales_2
-        @test XLSX.unique_label!(labels, "Sales") === :Sales_3
-        @test XLSX.unique_label!(labels, "") === :column
+        @test XLSX.Charts.unique_label!(labels, "Sales") === :Sales
+        @test XLSX.Charts.unique_label!(labels, "Sales") === :Sales_2
+        @test XLSX.Charts.unique_label!(labels, "Sales") === :Sales_3
+        @test XLSX.Charts.unique_label!(labels, "") === :column
     end
 
     @testset "getChartRanges dispatch" begin
         f = XLSX.readxlsx(joinpath(data_directory, "chart_bubble.xlsx"))
 
         # workbook-wide form: Vector{@NamedTuple{chart::String, ranges::Vector{ChartRanges}}}
-        all_f = XLSX.getChartRanges(f)
+        all_f = XLSX.Charts.getChartRanges(f)
         @test all_f isa Vector
         @test length(all_f) == 2
         @test all(x -> x isa NamedTuple{(:chart, :ranges)}, all_f)
         @test all(x -> x.chart isa String, all_f)
-        @test all(x -> x.ranges isa Vector{XLSX.ChartRanges}, all_f)
+        @test all(x -> x.ranges isa Vector{XLSX.Charts.ChartRanges}, all_f)
 
         # follows getCharts, per the docstring
-        @test [x.chart for x in all_f] == [c.name for c in XLSX.getCharts(f)]
+        @test [x.chart for x in all_f] == [c.name for c in XLSX.Charts.getCharts(f)]
 
         # identify the two charts by type rather than by part name
-        charts = XLSX.getCharts(f)
-        bub = charts[findfirst(c -> :bubbleChart in XLSX.getChartTypes(c), charts)]
-        pie = charts[findfirst(c -> :pieChart    in XLSX.getChartTypes(c), charts)]
+        charts = XLSX.Charts.getCharts(f)
+        bub = charts[findfirst(c -> :bubbleChart in XLSX.Charts.getChartTypes(c), charts)]
+        pie = charts[findfirst(c -> :pieChart    in XLSX.Charts.getChartTypes(c), charts)]
 
         # --- (x, name) form -----------------------------------------------------
-        rb = XLSX.getChartRanges(f, bub.name)
-        rp = XLSX.getChartRanges(f, pie.name)
-        @test rb isa Vector{XLSX.ChartRanges}
-        @test rp isa Vector{XLSX.ChartRanges}
+        rb = XLSX.Charts.getChartRanges(f, bub.name)
+        rp = XLSX.Charts.getChartRanges(f, pie.name)
+        @test rb isa Vector{XLSX.Charts.ChartRanges}
+        @test rp isa Vector{XLSX.Charts.ChartRanges}
 
-        # parallel to XLSX.getChartSeries(bub), document order
-        @test length(rb) == length(XLSX.getChartSeries(bub))
-        @test [x.idx  for x in rb] == [s.idx  for s in XLSX.getChartSeries(bub)]
-        @test [x.name for x in rb] == [s.name for s in XLSX.getChartSeries(bub)]
+        # parallel to XLSX.Charts.getChartSeries(bub), document order
+        @test length(rb) == length(XLSX.Charts.getChartSeries(bub))
+        @test [x.idx  for x in rb] == [s.idx  for s in XLSX.Charts.getChartSeries(bub)]
+        @test [x.name for x in rb] == [s.name for s in XLSX.Charts.getChartSeries(bub)]
 
         # every field is a member of the declared union
         for x in vcat(rb, rp), fld in (:categories, :values, :bubble_sizes)
-            @test getfield(x, fld) isa XLSX.ChartRange
+            @test getfield(x, fld) isa XLSX.Charts.ChartRange
         end
 
         # the docstring's specific claim: bubble_sizes only on bubble charts
@@ -490,13 +490,13 @@
         @test all(!isnothing(x.values)     for x in rb)
 
         # name forms getChart accepts
-        @test XLSX.getChartRanges(f, bub.name * ".xml") == rb
+        @test XLSX.Charts.getChartRanges(f, bub.name * ".xml") == rb
 
-        @test_throws XLSX.XLSXError XLSX.getChartRanges(f, "nosuchchart")
+        @test_throws XLSX.XLSXError XLSX.Charts.getChartRanges(f, "nosuchchart")
 
         # --- worksheet form agrees with the workbook form ------------------------
         ws = f[bub.sheet]
-        all_ws = XLSX.getChartRanges(ws)
+        all_ws = XLSX.Charts.getChartRanges(ws)
         @test all(x -> x isa NamedTuple{(:chart, :ranges)}, all_ws)
         @test issubset(Set(x.chart for x in all_ws), Set(x.chart for x in all_f))
 
@@ -508,60 +508,60 @@
 
     @testset "mixed c: and cx: on one sheet" begin
         f = XLSX.readxlsx(joinpath(data_directory, "chart_mixed.xlsx"))
-        charts = XLSX.getCharts(f)
+        charts = XLSX.Charts.getCharts(f)
 
         @test length(charts) == 2
-        @test count(c -> c isa XLSX.Chart, charts) == 1
-        @test count(c -> c isa XLSX.ChartEx, charts) == 1
-        @test issetequal(XLSX.chartSchema.(charts), [:c, :cx])
+        @test count(c -> c isa XLSX.Charts.Chart, charts) == 1
+        @test count(c -> c isa XLSX.Charts.ChartEx, charts) == 1
+        @test issetequal(XLSX.Charts.chartSchema.(charts), [:c, :cx])
 
         # Each chart keeps its own anchor — the risk is one anchor's from/to
         # being attributed to the other chart's frame.
         @test all(c -> !isnothing(c.sheet), charts)
 
-        c  = only(filter(x -> x isa XLSX.Chart,   charts))
-        cx = only(filter(x -> x isa XLSX.ChartEx, charts))
+        c  = only(filter(x -> x isa XLSX.Charts.Chart,   charts))
+        cx = only(filter(x -> x isa XLSX.Charts.ChartEx, charts))
 
         @test cx.from == "F1"
         @test c.from  == "F17"
-        @test XLSX.chartType(c)  === :barChart      # adjust to what you inserted
-        @test XLSX.chartType(cx) === :waterfall
+        @test XLSX.Charts.chartType(c)  === :barChart      # adjust to what you inserted
+        @test XLSX.Charts.chartType(cx) === :waterfall
 
         # Data works for one, throws for the other; ranges work for both.
-        @test XLSX.getChartData(c) isa XLSX.DataTable
-        @test_throws XLSX.XLSXError XLSX.getChartData(cx)
-        @test !isempty(XLSX.getChartRanges(c))
-        @test all(!isnothing, XLSX.getChartRanges(cx))
+        @test XLSX.Charts.getChartData(c) isa XLSX.DataTable
+        @test_throws XLSX.XLSXError XLSX.Charts.getChartData(cx)
+        @test !isempty(XLSX.Charts.getChartRanges(c))
+        @test all(!isnothing, XLSX.Charts.getChartRanges(cx))
 
         # Lookup by name reaches both.
-        @test XLSX.getChart(f, c.name)  isa XLSX.Chart
-        @test XLSX.getChart(f, cx.name) isa XLSX.ChartEx
+        @test XLSX.Charts.getChart(f, c.name)  isa XLSX.Charts.Chart
+        @test XLSX.Charts.getChart(f, cx.name) isa XLSX.Charts.ChartEx
 
         # Sheet-scoped discovery finds both.
-        @test length(XLSX.getCharts(f[c.sheet])) == 2
+        @test length(XLSX.Charts.getCharts(f[c.sheet])) == 2
 
         # Document order within the drawing, not schema order.
-        @test charts[1] isa XLSX.ChartEx
-        @test charts[2] isa XLSX.Chart
+        @test charts[1] isa XLSX.Charts.ChartEx
+        @test charts[2] isa XLSX.Charts.Chart
     end
     @testset "c: chart kind templates match Excel" begin
         fx  = joinpath(data_directory, "chart_kinds.xlsx")
         raw = XLSX.ZipArchives.ZipReader(read(fx))
-        bysheet = Dict(c.sheet => c for c in XLSX.getCharts(XLSX.readxlsx(fx)))
-        for (kind, t) in pairs(XLSX.C_KINDS)
+        bysheet = Dict(c.sheet => c for c in XLSX.Charts.getCharts(XLSX.readxlsx(fx)))
+        for (kind, t) in pairs(XLSX.Charts.C_KINDS)
             c = bysheet[String(t.template)]
-            @test XLSX.ZipArchives.zip_readentry(raw, c.path, String) == XLSX.CHART_KIND_TEMPLATES[t.template]
-            @test haskey(XLSX.CHART_STYLE_TEMPLATES, t.style)
+            @test XLSX.ZipArchives.zip_readentry(raw, c.path, String) == XLSX.Charts.CHART_KIND_TEMPLATES[t.template]
+            @test haskey(XLSX.Charts.CHART_STYLE_TEMPLATES, t.style)
         end
     end
     @testset "cx: chart kind templates match Excel" begin
         fx  = joinpath(data_directory, "chartex_kinds.xlsx")
         raw = XLSX.ZipArchives.ZipReader(read(fx))
-        for c in XLSX.getCharts(XLSX.readxlsx(fx))
-            c isa XLSX.ChartEx || continue
-            k = XLSX.chartType(c)
-            @test haskey(XLSX.CX_KINDS, k)
-            @test XLSX.ZipArchives.zip_readentry(raw, c.path, String) == XLSX.CHARTEX_KIND_TEMPLATES[k]
+        for c in XLSX.Charts.getCharts(XLSX.readxlsx(fx))
+            c isa XLSX.Charts.ChartEx || continue
+            k = XLSX.Charts.chartType(c)
+            @test haskey(XLSX.Charts.CX_KINDS, k)
+            @test XLSX.ZipArchives.zip_readentry(raw, c.path, String) == XLSX.Charts.CHARTEX_KIND_TEMPLATES[k]
         end
     end
     @testset "chart plumbing: a verbatim template on a new sheet" begin
@@ -576,20 +576,20 @@
             end
         end
 
-        p = XLSX._add_chart_part!(ws, XLSX.CHART_KIND_TEMPLATES[:column], 201;
+        p = XLSX.Charts._add_chart_part!(ws, XLSX.Charts.CHART_KIND_TEMPLATES[:column], 201;
                                   anchor = XLSX.CellRange("F2:M18"))
         @test p == "xl/charts/chart1.xml"
 
-        c = only(XLSX.getCharts(xf))
-        @test c isa XLSX.Chart
+        c = only(XLSX.Charts.getCharts(xf))
+        @test c isa XLSX.Charts.Chart
         @test c.sheet == "column"
-        @test XLSX.getChartTypes(c) == [:barChart]
-        @test [s.name for s in XLSX.getChartSeries(c)] == ["Alpha", "Beta", "Gamma"]
-        @test XLSX.getChartData(c).data[2] == [10, 20, 15, 5]
+        @test XLSX.Charts.getChartTypes(c) == [:barChart]
+        @test [s.name for s in XLSX.Charts.getChartSeries(c)] == ["Alpha", "Beta", "Gamma"]
+        @test XLSX.Charts.getChartData(c).data[2] == [10, 20, 15, 5]
 
         XLSX.writexlsx(path, xf, overwrite = true)
-        c2 = only(XLSX.getCharts(XLSX.readxlsx(path)))
-        @test XLSX.getChartTypes(c2) == [:barChart]
+        c2 = only(XLSX.Charts.getCharts(XLSX.readxlsx(path)))
+        @test XLSX.Charts.getChartTypes(c2) == [:barChart]
         @test c2.from == "F2"
 
         SAVE_FILES && save_outfile(xf)
@@ -601,27 +601,27 @@
         xf = XLSX.newxlsx("data")
         ws = xf["data"]
 
-        c = XLSX.addChart(ws, :column; anchor = "F2:M18", title = "Revenue")
-        @test c isa XLSX.Chart
-        @test XLSX.getChartTypes(c) == [:barChart]
-        @test isempty(XLSX.getChartSeries(c))
-        @test XLSX.getChartTitle(c) == "Revenue"
+        c = XLSX.Charts.addChart(ws, :column; anchor = "F2:M18", title = "Revenue")
+        @test c isa XLSX.Charts.Chart
+        @test XLSX.Charts.getChartTypes(c) == [:barChart]
+        @test isempty(XLSX.Charts.getChartSeries(c))
+        @test XLSX.Charts.getChartTitle(c) == "Revenue"
 
         # Fresh axis ids, consistently wired.
-        axes = XLSX.getChartAxes(c)
+        axes = XLSX.Charts.getChartAxes(c)
         @test length(axes) == 2
-        @test only(XLSX.getChartGroups(c)).axids == [ax.axid for ax in axes]
-        @test XLSX.getAxisPartner(c, axes[1]).axid == axes[2].axid
+        @test only(XLSX.Charts.getChartGroups(c)).axids == [ax.axid for ax in axes]
+        @test XLSX.Charts.getAxisPartner(c, axes[1]).axid == axes[2].axid
 
         # Every kind builds, and the title options work.
-        for (i, kind) in enumerate(keys(XLSX.C_KINDS))
-            k = XLSX.addChart(ws, kind; anchor = "O$(20i):V$(20i + 15)", title = i == 1 ? false : nothing)
-            @test isempty(XLSX.getChartSeries(k))
+        for (i, kind) in enumerate(keys(XLSX.Charts.C_KINDS))
+            k = XLSX.Charts.addChart(ws, kind; anchor = "O$(20i):V$(20i + 15)", title = i == 1 ? false : nothing)
+            @test isempty(XLSX.Charts.getChartSeries(k))
         end
-        @test length(XLSX.getCharts(ws)) == 1 + length(XLSX.C_KINDS)
+        @test length(XLSX.Charts.getCharts(ws)) == 1 + length(XLSX.Charts.C_KINDS)
 
         XLSX.writexlsx(path, xf, overwrite = true)
-        @test length(XLSX.getCharts(XLSX.readxlsx(path))) == 1 + length(XLSX.C_KINDS)
+        @test length(XLSX.Charts.getCharts(XLSX.readxlsx(path))) == 1 + length(XLSX.Charts.C_KINDS)
 
         SAVE_FILES && save_outfile(xf)
         isfile(path) && rm(path)
@@ -631,21 +631,21 @@
         path = "chart_chartsheet_add.xlsx"
         xf = XLSX.newxlsx("data")
 
-        c = XLSX.addChart(xf, :line; sheetname = "Trend", title = "Trend")
-        @test c isa XLSX.Chart
+        c = XLSX.Charts.addChart(xf, :line; sheetname = "Trend", title = "Trend")
+        @test c isa XLSX.Charts.Chart
         @test XLSX.sheetnames(xf) == ["data", "Trend"]
         @test XLSX.is_chartsheet(XLSX.get_workbook(xf), "Trend")
         @test c.sheet == "Trend"
         @test isnothing(c.from)
-        @test XLSX.getChartTypes(c) == [:lineChart]
+        @test XLSX.Charts.getChartTypes(c) == [:lineChart]
 
-        d = XLSX.addChart(xf, :pie)
+        d = XLSX.Charts.addChart(xf, :pie)
         @test d.sheet == "Chart1"
 
         XLSX.writexlsx(path, xf, overwrite = true)
         g = XLSX.readxlsx(path)
         @test XLSX.sheetnames(g) == ["data", "Trend", "Chart1"]
-        @test length(XLSX.getCharts(g)) == 2
+        @test length(XLSX.Charts.getCharts(g)) == 2
 
         SAVE_FILES && save_outfile(xf)
         isfile(path) && rm(path)
@@ -674,21 +674,21 @@
             ws[i + 1, 1] = r; ws[i + 1, 2] = 10i; ws[i + 1, 3] = 5i
         end
 
-        c = XLSX.addChart(ws, :column; anchor = "F2:M18")
-        XLSX.addSeries(c, "B2:B5"; categories = "A2:A5", name_ref = "B1")
-        XLSX.addSeries(c, "C2:C5"; categories = "A2:A5", name_ref = "C1")
+        c = XLSX.Charts.addChart(ws, :column; anchor = "F2:M18")
+        XLSX.Charts.addSeries(c, "B2:B5"; categories = "A2:A5", name_ref = "B1")
+        XLSX.Charts.addSeries(c, "C2:C5"; categories = "A2:A5", name_ref = "C1")
 
-        s = XLSX.getChartSeries(c)
+        s = XLSX.Charts.getChartSeries(c)
         @test [x.name for x in s] == ["Alpha", "Beta"]
         @test [x.idx for x in s] == [0, 1]
         @test s[1].values.data == [10, 20, 30, 40]
         @test s[1].categories.data == ["North", "South", "East", "West"]
-        @test XLSX.getSeriesFill(c, 1).value.fgcolor.val == "accent1"
-        @test XLSX.getSeriesFill(c, 2).value.fgcolor.val == "accent2"
-        @test XLSX.getChartData(c).data[2] == [10, 20, 30, 40]
+        @test XLSX.Charts.getSeriesFill(c, 1).value.fgcolor.val == "accent1"
+        @test XLSX.Charts.getSeriesFill(c, 2).value.fgcolor.val == "accent2"
+        @test XLSX.Charts.getChartData(c).data[2] == [10, 20, 30, 40]
 
         XLSX.writexlsx(path, xf, overwrite = true)
-        @test length(XLSX.getChartSeries(only(XLSX.getCharts(XLSX.readxlsx(path))))) == 2
+        @test length(XLSX.Charts.getChartSeries(only(XLSX.Charts.getCharts(XLSX.readxlsx(path))))) == 2
 
         SAVE_FILES && save_outfile(xf)
         isfile(path) && rm(path)
@@ -703,34 +703,34 @@
         end
 
         row = 1
-        for kind in keys(XLSX.C_KINDS)
-            c = XLSX.addChart(ws, kind; anchor = "F$row:M$(row + 15)", title = string(kind))
+        for kind in keys(XLSX.Charts.C_KINDS)
+            c = XLSX.Charts.addChart(ws, kind; anchor = "F$row:M$(row + 15)", title = string(kind))
             row += 16
             if kind === :bubble
-                XLSX.addSeries(c, "C2:C5"; categories = "B2:B5", bubble_sizes = "D2:D5", name = "Bubbles")
+                XLSX.Charts.addSeries(c, "C2:C5"; categories = "B2:B5", bubble_sizes = "D2:D5", name = "Bubbles")
             else
-                XLSX.addSeries(c, "B2:B5"; categories = "A2:A5", name_ref = "B1")
+                XLSX.Charts.addSeries(c, "B2:B5"; categories = "A2:A5", name_ref = "B1")
                 kind in (:pie, :doughnut) ||
-                    XLSX.addSeries(c, "C2:C5"; categories = "A2:A5", name_ref = "C1")
+                    XLSX.Charts.addSeries(c, "C2:C5"; categories = "A2:A5", name_ref = "C1")
             end
-            s = XLSX.getChartSeries(c)
+            s = XLSX.Charts.getChartSeries(c)
             @test s[1].values.data == [10, 20, 30, 40] || kind === :bubble
             @test !isnothing(s[1].categories)
             @test length(s) == (kind in (:pie, :doughnut, :bubble) ? 1 : 2)
         end
 
         # Per-point colours on a pie, one per category.
-        pie = XLSX.getCharts(ws)[findfirst(x -> XLSX.chartType(x) === :pieChart, XLSX.getCharts(ws))]
-        @test length(XLSX.getSeriesDataPoints(pie, 1)) == 4
+        pie = XLSX.Charts.getCharts(ws)[findfirst(x -> XLSX.Charts.chartType(x) === :pieChart, XLSX.Charts.getCharts(ws))]
+        @test length(XLSX.Charts.getSeriesDataPoints(pie, 1)) == 4
 
         # Rejected options.
-        col = XLSX.getCharts(ws)[1]
-        @test_throws XLSX.XLSXError XLSX.addSeries(col, "B2:B5"; smooth = true)
-        @test_throws XLSX.XLSXError XLSX.addSeries(col, "B2:B5"; bubble_sizes = "D2:D5")
-        @test_throws XLSX.XLSXError XLSX.addSeries(col, "B2:B5"; name = "x", name_ref = "B1")
+        col = XLSX.Charts.getCharts(ws)[1]
+        @test_throws XLSX.XLSXError XLSX.Charts.addSeries(col, "B2:B5"; smooth = true)
+        @test_throws XLSX.XLSXError XLSX.Charts.addSeries(col, "B2:B5"; bubble_sizes = "D2:D5")
+        @test_throws XLSX.XLSXError XLSX.Charts.addSeries(col, "B2:B5"; name = "x", name_ref = "B1")
 
         XLSX.writexlsx(path, xf, overwrite = true)
-        @test length(XLSX.getCharts(XLSX.readxlsx(path))) == length(XLSX.C_KINDS)
+        @test length(XLSX.Charts.getCharts(XLSX.readxlsx(path))) == length(XLSX.Charts.C_KINDS)
 
         SAVE_FILES && save_outfile(xf)
         isfile(path) && rm(path)
@@ -744,43 +744,43 @@
         for (i, r) in enumerate(("North", "South", "East", "West"))
             ws[i + 1, 1] = r; ws[i + 1, 2] = 10i; ws[i + 1, 3] = 5i
         end
-        smooth_of(c, i) = XLSX._bool_val(last(XLSX._series_nodes(XLSX.chart_root(c))[i]), "smooth")
+        smooth_of(c, i) = XLSX.Charts._bool_val(last(XLSX.Charts._series_nodes(XLSX.Charts.chart_root(c))[i]), "smooth")
 
         # Line: markers bring in the lineMarkers pattern; the default stays plain.
-        c = XLSX.addChart(ws, :line; anchor = "F1:M16")
-        XLSX.addSeries(c, "B2:B5"; categories = "A2:A5", markers = :diamond, smooth = true)
-        XLSX.addSeries(c, "C2:C5"; categories = "A2:A5")
-        @test XLSX.getSeriesMarker(c, 1).symbol === :diamond
-        @test !isnothing(XLSX.getSeriesMarker(c, 1).shape)
+        c = XLSX.Charts.addChart(ws, :line; anchor = "F1:M16")
+        XLSX.Charts.addSeries(c, "B2:B5"; categories = "A2:A5", markers = :diamond, smooth = true)
+        XLSX.Charts.addSeries(c, "C2:C5"; categories = "A2:A5")
+        @test XLSX.Charts.getSeriesMarker(c, 1).symbol === :diamond
+        @test !isnothing(XLSX.Charts.getSeriesMarker(c, 1).shape)
         @test smooth_of(c, 1) === true
-        @test XLSX.getSeriesMarker(c, 2).symbol === :none
+        @test XLSX.Charts.getSeriesMarker(c, 2).symbol === :none
         @test smooth_of(c, 2) === false
 
         # Scatter: a line, and no markers only when there is a line.
-        s = XLSX.addChart(ws, :scatter; anchor = "F18:M33")
-        XLSX.addSeries(s, "C2:C5"; categories = "B2:B5", line = true)
-        @test XLSX.getSeriesLine(s, 1).value.fill.kind === :solid
-        @test_throws XLSX.XLSXError XLSX.addSeries(s, "C2:C5"; categories = "B2:B5", markers = false)
-        XLSX.addSeries(s, "C2:C5"; categories = "B2:B5", markers = false, line = true)
-        @test XLSX.getSeriesMarker(s, 2).symbol === :none
+        s = XLSX.Charts.addChart(ws, :scatter; anchor = "F18:M33")
+        XLSX.Charts.addSeries(s, "C2:C5"; categories = "B2:B5", line = true)
+        @test XLSX.Charts.getSeriesLine(s, 1).value.fill.kind === :solid
+        @test_throws XLSX.XLSXError XLSX.Charts.addSeries(s, "C2:C5"; categories = "B2:B5", markers = false)
+        XLSX.Charts.addSeries(s, "C2:C5"; categories = "B2:B5", markers = false, line = true)
+        @test XLSX.Charts.getSeriesMarker(s, 2).symbol === :none
 
         # Radar markers.
-        r = XLSX.addChart(ws, :radar; anchor = "F35:M50")
-        XLSX.addSeries(r, "B2:B5"; categories = "A2:A5", markers = :square)
-        @test XLSX.getSeriesMarker(r, 1).symbol === :square
+        r = XLSX.Charts.addChart(ws, :radar; anchor = "F35:M50")
+        XLSX.Charts.addSeries(r, "B2:B5"; categories = "A2:A5", markers = :square)
+        @test XLSX.Charts.getSeriesMarker(r, 1).symbol === :square
 
         # Colour, in each accepted form.
-        col = XLSX.addChart(ws, :column; anchor = "O1:V16")
-        XLSX.addSeries(col, "B2:B5"; categories = "A2:A5", color = "FFFF0000")
-        XLSX.addSeries(col, "C2:C5"; categories = "A2:A5", color = "accent6")
-        @test XLSX.getSeriesFill(col, 1).value.fgcolor.rgb == "FF0000"
+        col = XLSX.Charts.addChart(ws, :column; anchor = "O1:V16")
+        XLSX.Charts.addSeries(col, "B2:B5"; categories = "A2:A5", color = "FFFF0000")
+        XLSX.Charts.addSeries(col, "C2:C5"; categories = "A2:A5", color = "accent6")
+        @test XLSX.Charts.getSeriesFill(col, 1).value.fgcolor.rgb == "FF0000"
 
         # Rejected.
-        pie = XLSX.addChart(ws, :pie; anchor = "O18:V33")
-        @test_throws XLSX.XLSXError XLSX.addSeries(pie, "B2:B5"; color = "FF0000")
-        @test_throws XLSX.XLSXError XLSX.addSeries(c, "B2:B5"; markers = :nonsense)
-        @test_throws XLSX.XLSXError XLSX.addSeries(c, "B2:B5"; smooth = "yes")
-        @test_throws XLSX.XLSXError XLSX.addSeries(col, "B2:B5"; color = "notacolor")
+        pie = XLSX.Charts.addChart(ws, :pie; anchor = "O18:V33")
+        @test_throws XLSX.XLSXError XLSX.Charts.addSeries(pie, "B2:B5"; color = "FF0000")
+        @test_throws XLSX.XLSXError XLSX.Charts.addSeries(c, "B2:B5"; markers = :nonsense)
+        @test_throws XLSX.XLSXError XLSX.Charts.addSeries(c, "B2:B5"; smooth = "yes")
+        @test_throws XLSX.XLSXError XLSX.Charts.addSeries(col, "B2:B5"; color = "notacolor")
 
         XLSX.writexlsx(path, xf, overwrite = true)
         SAVE_FILES && save_outfile(xf)
@@ -799,31 +799,31 @@
         end
 
         row = 1
-        for kind in keys(XLSX.CX_KINDS)
+        for kind in keys(XLSX.Charts.CX_KINDS)
             cats = kind in (:treemap, :sunburst) ? "A2:B6" :
                    kind === :histogram            ? nothing :
                    kind === :boxWhisker           ? "A2:A6" : "B2:B6"
-            c = XLSX.addChartEx(ws, kind, "C2:C6"; anchor = "F$row:M$(row + 15)",
+            c = XLSX.Charts.addChartEx(ws, kind, "C2:C6"; anchor = "F$row:M$(row + 15)",
                                 categories = cats, name_ref = "C1")
             row += 16
-            @test c isa XLSX.ChartEx
-            @test XLSX.chartType(c) === kind
-            @test XLSX.getChartSeriesCount(c) == (kind === :pareto ? 2 : 1)
-            @test XLSX.getSeriesName(c, 1) == "Amount"
+            @test c isa XLSX.Charts.ChartEx
+            @test XLSX.Charts.chartType(c) === kind
+            @test XLSX.Charts.getChartSeriesCount(c) == (kind === :pareto ? 2 : 1)
+            @test XLSX.Charts.getSeriesName(c, 1) == "Amount"
         end
 
-        charts = XLSX.getCharts(ws)
-        bw = charts[findfirst(c -> XLSX.chartType(c) === :boxWhisker, charts)]
-        XLSX.addSeries(bw, "D2:D6"; name_ref = "D1")
-        @test XLSX.getChartSeriesCount(bw) == 2
+        charts = XLSX.Charts.getCharts(ws)
+        bw = charts[findfirst(c -> XLSX.Charts.chartType(c) === :boxWhisker, charts)]
+        XLSX.Charts.addSeries(bw, "D2:D6"; name_ref = "D1")
+        @test XLSX.Charts.getChartSeriesCount(bw) == 2
 
-        wf = charts[findfirst(c -> XLSX.chartType(c) === :waterfall, charts)]
-        @test_throws XLSX.XLSXError XLSX.addSeries(wf, "D2:D6")
-        @test_throws XLSX.XLSXError XLSX.addChartEx(ws, :histogram, "C2:C6"; anchor = "O1:V16", categories = "B2:B6")
-        @test_throws XLSX.XLSXError XLSX.addChartEx(ws, :treemap, "C2:C6"; anchor = "O1:V16")
+        wf = charts[findfirst(c -> XLSX.Charts.chartType(c) === :waterfall, charts)]
+        @test_throws XLSX.XLSXError XLSX.Charts.addSeries(wf, "D2:D6")
+        @test_throws XLSX.XLSXError XLSX.Charts.addChartEx(ws, :histogram, "C2:C6"; anchor = "O1:V16", categories = "B2:B6")
+        @test_throws XLSX.XLSXError XLSX.Charts.addChartEx(ws, :treemap, "C2:C6"; anchor = "O1:V16")
 
         XLSX.writexlsx(path, xf, overwrite = true)
-        @test length(XLSX.getCharts(XLSX.readxlsx(path))) == length(XLSX.CX_KINDS)
+        @test length(XLSX.Charts.getCharts(XLSX.readxlsx(path))) == length(XLSX.Charts.CX_KINDS)
 
         SAVE_FILES && save_outfile(xf)
         isfile(path) && rm(path)
@@ -831,94 +831,94 @@
 
     @testset "a failed addChartEx leaves no chartsheet behind" begin
         xf = XLSX.newxlsx("data")
-        @test_throws XLSX.XLSXError XLSX.addChartEx(xf, :waterfall, "B2:B6")          # unqualified
-        @test_throws XLSX.XLSXError XLSX.addChartEx(xf, :waterfall, "Nowhere!B2:B6")  # no such sheet
+        @test_throws XLSX.XLSXError XLSX.Charts.addChartEx(xf, :waterfall, "B2:B6")          # unqualified
+        @test_throws XLSX.XLSXError XLSX.Charts.addChartEx(xf, :waterfall, "Nowhere!B2:B6")  # no such sheet
         @test XLSX.sheetnames(xf) == ["data"]
-        @test isempty(XLSX.getCharts(xf))
+        @test isempty(XLSX.Charts.getCharts(xf))
     end
     
     @testset "chart values compare by content" begin
         f = XLSX.readxlsx(joinpath(data_directory, "chart_gaps.xlsx"))          # has error cells
-        c = XLSX.getCharts(f)[1]
-        a, b = XLSX.getChartSeries(c), XLSX.getChartSeries(c)
+        c = XLSX.Charts.getCharts(f)[1]
+        a, b = XLSX.Charts.getChartSeries(c), XLSX.Charts.getChartSeries(c)
         @test a == b                                                             # missing in the cache
         @test hash(a) == hash(b)
         @test length(Set(vcat(a, b))) == length(a)
 
         fa = XLSX.readxlsx(joinpath(data_directory, "chart_appearance.xlsx"))
-        ca = only(filter(x -> x isa XLSX.Chart, XLSX.getCharts(fa)))
-        @test XLSX.getChartAxes(ca) == XLSX.getChartAxes(ca)
-        @test XLSX.getSeriesShapeProps(ca, 1) == XLSX.getSeriesShapeProps(ca, 1)
-        @test XLSX.getSeriesMarker(ca, 1) == XLSX.getSeriesMarker(ca, 1)
+        ca = only(filter(x -> x isa XLSX.Charts.Chart, XLSX.Charts.getCharts(fa)))
+        @test XLSX.Charts.getChartAxes(ca) == XLSX.Charts.getChartAxes(ca)
+        @test XLSX.Charts.getSeriesShapeProps(ca, 1) == XLSX.Charts.getSeriesShapeProps(ca, 1)
+        @test XLSX.Charts.getSeriesMarker(ca, 1) == XLSX.Charts.getSeriesMarker(ca, 1)
     end
 
     @testset "a value read before a write differs from one read after" begin
         path = "chart_equality_write.xlsx"
         cp(joinpath(data_directory, "chart_basic.xlsx"), path; force = true)
         xf = XLSX.openxlsx(path; mode = "rw")
-        c  = XLSX.getChart(xf, "chart1")
-        before = XLSX.getSeriesShapeProps(c, 1)
-        XLSX.setSeriesFill(c, 1, "red")
-        @test XLSX.getSeriesShapeProps(c, 1) != before
+        c  = XLSX.Charts.getChart(xf, "chart1")
+        before = XLSX.Charts.getSeriesShapeProps(c, 1)
+        XLSX.Charts.setSeriesFill(c, 1, "red")
+        @test XLSX.Charts.getSeriesShapeProps(c, 1) != before
         isfile(path) && rm(path)
     end
 
     @testset "chart_extras.xlsx: elements with no other fixture" begin
         xf = XLSX.readxlsx(joinpath(data_directory, "chart_extras.xlsx"))
-        chart(sheet) = only(XLSX.getCharts(xf[sheet]))
+        chart(sheet) = only(XLSX.Charts.getCharts(xf[sheet]))
 
         # Drop lines, on a line chart's group.
-        c = chart("droplines"); g = only(XLSX.getChartGroups(c))
-        dl = XLSX.getGroupDropLines(c, g)
+        c = chart("droplines"); g = only(XLSX.Charts.getChartGroups(c))
+        dl = XLSX.Charts.getGroupDropLines(c, g)
         @test !isnothing(dl)
         @test dl.line.width ≈ 0.75                                   # 9525 EMU
-        @test isnothing(XLSX.getGroupHiLowLines(c, g))
+        @test isnothing(XLSX.Charts.getGroupHiLowLines(c, g))
 
         # High-low lines and up/down bars together.
-        c = chart("hilolines"); g = only(XLSX.getChartGroups(c))
-        @test XLSX.getGroupHiLowLines(c, g).line.width ≈ 0.75
-        @test isnothing(XLSX.getGroupDropLines(c, g))
-        b = XLSX.getGroupUpDownBars(c, g)
+        c = chart("hilolines"); g = only(XLSX.Charts.getChartGroups(c))
+        @test XLSX.Charts.getGroupHiLowLines(c, g).line.width ≈ 0.75
+        @test isnothing(XLSX.Charts.getGroupDropLines(c, g))
+        b = XLSX.Charts.getGroupUpDownBars(c, g)
         @test b.gap_width == 150
-        @test XLSX.has_fill(XLSX.getUpBarShapeProps(c, b))
-        @test XLSX.has_fill(XLSX.getDownBarShapeProps(c, b))
+        @test XLSX.Charts.has_fill(XLSX.Charts.getUpBarShapeProps(c, b))
+        @test XLSX.Charts.has_fill(XLSX.Charts.getDownBarShapeProps(c, b))
 
         # Polynomial and moving-average trendlines, one per series.
         c = chart("trends")
-        tp = only(XLSX.getSeriesTrendlines(c, 1))
+        tp = only(XLSX.Charts.getSeriesTrendlines(c, 1))
         @test tp.kind === :poly
         @test tp.order == 2
         @test isnothing(tp.period)
         @test tp.disp_rsqr === false
-        tm = only(XLSX.getSeriesTrendlines(c, 2))
+        tm = only(XLSX.Charts.getSeriesTrendlines(c, 2))
         @test tm.kind === :movingAvg
         @test tm.period == 2
         @test isnothing(tm.order)
-        ln = XLSX.getTrendlineShapeProps(c, tp).line
+        ln = XLSX.Charts.getTrendlineShapeProps(c, tp).line
         @test ln.width ≈ 1.5
         @test ln.dash == "sysDot"
 
         # Custom error bars with cell references for both directions.
         c = chart("errbars")
-        e = only(XLSX.getSeriesErrorBars(c, 1))
+        e = only(XLSX.Charts.getSeriesErrorBars(c, 1))
         @test e.bar_type === :both
         @test e.value_type === :cust
         @test isnothing(e.direction)                                 # no c:errDir written
         @test e.no_end_cap === false
-        refs = XLSX.getErrorBarsCustomRefs(c, e)
+        refs = XLSX.Charts.getErrorBarsCustomRefs(c, e)
         @test refs.plus.ref  == "errbars!\$C\$2:\$C\$5"
         @test refs.minus.ref == "errbars!\$D\$2:\$D\$5"
         @test refs.plus.data == [12, 18, 25, 9]
 
         # A title bound to a cell: a reference and its cached string, no rich text.
         c = chart("boundtitle")
-        @test XLSX.getChartTitleRef(c) == "boundtitle!\$F\$1"
-        @test XLSX.getChartTitle(c) == "My Bound Title"
-        @test isnothing(XLSX.getChartTitleText(c))
+        @test XLSX.Charts.getChartTitleRef(c) == "boundtitle!\$F\$1"
+        @test XLSX.Charts.getChartTitle(c) == "My Bound Title"
+        @test isnothing(XLSX.Charts.getChartTitleText(c))
 
         # The a:ln join group.
         c = chart("join")
-        l = XLSX.getSeriesLine(c, 1).value
+        l = XLSX.Charts.getSeriesLine(c, 1).value
         @test l.width ≈ 3.0
         @test l.join == "bevel"
     end
@@ -927,22 +927,31 @@
         path = "chart_gridlines_bare.xlsx"
         cp(joinpath(data_directory, "chart_basic.xlsx"), path; force = true)
         xf   = XLSX.openxlsx(path; mode = "rw")
-        c    = XLSX.getChart(xf, "chart1")
-        ax   = only(XLSX.getChartAxes(c, :value))
-        root = XLSX.chart_root(c)
-        axn  = XLSX._axis_node(c, root, ax)
-        new  = XLSX.rebuild_path(root,
-                   [(XLSX.NS_C, "chart")          => "chart",
-                    (XLSX.NS_C, "plotArea")       => "plotArea",
-                    (XLSX.NS_C, "valAx")          => ("valAx", n -> n === axn),
-                    (XLSX.NS_C, "majorGridlines") => "majorGridlines"],
-                   gl -> XLSX.remove_child(gl, "spPr");
+        c    = XLSX.Charts.getChart(xf, "chart1")
+        ax   = only(XLSX.Charts.getChartAxes(c, :value))
+        root = XLSX.Charts.chart_root(c)
+        axn  = XLSX.Charts._axis_node(c, root, ax)
+        new  = XLSX.Charts.rebuild_path(root,
+                   [(XLSX.Charts.NS_C, "chart")          => "chart",
+                    (XLSX.Charts.NS_C, "plotArea")       => "plotArea",
+                    (XLSX.Charts.NS_C, "valAx")          => ("valAx", n -> n === axn),
+                    (XLSX.Charts.NS_C, "majorGridlines") => "majorGridlines"],
+                   gl -> XLSX.Charts.remove_child(gl, "spPr");
                    prefixes = XLSX.ns_prefixes(root))
-        XLSX.set_chart_root!(c, new)
+        XLSX.Charts.set_chart_root!(c, new)
 
-        gl = XLSX.getAxisGridlines(c, ax)
+        gl = XLSX.Charts.getAxisGridlines(c, ax)
         @test !isnothing(gl)                                         # still there
         @test isnothing(gl.fill) && isnothing(gl.line)               # but unformatted
         isfile(path) && rm(path)
     end
+
+    @testset "XLSX-level chart names" begin
+       for n in (:AbstractChart, :Chart, :ChartEx, :ChartRef, :ChartSeries,
+                 :chartSchema, :chartType, :getCharts, :getChart, :getChartData, :getChartRanges)
+           @test getglobal(XLSX, n) === getglobal(XLSX.Charts, n)
+           VERSION >= v"1.11" && @test Base.ispublic(XLSX, n)
+       end
+   end
+
 end

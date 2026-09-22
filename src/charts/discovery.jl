@@ -583,28 +583,28 @@ cached values is `getChartSeries(c; read_cached_values=false)`.
 A chart may reference an external workbook, in which case its source formula
 takes the form `[1]Sheet1!\$A\$1:\$A\$10`, where `[1]` indexes the workbook's
 external references. Pass `get_external_refs=true` to
-[`XLSX.getChartSeries`](@ref) or [`XLSX.getChartData`](@ref) to substitute the
+[`XLSX.Charts.getChartSeries`](@ref) or [`XLSX.Charts.getChartData`](@ref) to substitute the
 workbook path, as [`XLSX.getFormula`](@ref) does.
 
 # Examples
 ```julia
 julia> f = XLSX.readxlsx("sales.xlsx");
 
-julia> c = XLSX.getCharts(f["Summary"])[1];
+julia> c = XLSX.Charts.getCharts(f["Summary"])[1];
 
-julia> XLSX.getChartTitle(c)
+julia> XLSX.Charts.getChartTitle(c)
 "Revenue by region"
 
-julia> XLSX.getChartSeries(c)[1].values.ref
+julia> XLSX.Charts.getChartSeries(c)[1].values.ref
 "Summary!\$B\$2:\$B\$5"
 
 # A DataFrame per chart, skipping chartEx charts, which carry no cached data
-julia> dfs = Dict(c.name => DataFrame(XLSX.getChartData(c))
-                  for c in XLSX.getCharts(f) if c isa XLSX.Chart)
+julia> dfs = Dict(c.name => DataFrame(XLSX.Charts.getChartData(c))
+                  for c in XLSX.Charts.getCharts(f) if c isa XLSX.Charts.Chart)
 ```
 
 !!! note
-    The values [`XLSX.getChartData`](@ref) and [`XLSX.getChartSeries`](@ref)
+    The values [`XLSX.Charts.getChartData`](@ref) and [`XLSX.Charts.getChartSeries`](@ref)
     return are Excel's cache, written when the file was last saved by Excel. They
     may be stale relative to the source, and a file written by a tool that does
     not populate the cache will give empty series.
@@ -612,13 +612,13 @@ julia> dfs = Dict(c.name => DataFrame(XLSX.getChartData(c))
 !!! note
     Charts using the newer `chartEx` schema - waterfall, funnel, treemap,
     sunburst, histogram, Pareto, box & whisker, region map - are returned as
-    [`XLSX.ChartEx`](@ref) rather than [`XLSX.Chart`](@ref). Their type, title
+    [`XLSX.Charts.ChartEx`](@ref) rather than [`XLSX.Charts.Chart`](@ref). Their type, title
     and source ranges are available; their cached values are not, and
-    [`XLSX.getChartData`](@ref) throws for them. Use [`XLSX.chartSchema`](@ref) or
-    `isa` to tell the two apart, and [`XLSX.getChartRanges`](@ref) to find their
+    [`XLSX.Charts.getChartData`](@ref) throws for them. Use [`XLSX.Charts.chartSchema`](@ref) or
+    `isa` to tell the two apart, and [`XLSX.Charts.getChartRanges`](@ref) to find their
     source cells.
 
-See also [`XLSX.getChart`](@ref), [`XLSX.getChartData`](@ref), [`XLSX.chartType`](@ref).
+See also [`XLSX.Charts.getChart`](@ref), [`XLSX.Charts.getChartData`](@ref), [`XLSX.Charts.chartType`](@ref).
 """
 function getCharts(x::Union{Worksheet,XLSXFile})::Vector{AbstractChart}
     xf = get_xlsxfile(x)
@@ -633,13 +633,13 @@ Return a single chart. `name` may be the part name (`"chart1"` or
 `"chart1.xml"`), the full package path, or the chart's relationship id within its
 drawing part (`"rId1"`).
 
-Returns a [`XLSX.ChartEx`](@ref) where the named part uses the `chartEx` schema.
+Returns a [`XLSX.Charts.ChartEx`](@ref) where the named part uses the `chartEx` schema.
 The returned handle reads the current part on every call, so it stays valid
 across edits. Options that affect reading, such as `read_cached_values` and
-`get_external_refs`, are taken by the accessors: see [`XLSX.getChartSeries`](@ref)
-and [`XLSX.getChartData`](@ref).
+`get_external_refs`, are taken by the accessors: see [`XLSX.Charts.getChartSeries`](@ref)
+and [`XLSX.Charts.getChartData`](@ref).
 
-See also [`XLSX.getCharts`](@ref).
+See also [`XLSX.Charts.getCharts`](@ref).
 """
 function getChart(x::Union{Worksheet,XLSXFile}, name::AbstractString)::AbstractChart
     xf = get_xlsxfile(x)
@@ -735,7 +735,7 @@ case, and nothing is cached for it.
 ```julia
 julia> using DataFrames
 
-julia> DataFrame(XLSX.getChartData(f["Summary"], "chart1"))
+julia> DataFrame(XLSX.Charts.getChartData(f["Summary"], "chart1"))
 4×3 DataFrame
  Row │ categories  2024      2025
      │ String      Float64   Float64
@@ -744,10 +744,10 @@ julia> DataFrame(XLSX.getChartData(f["Summary"], "chart1"))
 !!! note
     `chartEx` charts carry no readable value cache, so this throws
     [`XLSX.XLSXError`](@ref) for them. Use
-    [`XLSX.getChartRanges`](@ref) and [`XLSX.getdata`](@ref) to read their
+    [`XLSX.Charts.getChartRanges`](@ref) and [`XLSX.getdata`](@ref) to read their
     source cells instead.
 
-See also [`XLSX.getCharts`](@ref), [`XLSX.gettable`](@ref).
+See also [`XLSX.Charts.getCharts`](@ref), [`XLSX.gettable`](@ref).
 """
 function getChartData(c::Chart; get_external_refs::Bool=false)::DataTable
     series = getChartSeries(c; get_external_refs)
@@ -863,16 +863,16 @@ _chart_ranges(series::Vector{ChartSeries})::Vector{ChartRanges} =
 
 The worksheet ranges of the source data a chart plots from.
 
-Given a [`XLSX.Chart`](@ref), or a chart `name` in any of the forms
-[`XLSX.getChart`](@ref) accepts, return one entry per series in document order,
+Given a [`XLSX.Charts.Chart`](@ref), or a chart `name` in any of the forms
+[`XLSX.Charts.getChart`](@ref) accepts, return one entry per series in document order,
 parallel to `getChartSeries(c)`. Each entry carries the series `idx` and `name` 
 alongside its `categories`, `values` and `bubble_sizes` ranges.
 
 Given no name, return the ranges of every chart on the worksheet or in the
-workbook, each paired with its chart name, following [`XLSX.getCharts`](@ref).
+workbook, each paired with its chart name, following [`XLSX.Charts.getCharts`](@ref).
 
 `categories` holds `c:cat` or `c:xVal` and `values` holds `c:val` or `c:yVal`, so
-the two mean the same thing whatever the chart type, as in [`XLSX.ChartSeries`](@ref).
+the two mean the same thing whatever the chart type, as in [`XLSX.Charts.ChartSeries`](@ref).
 `bubble_sizes` is `nothing` for every chart type but bubble.
 
 A range is `nothing` wherever the series has no addressable source: a literal
@@ -883,7 +883,7 @@ name.
 ```julia
 julia> f = XLSX.readxlsx("sales.xlsx");
 
-julia> r = XLSX.getChartRanges(f["Summary"], "chart1");
+julia> r = XLSX.Charts.getChartRanges(f["Summary"], "chart1");
 
 julia> r[1].name, r[1].values
 ("2024", Summary!B2:B5)
@@ -894,7 +894,7 @@ julia> XLSX.getdata(f, r[1].values)      # read the live source cells, not the c
  1310.0
  ⋮
 
-julia> [(x.chart, length(x.ranges)) for x in XLSX.getChartRanges(f)]
+julia> [(x.chart, length(x.ranges)) for x in XLSX.Charts.getChartRanges(f)]
 2-element Vector{Tuple{String, Int64}}:
  ("chart1", 3)
  ("chart2", 1)
@@ -902,17 +902,17 @@ julia> [(x.chart, length(x.ranges)) for x in XLSX.getChartRanges(f)]
 
 !!! note
     A range records where the chart says its source data came from, which is not
-    necessarily where the values in [`XLSX.getChartData`](@ref) came from: the
+    necessarily where the values in [`XLSX.Charts.getChartData`](@ref) came from: the
     cache is a snapshot from the last save, and the cells may have changed
     since, or the source sheet may have been deleted entirely.
 
 !!! note
-    For a [`XLSX.ChartEx`](@ref) this returns a flat `Vector{ChartRange}` rather
+    For a [`XLSX.Charts.ChartEx`](@ref) this returns a flat `Vector{ChartRange}` rather
     than one entry per series. The `cx:` schema declares its data dimensions
     once in `cx:chartData` and shares them across series, so there is no
     per-series `idx` or `name` to report.
 
-See also [`XLSX.getChart`](@ref), [`XLSX.getCharts`](@ref), [`XLSX.getChartData`](@ref).
+See also [`XLSX.Charts.getChart`](@ref), [`XLSX.Charts.getCharts`](@ref), [`XLSX.Charts.getChartData`](@ref).
 """
 getChartRanges(c::Chart) = _chart_ranges(getChartSeries(c; read_cached_values=false))
 
@@ -930,7 +930,7 @@ getChartRanges(x::Union{Worksheet,XLSXFile}) =
 # ===========================================================================
 
 function Base.show(io::IO, c::Chart)
-    print(io, "XLSX.Chart(\"", c.name, "\"",
+    print(io, "XLSX.Charts.Chart(\"", c.name, "\"",
           isnothing(c.sheet) ? "" : ", \"" * c.sheet * "\"",
           isnothing(c.from) ? "" : ", " * c.from,
           ", ", join(string.(getChartTypes(c)), "+"),
@@ -938,13 +938,13 @@ function Base.show(io::IO, c::Chart)
 end
 
 Base.show(io::IO, s::ChartSeries) =
-    print(io, "XLSX.ChartSeries(", something(s.name, "<unnamed>"), ", ", s.charttype, ")")
+    print(io, "XLSX.Charts.ChartSeries(", something(s.name, "<unnamed>"), ", ", s.charttype, ")")
 
 Base.show(io::IO, r::ChartRef) =
-    print(io, "XLSX.ChartRef(", something(r.ref, "<literal>"), ", ", r.ptCount, " pts)")
+    print(io, "XLSX.Charts.ChartRef(", something(r.ref, "<literal>"), ", ", r.ptCount, " pts)")
 
 function Base.show(io::IO, ::MIME"text/plain", c::Chart)
-    print(io, "XLSX.Chart \"", c.name, "\"")
+    print(io, "XLSX.Charts.Chart \"", c.name, "\"")
     isnothing(c.sheet) || print(io, " on sheet \"", c.sheet, "\"")
     isnothing(c.from) || print(io, " at ", c.from, isnothing(c.to) ? "" : ":" * c.to)
     println(io)
@@ -962,7 +962,7 @@ function Base.show(io::IO, ::MIME"text/plain", c::Chart)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", s::ChartSeries)
-    println(io, "XLSX.ChartSeries ", something(s.name, "<unnamed>"), " (", s.charttype, ")")
+    println(io, "XLSX.Charts.ChartSeries ", something(s.name, "<unnamed>"), " (", s.charttype, ")")
     for (label, r) in (("categories", s.categories), ("values", s.values), ("sizes", s.bubble_sizes))
         isnothing(r) && continue
         println(io, "  ", label, ": ", something(r.ref, "<literal>"), " - ", r.ptCount, " pts, ", r.kind)
@@ -970,21 +970,21 @@ function Base.show(io::IO, ::MIME"text/plain", s::ChartSeries)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", r::ChartRef)
-    println(io, "XLSX.ChartRef ", something(r.ref, "<literal>"), " (", r.kind, ", ", r.ptCount, " pts)")
+    println(io, "XLSX.Charts.ChartRef ", something(r.ref, "<literal>"), " (", r.kind, ", ", r.ptCount, " pts)")
     isnothing(r.format_code) || println(io, "  format: ", r.format_code)
     isempty(r.errors) || println(io, "  errors at: ", join(sort(collect(keys(r.errors))), ", "))
     isempty(r.data) || println(io, "  data: ", r.data)
 end
 
 Base.show(io::IO, c::ChartEx) =
-    print(io, "XLSX.ChartEx(\"", c.name, "\"",
+    print(io, "XLSX.Charts.ChartEx(\"", c.name, "\"",
           isnothing(c.sheet) ? "" : ", \"" * c.sheet * "\"",
           isnothing(c.from) ? "" : ", " * c.from,
           ", ", chartType(c), ", ", length(_cx_refs(c)), " refs)")
 
 function Base.show(io::IO, ::MIME"text/plain", c::ChartEx)
-    # header, e.g.  XLSX.ChartEx "chartEx1" on sheet "Sheet1" at K9:R23
-    print(io, "XLSX.ChartEx ", repr(c.name))
+    # header, e.g.  XLSX.Charts.ChartEx "chartEx1" on sheet "Sheet1" at K9:R23
+    print(io, "XLSX.Charts.ChartEx ", repr(c.name))
     isnothing(c.sheet) || print(io, " on sheet ", repr(c.sheet))
     (isnothing(c.from) || isnothing(c.to)) || print(io, " at ", c.from, ":", c.to)
     println(io)

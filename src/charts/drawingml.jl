@@ -139,11 +139,11 @@ function parse_drawing_color(wb::Workbook, node::Union{Nothing,XML.Node})::Union
 end
 
 Base.show(io::IO, c::DrawingColor) =
-    print(io, "XLSX.DrawingColor(", c.val, " -> #", c.rgb,
+    print(io, "XLSX.Charts.DrawingColor(", c.val, " -> #", c.rgb,
           c.alpha == 1.0 ? "" : ", alpha " * string(round(c.alpha; digits=3)), ")")
 
 function Base.show(io::IO, ::MIME"text/plain", c::DrawingColor)
-    println(io, "XLSX.DrawingColor ", c.kind, " ", repr(c.val))
+    println(io, "XLSX.Charts.DrawingColor ", c.kind, " ", repr(c.val))
     println(io, "  resolves to: #", c.rgb)
     c.alpha == 1.0 || println(io, "  alpha: ", round(c.alpha; digits=3))
     isempty(c.transforms) ||
@@ -236,12 +236,12 @@ _show_color(c::SchemeColor)  = string(c.token)
 _show_color(c::AbstractString) = String(c)
 
 Base.show(io::IO, fl::DrawingFill) =
-    print(io, "XLSX.DrawingFill(", fl.kind,
+    print(io, "XLSX.Charts.DrawingFill(", fl.kind,
           isnothing(fl.fgcolor) ? "" : ", " * _show_color(fl.fgcolor),
           isnothing(fl.bgcolor) ? "" : " on " * _show_color(fl.bgcolor), ")")
 
 function Base.show(io::IO, ::MIME"text/plain", fl::DrawingFill)
-    println(io, "XLSX.DrawingFill ", fl.kind)
+    println(io, "XLSX.Charts.DrawingFill ", fl.kind)
     isnothing(fl.preset)  || println(io, "  pattern: ", fl.preset)
     isnothing(fl.fgcolor) || println(io, "  foreground: ", _show_color(fl.fgcolor))
     isnothing(fl.bgcolor) || println(io, "  background: ", _show_color(fl.bgcolor))

@@ -27,13 +27,13 @@ two things follow, and both matter:
   no cached values at all, even though the chart is perfectly valid and will
   display correctly once Excel opens and re-saves it.
 
-Where a chart's series refers to a real range, [`XLSX.getChartRanges`](@ref) gives
+Where a chart's series refers to a real range, [`XLSX.Charts.getChartRanges`](@ref) gives
 you that range so you can read the live cells instead. See
 [Where the data came from](#Where-the-data-came-from) below.
 
 ## Finding the charts
 
-[`XLSX.getCharts`](@ref) lists every chart anchored to a worksheet, or every chart
+[`XLSX.Charts.getCharts`](@ref) lists every chart anchored to a worksheet, or every chart
 in the file:
 
 ```julia
@@ -45,13 +45,13 @@ XLSXFile("chart_basic.xlsx") containing 1 Worksheet
 -------------------------------------------------
                  Data 5x3           A1:C5
 
-julia> XLSX.getCharts(f["Data"])
-1-element Vector{XLSX.Chart}:
- XLSX.Chart("chart1", "Data", G9, barChart, 2 series)
+julia> XLSX.Charts.getCharts(f["Data"])
+1-element Vector{XLSX.Charts.Chart}:
+ XLSX.Charts.Chart("chart1", "Data", G9, barChart, 2 series)
 
-julia> XLSX.getCharts(f)          # the whole workbook
-1-element Vector{XLSX.Chart}:
- XLSX.Chart("chart1", "Data", G9, barChart, 2 series)
+julia> XLSX.Charts.getCharts(f)          # the whole workbook
+1-element Vector{XLSX.Charts.Chart}:
+ XLSX.Charts.Chart("chart1", "Data", G9, barChart, 2 series)
 ```
 
 `getCharts(ws)` returns the charts *anchored to that sheet*, in the order the
@@ -60,23 +60,23 @@ order, followed by any chart part the package declares but no drawing references
 — an orphan left behind by an edit elsewhere. Both return an empty vector when
 there is nothing to find.
 
-[`XLSX.getChart`](@ref) fetches a single chart. It accepts the part name, with or
+[`XLSX.Charts.getChart`](@ref) fetches a single chart. It accepts the part name, with or
 without its extension, the full package path, or the chart's relationship id
 within its drawing part:
 
 ```julia
-julia> c = XLSX.getChart(f["Data"], "chart1")
-XLSX.Chart "chart1" on sheet "Data" at G9:N23
+julia> c = XLSX.Charts.getChart(f["Data"], "chart1")
+XLSX.Charts.Chart "chart1" on sheet "Data" at G9:N23
   title: "Revenue by Region"
   type: barChart
   series: 2
     [0] 2024 - Data!$B$2:$B$5 (4 pts)
     [1] 2025 - Data!$C$2:$C$5 (4 pts)
 
-julia> XLSX.getChart(f, "xl/charts/chart1.xml") == c
+julia> XLSX.Charts.getChart(f, "xl/charts/chart1.xml") == c
 true
 
-julia> XLSX.getChart(f["Data"], "rId1") == c
+julia> XLSX.Charts.getChart(f["Data"], "rId1") == c
 true
 ```
 
@@ -87,7 +87,7 @@ are.
 
 Three types carry the result, nested one inside the next.
 
-[`XLSX.Chart`](@ref) is one chart part:
+[`XLSX.Charts.Chart`](@ref) is one chart part:
 
 | Field | Meaning |
 | --- | --- |
@@ -100,13 +100,13 @@ Three types carry the result, nested one inside the next.
 | `charttypes` | `[:barChart]`, or several for a combo chart |
 | `series` | `Vector{ChartSeries}` in document order |
 
-[`XLSX.ChartSeries`](@ref) is one series within it, holding its `idx` and `order`
+[`XLSX.Charts.ChartSeries`](@ref) is one series within it, holding its `idx` and `order`
 as Excel recorded them, its `charttype`, its `name`, and up to four references:
 `name_ref`, `categories`, `values` and `bubble_sizes`.
 
 ```julia
 julia> s = c.series[1]
-XLSX.ChartSeries 2024 (barChart)
+XLSX.Charts.ChartSeries 2024 (barChart)
   categories: Data!$A$2:$A$5 - 4 pts, str
   values: Data!$B$2:$B$5 - 4 pts, num
 ```
@@ -117,12 +117,12 @@ XLSX.ChartSeries 2024 (barChart)
     fields therefore mean the same thing whatever the chart type, and you never
     need to branch on `charttype` to find the data.
 
-[`XLSX.ChartRef`](@ref) is a single reference — the formula it came from, the
+[`XLSX.Charts.ChartRef`](@ref) is a single reference — the formula it came from, the
 number format Excel recorded for it, and the cached points themselves:
 
 ```julia
 julia> s.values
-XLSX.ChartRef Data!$B$2:$B$5 (num, 4 pts)
+XLSX.Charts.ChartRef Data!$B$2:$B$5 (num, 4 pts)
   format: General
   data: [10.0, 20.0, 15.0, 5.0]
 
@@ -139,13 +139,13 @@ they have no `ref`.
 
 ## Getting the cached data
 
-[`XLSX.getChartData`](@ref) flattens a chart's series into an
+[`XLSX.Charts.getChartData`](@ref) flattens a chart's series into an
 [`XLSX.DataTable`](@ref), ready for `DataFrame` or any other Tables.jl sink:
 
 ```julia
 julia> using DataFrames
 
-julia> DataFrame(XLSX.getChartData(c))
+julia> DataFrame(XLSX.Charts.getChartData(c))
 4×3 DataFrame
  Row │ categories  2024     2025
      │ String      Float64  Float64
@@ -159,7 +159,7 @@ julia> DataFrame(XLSX.getChartData(c))
 It also takes a chart name directly, saving the intermediate `getChart` call:
 
 ```julia
-julia> dt = XLSX.getChartData(f["Data"], "chart1");
+julia> dt = XLSX.Charts.getChartData(f["Data"], "chart1");
 ```
 
 Series that have no name in the file — the ones Excel labels "Series1",
@@ -175,7 +175,7 @@ bubble charts, where each series carries its own x values — each series
 contributes its own `<series>_x` column immediately before its values:
 
 ```julia
-julia> DataFrame(XLSX.getChartData(XLSX.readxlsx("chart_scatter.xlsx"), "chart1"))
+julia> DataFrame(XLSX.Charts.getChartData(XLSX.readxlsx("chart_scatter.xlsx"), "chart1"))
 4×4 DataFrame
  Row │ Series1_x  Series1  Series2_x  Series2
      │ Float64    Float64  Float64    Float64
@@ -190,7 +190,7 @@ Multi-level categories give one column per level, in the order Excel writes them
 (innermost first):
 
 ```julia
-julia> DataFrame(XLSX.getChartData(XLSX.readxlsx("chart_multilevel.xlsx"), "chart1"))
+julia> DataFrame(XLSX.Charts.getChartData(XLSX.readxlsx("chart_multilevel.xlsx"), "chart1"))
 4×3 DataFrame
  Row │ categories_1  categories_2  Sales
      │ String        String        Float64
@@ -208,12 +208,12 @@ plotting against an implicit index in that case, and caches nothing for it.
 
 ## Where the data came from
 
-The cache tells you what the chart *displayed*; [`XLSX.getChartRanges`](@ref)
+The cache tells you what the chart *displayed*; [`XLSX.Charts.getChartRanges`](@ref)
 tells you where it says the data *came from*, as a range object you can hand
 straight back to [`XLSX.getdata`](@ref):
 
 ```julia
-julia> r = XLSX.getChartRanges(f["Data"], "chart1");
+julia> r = XLSX.Charts.getChartRanges(f["Data"], "chart1");
 
 julia> r[1].name, r[1].categories, r[1].values
 ("2024", Data!A2:A5, Data!B2:B5)
@@ -235,7 +235,7 @@ Called with no name, `getChartRanges` covers every chart on the sheet or in the
 workbook, each paired with its chart name:
 
 ```julia
-julia> [(x.chart, length(x.ranges)) for x in XLSX.getChartRanges(f)]
+julia> [(x.chart, length(x.ranges)) for x in XLSX.Charts.getChartRanges(f)]
 1-element Vector{Tuple{String, Int64}}:
  ("chart1", 2)
 ```
@@ -266,10 +266,10 @@ difference.
 which is `#N/A` and nothing else:
 
 ```julia
-julia> g = XLSX.getChart(XLSX.readxlsx("chart_gaps.xlsx"), "chart1");
+julia> g = XLSX.Charts.getChart(XLSX.readxlsx("chart_gaps.xlsx"), "chart1");
 
 julia> v = g.series[1].values
-XLSX.ChartRef Data!$B$2:$B$6 (num, 5 pts)
+XLSX.Charts.ChartRef Data!$B$2:$B$6 (num, 5 pts)
   format: General
   errors at: 3
   data: Union{Missing, Float64}[1.0, missing, missing, 0.0, 5.0]
@@ -309,7 +309,7 @@ though the source cell holds `#DIV/0!`.
     A zero in cached chart data may be a genuine zero or may be any error other
     than `#N/A`. This is a limitation of the file format, not of XLSX.jl: Excel
     discards the distinction when it writes the cache. Where it matters, read the
-    source cells through [`XLSX.getChartRanges`](@ref) and
+    source cells through [`XLSX.Charts.getChartRanges`](@ref) and
     [`XLSX.getdata`](@ref), which see the real cell values and report every error
     type.
 
@@ -325,7 +325,7 @@ series sharing an axis, say — reports every group in `charttypes`, and each
 series remembers which group it belongs to:
 
 ```julia
-julia> cc = XLSX.getChart(XLSX.readxlsx("chart_combo.xlsx"), "chart1");
+julia> cc = XLSX.Charts.getChart(XLSX.readxlsx("chart_combo.xlsx"), "chart1");
 
 julia> cc.charttypes
 2-element Vector{Symbol}:
@@ -338,7 +338,7 @@ julia> [(s.name, s.charttype) for s in cc.series]
  ("2025", :lineChart)
 ```
 
-[`XLSX.getChartData`](@ref) is indifferent to this: series from every group land in the same
+[`XLSX.Charts.getChartData`](@ref) is indifferent to this: series from every group land in the same
 table, in document order.
 
 ## Chartsheets
@@ -354,8 +354,8 @@ XLSXFile("chart_chartsheet.xlsx") containing 2 Worksheets
              TheChart Chartsheet
                  Data 5x3           A1:C5
 
-julia> c = XLSX.getCharts(f["TheChart"])[1]
-XLSX.Chart "chart1" on sheet "TheChart"
+julia> c = XLSX.Charts.getCharts(f["TheChart"])[1]
+XLSX.Charts.Chart "chart1" on sheet "TheChart"
   title: "Revenue by Region"
   type: barChart
   series: 2
@@ -374,7 +374,7 @@ A series may plot from a range in a different workbook, in which case its `ref`
 begins with a bracketed index into the workbook's external references:
 
 ```julia
-julia> e = XLSX.getChart(XLSX.readxlsx("chart_external.xlsx"), "chart1");
+julia> e = XLSX.Charts.getChart(XLSX.readxlsx("chart_external.xlsx"), "chart1");
 
 julia> e.series[1].values.ref
 "[1]Feuil1!\$B\$1:\$B\$10"
@@ -384,7 +384,7 @@ Pass `get_external_refs=true` to substitute the recorded workbook path, exactly
 as [`XLSX.getFormula`](@ref) does for formulas:
 
 ```julia
-julia> e = XLSX.getChart(XLSX.readxlsx("chart_external.xlsx"), "chart1";
+julia> e = XLSX.Charts.getChart(XLSX.readxlsx("chart_external.xlsx"), "chart1";
                          get_external_refs=true);
 
 julia> e.series[1].values.ref
@@ -402,10 +402,10 @@ you only need the shape of a chart — its title, types, series names, source
 formulas, format codes and point counts — pass `read_cached_values=false`:
 
 ```julia
-julia> c = XLSX.getChart(f["Data"], "chart1"; read_cached_values=false);
+julia> c = XLSX.Charts.getChart(f["Data"], "chart1"; read_cached_values=false);
 
 julia> c.series[1].values
-XLSX.ChartRef Data!$B$2:$B$5 (num, 4 pts)
+XLSX.Charts.ChartRef Data!$B$2:$B$5 (num, 4 pts)
   format: General
 
 julia> c.series[1].values.data
@@ -415,8 +415,8 @@ Any[]
 `ptCount` is still populated; only `data` is left empty. Series names are always
 read, since they are metadata rather than plotted values.
 
-Calling [`XLSX.getChartData`](@ref) on a chart read this way throws an `XLSXError` rather than
-silently returning an empty table. [`XLSX.getChartRanges`](@ref) uses `read_cached_values=false` 
+Calling [`XLSX.Charts.getChartData`](@ref) on a chart read this way throws an `XLSXError` rather than
+silently returning an empty table. [`XLSX.Charts.getChartRanges`](@ref) uses `read_cached_values=false` 
 internally, as it never needs the values.
 
 ## What is not supported
@@ -424,18 +424,18 @@ internally, as it never needs the values.
 - **Creating or editing charts.** Reading only, for now.
 - **chartEx charts.** Waterfall, funnel, treemap, sunburst, histogram,
   Pareto, box & whisker and region map charts use a newer schema under a
-  different namespace. These are returned as [`XLSX.ChartEx`](@ref) rather
-  than [`XLSX.Chart`](@ref): their type, title and source ranges are read,
-  but their cached values are not, and [`XLSX.getChartData`](@ref) throws
+  different namespace. These are returned as [`XLSX.Charts.ChartEx`](@ref) rather
+  than [`XLSX.Charts.Chart`](@ref): their type, title and source ranges are read,
+  but their cached values are not, and [`XLSX.Charts.getChartData`](@ref) throws
   for them.
 - **chartEx source references.** Excel writes these indirectly, through
   hidden defined names of the form `_xlchart.v1.0` rather than as worksheet
   ranges. `c.refs` holds the reference as written;
-  [`XLSX.getChartRanges`](@ref) resolves it. Those names are excluded from
+  [`XLSX.Charts.getChartRanges`](@ref) resolves it. Those names are excluded from
   [`XLSX.getDefinedNames`](@ref) and are protected from deletion.
 - **Chart appearance.** Colours, fonts, axis scales, gridlines, data labels, 
   trendlines and legends are all preserved on write but are not currently 
   exposed for reading.
 - **Live recomputation.** Values come from the cache. Use
-  [`XLSX.getChartRanges`](@ref) with [`XLSX.getdata`](@ref) to read the source
+  [`XLSX.Charts.getChartRanges`](@ref) with [`XLSX.getdata`](@ref) to read the source
   cells as they stand now.

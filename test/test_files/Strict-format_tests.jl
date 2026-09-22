@@ -162,7 +162,7 @@
         f= XLSX.openxlsx("mytest.xlsx"; mode="rw")
         XLSX.deletesheet!(f["Diagramm1"])
         @test XLSX.sheetnames(f) == ["Tabelle1"]
-        @test isempty(XLSX.getCharts(f))
+        @test isempty(XLSX.Charts.getCharts(f))
         isfile("mytest.xlsx") && rm("mytest.xlsx")
     end
     @testset "Normalisation reaches every element" begin

@@ -143,10 +143,10 @@
         wb = XLSX.get_workbook(f)
         ch = XLSX.xml_root_element(f.data["xl/charts/chart1.xml"])
 
-        cols = XLSX.DrawingColor[]
+        cols = XLSX.Charts.DrawingColor[]
         walk(n) = for c in XML.eachelement(n)
             XLSX.localname(c) == "solidFill" ?
-                (col = XLSX.parse_drawing_color(wb, c); isnothing(col) || push!(cols, col)) :
+                (col = XLSX.Charts.parse_drawing_color(wb, c); isnothing(col) || push!(cols, col)) :
                 walk(c)
         end
         walk(ch)
