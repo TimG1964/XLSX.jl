@@ -489,7 +489,10 @@ function getdata(ws::Worksheet, cell::Cell)
     # Fast path for common non-date types — avoids fetching workbook date mode
     dt == CT_EMPTY  && return missing
     dt == CT_ERROR  && return missing
-    dt == CT_STRING && return sst_unformatted_string(ws, reinterpret(Int64, v))
+    if dt == CT_STRING
+        s = sst_unformatted_string(ws, reinterpret(Int64, v))
+        return isempty(s) ? missing : s
+    end
     dt == CT_BOOL   && return v != 0
     dt == CT_INT    && return reinterpret(Int64, v)
     dt == CT_FLOAT  && return reinterpret(Float64, v)
