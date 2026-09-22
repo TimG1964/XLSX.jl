@@ -2590,6 +2590,24 @@
             @test occursin("<cfvo type=\"num\" val=\"10\"/>", x)
             @test occursin("rgb=\"FFFCFCFF\"", x)
         end
+
+        @testset "cellIs default value averages the cells of a non-contiguous range" begin
+            xf = XLSX.newxlsx()
+            s  = xf[1]
+            s["A1"] = 2; s["A2"] = 100; s["A3"] = 4; s["A4"] = "text"
+            XLSX.setConditionalFormat(s, "A1,A3", :cellIs)            # the average of A1 and A3 only
+            XLSX.setConditionalFormat(s, "A1:A4", :cellIs)            # contiguous, with a text cell
+            f = tempname() * ".xlsx"
+            XLSX.writexlsx(f, xf; overwrite = true)
+            r    = XLSX.ZipArchives.ZipReader(read(f))
+            xml  = XLSX.ZipArchives.zip_readentry(r, "xl/worksheets/sheet1.xml", String)
+            fmls = [m[1] for m in eachmatch(r"<formula>([^<]*)</formula>", xml)]
+            @test "3.0" in fmls                                       # (2 + 4) / 2
+            @test any(x -> parse(Float64, x) ≈ 106 / 3, fmls)         # (2 + 100 + 4) / 3; text ignored
+            @test !any(x -> occursin(r"\[|;;", x), fmls)              # never a printed array
+            rm(f)
+        end
+
     end
     @testset "clear replaces previous bands" begin
         xf = XLSX.newxlsx(); s = xf[1]

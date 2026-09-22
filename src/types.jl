@@ -425,6 +425,7 @@ struct Table
     display_name::String
     ref::CellRange
     columns::Vector{String}
+    has_header_row::Bool          # false when the header row is hidden (headerRowCount="0"); ref then starts at the data
     has_totals_row::Bool
     style::Union{TableStyleInfo,Nothing}
     sheet # untyped to resolve circular dependency with Worksheet
@@ -1779,3 +1780,20 @@ and `c:spPr` is `a:CT_ShapeProperties` despite its chart prefix. Callers state i
 """
 const SchemaKey = Tuple{String,String}
 
+# Value equality for the chart and DrawingML value types: every field except `raw`,
+# which is a snapshot of the XML rather than part of the value. Fields compare with
+# isequal, so `missing` (error cells in a cache) and NaN behave, and hash agrees.
+# Chart and ChartEx are handles, compared by package and path in charts.jl;
+# ChartGroup, SchemeColor and the ChartEx value types define their own.
+for T in (ChartRef, ChartSeries, ChartAxis, ChartDataPoint, ChartDataLabel, ChartTrendline,
+          ChartErrorBars, ChartMarker, ChartUpDownBars,
+          DrawingColor, DrawingFill, DrawingLine, DrawingShapeProps, DrawingText,
+          DrawingBodyProps, DrawingParagraph, DrawingParaProps, DrawingRun, DrawingRunProps)
+    @eval begin
+        Base.:(==)(a::$T, b::$T) =
+            all(f -> f === :raw || isequal(getfield(a, f), getfield(b, f)), fieldnames($T))
+        Base.hash(x::$T, h::UInt) =
+            foldl((h, f) -> f === :raw ? h : hash(getfield(x, f), h), fieldnames($T);
+                  init = hash($(QuoteNode(nameof(T))), h))
+    end
+end

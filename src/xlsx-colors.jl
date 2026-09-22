@@ -384,3 +384,4 @@ function _linear_map(c::Colors.RGB{Float64}, f)
     return Colors.RGB{Float64}(r, g, b)
 end
 
+

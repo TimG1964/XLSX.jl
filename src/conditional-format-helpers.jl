@@ -407,3 +407,9 @@ function _band_colors(spec, n::Int)::Vector{String}
     throw(XLSXError("`colors` must give either $n colors (one per band) or " *
                     "2 colors to interpolate between, got $(length(cols))."))
 end
+
+# Every value in a range as one flat vector. getdata gives a matrix for a
+# contiguous range and a vector of matrices, one per part, for a non-contiguous one.
+_cf_values(ws::Worksheet, rng) =
+    (d = getdata(ws, rng);
+     d isa AbstractMatrix ? vec(d) : reduce(vcat, vec.(d); init = Any[]))

@@ -1434,6 +1434,8 @@ chart; a bubble chart requires them, and `bubble_sizes` too. `name` is literal
 text for the series name, and `name_ref` a cell to take it from; pass one or
 neither.
 
+To plot a table column, pass gettablerange(t, column) for either `values` or `categories`
+
 `markers` (line, lineMarkers, radar and scatter) is a symbol such as `:circle`,
 or `false` for none. `smooth` (line, lineMarkers and scatter) curves the line.
 `line` (scatter) joins the points. 

@@ -837,4 +837,112 @@
         @test isempty(XLSX.getCharts(xf))
     end
     
+    @testset "chart values compare by content" begin
+        f = XLSX.readxlsx(joinpath(data_directory, "chart_gaps.xlsx"))          # has error cells
+        c = XLSX.getCharts(f)[1]
+        a, b = XLSX.getChartSeries(c), XLSX.getChartSeries(c)
+        @test a == b                                                             # missing in the cache
+        @test hash(a) == hash(b)
+        @test length(Set(vcat(a, b))) == length(a)
+
+        fa = XLSX.readxlsx(joinpath(data_directory, "chart_appearance.xlsx"))
+        ca = only(filter(x -> x isa XLSX.Chart, XLSX.getCharts(fa)))
+        @test XLSX.getChartAxes(ca) == XLSX.getChartAxes(ca)
+        @test XLSX.getSeriesShapeProps(ca, 1) == XLSX.getSeriesShapeProps(ca, 1)
+        @test XLSX.getSeriesMarker(ca, 1) == XLSX.getSeriesMarker(ca, 1)
+    end
+
+    @testset "a value read before a write differs from one read after" begin
+        path = "chart_equality_write.xlsx"
+        cp(joinpath(data_directory, "chart_basic.xlsx"), path; force = true)
+        xf = XLSX.openxlsx(path; mode = "rw")
+        c  = XLSX.getChart(xf, "chart1")
+        before = XLSX.getSeriesShapeProps(c, 1)
+        XLSX.setSeriesFill(c, 1, "red")
+        @test XLSX.getSeriesShapeProps(c, 1) != before
+        isfile(path) && rm(path)
+    end
+
+    @testset "chart_extras.xlsx: elements with no other fixture" begin
+        xf = XLSX.readxlsx(joinpath(data_directory, "chart_extras.xlsx"))
+        chart(sheet) = only(XLSX.getCharts(xf[sheet]))
+
+        # Drop lines, on a line chart's group.
+        c = chart("droplines"); g = only(XLSX.getChartGroups(c))
+        dl = XLSX.getGroupDropLines(c, g)
+        @test !isnothing(dl)
+        @test dl.line.width ≈ 0.75                                   # 9525 EMU
+        @test isnothing(XLSX.getGroupHiLowLines(c, g))
+
+        # High-low lines and up/down bars together.
+        c = chart("hilolines"); g = only(XLSX.getChartGroups(c))
+        @test XLSX.getGroupHiLowLines(c, g).line.width ≈ 0.75
+        @test isnothing(XLSX.getGroupDropLines(c, g))
+        b = XLSX.getGroupUpDownBars(c, g)
+        @test b.gap_width == 150
+        @test XLSX.has_fill(XLSX.getUpBarShapeProps(c, b))
+        @test XLSX.has_fill(XLSX.getDownBarShapeProps(c, b))
+
+        # Polynomial and moving-average trendlines, one per series.
+        c = chart("trends")
+        tp = only(XLSX.getSeriesTrendlines(c, 1))
+        @test tp.kind === :poly
+        @test tp.order == 2
+        @test isnothing(tp.period)
+        @test tp.disp_rsqr === false
+        tm = only(XLSX.getSeriesTrendlines(c, 2))
+        @test tm.kind === :movingAvg
+        @test tm.period == 2
+        @test isnothing(tm.order)
+        ln = XLSX.getTrendlineShapeProps(c, tp).line
+        @test ln.width ≈ 1.5
+        @test ln.dash == "sysDot"
+
+        # Custom error bars with cell references for both directions.
+        c = chart("errbars")
+        e = only(XLSX.getSeriesErrorBars(c, 1))
+        @test e.bar_type === :both
+        @test e.value_type === :cust
+        @test isnothing(e.direction)                                 # no c:errDir written
+        @test e.no_end_cap === false
+        refs = XLSX.getErrorBarsCustomRefs(c, e)
+        @test refs.plus.ref  == "errbars!\$C\$2:\$C\$5"
+        @test refs.minus.ref == "errbars!\$D\$2:\$D\$5"
+        @test refs.plus.data == [12, 18, 25, 9]
+
+        # A title bound to a cell: a reference and its cached string, no rich text.
+        c = chart("boundtitle")
+        @test XLSX.getChartTitleRef(c) == "boundtitle!\$F\$1"
+        @test XLSX.getChartTitle(c) == "My Bound Title"
+        @test isnothing(XLSX.getChartTitleText(c))
+
+        # The a:ln join group.
+        c = chart("join")
+        l = XLSX.getSeriesLine(c, 1).value
+        @test l.width ≈ 3.0
+        @test l.join == "bevel"
+    end
+
+    @testset "gridlines written without c:spPr are still gridlines" begin
+        path = "chart_gridlines_bare.xlsx"
+        cp(joinpath(data_directory, "chart_basic.xlsx"), path; force = true)
+        xf   = XLSX.openxlsx(path; mode = "rw")
+        c    = XLSX.getChart(xf, "chart1")
+        ax   = only(XLSX.getChartAxes(c, :value))
+        root = XLSX.chart_root(c)
+        axn  = XLSX._axis_node(c, root, ax)
+        new  = XLSX.rebuild_path(root,
+                   [(XLSX.NS_C, "chart")          => "chart",
+                    (XLSX.NS_C, "plotArea")       => "plotArea",
+                    (XLSX.NS_C, "valAx")          => ("valAx", n -> n === axn),
+                    (XLSX.NS_C, "majorGridlines") => "majorGridlines"],
+                   gl -> XLSX.remove_child(gl, "spPr");
+                   prefixes = XLSX.ns_prefixes(root))
+        XLSX.set_chart_root!(c, new)
+
+        gl = XLSX.getAxisGridlines(c, ax)
+        @test !isnothing(gl)                                         # still there
+        @test isnothing(gl.fill) && isnothing(gl.line)               # but unformatted
+        isfile(path) && rm(path)
+    end
 end

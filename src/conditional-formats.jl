@@ -1555,8 +1555,12 @@ function setCfCellIs(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::
     dxid = Add_Cf_Dx(wb, new_dx)
 
     if isnothing(value)
-        value = all(ismissing.(ws[rng])) ? nothing : string(sum(skipmissing(ws[rng])) / count(!ismissing, ws[rng]))
+        # The average of the range's numbers, as Excel's AVERAGE takes it: text,
+        # booleans and empty cells are ignored.
+        nums  = filter(v -> v isa Real && !(v isa Bool), _cf_values(ws, rng))
+        value = isempty(nums) ? nothing : string(sum(nums) / length(nums))
     end
+
     cfx = XML.Element("$(pfx)cfRule"; type="cellIs", dxfId=string(dxid.id))
     cfx["priority"] = next_cf_priority!(ws)
     if !isnothing(stopIfTrue) && stopIfTrue == "true"

@@ -90,9 +90,10 @@ function resolve_color_base(wb::Workbook, node::XML.Node)::String
         return Colors.hex(c, :RRGGBB)
 
     elseif tag == "scrgbClr"
-        c = Colors.RGB{Float64}(_attr_pct(node, "r", 0.0),
-                                _attr_pct(node, "g", 0.0),
-                                _attr_pct(node, "b", 0.0))
+        # Components are linear, in thousandths of a percent, and may lie outside
+        # 0–100% (scRGB is an extended-range space); clamp to what sRGB can show.
+        lin(name) = _linear_to_srgb(clamp(_attr_pct(node, name, 0.0), 0.0, 1.0))
+        c = Colors.RGB{Float64}(lin("r"), lin("g"), lin("b"))
         return Colors.hex(c, :RRGGBB)
     end
 
@@ -636,7 +637,9 @@ function text_content(node::XML.Node)::String
         localname(p) == "p" || continue
         (n += 1) > 1 && print(io, "\n")
         for r in XML.eachelement(p)
-            localname(r) in ("r", "fld") && print(io, something(child_text(r, "t"), ""))
+            t = localname(r)
+            t in ("r", "fld") && print(io, something(child_text(r, "t"), ""))
+            t == "br"         && print(io, "\n")
         end
     end
     return String(take!(io))

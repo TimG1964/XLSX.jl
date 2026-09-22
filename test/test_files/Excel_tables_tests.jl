@@ -3024,30 +3024,31 @@ end
         @test XLSX.parse_table_columns(doc) == ["a", "b"]
     end
 
-    @testset "parse_table_xml - totalsRowShown without totalsRowCount" begin
-        # Excel's own writer prefers totalsRowCount; hand-authored files often
-        # carry only totalsRowShown. Both must be recognised.
+    @testset "parse_table_xml - totals and header rows follow the count attributes" begin
+        # totalsRowCount is the number of totals rows in ref now; totalsRowShown is
+        # history (has one ever been shown) and says nothing about the current range.
+        # Checked against Excel: a table whose totals row was switched on then off
+        # carries neither attribute, and one that never had totals has
+        # totalsRowShown="0".
         f = XLSX.newxlsx()
         sh = f[1]
         base = """<tableColumns count="1"><tableColumn id="1" name="a"/></tableColumns>"""
-
-        shown = XLSX.parse_table_xml(_tbl_doc(
-            """<table xmlns="$_TBL_NS" id="1" name="T" ref="A1:A3" totalsRowShown="1">$base</table>"""),
+        tbl(attrs) = XLSX.parse_table_xml(_tbl_doc(
+            """<table xmlns="$_TBL_NS" id="1" name="T" ref="A1:A3" $attrs>$base</table>"""),
             "t.xml", sh)
-        @test shown.has_totals_row == true
 
-        count_only = XLSX.parse_table_xml(_tbl_doc(
-            """<table xmlns="$_TBL_NS" id="1" name="T" ref="A1:A3" totalsRowCount="1">$base</table>"""),
-            "t.xml", sh)
-        @test count_only.has_totals_row == true
+        @test tbl("""totalsRowCount="1\"""").has_totals_row == true
+        @test tbl("""totalsRowShown="1" totalsRowCount="1\"""").has_totals_row == true   # as XLSX.jl writes it
+        @test tbl("""totalsRowShown="1\"""").has_totals_row == false    # shown once, not now
+        @test tbl("""totalsRowShown="0\"""").has_totals_row == false    # never had one
+        @test tbl("").has_totals_row == false                           # on, then off, in Excel
 
-        neither = XLSX.parse_table_xml(_tbl_doc(
-            """<table xmlns="$_TBL_NS" id="1" name="T" ref="A1:A3">$base</table>"""),
-            "t.xml", sh)
-        @test neither.has_totals_row == false
+        @test tbl("").has_header_row == true                            # headerRowCount defaults to 1
+        @test tbl("""headerRowCount="1\"""").has_header_row == true
+        @test tbl("""headerRowCount="0\"""").has_header_row == false    # header row hidden
 
         # displayName defaults to name when absent
-        @test neither.display_name == "T"
+        @test tbl("").display_name == "T"
     end
 
     @testset "parse_table_style_info - element present but bare" begin
@@ -3744,4 +3745,47 @@ end
         end
     end
     
+    @testset "gettablerange" begin
+        xf = XLSX.newxlsx("data")
+        ws = xf["data"]
+        ws["A1"] = "Region"; ws["B1"] = "Item"; ws["C1"] = "Amount"
+        for (i, row) in enumerate((("Europe", "France", 30), ("Europe", "Spain", 20),
+                                   ("Asia", "Japan", 50), ("Asia", "India", 35),
+                                   ("Americas", "USA", 60)))
+            for (j, v) in enumerate(row); ws[i + 1, j] = v; end
+        end
+        t = XLSX.addtable!(ws, XLSX.CellRange("A1:C6"); name = "Sales")
+
+        @test string(XLSX.gettablerange(t))                          == "data!A2:C6"
+        @test string(XLSX.gettablerange(t, "Amount"))                == "data!C2:C6"
+        @test string(XLSX.gettablerange(t, 3))                       == "data!C2:C6"
+        @test string(XLSX.gettablerange(t, "Amount"; header = true)) == "data!C1"
+        @test string(XLSX.gettablerange(t, "Region", "Item"))        == "data!A2:B6"
+        @test_throws XLSX.XLSXError XLSX.gettablerange(t, "Nope")
+        @test_throws XLSX.XLSXError XLSX.gettablerange(t, 4)
+
+        # A chart from table columns.
+        c = XLSX.addChart(ws, :column; anchor = "E2:L18")
+        XLSX.addSeries(c, XLSX.gettablerange(t, "Amount");
+                       categories = XLSX.gettablerange(t, "Item"),
+                       name_ref   = XLSX.gettablerange(t, "Amount"; header = true))
+        s = only(XLSX.getChartSeries(c))
+        @test s.name == "Amount"
+        @test s.values.data == [30, 20, 50, 35, 60]
+    end
+
+    @testset "a table with its header row hidden" begin
+        f = XLSX.readxlsx(joinpath(data_directory, "table_hidden_header.xlsx"))
+        t = only(XLSX.tables(f))
+        @test !t.has_header_row
+        dt = XLSX.gettable(t)
+        @test length(dt.data[1]) == 3                              # A2:B4, all three rows
+        @test string.(dt.column_labels) == t.columns               # names from the table definition
+        @test length(collect(XLSX.eachtablerow(t))) == 3
+        @test string(XLSX.gettablerange(t)) == "$(t.sheet.name)!A2:B4"
+        cols = Tables.columns(t)
+        @test length(Tables.getcolumn(cols, 1)) == 3                 # three data rows, not two
+        @test length(collect(Tables.rows(t))) == 3
+    end
+
 end

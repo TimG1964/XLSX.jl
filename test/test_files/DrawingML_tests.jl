@@ -100,6 +100,24 @@
         @test c.rgb == "112233"
     end
 
+    @testset "hslClr" begin
+        # hue in 60000ths of a degree; sat and lum in thousandths of a percent.
+        c = color_of("""<a:hslClr xmlns:a="$(XLSX.NS_A)" hue="0" sat="100000" lum="50000"/>""")
+        @test c.kind === :hsl
+        @test c.rgb == "FF0000"
+        @test c.alpha == 1.0
+        @test color_of("""<a:hslClr xmlns:a="$(XLSX.NS_A)" hue="14400000" sat="100000" lum="50000"/>""").rgb == "0000FF"
+    end
+
+    @testset "scrgbClr" begin
+        # Linear RGB, thousandths of a percent per channel.
+        c = color_of("""<a:scrgbClr xmlns:a="$(XLSX.NS_A)" r="100000" g="0" b="0"/>""")
+        @test c.kind === :scrgb
+        @test c.rgb == "FF0000"
+        @test c.alpha == 1.0
+        @test color_of("""<a:scrgbClr xmlns:a="$(XLSX.NS_A)" r="50000" g="50000" b="50000"/>""").rgb == "BCBCBC"   # linear 0.5 is sRGB 188
+    end
+
     @testset "unknown transforms are no-ops" begin
         plain = color_of("""<a:srgbClr xmlns:a="$(XLSX.NS_A)" val="336699"/>""")
         c = color_of("""
@@ -1088,6 +1106,17 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 XLSX.DrawingColor(:scrgb, "", Pair{Symbol,Int}[], "000000", 1.0), pfx)
         end
 
+    end
 
+    @testset "text_content reads a raw body as it reads a parsed one" begin
+        xml = """<c:tx xmlns:c="$(XLSX.NS_C)" xmlns:a="$(XLSX.NS_A)"><c:rich><a:bodyPr/><a:lstStyle/>""" *
+            """<a:p><a:r><a:t>One</a:t></a:r><a:br/><a:r><a:t>Two</a:t></a:r></a:p>""" *
+            """<a:p><a:r><a:t>Three</a:t></a:r><a:fld id="{0}" type="x"><a:t>!</a:t></a:fld></a:p>""" *
+            """</c:rich></c:tx>"""
+        tx   = XLSX.xml_root_element(parse(xml, XLSX.XML.Node))
+        rich = XLSX.first_element_with_tag(tx, "rich")
+        wb   = XLSX.get_workbook(XLSX.newxlsx())
+        @test XLSX.text_content(rich) == "One\nTwo\nThree!"
+        @test XLSX.text_content(rich) == XLSX.text_content(XLSX.parse_drawing_text(wb, tx; tag = "rich"))
     end
 end

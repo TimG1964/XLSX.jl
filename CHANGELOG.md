@@ -5,9 +5,6 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
-- fix [#454](https://github.com/JuliaData/XLSX.jl/issues/454) (retain number formats)
-- When given range that resolves to a single cell, `setFormat`, `setFont`, `setFill`, 
-  `setBorder` and `setAlignment` now return the cell's attribute id, instead of -1.
 - Add a `deleteDefinedName` function
 - Add a `removeMergedCells` function
 - Add support for reading `chartEx` charts (waterfall, funnel, treemap, sunburst,
@@ -47,6 +44,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   it when `max_type` was `"highest"`.
 - A custom three-colour `colorScale` without an explicit `mid_col` threw an error;
   `mid_col` now defaults to white.
+
+## [v0.12.4](https://github.com/JuliaData/XLSX.jl/tree/v0.12.4) - 2026-09-21
+- fix [#460](https://github.com/JuliaData/XLSX.jl/issues/460)
+- fix [#454](https://github.com/JuliaData/XLSX.jl/issues/454) (retain number formats)
+- When given range that resolves to a single cell, `setFormat`, `setFont`, `setFill`, `setBorder` and `setAlignment` now return the cell's attribute id, instead of -1.
+
 
 ## [v0.12.3](https://github.com/JuliaData/XLSX.jl/tree/v0.12.3) - 2026-08-20
 - Address [#263](https://github.com/JuliaData/XLSX.jl/issues/263) (Retrieve data from chart)
