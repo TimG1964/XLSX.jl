@@ -659,6 +659,7 @@ end
 
 function convert_strict_to_transitional!(xf::XLSXFile, pass::Int)
     for filename in keys(xf.files)
+        haskey(xf.data, filename) || continue      # target_sheet: only some files are loaded
         should_process = if pass == 1
             !occursin(r"xl/worksheets/sheet\d*\.xml|xl/sharedStrings\.xml", filename)
         elseif pass == 2
