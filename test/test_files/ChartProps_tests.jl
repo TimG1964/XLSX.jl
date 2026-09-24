@@ -1009,5 +1009,28 @@
         SAVE_FILES && save_outfile(xf)
         isfile(path) && rm(path)
     end
+    @testset "ChartMarker" begin
+        plain(x) = sprint(show, MIME("text/plain"), x)
+
+        xf = XLSX.opentemplate(joinpath(data_directory, "chart_kinds.xlsx"))
+        c  = XLSX.Charts.getCharts(xf["linemarkers"])[1]
+
+        XLSX.Charts.setMarker(c, 1; symbol = :circle, size = 7)
+        m = XLSX.Charts.getSeriesMarker(c, 1)
+        @test repr(m) == "XLSX.Charts.ChartMarker(circle, size 7)"
+        s = plain(m)
+        @test occursin("series idx $(m.series_idx)", s)
+        @test occursin("symbol: circle", s)
+        @test occursin("size: 7 pt", s)
+        @test !occursin("Element", s)
+        @test !occursin("point idx", s)         # the series' own marker
+
+        XLSX.Charts.setMarkerSymbol(c, 1, :diamond; point = 2)
+        p = XLSX.Charts.getDataPointMarker(c, XLSX.Charts.getSeriesDataPoints(c, 1)[1])
+        @test occursin("point idx 1", repr(p))  # c:idx, one less than the position
+        @test occursin("point idx 1", plain(p))
+
+        SAVE_FILES && save_outfile(xf)
+    end
 end
 

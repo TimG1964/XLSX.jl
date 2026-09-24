@@ -554,6 +554,22 @@
             @test haskey(XLSX.Charts.CHART_STYLE_TEMPLATES, t.style)
         end
     end
+    @testset "getChartData with per-series x values" begin
+        # chart_scatter_xy has two scatter series on different x ranges, so the
+        # categories can't collapse into one column.
+        xf = XLSX.readxlsx(joinpath(data_directory, "chart_scatter_xy.xlsx"))
+        c  = XLSX.Charts.getChart(xf, "chart1")
+
+        r = XLSX.Charts.getChartRanges(c)
+        @test r[1].categories != r[2].categories        # the premise of the fixture
+
+        dt = XLSX.Charts.getChartData(c)
+        @test dt.column_labels == [:y1_x, :y1, :y2_x, :y2]
+        @test dt.data[1] == [1.0, 2.0, 3.0, 4.0]      # B1_x
+        @test dt.data[2] == [10.0, 20.0, 30.0, 40.0]  # B1
+        @test dt.data[3] == [2.0, 4.0, 6.0, 8.0]      # D1_x
+        @test dt.data[4] == [5.0, 15.0, 25.0, 35.0]   # D1    
+    end
     @testset "cx: chart kind templates match Excel" begin
         fx = joinpath(data_directory, "chartex_kinds.xlsx")
         raw = XLSX.ZipArchives.ZipReader(read(fx))
@@ -641,6 +657,18 @@
 
         d = XLSX.Charts.addChart(xf, :pie)
         @test d.sheet == "Chart1"
+
+        # A chartsheet chart's series take their data from a worksheet.
+        xf["data"]["B2:B5"] = [8, 7, 3, 9]
+        xf["data"]["A2:A5"] = ["A", "B", "C", "D"]
+        XLSX.Charts.addSeries(c, "data!B2:B5"; categories = "data!A2:A5", name = "y")
+        s = only(XLSX.Charts.getChartSeries(c))
+        @test s.name == "y"
+        @test s.values.ref == "data!\$B\$2:\$B\$5"
+        @test length(s.values.data) == 4
+
+        # An unqualified reference has no sheet to mean.
+        @test_throws XLSX.XLSXError XLSX.Charts.addSeries(c, "B2:B5")
 
         XLSX.writexlsx(path, xf, overwrite=true)
         g = XLSX.readxlsx(path)

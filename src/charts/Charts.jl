@@ -76,11 +76,13 @@ using ..XLSX:
     ns_prefixes, prefixed_tag, with_attribute, xml_root_element, truncate_len,
     # workbook, sheets and cells
     get_workbook, get_xlsxfile, get_xml_data, get_worksheet_internal_file,
-    getsheet, getdata, isdate1904, date_to_excel_value, time_to_excel_value,
+    getsheet, getdata, is_chartsheet, isdate1904, date_to_excel_value, time_to_excel_value,
     # references and defined names
     abscell, mkabs, quoteit, ref_chooser, row_number, column_number, _parse_cell_marker,
     get_defined_name_value, is_defined_name_value_a_reference, is_workbook_defined_name,
     get_ext_refs, get_external_workbook_path,
+    is_valid_cellname, is_valid_cellrange,
+    is_valid_column_range, is_valid_row_range,
     is_valid_sheet_cellname, is_valid_sheet_cellrange,
     is_valid_sheet_column_range, is_valid_sheet_row_range,
     is_valid_fixed_sheet_cellname, is_valid_fixed_sheet_cellrange,
@@ -143,7 +145,9 @@ export
     getTrendlineShapeProps, getTrendlineLabelText, getTrendlineLabelTextProps,
     getTrendlineLabelShapeProps, getErrorBarsShapeProps, getErrorBarsCustomRefs,
     # Types users construct
-    SchemeColor
+    SchemeColor,
+    # Predicates
+    has_fill, has_line
 
 @static if VERSION >= v"1.11"
     eval(Meta.parse("""

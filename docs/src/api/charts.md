@@ -74,6 +74,8 @@ setSeriesLineCap
 setSeriesLineCompound
 setSeriesLineJoin
 setSeriesLineMiterLimit
+has_fill
+has_line
 ```
 
 ## Chart groups

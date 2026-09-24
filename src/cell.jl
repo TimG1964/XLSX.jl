@@ -210,10 +210,17 @@ function Cell(c::XML.LazyNode, ws::Worksheet, sst_pfx::String,
               load_formulas::Bool=true)::Union{Cell,EmptyCell}
     wb = get_workbook(ws)
     @assert localname(c) == "c" "`Cell` expects a `c` (cell) XML node."
-    ref_str = get(c, "r", SubString(""))
-    t       = get(c, "t", SubString(""))
-    s_str   = get(c, "s", SubString(""))
-    m_str   = get(c, "cm", SubString(""))
+    ref_str::SubString{String} = SubString("")
+    t::SubString{String}       = SubString("")
+    s_str::SubString{String}   = SubString("")
+    m_str::SubString{String}   = SubString("")
+    for (k, v) in XML.eachattribute(c)
+        if k == "r";      ref_str = v
+        elseif k == "t";  t       = v
+        elseif k == "s";  s_str   = v
+        elseif k == "cm"; m_str   = v
+        end
+    end
     ref   = CellRef(ref_str)
     style, num_style = _parse_style(s_str)
     meta = isempty(m_str) ? UInt32(0) : parse(UInt32, m_str)
@@ -489,7 +496,10 @@ function getdata(ws::Worksheet, cell::Cell)
     # Fast path for common non-date types — avoids fetching workbook date mode
     dt == CT_EMPTY  && return missing
     dt == CT_ERROR  && return missing
-    dt == CT_STRING && return sst_unformatted_string(ws, reinterpret(Int64, v))
+    if dt == CT_STRING
+        s = sst_unformatted_string(ws, reinterpret(Int64, v))
+        return isempty(s) ? missing : s
+    end
     dt == CT_BOOL   && return v != 0
     dt == CT_INT    && return reinterpret(Int64, v)
     dt == CT_FLOAT  && return reinterpret(Float64, v)

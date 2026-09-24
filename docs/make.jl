@@ -17,7 +17,15 @@ makedocs(
         ],
         "Using Formulas" => "formulae/formulas.md",
         "Using Excel Tables" => "tables/excelTables.md",
-        "Excel Charts" => "charts/excelCharts.md",
+        "Excel Charts" => Any[
+            "Overview" => "charts/excelCharts.md",
+            "Reading charts" => "charts/readingCharts.md",
+            "Formatting charts" => "charts/formattingCharts.md",
+            "Creating charts" => "charts/creatingCharts.md",
+            "Creating chartEx charts" => "charts/creatingChartEx.md",
+            "Sheets with charts" => "charts/chartSheets.md",
+            "Limitations" => "charts/chartLimitations.md",
+        ],
         "Examples" => "examples.md",
         "Migration Guide" => "migration.md",
         "API Reference" => Any[

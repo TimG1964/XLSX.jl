@@ -250,7 +250,22 @@ function _resolve_ref(xf::XLSXFile, sheet::Union{Nothing,String}, ref)
     return out
 end
 
-_series_ref(c::AbstractChart, ref) = _resolve_ref(c.package, c.sheet, ref)
+# A chart on a chartsheet has no cells of its own, so its references resolve
+# through the workbook: `c.sheet` names the chartsheet, not a source of data.
+_data_sheet(c::AbstractChart) =
+    isnothing(c.sheet) || is_chartsheet(get_workbook(c.package), c.sheet) ? nothing : c.sheet
+
+function _series_ref(c::AbstractChart, ref)
+    sheet = _data_sheet(c)
+    if isnothing(sheet) && ref isa AbstractString &&
+       (is_valid_cellname(ref) || is_valid_cellrange(ref) ||
+        is_valid_column_range(ref) || is_valid_row_range(ref))
+        throw(XLSXError(
+            "`$ref` names no sheet. A chart on a chartsheet has no cells of its own, " *
+            "so its series must name the sheet holding the data, as in `\"Sheet1!$ref\"`."))
+    end
+    return _resolve_ref(c.package, sheet, ref)
+end
 
 _chart_num(v) = v isa Dates.Date || v isa Dates.DateTime || v isa Dates.Time
 

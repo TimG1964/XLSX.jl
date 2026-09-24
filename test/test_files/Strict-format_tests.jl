@@ -165,6 +165,14 @@
         @test isempty(XLSX.Charts.getCharts(f))
         isfile("mytest.xlsx") && rm("mytest.xlsx")
     end
+    @testset "readtable on Strict OOXML with target_sheet" begin
+        f = joinpath(data_directory, "strict.xlsx")
+        # readtable loads only the target sheet; the others must not be touched
+        for s in ("general", "table", "lookup")
+            @test XLSX.readtable(f, s) isa XLSX.DataTable
+        end
+        @test XLSX.readtable(f, 1) isa XLSX.DataTable
+    end
     @testset "Normalisation reaches every element" begin
         # Strict namespaces can be declared below the root, e.g. xmlns:r on
         # cx:chart inside mc:AlternateContent in a drawing part. A write must

@@ -1000,6 +1000,21 @@ function Base.show(io::IO, ::MIME"text/plain", r::ChartRef)
     isempty(r.data) || println(io, "  data: ", r.data)
 end
 
+Base.show(io::IO, m::ChartMarker) =
+    print(io, "XLSX.Charts.ChartMarker(",
+          isnothing(m.symbol) ? "symbol inherited" : string(m.symbol),
+          isnothing(m.size) ? "" : ", size $(m.size)",
+          isnothing(m.point_idx) ? "" : ", point idx $(m.point_idx)", ")")
+
+function Base.show(io::IO, ::MIME"text/plain", m::ChartMarker)
+    println(io, "XLSX.Charts.ChartMarker",
+            isnothing(m.point_idx) ? " (series idx $(m.series_idx))" :
+            " (series idx $(m.series_idx), point idx $(m.point_idx))")
+    println(io, "  symbol: ", isnothing(m.symbol) ? "inherited" : m.symbol)
+    isnothing(m.size)  || println(io, "  size: ", m.size, " pt")
+    isnothing(m.shape) || println(io, "  shape: ", m.shape)
+end
+
 Base.show(io::IO, c::ChartEx) =
     print(io, "XLSX.Charts.ChartEx(\"", c.name, "\"",
           isnothing(c.sheet) ? "" : ", \"" * c.sheet * "\"",

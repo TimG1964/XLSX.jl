@@ -252,6 +252,37 @@ function Base.show(io::IO, ::MIME"text/plain", fl::DrawingFill)
         println(io, "  (not modelled; preserved on write)")
 end
 
+function Base.show(io::IO, ln::DrawingLine)
+    parts = String[]
+    if !isnothing(ln.fill)
+        push!(parts, ln.fill.kind === :none ? "no stroke" :
+                     isnothing(ln.fill.fgcolor) ? string(ln.fill.kind) :
+                     _show_color(ln.fill.fgcolor))
+    end
+    isnothing(ln.width) || push!(parts, string(ln.width) * "pt")
+    isnothing(ln.dash)  || push!(parts, ln.dash)
+    print(io, "XLSX.Charts.DrawingLine(",
+          isempty(parts) ? "inherited" : join(parts, ", "), ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", ln::DrawingLine)
+    println(io, "XLSX.Charts.DrawingLine")
+    if isnothing(ln.fill)
+        println(io, "  stroke: inherited")
+    elseif ln.fill.kind === :none
+        println(io, "  stroke: none")
+    else
+        println(io, "  stroke: ", ln.fill)
+    end
+    isnothing(ln.width) || println(io, "  width: ", ln.width, " pt")
+    for (label, v) in (("dash", ln.dash), ("cap", ln.cap),
+                       ("compound", ln.compound), ("join", ln.join))
+        isnothing(v) || println(io, "  ", label, ": ", v)
+    end
+    isnothing(ln.miter_limit) ||
+        println(io, "  miter limit: ", ln.miter_limit, " × width")
+end
+
 # Inheritance. Every field on DrawingRunProps is Union{Nothing,T}: absent means
 # "inherit", not "default", because a run's a:rPr sets only what differs from
 # what it inherits. The cascade, innermost first:
@@ -488,22 +519,40 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    has_fill(sp::DrawingShapeProps) -> Bool
+    has_fill(x) -> Bool
 
-Whether the shape sets a visible fill. `false` both when no fill is specified
-(inherited) and when `<a:noFill/>` is written (deliberately transparent) — use
-`sp.fill` directly to tell those apart.
+Whether `x` sets a visible fill. `x` is a [`DrawingShapeProps`](@ref), a
+[`DrawingFill`](@ref), or the [`Effective`](@ref) a resolver returns.
+
+`false` covers two different cases: nothing was written, so the fill is
+inherited; or `<a:noFill/>` was, so it is deliberately transparent. Read
+`sp.fill`, or `e.value`, to tell those apart — `nothing` for the first, a fill
+with `kind === :none` for the second.
+
+`false` never means Excel draws nothing: a property written at no rung comes
+from the chart style, which this layer does not read.
 """
 has_fill(sp::DrawingShapeProps) = !isnothing(sp.fill) && sp.fill.kind !== :none
+has_fill(f::DrawingFill) = f.kind !== :none
+has_fill(e::Effective{DrawingFill}) = !isnothing(e.value) && has_fill(e.value)
 
 """
-    has_line(sp::DrawingShapeProps) -> Bool
+    has_line(x) -> Bool
 
-Whether the shape sets a visible outline. `false` when `a:ln` is absent, and
-also when it contains `<a:noFill/>`, which is how Excel writes "no border".
+Whether `x` sets a visible outline. `x` is a [`DrawingShapeProps`](@ref), a
+[`DrawingLine`](@ref), or the [`Effective`](@ref) a resolver returns.
+
+`false` when `a:ln` is absent, so the outline is inherited, and also when it
+contains `<a:noFill/>`, which is how Excel writes "no border". As with
+[`has_fill`](@ref), read the line itself to tell those apart.
+
+`false` never means Excel draws nothing: a property written at no rung comes
+from the chart style, which this layer does not read.
 """
 has_line(sp::DrawingShapeProps) =
     !isnothing(sp.line) && !isnothing(sp.line.fill) && sp.line.fill.kind !== :none
+has_line(l::DrawingLine) = !isnothing(l.fill) && l.fill.kind !== :none
+has_line(e::Effective{DrawingLine}) = !isnothing(e.value) && has_line(e.value)
 
 function Base.show(io::IO, sp::DrawingShapeProps)
     parts = String[]

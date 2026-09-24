@@ -658,21 +658,26 @@ struct DrawingText
     raw::Union{Nothing,XML.Node}
 end
 
+_as_paragraphs(p::DrawingParagraph) = (p,)
+_as_paragraphs(s::AbstractString) = (DrawingParagraph(line) for line in split(s, "\n"))
+
 """
     DrawingText(paragraphs...; body = nothing, liststyle = nothing)
 
 A text body. Paragraphs may be `DrawingParagraph`s or plain strings, each
-becoming a one-run paragraph.
+becoming a one-run paragraph. A string containing `"\\n"` becomes one paragraph
+per line, so the two forms below are the same text body:
 
-    DrawingText("Revenue by Region")
+    DrawingText("Revenue", "by region")
+    DrawingText("Revenue\\nby region")
+
     DrawingText(DrawingParagraph("Revenue", DrawingRun(" 2026",
                     props = DrawingRunProps(bold = true))))
 """
 DrawingText(paras::Union{DrawingParagraph,AbstractString}...;
             body = nothing, liststyle = nothing) =
     DrawingText(body, liststyle,
-                DrawingParagraph[p isa DrawingParagraph ? p : DrawingParagraph(p)
-                                 for p in paras],
+                DrawingParagraph[q for p in paras for q in _as_paragraphs(p)],
                 nothing)
 
 """

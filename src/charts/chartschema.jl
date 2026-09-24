@@ -711,3 +711,7 @@ function _check(v::Symbol, allowed, what, aliases = Dict{Symbol,Symbol}())
     end
     return val
 end
+
+# Strings are an easy guess for these; accept one and say so through the same check.
+_check(v::AbstractString, allowed, what, aliases = Dict{Symbol,Symbol}()) =
+    _check(Symbol(v), allowed, what, aliases)

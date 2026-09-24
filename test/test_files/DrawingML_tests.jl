@@ -444,6 +444,10 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 @test length(t.paragraphs) == 2
                 @test XLSX.Charts.text_content(t) == "One\nTwo\nThree"
                 @test [r.kind for r in t.paragraphs[1].runs] == [:run, :br, :run]
+                @test XLSX.Charts.DrawingText("Revenue\nby region") ==
+                    XLSX.Charts.DrawingText("Revenue", "by region")
+                @test length(XLSX.Charts.DrawingText("a\nb\nc").paragraphs) == 3
+                @test XLSX.Charts.text_content(XLSX.Charts.DrawingText("a\nb")) == "a\nb"
             end
 
             @testset "indented XML (nodetype guard)" begin
@@ -658,14 +662,14 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
     @testset "setting a run property clears it from the runs" begin
         tmp = joinpath(mktempdir(), "runclear.xlsx")
         cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp)
-        xf = XLSX.openxlsx(tmp; mode = "rw")
+        xf = XLSX.openxlsx(tmp; mode="rw")
         h = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "histogram", XLSX.Charts.getCharts(xf)))
 
         # Excel wrote this title with sz on both a:defRPr and the run's a:rPr
         XLSX.Charts.setChartTitleTextProp(h, :size, 20)
         tx = XLSX.first_element_with_tag(
-                XLSX.first_element_with_tag(XLSX.Charts._cx_chart(h), "title"), "txPr")
-        p   = XLSX.first_element_with_tag(tx, "p")
+            XLSX.first_element_with_tag(XLSX.Charts._cx_chart(h), "title"), "txPr")
+        p = XLSX.first_element_with_tag(tx, "p")
         def = XLSX.first_element_with_tag(XLSX.first_element_with_tag(p, "pPr"), "defRPr")
         rpr = XLSX.first_element_with_tag(XLSX.first_element_with_tag(p, "r"), "rPr")
 
@@ -679,10 +683,10 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
         # a composite field: the run's own solidFill must go too
         XLSX.Charts.setChartTitleTextProp(h, :fill, "FFC00000")
         rpr = XLSX.first_element_with_tag(XLSX.first_element_with_tag(
-                XLSX.first_element_with_tag(
-                    XLSX.first_element_with_tag(XLSX.Charts._cx_chart(h), "title"), "txPr"), "p"), "r")
+            XLSX.first_element_with_tag(
+                XLSX.first_element_with_tag(XLSX.Charts._cx_chart(h), "title"), "txPr"), "p"), "r")
         @test isnothing(XLSX.first_element_with_tag(
-                XLSX.first_element_with_tag(rpr, "rPr"), "solidFill"))
+            XLSX.first_element_with_tag(rpr, "rPr"), "solidFill"))
         @test XLSX.Charts.default_run_props(XLSX.Charts.getChartTitleTextProps(h)).fill.fgcolor.rgb == "C00000"
     end
     @testset "formatting cascade" begin
@@ -1113,10 +1117,52 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
             """<a:p><a:r><a:t>One</a:t></a:r><a:br/><a:r><a:t>Two</a:t></a:r></a:p>""" *
             """<a:p><a:r><a:t>Three</a:t></a:r><a:fld id="{0}" type="x"><a:t>!</a:t></a:fld></a:p>""" *
             """</c:rich></c:tx>"""
-        tx   = XLSX.xml_root_element(parse(xml, XLSX.XML.Node))
+        tx = XLSX.xml_root_element(parse(xml, XLSX.XML.Node))
         rich = XLSX.first_element_with_tag(tx, "rich")
-        wb   = XLSX.get_workbook(XLSX.newxlsx())
+        wb = XLSX.get_workbook(XLSX.newxlsx())
         @test XLSX.Charts.text_content(rich) == "One\nTwo\nThree!"
-        @test XLSX.Charts.text_content(rich) == XLSX.Charts.text_content(XLSX.Charts.parse_drawing_text(wb, tx; tag = "rich"))
+        @test XLSX.Charts.text_content(rich) == XLSX.Charts.text_content(XLSX.Charts.parse_drawing_text(wb, tx; tag="rich"))
     end
+
+    @testset "show methods: DrawingLine and ChartMarker" begin
+        # Both types previously fell back to Julia's default struct printing, which
+        # dumps `raw`. These pin the summary and the multi-line forms.
+        plain(x) = sprint(show, MIME("text/plain"), x)
+
+        @testset "DrawingLine" begin
+            # Built in code, so no `raw` and nothing inherited from a file.
+            ln = XLSX.Charts.DrawingLine(; width=2.25, dash="sysDot", cap="rnd")
+            @test repr(ln) == "XLSX.Charts.DrawingLine(2.25pt, sysDot)"
+            s = plain(ln)
+            @test occursin("stroke: inherited", s)
+            @test occursin("width: 2.25 pt", s)
+            @test occursin("dash: sysDot", s)
+            @test occursin("cap: rnd", s)
+            @test !occursin("compound", s)          # absent fields are not printed
+            @test !occursin("miter", s)
+
+            @test repr(XLSX.Charts.DrawingLine()) == "XLSX.Charts.DrawingLine(inherited)"
+
+            none = XLSX.Charts.DrawingLine(; fill=XLSX.Charts.DrawingFill(:none))
+            @test repr(none) == "XLSX.Charts.DrawingLine(no stroke)"
+            @test occursin("stroke: none", plain(none))
+
+            red = XLSX.Charts.DrawingLine(;
+                fill=XLSX.Charts.DrawingFill(:solid; fgcolor="FF0000"),
+                width=1.5)
+            @test occursin("1.5pt", repr(red))
+            @test occursin("stroke: ", plain(red))
+
+            # Read from a file: the line on chart_appearance's first series is an
+            # explicit <a:noFill/>, not an absent element.
+            xf = XLSX.readxlsx(joinpath(data_directory, "chart_appearance.xlsx"))
+            c = XLSX.Charts.getCharts(xf)[1]
+            fl = XLSX.Charts.getSeriesShapeProps(c, 1).line
+            @test repr(fl) == "XLSX.Charts.DrawingLine(no stroke)"
+            @test !occursin("Element", plain(fl))   # `raw` stays out of the output
+        end
+
+
+    end
+
 end

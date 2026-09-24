@@ -1,15 +1,24 @@
-# Charts
+```@meta
+CurrentModule = XLSX.Charts
+```
 
-(Chart support in XLSX.jl Work in Progress)
+!!! note "Experimental"
+
+    Handling of native Excel charts in XLSX.jl is experimental and a work in 
+    progress. All aspects may be subject to change. Feedback is welcome!
+
+
+# Charts
 
 Excel charts come in two schemas, and XLSX.jl reads, formats and creates both.
 
 - The **`c:` schema** (ECMA-376) covers bar, column, line, pie, doughnut, area,
   scatter, bubble, radar and stock charts — everything Excel has had for a long
-  time. These are [`XLSX.Charts.Chart`](@ref).
+  time. These are [`Chart`](@ref).
 - The **`cx:` schema** ("chartEx", a Microsoft extension) covers waterfall,
-  funnel, treemap, sunburst, histogram, Pareto, box & whisker and region map.
-  These are [`XLSX.Charts.ChartEx`](@ref).
+  funnel, treemap, sunburst, histogram, Pareto, box & whisker and region map
+  (Excel's filled map). These are [`ChartEx`](@ref). All are read; all but
+  region map can be created.
 
 Chart support lives in its own sub-module. Qualify the functions as
 `XLSX.Charts.getCharts`, or bring them into scope:
@@ -32,15 +41,25 @@ This page covers the ideas the rest of the guide assumes. The other pages are
 the workbook:
 
 ```julia
-julia> f = XLSX.readxlsx("chart_basic.xlsx");
+julia> f = XLSX.readxlsx("chart_kinds.xlsx");
 
-julia> getCharts(f["Data"])          # this sheet
-1-element Vector{XLSX.Charts.Chart}:
- XLSX.Charts.Chart("chart1", "Data", G9, barChart, 2 series)
+julia> getCharts(f["line"])          # this sheet
+1-element Vector{XLSX.Charts.AbstractChart}:
+ XLSX.Charts.Chart("chart8", "line", F9, lineChart, 3 series)
 
 julia> getCharts(f)                  # the whole workbook
-1-element Vector{XLSX.Charts.Chart}:
- XLSX.Charts.Chart("chart1", "Data", G9, barChart, 2 series)
+11-element Vector{XLSX.Charts.AbstractChart}:
+ XLSX.Charts.Chart("chart1", "radar", F9, radarChart, 3 series)
+ XLSX.Charts.Chart("chart2", "bubble", F9, bubbleChart, 1 series)
+ XLSX.Charts.Chart("chart3", "scatter", F9, scatterChart, 2 series)
+ XLSX.Charts.Chart("chart4", "doughnut", F9, doughnutChart, 1 series)
+ XLSX.Charts.Chart("chart5", "pie", F9, pieChart, 1 series)
+ XLSX.Charts.Chart("chart6", "area", F9, areaChart, 3 series)
+ XLSX.Charts.Chart("chart7", "linemarkers", F9, lineChart, 3 series)
+ XLSX.Charts.Chart("chart8", "line", F9, lineChart, 3 series)
+ XLSX.Charts.Chart("chart9", "stacked", F9, barChart, 3 series)
+ XLSX.Charts.Chart("chart10", "bar", F9, barChart, 3 series)
+ XLSX.Charts.Chart("chart11", "column", F9, barChart, 3 series)
 ```
 
 `getCharts(ws)` returns them in the order the drawing declares them.
@@ -53,18 +72,21 @@ find.
 package path, or by relationship id within the drawing:
 
 ```julia
-julia> c = getChart(f["Data"], "chart1")
-XLSX.Charts.Chart "chart1" on sheet "Data" at G9:N23
-  title: "Revenue by Region"
-  type: barChart
-  series: 2
-    [1] 2024 - Data!$B$2:$B$5 (4 pts)
-    [2] 2025 - Data!$C$2:$C$5 (4 pts)
+julia> c = getChart(f["line"], "chart8")
+XLSX.Charts.Chart "chart8" on sheet "line" at F9:L23
+  type: lineChart
+  series: 3
+    [1] Alpha - line!$B$2:$B$5 (4 pts)
+    [2] Beta - line!$C$2:$C$5 (4 pts)
+    [3] Gamma - line!$D$2:$D$5 (4 pts)
 
-julia> getChart(f, "xl/charts/chart1.xml") == c
+julia> getChart(f, "xl/charts/chart8.xml") == c
 true
 
-julia> getChart(f["Data"], "rId1") == c
+julia> c.rId
+"rId1"
+
+julia> getChart(f["line"], "rId1") == c
 true
 ```
 
@@ -78,8 +100,8 @@ A workbook can hold both kinds, so `getCharts` returns a vector that may mix
 [`getChartType`](@ref) names the kind:
 
 ```julia
-julia> getChartSchema(c), getChartType(c)
-(:c, :barChart)
+julia> getChartSchema(c), XLSX.Charts.getChartType(c)
+(:c, :lineChart)
 ```
 
 Most of the API takes either. Where it doesn't, it's because the schemas
@@ -123,8 +145,8 @@ julia> ax = getChartAxes(c, :value)[1];
 
 julia> setSeriesFill(c, 1, "FF0000");        # unrelated write
 
-julia> getAxisMajorUnit(c, ax)               # `ax` still resolves
-5.0
+julia> getAxisTickLabelPos(c, ax)            # `ax` still resolves
+:nextTo
 ```
 
 Re-read the value when you want its own fields refreshed; keep using it as an
@@ -137,9 +159,10 @@ the package. Excel's own identifiers are something else:
 
 ```julia
 julia> [s.idx for s in getChartSeries(c)]    # c:idx, as the file records it
-2-element Vector{Int64}:
+3-element Vector{Int64}:
  0
  1
+ 2
 ```
 
 They usually agree, because Excel numbers series from 0 in order. They need not:
