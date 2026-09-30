@@ -48,7 +48,7 @@ julia> getCharts(f["line"])          # this sheet
  XLSX.Charts.Chart("chart8", "line", F9, lineChart, 3 series)
 
 julia> getCharts(f)                  # the whole workbook
-11-element Vector{XLSX.Charts.AbstractChart}:
+12-element Vector{XLSX.Charts.AbstractChart}:
  XLSX.Charts.Chart("chart1", "radar", F9, radarChart, 3 series)
  XLSX.Charts.Chart("chart2", "bubble", F9, bubbleChart, 1 series)
  XLSX.Charts.Chart("chart3", "scatter", F9, scatterChart, 2 series)
@@ -60,6 +60,7 @@ julia> getCharts(f)                  # the whole workbook
  XLSX.Charts.Chart("chart9", "stacked", F9, barChart, 3 series)
  XLSX.Charts.Chart("chart10", "bar", F9, barChart, 3 series)
  XLSX.Charts.Chart("chart11", "column", F9, barChart, 3 series)
+ XLSX.Charts.Chart("chart12", "stackedbar", F19, barChart, 3 series)
 ```
 
 `getCharts(ws)` returns them in the order the drawing declares them.

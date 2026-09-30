@@ -19,7 +19,7 @@ A created chart starts from a chart part Excel itself wrote, kept verbatim in
 the package, so the result is what Excel would have produced. That means a kind
 with no template cannot be created at all, rather than being approximated:
 
-- stacked bar and percent-stacked bar or column
+- percent-stacked bar and column
 - 3-D charts of any kind
 - stock, surface and of-pie charts
 - combo charts — a plot area with more than one group
@@ -70,6 +70,23 @@ Nothing is recomputed. A chart's cached values are those of the last save by
 Excel, and a series added by [`addSeries`](@ref) caches the cells as they stand
 at that moment. Changing a cell afterwards does not update any chart that plots
 it; Excel does that when it next opens the file.
+
+The same goes for formulas. A cell written by [`XLSX.setFormula`](@ref) has no
+value until Excel calculates it, so a series plotting it is cached with no
+values, and [`getChartData`](@ref) finds none. Excel recalculates on opening
+and draws the chart from the results, so the chart looks right there. To read
+the values in Julia, compute them there too, or read them back from a file Excel
+has saved.
+
+## Legend entries follow series order
+
+Excel draws a legend entry for each series, in series order, and can hide
+entries but not reorder them. So [`setLegendEntryDeleted`](@ref) hides entries,
+and there is no setter for their order. To show a legend in another order, add
+series that plot zeros, in the order wanted and formatted to match, and hide the
+entries of the series that draw the data;
+[A Likert chart](../examples.md#A-diverging-stacked-bar-chart-for-Likert-scale-survey-data)
+shows how.
 
 ## Lines and dashes: symbols in, strings out
 

@@ -637,17 +637,20 @@ end
 """
     getAxisCrosses(c::Chart, ax::ChartAxis) -> Union{Nothing,Symbol}
 
-Where the partner axis crosses this one, as a rule: `:autoZero`, `:min` or
-`:max`. Mutually exclusive with [`getAxisCrossesAt`](@ref) — a chart uses one or
-the other, so at most one of the two is non-`nothing`.
+Where this axis crosses its partner (`c:crosses`), as a position on the
+partner: `:autoZero`, `:min` or `:max`. Mutually exclusive with
+[`getAxisCrossesAt`](@ref) — at most one of the two is non-`nothing`.
+
+Excel's "Horizontal axis crosses: At maximum category", set in the category
+axis's pane, is stored on the value axis.
 """
 getAxisCrosses(c::Chart, ax::ChartAxis)       = _axis_sym(_axnode(c, ax), "crosses")
 
 """
     getAxisCrossesAt(c::Chart, ax::ChartAxis) -> Union{Nothing,Float64}
 
-Where the partner axis crosses this one, as a value (`c:crossesAt`). Mutually
-exclusive with [`getAxisCrosses`](@ref).
+Where this axis crosses its partner, as a value on the partner's scale
+(`c:crossesAt`). Mutually exclusive with [`getAxisCrosses`](@ref).
 """
 getAxisCrossesAt(c::Chart, ax::ChartAxis)     = _axis_num(_axnode(c, ax), "crossesAt")
 
@@ -1857,16 +1860,17 @@ use [`setChartTitleTextProp`](@ref) to change one property and leave the rest.
 A title bound to a cell (`c:tx/c:strRef`) is replaced by literal text; the
 reference is lost. `c:autoTitleDeleted` is not touched, so a chart with the
 title switched off stays that way.
+
+A title created here gets `c:overlay val="0"`, as Excel writes on every title
+it creates, so it sits beside the plot area rather than over it.
 """
 function setChartTitleText(c::Chart, text::DrawingText)
     root = chart_root(c)
     pfx  = ns_prefixes(root)
     new  = rebuild_path(root,
                [(NS_C, "chart") => "chart",
-                (NS_C, "title") => "title",
-                (NS_C, "tx")    => "tx"],
-               tx -> insert_child(remove_choice(tx, (NS_C, "tx"), TX_GROUP),
-                                  (NS_C, "tx"), _text_from(text, "rich", pfx));
+                (NS_C, "title") => "title"],
+               t -> _title_with_text(t, text, pfx);
                prefixes = pfx)
     set_chart_root!(c, new)
     return c
@@ -1875,27 +1879,34 @@ end
 setChartTitleText(c::Chart, text::AbstractString) =
     setChartTitleText(c, DrawingText(text))
 
+    # A title with no c:overlay is drawn over the plot area; Excel writes
+# overlay=0 on every title it creates, so a new title gets the same.
+function _title_with_text(t::XML.Node, text::DrawingText, pfx)
+    tkey = (NS_C, "title")
+    tx = something(first_element_with_tag(t, "tx"), XML.Element(prefixed_tag(pfx[NS_C], "tx")))
+    tx = insert_child(remove_choice(tx, (NS_C, "tx"), TX_GROUP), (NS_C, "tx"),
+                      _text_from(text, "rich", pfx))
+    t = insert_child(t, tkey, tx)
+    return isnothing(first_element_with_tag(t, "overlay")) ?
+           insert_child(t, tkey, _val_el(pfx, "overlay", "0")) : t
+end
+
 """
     setAxisTitleText(c, ax::ChartAxis, text) -> Chart
 
 Replace an axis title's text and all its formatting. As
 [`setChartTitleText`](@ref), including that a cell reference is replaced by
 literal text.
+
+A title created here gets `c:overlay val="0"`, as Excel writes on every title
+it creates, so it sits beside the plot area rather than over it.
 """
 function setAxisTitleText(c::Chart, ax::ChartAxis, text::DrawingText)
     root = chart_root(c)
     pfx  = ns_prefixes(root)
-    axn  = _axis_node(c, root, ax)
-    atag = String(localname(axn))
-    new  = rebuild_path(root,
-               [(NS_C, "chart")    => "chart",
-                (NS_C, "plotArea") => "plotArea",
-                (NS_C, atag)       => (atag, n -> n === axn),
-                (NS_C, "title")    => "title",
-                (NS_C, "tx")       => "tx"],
-               tx -> insert_child(remove_choice(tx, (NS_C, "tx"), TX_GROUP),
-                                  (NS_C, "tx"), _text_from(text, "rich", pfx));
-               prefixes = pfx)
+    steps, _, _ = _axis_path(c, root, ax)
+    new = rebuild_path(root, [steps...; (NS_C, "title") => "title"],
+                       t -> _title_with_text(t, text, pfx); prefixes = pfx)
     set_chart_root!(c, new)
     return c
 end
@@ -1945,6 +1956,8 @@ A title carries formatting in `c:title/c:txPr` and, when it holds literal text,
 in `c:title/c:tx/c:rich` as well — Excel renders the `rich` one, so both are
 written. Contrast [`setChartTitleText`](@ref), which replaces the text and all
 its formatting.
+
+
 """
 function setChartTitleTextProp(c::Chart, field::Symbol, value)
     root = chart_root(c)
@@ -2093,3 +2106,528 @@ end
 _deleted_dlbl(lbl::XML.Node, pfx) =
     _with_children(lbl, XML.Node[first_element_with_tag(lbl, "idx"),
                                  XML.Element(prefixed_tag(pfx[NS_C], "delete"); val = "1")])
+
+# ── Axis setters ──────────────────────────────────────────────────────────────
+
+function _axis_path(c::Chart, root::XML.Node, ax::ChartAxis)
+    el  = _axis_node(c, root, ax)
+    tag = String(localname(el))
+    key = (NS_C, tag)
+    steps = [(NS_C, "chart")    => "chart",
+             (NS_C, "plotArea") => "plotArea",
+             key                => (tag, n -> n === el)]
+    return steps, key, el
+end
+
+"""
+    _set_axis(c, ax, f) -> Chart
+
+Apply `f(el, key, pfx)` to the axis element and rebuild the chart part once.
+`key` is the axis's schema key, for `insert_child` on the axis.
+"""
+function _set_axis(c::Chart, ax::ChartAxis, f)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    steps, key, _ = _axis_path(c, root, ax)
+    new = rebuild_path(root, steps, el -> f(el, key, pfx); prefixes = pfx)
+    set_chart_root!(c, new)
+    return c
+end
+
+_val_el(pfx, tag, v::AbstractString) = XML.Element(prefixed_tag(pfx[NS_C], tag); val = v)
+
+# Set `<c:tag val=v/>` on `el`, or remove it for `:inherit`.
+_with_val(el, key, pfx, tag, v) =
+    v === :inherit ? remove_child(el, tag) : insert_child(el, key, _val_el(pfx, tag, v))
+
+function _check_sym(v, allowed, what)
+    v === :inherit && return :inherit
+    v isa Symbol && v in allowed && return String(v)
+    throw(XLSXError("`$(repr(v))` is not a valid $what; use one of " *
+                    join(map(repr, allowed), ", ") * ", or `:inherit`."))
+end
+
+# xsd:double as Excel writes it: integers without a trailing `.0`.
+_xsd_double(x::Float64) = isinteger(x) && abs(x) < 1e15 ? string(Int(x)) : string(x)
+
+function _finite(v, what)
+    v === :inherit && return :inherit
+    x = Float64(v)
+    isfinite(x) || throw(XLSXError("$what must be finite; got $v."))
+    return _xsd_double(x)
+end
+
+const _AX_TICK_LBL_POS = (:high, :low, :nextTo, :none)
+const _AX_ORIENTATIONS = (:minMax, :maxMin)
+const _AX_CROSSES      = (:autoZero, :min, :max)
+
+"""
+    setAxisTickLabelPos(c, ax, pos) -> Chart
+
+Set where the axis's tick labels are drawn (`c:tickLblPos`): `:nextTo` the
+axis, at the `:low` or `:high` end of the crossing axis, or `:none`. `:inherit`
+removes the element.
+
+`:low` keeps a category axis's labels at the edge of the plot area when the
+value axis has negative values, rather than beside the zero line.
+"""
+setAxisTickLabelPos(c::Chart, ax::ChartAxis, pos::Symbol) =
+    _set_axis(c, ax, (el, key, pfx) ->
+        _with_val(el, key, pfx, "tickLblPos", _check_sym(pos, _AX_TICK_LBL_POS, "tick label position")))
+
+"""
+    setAxisScaling(c, ax; orientation, min, max) -> Chart
+
+Set several `c:scaling` properties in one rebuild. A keyword left unspecified is
+left alone; `:inherit` removes it.
+
+- `orientation` — `:minMax`, or `:maxMin` to plot the axis in reverse order.
+- `min`, `max` — fixed bounds, in the axis's own units. `:inherit` returns a
+  bound to automatic.
+
+Throws if the resulting bounds would have `min ≥ max`. Checking once all
+keywords are applied means a range can be moved in one call past its old
+bounds, which separate [`setAxisMin`](@ref) and [`setAxisMax`](@ref) calls
+might not allow.
+
+Throws if the axis has no `c:scaling`; see [`getAxisOrientation`](@ref).
+"""
+function setAxisScaling(c::Chart, ax::ChartAxis;
+                        orientation = nothing, min = nothing, max = nothing)
+    all(isnothing, (orientation, min, max)) && return c
+    o  = isnothing(orientation) ? nothing : _check_sym(orientation, _AX_ORIENTATIONS, "axis orientation")
+    lo = isnothing(min) ? nothing : _finite(min, "An axis minimum")
+    hi = isnothing(max) ? nothing : _finite(max, "An axis maximum")
+    skey = (NS_C, "scaling")
+    return _set_axis(c, ax, (el, key, pfx) -> begin
+        sc = _axis_scaling(el)
+        isnothing(o)  || (sc = _with_val(sc, skey, pfx, "orientation", o))
+        isnothing(lo) || (sc = _with_val(sc, skey, pfx, "min", lo))
+        isnothing(hi) || (sc = _with_val(sc, skey, pfx, "max", hi))
+        a, b = _scaling_num(sc, "min"), _scaling_num(sc, "max")
+        isnothing(a) || isnothing(b) || a < b || throw(XLSXError(
+            "Axis minimum ($a) must be less than its maximum ($b)."))
+        insert_child(el, key, sc)
+    end)
+end
+
+"""
+    setAxisMin(c, ax, value) -> Chart
+
+Fix the axis's lower bound (`c:scaling/c:min`); `:inherit` returns it to
+automatic. See [`setAxisScaling`](@ref) to set both bounds at once.
+"""
+setAxisMin(c::Chart, ax::ChartAxis, v) = setAxisScaling(c, ax; min = v)
+
+"""
+    setAxisMax(c, ax, value) -> Chart
+
+Fix the axis's upper bound (`c:scaling/c:max`); `:inherit` returns it to
+automatic. See [`setAxisScaling`](@ref) to set both bounds at once.
+"""
+setAxisMax(c::Chart, ax::ChartAxis, v) = setAxisScaling(c, ax; max = v)
+
+"""
+    setAxisOrientation(c, ax, orientation) -> Chart
+
+`:minMax` for a normal axis, `:maxMin` to plot it in reverse order — Excel's
+"Categories in reverse order" or "Values in reverse order". `:inherit` removes
+the element.
+
+Reversing a bar chart's category axis moves the value axis to the other end;
+[`setAxisCrosses`](@ref)`(c, valax, :max)` moves it back.
+"""
+setAxisOrientation(c::Chart, ax::ChartAxis, o::Symbol) = setAxisScaling(c, ax; orientation = o)
+
+"""
+    setAxisCrosses(c, ax, rule) -> Chart
+
+Set where this axis crosses its partner (`c:crosses`), as a position on the
+partner: `:autoZero`, `:min` or `:max`. Removes any `c:crossesAt`, since the
+schema allows one or the other. `:inherit` removes `c:crosses` only.
+
+Excel's "Horizontal axis crosses: At maximum category", set in the category
+axis's pane, is written on the *value* axis: `setAxisCrosses(c, valax, :max)`.
+"""
+function setAxisCrosses(c::Chart, ax::ChartAxis, rule::Symbol)
+    v = _check_sym(rule, _AX_CROSSES, "crossing rule")
+    return _set_axis(c, ax, (el, key, pfx) ->
+        v === :inherit ? remove_child(el, "crosses") :
+            _with_val(remove_child(el, "crossesAt"), key, pfx, "crosses", v))
+end
+
+"""
+    setAxisCrossesAt(c, ax, value) -> Chart
+
+Set where this axis crosses its partner as a value on the partner's scale
+(`c:crossesAt`). Removes any `c:crosses`. `:inherit` removes `c:crossesAt` only.
+"""
+function setAxisCrossesAt(c::Chart, ax::ChartAxis, value)
+    v = _finite(value, "An axis crossing")
+    return _set_axis(c, ax, (el, key, pfx) ->
+        v === :inherit ? remove_child(el, "crossesAt") :
+            _with_val(remove_child(el, "crosses"), key, pfx, "crossesAt", v))
+end
+
+"""
+    setAxisNumberFormatCode(c, ax, code) -> Chart
+
+Set the axis's number format (`c:numFmt/@formatCode`) and unlink it from the
+source cells (`sourceLinked="0"`), without which Excel ignores the code.
+`:inherit` removes `c:numFmt`.
+
+A two-section code such as `"0%;0%"` shows negative values without a minus sign.
+"""
+function setAxisNumberFormatCode(c::Chart, ax::ChartAxis, code)
+    return _set_axis(c, ax, (el, key, pfx) ->
+        code === :inherit ? remove_child(el, "numFmt") :
+            insert_child(el, key, XML.Element(prefixed_tag(pfx[NS_C], "numFmt");
+                                              formatCode = String(code), sourceLinked = "0")))
+end
+
+"""
+    setAxisNumberFormatLinked(c, ax, linked::Bool) -> Chart
+
+Set `c:numFmt/@sourceLinked`, keeping the current format code, or `"General"` if
+none was written.
+"""
+function setAxisNumberFormatLinked(c::Chart, ax::ChartAxis, linked::Bool)
+    return _set_axis(c, ax, (el, key, pfx) -> begin
+        code = something(_attr(first_element_with_tag(el, "numFmt"), "formatCode"), "General")
+        insert_child(el, key, XML.Element(prefixed_tag(pfx[NS_C], "numFmt");
+                                          formatCode = code, sourceLinked = linked ? "1" : "0"))
+    end)
+end
+
+# ── Group setters ─────────────────────────────────────────────────────────────
+
+_group_axids(el) = [parse(Int, _attr(k, "val")) for k in XML.children(el) if localname(k) == "axId"]
+
+function _group_path(c::Chart, root::XML.Node, g::ChartGroup)
+    tag = String(g.kind)
+    els = [el for el in _plotarea_children(root)
+           if localname(el) == tag && _group_axids(el) == g.axids]
+    length(els) == 1 || throw(XLSXError(
+        "Chart `$(c.name)` has $(length(els)) `$tag` groups on axes $(g.axids); expected one."))
+    el  = only(els)
+    key = (NS_C, tag)
+    steps = [(NS_C, "chart")    => "chart",
+             (NS_C, "plotArea") => "plotArea",
+             key                => (tag, n -> n === el)]
+    return steps, key, el
+end
+
+function _set_group(c::Chart, g::ChartGroup, f)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    steps, key, _ = _group_path(c, root, g)
+    new = rebuild_path(root, steps, el -> f(el, key, pfx); prefixes = pfx)
+    set_chart_root!(c, new)
+    return c
+end
+
+function _group_node(c::Chart, g::ChartGroup)
+    _, _, el = _group_path(c, chart_root(c), g)
+    return el
+end
+
+function _check_pct(v, lo, hi, what)
+    v === :inherit && return :inherit
+    v isa Integer && lo <= v <= hi && return string(v)
+    throw(XLSXError("$what must be an integer percentage from $lo to $hi, or `:inherit`; got $(repr(v))."))
+end
+
+"""
+    getGroupGapWidth(c::Chart, g::ChartGroup) -> Union{Nothing,Int}
+
+`c:gapWidth` — the space between bars or clusters, as a percentage of a bar's
+width (0–500). `nothing` means not written; Excel then uses 150. Bar and
+bar-of-pie groups only.
+"""
+function getGroupGapWidth(c::Chart, g::ChartGroup)
+    el = _group_node(c, g)
+    _require_kind(el, (:barChart, :bar3DChart, :ofPieChart), "gapWidth")
+    return _int_val(el, "gapWidth")
+end
+
+"""
+    setGroupGapWidth(c, g, percent) -> Chart
+
+Set the group's gap width (0–500, as Excel's "Gap Width" box), or `:inherit`
+to remove it.
+"""
+function setGroupGapWidth(c::Chart, g::ChartGroup, pct)
+    v = _check_pct(pct, 0, 500, "A gap width")
+    return _set_group(c, g, (el, key, pfx) -> begin
+        _require_kind(el, (:barChart, :bar3DChart, :ofPieChart), "gapWidth")
+        _with_val(el, key, pfx, "gapWidth", v)
+    end)
+end
+
+"""
+    getGroupOverlap(c::Chart, g::ChartGroup) -> Union{Nothing,Int}
+
+`c:overlap` — how far bars in a cluster overlap, as a percentage from -100
+(separated by a bar's width) to 100 (fully overlapping, as stacked charts need).
+`nothing` means not written. 2-D bar groups only.
+"""
+function getGroupOverlap(c::Chart, g::ChartGroup)
+    el = _group_node(c, g)
+    _require_kind(el, (:barChart,), "overlap")
+    return _int_val(el, "overlap")
+end
+
+"""
+    setGroupOverlap(c, g, percent) -> Chart
+
+Set the group's overlap (-100 to 100), or `:inherit` to remove it. Stacked
+groups need 100 for each series to sit on the one before it.
+"""
+function setGroupOverlap(c::Chart, g::ChartGroup, pct)
+    v = _check_pct(pct, -100, 100, "An overlap")
+    return _set_group(c, g, (el, key, pfx) -> begin
+        _require_kind(el, (:barChart,), "overlap")
+        _with_val(el, key, pfx, "overlap", v)
+    end)
+end
+
+# ── Legend entries ────────────────────────────────────────────────────────────
+
+_legend_node(root::XML.Node) =
+    first_element_with_tag(first_element_with_tag(root, "chart"), "legend")
+
+_series_idx(c::Chart, root::XML.Node, i::Integer) =
+    _int_val(last(_series_pick(c, root, i)), "idx")
+
+function _legend_entry(pfx, idx::Int, deleted::Bool)
+    key = (NS_C, "legendEntry")
+    e = XML.Element(prefixed_tag(pfx[NS_C], "legendEntry"))
+    e = insert_child(e, key, _val_el(pfx, "idx", string(idx)))
+    return insert_child(e, key, _val_el(pfx, "delete", deleted ? "1" : "0"))
+end
+
+"""
+    getLegendEntryDeleted(c::Chart, i::Integer) -> Union{Nothing,Bool}
+
+Whether series `i`'s legend entry is hidden (`c:legendEntry/c:delete`).
+`nothing` means the chart has no legend, series `i` has no `c:legendEntry`, or
+the entry carries text formatting instead, which the schema allows in place of
+`c:delete`; in all three cases the entry is shown.
+
+A legend entry is keyed by its series' `c:idx`, which this finds from the
+position.
+"""
+function getLegendEntryDeleted(c::Chart, i::Integer)
+    root = chart_root(c)
+    lg   = _legend_node(root)
+    isnothing(lg) && return nothing
+    x = _series_idx(c, root, i)
+    for k in XML.children(lg)
+        localname(k) == "legendEntry" && _int_val(k, "idx") == x && return _bool_val(k, "delete")
+    end
+    return nothing
+end
+
+"""
+    setLegendEntryDeleted(c, positions, deleted) -> Chart
+
+Hide (`true`) or show (`false`) the legend entries of the series at
+`positions` — a single position or any collection of them — in one rebuild of
+the chart part. `:inherit` removes their `c:legendEntry` elements, so the
+entries show with the legend's own formatting.
+
+Replacing an entry discards any text formatting it carried: the schema allows
+an entry either `c:delete` or `c:txPr`, not both.
+
+Throws if the chart has no legend, rather than adding one.
+
+Hiding entries is how to show a legend in an order other than series order:
+add series with zero values in the wanted order, format them to match, and
+hide the entries of the series that draw the data.
+"""
+function setLegendEntryDeleted(c::Chart, positions, deleted::Union{Bool,Symbol})
+    deleted isa Symbol && deleted !== :inherit && throw(XLSXError(
+        "`$(repr(deleted))` is not a legend entry state; use `true`, `false` or `:inherit`."))
+    ps = positions isa Integer ? (positions,) : positions
+    isempty(ps) && return c
+
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    isnothing(_legend_node(root)) && throw(XLSXError(
+        "Chart `$(c.name)` has no legend, so it has no legend entries to set."))
+    idxs = unique(Int[_series_idx(c, root, i) for i in ps])
+    lkey = (NS_C, "legend")
+
+    new = rebuild_path(root, [(NS_C, "chart") => "chart", lkey => "legend"], lg -> begin
+        kids    = isnothing(lg.children) ? XML.Node[] : lg.children
+        others  = XML.Node[k for k in kids if localname(k) != "legendEntry"]
+        entries = XML.Node[k for k in kids
+                           if localname(k) == "legendEntry" && !(_int_val(k, "idx") in idxs)]
+        deleted === :inherit || append!(entries, [_legend_entry(pfx, x, deleted) for x in idxs])
+        sort!(entries; by = k -> _int_val(k, "idx"))
+        foldl((l, e) -> insert_child(l, lkey, e), entries; init = _with_children(lg, others))
+    end; prefixes = pfx)
+    set_chart_root!(c, new)
+    return c
+end
+
+const _TICK_MARKS = (:cross, :in, :out, :none)
+const _TICK_MARK_ALIASES = Dict(:inside => :in, :outside => :out)   # Excel's names
+
+_tick_mark(m::Symbol) = _check_sym(get(_TICK_MARK_ALIASES, m, m), _TICK_MARKS, "tick mark")
+
+"""
+    setAxisMajorTickMark(c, ax, mark) -> Chart
+
+Set the axis's major tick marks (`c:majorTickMark`): `:out`, `:in`, `:cross` or
+`:none`, or Excel's `:outside` and `:inside`. `:inherit` removes the element.
+"""
+function setAxisMajorTickMark(c::Chart, ax::ChartAxis, m::Symbol)
+    v = _tick_mark(m)
+    return _set_axis(c, ax, (el, key, pfx) -> _with_val(el, key, pfx, "majorTickMark", v))
+end
+
+"""
+    setAxisMinorTickMark(c, ax, mark) -> Chart
+
+As [`setAxisMajorTickMark`](@ref), for `c:minorTickMark`.
+"""
+function setAxisMinorTickMark(c::Chart, ax::ChartAxis, m::Symbol)
+    v = _tick_mark(m)
+    return _set_axis(c, ax, (el, key, pfx) -> _with_val(el, key, pfx, "minorTickMark", v))
+end
+
+"""
+    setAxisGridlines(c, ax; major, minor) -> Chart
+
+Show (`true`) or remove (`false`) the axis's major and minor gridlines. A
+gridline element's presence is the switch, so `false` removes it rather than
+writing an "off" value; a newly shown set takes its line from the chart style.
+A keyword left unspecified is left alone.
+"""
+function setAxisGridlines(c::Chart, ax::ChartAxis; major = nothing, minor = nothing)
+    all(isnothing, (major, minor)) && return c
+    for v in (major, minor)
+        v isa Union{Nothing,Bool} || throw(XLSXError("Gridlines are `true` or `false`; got $(repr(v))."))
+    end
+    return _set_axis(c, ax, (el, key, pfx) -> begin
+        for (v, tag) in ((major, "majorGridlines"), (minor, "minorGridlines"))
+            isnothing(v) && continue
+            has = !isnothing(first_element_with_tag(el, tag))
+            if v && !has
+                el = insert_child(el, key, XML.Element(prefixed_tag(pfx[NS_C], tag)))
+            elseif !v
+                el = remove_child(el, tag)
+            end
+        end
+        el
+    end)
+end
+
+"""
+    setAxisTextProp(c, ax, field, value) -> Chart
+
+Set one text property of the axis's tick labels (`c:txPr` on the axis). Takes
+the same fields and values as [`setLegendTextProp`](@ref).
+"""
+setAxisTextProp(c::Chart, ax::ChartAxis, field::Symbol, value) =
+    _set_axis(c, ax, (el, key, pfx) -> _txpr_with_run_prop(el, key, field, value, pfx))
+
+# Rebuild the spPr under the element `stepsof(root)` addresses, applying g(sp, pfx).
+function _set_shape_under(c::Chart, stepsof, g)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    new  = rebuild_path(root, [stepsof(root)...; (NS_A, "spPr") => "spPr"],
+                        sp -> g(sp, pfx); prefixes = pfx)
+    set_chart_root!(c, new)
+    return c
+end
+
+_ln_setter(kw) = (sp, pfx) -> _sp_with_line(sp, (NS_A, "spPr"), ln -> _ln_with(ln, pfx; kw...), pfx)
+
+function _line_instruction(what::Symbol)
+    what === :inherit && return (sp, _) -> remove_child(sp, "ln")
+    what === :none    && return _ln_setter((; color = :none, width = nothing, dash = nothing,
+                                              cap = nothing, compound = nothing,
+                                              join = nothing, miterLimit = nothing))
+    throw(XLSXError("`$what` is not a line instruction; use `:none` or `:inherit`."))
+end
+
+_axis_steps(c::Chart, ax::ChartAxis) = root -> first(_axis_path(c, root, ax))
+_plotarea_steps(_) = [(NS_C, "chart") => "chart", (NS_C, "plotArea") => "plotArea"]
+
+"""
+    setAxisLine(c, ax; color, width, dash, cap, compound, join, miterLimit) -> Chart
+    setAxisLine(c, ax, :none)
+    setAxisLine(c, ax, :inherit)
+
+Set the axis line, as [`setSeriesLine`](@ref) sets a series outline: several
+properties in one rebuild, `:none` for a line that draws nothing, `:inherit` to
+remove it so the chart style supplies it.
+"""
+function setAxisLine(c::Chart, ax::ChartAxis;
+                     color = nothing, width = nothing, dash = nothing, cap = nothing,
+                     compound = nothing, join = nothing, miterLimit = nothing)
+    kw = (; color, width, dash, cap, compound, join, miterLimit)
+    all(isnothing, kw) && return c
+    return _set_shape_under(c, _axis_steps(c, ax), _ln_setter(kw))
+end
+setAxisLine(c::Chart, ax::ChartAxis, what::Symbol) =
+    _set_shape_under(c, _axis_steps(c, ax), _line_instruction(what))
+
+"""
+    setPlotAreaLine(c; color, width, dash, cap, compound, join, miterLimit) -> Chart
+    setPlotAreaLine(c, :none)
+    setPlotAreaLine(c, :inherit)
+
+Set the border of the plot area (`c:plotArea/c:spPr/a:ln`), as
+[`setSeriesLine`](@ref) sets a series outline.
+"""
+function setPlotAreaLine(c::Chart;
+                         color = nothing, width = nothing, dash = nothing, cap = nothing,
+                         compound = nothing, join = nothing, miterLimit = nothing)
+    kw = (; color, width, dash, cap, compound, join, miterLimit)
+    all(isnothing, kw) && return c
+    return _set_shape_under(c, _plotarea_steps, _ln_setter(kw))
+end
+setPlotAreaLine(c::Chart, what::Symbol) =
+    _set_shape_under(c, _plotarea_steps, _line_instruction(what))
+
+
+function _positive(v, what)
+    v === :inherit && return :inherit
+    x = Float64(v)
+    isfinite(x) && x > 0 || throw(XLSXError("$what must be positive and finite; got $v."))
+    return _xsd_double(x)
+end
+
+"""
+    setAxisMajorUnit(c, ax, value) -> Chart
+
+Set the interval between major ticks and gridlines (`c:majorUnit`), in the
+axis's own units; `:inherit` returns it to automatic. Value and date axes only.
+
+Ticks start at the axis minimum, so a minimum that is a multiple of the unit
+puts a tick at zero.
+"""
+function setAxisMajorUnit(c::Chart, ax::ChartAxis, v)
+    s = _positive(v, "A major unit")
+    return _set_axis(c, ax, (el, key, pfx) -> begin
+        _require_kind(el, (:valAx, :dateAx), "majorUnit")
+        _with_val(el, key, pfx, "majorUnit", s)
+    end)
+end
+
+"""
+    setAxisMinorUnit(c, ax, value) -> Chart
+
+As [`setAxisMajorUnit`](@ref), for the interval between minor ticks
+(`c:minorUnit`).
+"""
+function setAxisMinorUnit(c::Chart, ax::ChartAxis, v)
+    s = _positive(v, "A minor unit")
+    return _set_axis(c, ax, (el, key, pfx) -> begin
+        _require_kind(el, (:valAx, :dateAx), "minorUnit")
+        _with_val(el, key, pfx, "minorUnit", s)
+    end)
+end

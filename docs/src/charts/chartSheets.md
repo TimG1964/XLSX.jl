@@ -74,12 +74,6 @@ julia> isempty(getCharts(g))
 true
 ```
 
-!!! note "Experimental"
-
-    Handling of native Excel charts in XLSX.jl is experimental and a work in 
-    progress. All aspects may be subject to change. Feedback is welcome!
-
-
 A chart elsewhere in the workbook that plots from the deleted sheet keeps its
 reference, as a formula does — the chart will show its cached values, and Excel
 resolves the reference when it next opens the file.
@@ -89,6 +83,8 @@ resolves the reference when it next opens the file.
 A chartsheet is a sheet in its own right, so it is deleted like any other:
 
 ```julia
+julia> addChart(g, :line; sheetname = "Trend");
+
 julia> XLSX.deletesheet!(g, "Trend");
 ```
 

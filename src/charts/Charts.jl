@@ -107,6 +107,7 @@ export
     getPlotAreaShapeProps, getChartSpaceShapeProps, getChartSpaceTextProps,
     getChartLegend, getLegendPos, getLegendOverlay, getLegendShapeProps, getLegendTextProps,
     setChartTitleText, setChartTitleTextProp, setChartSpaceTextProp, setLegendTextProp,
+    setLegendEntryDeleted, getLegendEntryDeleted, setPlotAreaLine,
     # Series
     getSeriesName, getSeriesNameRange, getSeriesData, getSeriesOwner, getSeriesHidden,
     getSeriesGroup, getSeriesAxes, getSeriesAxisIds, getSeriesLayout,
@@ -123,7 +124,7 @@ export
     # Groups
     getGroupAxes, getGroupLabelTextProps, getGroupDropLines, getGroupHiLowLines,
     getGroupSeriesLines, getGroupUpDownBars, getUpBarShapeProps, getDownBarShapeProps,
-    setGroupLabelTextProp,
+    setGroupLabelTextProp, getGroupGapWidth, setGroupGapWidth, getGroupOverlap, setGroupOverlap,
     # Axes
     getAxisShapeProps, getAxisTextProps, getAxisTitleText, getAxisTitleRef,
     getAxisTitleTextProps, getAxisGridlines, getAxisPartner,
@@ -132,7 +133,12 @@ export
     getAxisMin, getAxisMax, getAxisLogBase, getAxisCrosses, getAxisCrossesAt,
     getAxisMajorUnit, getAxisMinorUnit, getAxisLabelAlign, getAxisLabelOffset,
     getAxisMultiLevelLabels, getAxisCrossBetween,
-    setAxisTitleText, setAxisTitleTextProp,
+    setAxisTitleText, setAxisTitleTextProp, setAxisTickLabelPos, 
+    setAxisScaling, setAxisMin, setAxisMax, setAxisOrientation, 
+    setAxisCrosses, setAxisCrossesAt, setAxisNumberFormatCode, setAxisNumberFormatLinked, 
+    setAxisTitleText, getGapWidth, setGapWidth, getOverlap, setOverlap,
+    setAxisMajorTickMark, setAxisMinorTickMark, setAxisGridlines, setAxisTextProp, setAxisLine,
+    setAxisMajorUnit, setAxisMinorUnit,
     # Data points, markers and labels
     getDataPointShapeProps, getDataPointMarker, getMarkerFill,
     getDataLabelText, getDataLabelTextProps, getDataLabelShapeProps,

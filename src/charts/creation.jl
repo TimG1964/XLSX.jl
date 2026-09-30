@@ -153,9 +153,11 @@ end
 Add an empty chart of `kind` to `ws`, covering the cells in `anchor` (a range
 such as `"F2:M18"`). Add data with [`addSeries`](@ref).
 
-`kind` is one of `:column`, `:bar`, `:stackedColumn`, `:line`, `:lineMarkers`,
-`:area`, `:pie`, `:doughnut`, `:scatter`, `:bubble` or `:radar`. The chart
-starts as Excel's own default for that kind, formatted by the workbook's theme.
+`kind` is one of `:column`, `:bar`, `:stackedColumn`, `:stackedBar`, `:line`,
+`:lineMarkers`, `:area`, `:pie`, `:doughnut`, `:scatter`, `:bubble` or `:radar`.
+`:bar` and `:stackedBar` are horizontal; `:column` and `:stackedColumn` vertical.
+The chart starts as Excel's own default for that kind, formatted by the
+workbook's theme.
 
 `title` is `nothing` for Excel's automatic title, a string for typed text, or
 `false` for no title.

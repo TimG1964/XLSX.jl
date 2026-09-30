@@ -64,6 +64,7 @@ const CHILD_ORDER = Dict{Tuple{String,String},Vector{Union{String,Vector{String}
     (NS_C, "serAx") => ["axId","scaling","delete","axPos","majorGridlines","minorGridlines",
                         "title","numFmt","majorTickMark","minorTickMark","tickLblPos","spPr",
                         "txPr","crossAx","crosses","crossesAt","tickLblSkip","tickMarkSkip","extLst"],
+    (NS_C, "scaling")     => ["logBase","orientation","max","min","extLst"],
 
     # CT_ChartLines — gridlines, drop lines, hi-low lines, series lines, leader lines
     (NS_C, "majorGridlines") => ["spPr"],
@@ -383,6 +384,7 @@ const C_KINDS = (
     column        = (template = :column,      style = 201),
     bar           = (template = :bar,         style = 216),
     stackedColumn = (template = :stacked,     style = 297),
+    stackedBar    = (template = :stackedbar,  style = 297),
     line          = (template = :line,        style = 227),
     lineMarkers   = (template = :linemarkers, style = 332),
     area          = (template = :area,        style = 276),

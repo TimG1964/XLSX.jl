@@ -85,8 +85,8 @@
 
 @testset "ChartProps" begin
 
-    f  = XLSX.readxlsx(joinpath(data_directory, "chart_appearance.xlsx"))
-    c  = XLSX.Charts.getCharts(f)[1]
+    f = XLSX.readxlsx(joinpath(data_directory, "chart_appearance.xlsx"))
+    c = XLSX.Charts.getCharts(f)[1]
 
     @testset "reaching the XML" begin
         root = XLSX.Charts.chart_root(c)
@@ -214,8 +214,8 @@
 
     @testset "axes: appearance" begin
         cat, pri, sec = XLSX.Charts.getChartAxis(c, 612078287),
-                        XLSX.Charts.getChartAxis(c, 460195247),
-                        XLSX.Charts.getChartAxis(c, 1773317264)
+        XLSX.Charts.getChartAxis(c, 460195247),
+        XLSX.Charts.getChartAxis(c, 1773317264)
 
         @test XLSX.Charts.text_content(XLSX.Charts.getAxisTitleText(c, cat)) == "Horizontal"
         @test XLSX.Charts.text_content(XLSX.Charts.getAxisTitleText(c, pri)) == "Primary"
@@ -240,8 +240,8 @@
 
     @testset "axes: scalars" begin
         cat, pri, sec = XLSX.Charts.getChartAxis(c, 612078287),
-                        XLSX.Charts.getChartAxis(c, 460195247),
-                        XLSX.Charts.getChartAxis(c, 1773317264)
+        XLSX.Charts.getChartAxis(c, 460195247),
+        XLSX.Charts.getChartAxis(c, 1773317264)
 
         @test XLSX.Charts.getAxisNumberFormatCode(c, cat) == "General"
         @test XLSX.Charts.getAxisNumberFormatLinked(c, cat) === true
@@ -418,7 +418,7 @@
         @test sp.fill.kind == :none                      # explicit noFill
 
         # Only cust bars carry plus/minus references.
-        @test XLSX.Charts.getErrorBarsCustomRefs(c, e) == (plus = nothing, minus = nothing)
+        @test XLSX.Charts.getErrorBarsCustomRefs(c, e) == (plus=nothing, minus=nothing)
     end
 
     @testset "other fixtures" begin
@@ -497,14 +497,14 @@
         @test e.site.level === :series && e.value == 9.0
     end
 
-        @testset "setSeriesFill" begin
+    @testset "setSeriesFill" begin
         # Setters mutate xf.data, so work on a copy rather than the tracked fixture.
         src = joinpath(data_directory, "chart_appearance.xlsx")
         tmp = joinpath(mktempdir(), "appearance.xlsx")
         cp(src, tmp)
 
-        xf = XLSX.openxlsx(tmp; mode = "rw")
-        c  = first(XLSX.Charts.getCharts(xf[1]))
+        xf = XLSX.openxlsx(tmp; mode="rw")
+        c = first(XLSX.Charts.getCharts(xf[1]))
         wb = XLSX.get_workbook(xf[1])
 
         # Series 3 has an spPr with a line and no fill — the empty-slot case.
@@ -520,14 +520,14 @@
         @test !isnothing(XLSX.Charts.getSeriesLine(c, 3).value)
 
         # replacing an existing fill does not throw and does not duplicate
-        c  = XLSX.Charts.setSeriesFill(c, 3, "blue")
+        c = XLSX.Charts.setSeriesFill(c, 3, "blue")
         sp = XLSX.Charts.getSeriesShapeProps(c, 3).raw
-        @test count(k -> XLSX.localname(k) in ("solidFill","noFill","gradFill","pattFill",
-                                        "blipFill","grpFill"), XML.children(sp)) == 1
+        @test count(k -> XLSX.localname(k) in ("solidFill", "noFill", "gradFill", "pattFill",
+            "blipFill", "grpFill"), XML.children(sp)) == 1
         @test XLSX.Charts.getSeriesFill(c, 3).value.fgcolor.rgb == "0000FF"
 
         # a theme color with transforms
-        c = XLSX.Charts.setSeriesFill(c, 3, XLSX.Charts.SchemeColor(:accent1; lumMod = 75))
+        c = XLSX.Charts.setSeriesFill(c, 3, XLSX.Charts.SchemeColor(:accent1; lumMod=75))
         e = XLSX.Charts.getSeriesFill(c, 3)
         @test e.value.fgcolor.val == "accent1"
         @test e.value.fgcolor.transforms == [:lumMod => 75000]
@@ -552,9 +552,9 @@
         @test XLSX.Charts.getSeriesFill(c, 1).value.fgcolor.rgb == "008000"
 
         # the survivor test: writing and reopening keeps the change
-        XLSX.writexlsx(tmp, xf; overwrite = true)
+        XLSX.writexlsx(tmp, xf; overwrite=true)
         xf2 = XLSX.openxlsx(tmp)
-        c2  = first(XLSX.Charts.getCharts(xf2[1]))
+        c2 = first(XLSX.Charts.getCharts(xf2[1]))
         @test XLSX.Charts.getSeriesFill(c2, 1).value.fgcolor.rgb == "008000"
     end
     @testset "setSeriesLine" begin
@@ -562,8 +562,8 @@
         tmp = joinpath(mktempdir(), "appearance.xlsx")
         cp(joinpath(data_directory, "chart_appearance.xlsx"), tmp)
 
-        xf = XLSX.openxlsx(tmp; mode = "rw")
-        c  = first(XLSX.Charts.getCharts(xf[1]))
+        xf = XLSX.openxlsx(tmp; mode="rw")
+        c = first(XLSX.Charts.getCharts(xf[1]))
 
         # All three series have an a:ln written with noFill inside — the line exists
         # and draws nothing. Remove it to exercise creation from scratch.
@@ -614,12 +614,12 @@
         @test isnothing(e.value.dash) && e.value.cap == "rnd" && e.value.width ≈ 2.25
 
         # the sugar is one rebuild, and a bad value leaves nothing applied
-        c = XLSX.Charts.setSeriesLine(c, 3; color = "blue", width = 1.5, dash = :dash)
+        c = XLSX.Charts.setSeriesLine(c, 3; color="blue", width=1.5, dash=:dash)
         e = XLSX.Charts.getSeriesLine(c, 3)
         @test e.value.fill.fgcolor.rgb == "0000FF" && e.value.width ≈ 1.5 && e.value.dash == "dash"
 
         before = XML.write(XLSX.Charts.getSeriesShapeProps(c, 3).raw)
-        @test_throws XLSX.XLSXError XLSX.Charts.setSeriesLine(c, 3; width = 3, dash = :nonsense)
+        @test_throws XLSX.XLSXError XLSX.Charts.setSeriesLine(c, 3; width=3, dash=:nonsense)
         @test XML.write(XLSX.Charts.getSeriesShapeProps(c, 3).raw) == before      # atomic
 
         # no keywords is a no-op returning the same chart
@@ -634,9 +634,9 @@
 
         # survives a write and reopen
         c = XLSX.Charts.setSeriesLineColor(c, 1, "green")
-        XLSX.writexlsx(tmp, xf; overwrite = true)
+        XLSX.writexlsx(tmp, xf; overwrite=true)
         xf2 = XLSX.openxlsx(tmp)
-        c2  = first(XLSX.Charts.getCharts(xf2[1]))
+        c2 = first(XLSX.Charts.getCharts(xf2[1]))
         @test XLSX.Charts.getSeriesLine(c2, 1).value.fill.fgcolor.rgb == "008000"
     end
 
@@ -644,8 +644,8 @@
         tmp = joinpath(mktempdir(), "appearance.xlsx")
         cp(joinpath(data_directory, "chart_appearance.xlsx"), tmp)
 
-        xf = XLSX.openxlsx(tmp; mode = "rw")
-        c  = first(XLSX.Charts.getCharts(xf[1]))
+        xf = XLSX.openxlsx(tmp; mode="rw")
+        c = first(XLSX.Charts.getCharts(xf[1]))
 
         # Series 3 is the line series: c:marker diamond size 9 with its own spPr.
         m = XLSX.Charts.getSeriesMarker(c, 3)
@@ -681,24 +681,24 @@
                         for k in XML.eachelement(mk)])
 
         # the point marker: series 3's dPt at idx 2 is point 3
-        c = XLSX.Charts.setMarkerFill(c, 3, "green"; point = 3)
+        c = XLSX.Charts.setMarkerFill(c, 3, "green"; point=3)
         e = XLSX.Charts.getMarkerFill(c, 3, 3)
         @test e.site.level === :point && e.value.fgcolor.rgb == "008000"
 
         # Point 1 of series 3 had no c:dPt; the setter now creates one.
-        XLSX.Charts.setMarkerFill(c, 3, "red"; point = 1)
+        XLSX.Charts.setMarkerFill(c, 3, "red"; point=1)
         d = XLSX.Charts.getSeriesDataPoint(c, 3, 1)
         @test !isnothing(d)
         @test XLSX.Charts.getDataPointMarker(c, d).shape.fill.fgcolor.rgb == "FF0000"
 
         # the sugar is one rebuild
-        c = XLSX.Charts.setMarker(c, 3; symbol = :square, size = 7, fill = "yellow")
+        c = XLSX.Charts.setMarker(c, 3; symbol=:square, size=7, fill="yellow")
         m = XLSX.Charts.getSeriesMarker(c, 3)
         @test m.symbol === :square && m.size == 7
         @test XLSX.Charts.setMarker(c, 3) === c                          # no keywords, no-op
 
         # survives a write and reopen
-        XLSX.writexlsx(tmp, xf; overwrite = true)
+        XLSX.writexlsx(tmp, xf; overwrite=true)
         c2 = first(XLSX.Charts.getCharts(XLSX.openxlsx(tmp)[1]))
         @test XLSX.Charts.getSeriesMarker(c2, 3).symbol === :square
     end
@@ -707,9 +707,9 @@
         tmp = joinpath(mktempdir(), "appearance.xlsx")
         cp(joinpath(data_directory, "chart_appearance.xlsx"), tmp)
 
-        xf = XLSX.openxlsx(tmp; mode = "rw")
+        xf = XLSX.openxlsx(tmp; mode="rw")
         wb = XLSX.get_workbook(xf[1])
-        c  = first(XLSX.Charts.getCharts(xf[1]))
+        c = first(XLSX.Charts.getCharts(xf[1]))
 
         # Series 1's labels are sz 1050 accent1+lumMod; series 2's are sz 900.
         @test XLSX.Charts.getLabelTextProp(c, 1, :size).value ≈ 10.5
@@ -733,9 +733,9 @@
         # compound fields
         c = XLSX.Charts.setLabelTextProp(c, 1, :fill, "red")
         @test XLSX.Charts.getLabelTextProp(c, 1, :fill).value.fgcolor.rgb == "FF0000"
-        c = XLSX.Charts.setLabelTextProp(c, 1, :fill, XLSX.Charts.SchemeColor(:accent1; lumMod = 75))
+        c = XLSX.Charts.setLabelTextProp(c, 1, :fill, XLSX.Charts.SchemeColor(:accent1; lumMod=75))
         @test XLSX.Charts.getLabelTextProp(c, 1, :fill).value.fgcolor.val == "accent1"
-        c = XLSX.Charts.setLabelTextProp(c, 1, :line, (color = "blue", width = 1.5))
+        c = XLSX.Charts.setLabelTextProp(c, 1, :line, (color="blue", width=1.5))
         l = XLSX.Charts.getLabelTextProp(c, 1, :line).value
         @test l.fill.fgcolor.rgb == "0000FF" && l.width ≈ 1.5
 
@@ -756,14 +756,14 @@
         for f in flags
             @test XML.attributes(XLSX.first_element_with_tag(dl, f))["val"] == "0"
         end
-        
+
         # An individual label. Series 1's dLbl at idx 0 is point 1, retyped, and
         # carries formatting in BOTH c:tx/c:rich and c:txPr — writing one alone
         # would leave the edit invisible in Excel.
         c = XLSX.Charts.setLabelTextProp(c, 1, 1, :size, 20)
         lbl = XLSX.Charts.getSeriesDataLabel(c, 1, 1).raw
         for body in (XLSX.first_element_with_tag(lbl, "txPr"),
-                    XLSX.first_element_with_tag(XLSX.first_element_with_tag(lbl, "tx"), "rich"))
+            XLSX.first_element_with_tag(XLSX.first_element_with_tag(lbl, "tx"), "rich"))
             rp = XLSX.Charts.default_run_props(XLSX.Charts.parse_drawing_text(wb, body))
             @test rp.size ≈ 20.0
         end
@@ -794,7 +794,7 @@
         @test e.value == "all" && e.site.level === :chartspace
 
         # survives a write and reopen
-        XLSX.writexlsx(tmp, xf; overwrite = true)
+        XLSX.writexlsx(tmp, xf; overwrite=true)
         c2 = first(XLSX.Charts.getCharts(XLSX.openxlsx(tmp)[1]))
         @test XLSX.Charts.getLabelTextProp(c2, 3, :size).value ≈ 11.0
     end
@@ -802,8 +802,8 @@
     @testset "title and legend text" begin
         tmp = joinpath(mktempdir(), "appearance.xlsx")
         cp(joinpath(data_directory, "chart_appearance.xlsx"), tmp)
-        xf = XLSX.openxlsx(tmp; mode = "rw")
-        c  = first(XLSX.Charts.getCharts(xf[1]))
+        xf = XLSX.openxlsx(tmp; mode="rw")
+        c = first(XLSX.Charts.getCharts(xf[1]))
         wb = XLSX.get_workbook(xf[1])
 
         # The fixture's chart title has spPr and txPr but no c:tx — Excel generates
@@ -822,7 +822,7 @@
 
         # A DrawingText replaces text and formatting wholesale.
         c = XLSX.Charts.setChartTitleText(c, XLSX.Charts.DrawingText(XLSX.Charts.DrawingParagraph(
-                XLSX.Charts.DrawingRun("Q4", props = XLSX.Charts.DrawingRunProps(size = 24.0, italic = true)))))
+            XLSX.Charts.DrawingRun("Q4", props=XLSX.Charts.DrawingRunProps(size=24.0, italic=true)))))
         g = XLSX.Charts.getChartTitleText(c)
         @test XLSX.Charts.text_content(g) == "Q4"
         @test XLSX.Charts.first_run_props(g).size ≈ 24.0 && XLSX.Charts.first_run_props(g).italic === true
@@ -830,11 +830,11 @@
         # Axis titles. The catAx at 612078287 is titled "Horizontal".
         ax = XLSX.Charts.getChartAxis(c, 612078287)
         @test XLSX.Charts.text_content(XLSX.Charts.getAxisTitleText(c, ax)) == "Horizontal"
-        c  = XLSX.Charts.setAxisTitleText(c, ax, "Quarter")
+        c = XLSX.Charts.setAxisTitleText(c, ax, "Quarter")
         ax = XLSX.Charts.getChartAxis(c, 612078287)              # the Chart is fresh; re-fetch
         @test XLSX.Charts.text_content(XLSX.Charts.getAxisTitleText(c, ax)) == "Quarter"
 
-        c  = XLSX.Charts.setAxisTitleTextProp(c, ax, :bold, true)
+        c = XLSX.Charts.setAxisTitleTextProp(c, ax, :bold, true)
         ax = XLSX.Charts.getChartAxis(c, 612078287)
         @test XLSX.Charts.default_run_props(XLSX.Charts.getAxisTitleText(c, ax)).bold === true
 
@@ -848,7 +848,7 @@
                         for k in XML.eachelement(t)])
 
         # survives a write and reopen
-        XLSX.writexlsx(tmp, xf; overwrite = true)
+        XLSX.writexlsx(tmp, xf; overwrite=true)
         c2 = first(XLSX.Charts.getCharts(XLSX.openxlsx(tmp)[1]))
         @test XLSX.Charts.text_content(XLSX.Charts.getChartTitleText(c2)) == "Q4"
         ax2 = XLSX.Charts.getChartAxis(c2, 612078287)
@@ -858,14 +858,14 @@
     @testset "created spPr takes the chart prefix" begin
         tmp = joinpath(mktempdir(), "prefix.xlsx")
         cp(joinpath(data_directory, "chart_appearance.xlsx"), tmp)
-        xf = XLSX.openxlsx(tmp; mode = "rw")
+        xf = XLSX.openxlsx(tmp; mode="rw")
         c = only(filter(x -> x isa XLSX.Charts.Chart, XLSX.Charts.getCharts(xf)))
 
         # strip series 1's spPr so the setter has to create one
         root = XLSX.Charts.chart_root(c)
         new = XLSX.Charts.rebuild_path(root, XLSX.Charts._series_path(c, root, 1)[1],
-                                s -> XLSX.Charts.remove_child(s, "spPr");
-                                prefixes = XLSX.ns_prefixes(root))
+            s -> XLSX.Charts.remove_child(s, "spPr");
+            prefixes=XLSX.ns_prefixes(root))
         XLSX.Charts.set_chart_root!(c, new)
         @test XLSX.Charts.setSeriesFill(c, 1, "FF00B0F0") === c
         @test XLSX.XML.tag(XLSX.first_element_with_tag(XLSX.Charts._series(c, 1).raw, "spPr")) == "c:spPr"
@@ -874,12 +874,12 @@
     @testset "title run properties yield to the paragraph default" begin
         tmp = joinpath(mktempdir(), "c_runclear.xlsx")
         cp(joinpath(data_directory, "chart_basic.xlsx"), tmp)
-        xf = XLSX.openxlsx(tmp; mode = "rw")
+        xf = XLSX.openxlsx(tmp; mode="rw")
         c = only(filter(x -> x isa XLSX.Charts.Chart, XLSX.Charts.getCharts(xf)))
         c = XLSX.Charts.setChartTitleTextProp(c, :size, 18)
         @test XLSX.Charts.default_run_props(XLSX.Charts.getChartTitleTextProps(c)).size ≈ 18.0
         rich = XLSX.first_element_with_tag(
-                   XLSX.first_element_with_tag(XLSX.Charts.getChartTitleNode(c), "tx"), "rich")
+            XLSX.first_element_with_tag(XLSX.Charts.getChartTitleNode(c), "tx"), "rich")
         for r in XLSX.elements_with_tag(XLSX.first_element_with_tag(rich, "p"), "r")
             rpr = XLSX.first_element_with_tag(r, "rPr")
             isnothing(rpr) || @test isempty(XLSX.get_attr(rpr, "sz"))
@@ -888,17 +888,17 @@
 
     @testset "Chart handles are durable" begin
         path = "chart_durable.xlsx"
-        out  = "chart_durable_out.xlsx"
+        out = "chart_durable_out.xlsx"
         cp(joinpath(data_directory, "chart_basic.xlsx"), path; force=true)
-        xf = XLSX.openxlsx(path; mode = "rw")
-        c  = XLSX.Charts.getChart(xf, "chart1")
+        xf = XLSX.openxlsx(path; mode="rw")
+        c = XLSX.Charts.getChart(xf, "chart1")
         c2 = XLSX.Charts.getChart(xf, "chart1")          # obtained before the write
 
         n = length(XLSX.Charts.getChartSeries(c))
         @test XLSX.Charts.setSeriesFill(c, 1, "FFFF0000") === c
 
         # Both handles see the write; neither needed refreshing.
-        @test XLSX.Charts.getSeriesFill(c,  1).value.fgcolor.rgb == "FF0000"
+        @test XLSX.Charts.getSeriesFill(c, 1).value.fgcolor.rgb == "FF0000"
         @test XLSX.Charts.getSeriesFill(c2, 1).value.fgcolor.rgb == "FF0000"
         @test length(XLSX.Charts.getChartSeries(c)) == n
         @test XLSX.Charts.getChartTypes(c) == [:barChart]
@@ -907,7 +907,7 @@
         # A second write through the same handle, then a round trip.
         XLSX.Charts.setSeriesLineWidth(c, 2, 2.5)
         SAVE_FILES && save_outfile(xf)
-        XLSX.writexlsx(out, xf, overwrite = true)
+        XLSX.writexlsx(out, xf, overwrite=true)
         c3 = XLSX.Charts.getChart(XLSX.readxlsx(out), "chart1")
         @test XLSX.Charts.getSeriesFill(c3, 1).value.fgcolor.rgb == "FF0000"
         @test XLSX.Charts.getSeriesLine(c3, 2).value.width ≈ 2.5
@@ -919,21 +919,21 @@
     @testset "data point setters address the same point as the getters" begin
         path = "chart_appearance_dpt.xlsx"
         cp(joinpath(data_directory, "chart_appearance.xlsx"), path; force=true)
-        xf = XLSX.openxlsx(path; mode = "rw")
+        xf = XLSX.openxlsx(path; mode="rw")
 
         hit = nothing
         for c in XLSX.Charts.getCharts(xf)
             c isa XLSX.Charts.Chart || continue
             for i in 1:length(XLSX.Charts.getChartSeries(c))
                 dps = XLSX.Charts.getSeriesDataPoints(c, i)
-                isempty(dps) || (hit = (c, i, first(dps).idx + 1); break)
+                isempty(dps) || (hit=(c, i, first(dps).idx + 1); break)
             end
             isnothing(hit) || break
         end
         @test !isnothing(hit)                      # the fixture must have a c:dPt
         c, i, point = hit
 
-        XLSX.Charts.setMarkerSymbol(c, i, :diamond; point = point)
+        XLSX.Charts.setMarkerSymbol(c, i, :diamond; point=point)
         SAVE_FILES && save_outfile(xf)
         d = XLSX.Charts.getSeriesDataPoint(c, i, point)
         @test XLSX.Charts.getDataPointMarker(c, d).symbol === :diamond
@@ -944,8 +944,8 @@
     @testset "axis handles survive writes" begin
         path = "chart_axis_durable.xlsx"
         cp(joinpath(data_directory, "chart_basic.xlsx"), path; force=true)
-        xf = XLSX.openxlsx(path; mode = "rw")
-        c  = XLSX.Charts.getChart(xf, "chart1")
+        xf = XLSX.openxlsx(path; mode="rw")
+        c = XLSX.Charts.getChart(xf, "chart1")
         ax = only(XLSX.Charts.getChartAxes(c, :value))
 
         @test isnothing(XLSX.Charts.getAxisTitleText(c, ax))
@@ -962,19 +962,19 @@
     @testset "creating c:dPt and c:dLbl" begin
         path = "chart_create_points.xlsx"
         cp(joinpath(data_directory, "chart_gaps.xlsx"), path; force=true)
-        xf = XLSX.openxlsx(path; mode = "rw")
-        c  = XLSX.Charts.getCharts(xf)[1]
+        xf = XLSX.openxlsx(path; mode="rw")
+        c = XLSX.Charts.getCharts(xf)[1]
         @test isempty(XLSX.Charts.getSeriesDataPoints(c, 1))
 
         # Created out of order; stored in c:idx order. Points 1 and 4 both plot.
-        XLSX.Charts.setMarkerSymbol(c, 1, :diamond; point = 4)
-        XLSX.Charts.setMarkerSymbol(c, 1, :square; point = 1)
+        XLSX.Charts.setMarkerSymbol(c, 1, :diamond; point=4)
+        XLSX.Charts.setMarkerSymbol(c, 1, :square; point=1)
         @test [d.idx for d in XLSX.Charts.getSeriesDataPoints(c, 1)] == [0, 3]
         @test XLSX.Charts.getDataPointMarker(c, XLSX.Charts.getSeriesDataPoint(c, 1, 4)).symbol === :diamond
         @test XLSX.Charts.getDataPointMarker(c, XLSX.Charts.getSeriesDataPoint(c, 1, 1)).symbol === :square
 
         # A second write to an existing point edits it rather than adding another.
-        XLSX.Charts.setMarkerSize(c, 1, 9; point = 4)
+        XLSX.Charts.setMarkerSize(c, 1, 9; point=4)
         @test length(XLSX.Charts.getSeriesDataPoints(c, 1)) == 2
         @test XLSX.Charts.getDataPointMarker(c, XLSX.Charts.getSeriesDataPoint(c, 1, 4)).size == 9
 
@@ -1013,9 +1013,9 @@
         plain(x) = sprint(show, MIME("text/plain"), x)
 
         xf = XLSX.opentemplate(joinpath(data_directory, "chart_kinds.xlsx"))
-        c  = XLSX.Charts.getCharts(xf["linemarkers"])[1]
+        c = XLSX.Charts.getCharts(xf["linemarkers"])[1]
 
-        XLSX.Charts.setMarker(c, 1; symbol = :circle, size = 7)
+        XLSX.Charts.setMarker(c, 1; symbol=:circle, size=7)
         m = XLSX.Charts.getSeriesMarker(c, 1)
         @test repr(m) == "XLSX.Charts.ChartMarker(circle, size 7)"
         s = plain(m)
@@ -1025,12 +1025,265 @@
         @test !occursin("Element", s)
         @test !occursin("point idx", s)         # the series' own marker
 
-        XLSX.Charts.setMarkerSymbol(c, 1, :diamond; point = 2)
+        XLSX.Charts.setMarkerSymbol(c, 1, :diamond; point=2)
         p = XLSX.Charts.getDataPointMarker(c, XLSX.Charts.getSeriesDataPoints(c, 1)[1])
         @test occursin("point idx 1", repr(p))  # c:idx, one less than the position
         @test occursin("point idx 1", plain(p))
 
         SAVE_FILES && save_outfile(xf)
     end
-end
 
+
+    @testset "axis, group and legend setters" begin
+        tmp = "chart_setters_stackedbar.xlsx"
+        cp(joinpath(data_directory, "chart_kinds.xlsx"), tmp; force=true)
+        try
+            xf = XLSX.openxlsx(tmp; mode="rw")
+            c = first(XLSX.Charts.getCharts(xf["stackedbar"]))
+            axs = XLSX.Charts.getChartAxes(c)
+            catax = only(filter(a -> a.kind === :catAx, axs))
+            valax = only(filter(a -> a.kind === :valAx, axs))
+            g = only(XLSX.Charts.getChartGroups(c))
+            snapshot(c) = XML.write(XLSX.Charts.chart_root(c))
+
+            # tick label position
+            @test XLSX.Charts.getAxisTickLabelPos(c, catax) === :nextTo
+            c = XLSX.Charts.setAxisTickLabelPos(c, catax, :low)
+            @test XLSX.Charts.getAxisTickLabelPos(c, catax) === :low
+            before = snapshot(c)
+            @test_throws XLSX.XLSXError XLSX.Charts.setAxisTickLabelPos(c, catax, :left)
+            @test snapshot(c) == before                                          # atomic
+            c = XLSX.Charts.setAxisTickLabelPos(c, catax, :inherit)
+            @test isnothing(XLSX.Charts.getAxisTickLabelPos(c, catax))
+            c = XLSX.Charts.setAxisTickLabelPos(c, catax, :low)
+
+            # bounds: absent by default, set together, checked after all keywords apply
+            @test isnothing(XLSX.Charts.getAxisMin(c, valax))
+            @test isnothing(XLSX.Charts.getAxisMax(c, valax))
+            c = XLSX.Charts.setAxisScaling(c, valax; min=-0.8, max=0.8)
+            @test XLSX.Charts.getAxisMin(c, valax) ≈ -0.8
+            @test XLSX.Charts.getAxisMax(c, valax) ≈ 0.8
+            before = snapshot(c)
+            @test_throws XLSX.XLSXError XLSX.Charts.setAxisMin(c, valax, 1)        # past the max
+            @test snapshot(c) == before
+            c = XLSX.Charts.setAxisScaling(c, valax; min=1, max=2)            # one call moves both
+            @test XLSX.Charts.getAxisMin(c, valax) ≈ 1.0
+            @test XLSX.Charts.getAxisMax(c, valax) ≈ 2.0
+            @test_throws XLSX.XLSXError XLSX.Charts.setAxisScaling(c, valax; min=3, max=2)
+            @test_throws XLSX.XLSXError XLSX.Charts.setAxisMax(c, valax, Inf)
+            @test XLSX.Charts.setAxisScaling(c, valax) === c                       # no keywords
+            c = XLSX.Charts.setAxisMax(c, valax, :inherit)
+            @test isnothing(XLSX.Charts.getAxisMax(c, valax))
+            @test XLSX.Charts.getAxisMin(c, valax) ≈ 1.0
+
+            # orientation, and c:scaling stays in schema order
+            c = XLSX.Charts.setAxisOrientation(c, catax, :maxMin)
+            @test XLSX.Charts.getAxisOrientation(c, catax) === :maxMin
+            @test_throws XLSX.XLSXError XLSX.Charts.setAxisOrientation(c, catax, :reverse)
+            c = XLSX.Charts.setAxisScaling(c, valax; orientation=:maxMin, min=-1, max=1)
+            sc = XLSX.first_element_with_tag(XLSX.Charts._axnode(c, valax), "scaling")
+            @test issorted([findfirst(==(XLSX.localname(k)), XLSX.Charts.CHILD_ORDER[(XLSX.Charts.NS_C, "scaling")])
+                            for k in XML.eachelement(sc)])
+
+            # crosses and crossesAt replace each other; :inherit removes only its own
+            @test XLSX.Charts.getAxisCrosses(c, valax) === :autoZero
+            c = XLSX.Charts.setAxisCrossesAt(c, valax, 2.5)
+            @test XLSX.Charts.getAxisCrossesAt(c, valax) ≈ 2.5
+            @test isnothing(XLSX.Charts.getAxisCrosses(c, valax))
+            c = XLSX.Charts.setAxisCrosses(c, valax, :max)
+            @test XLSX.Charts.getAxisCrosses(c, valax) === :max
+            @test isnothing(XLSX.Charts.getAxisCrossesAt(c, valax))
+            @test_throws XLSX.XLSXError XLSX.Charts.setAxisCrosses(c, valax, :middle)
+            c = XLSX.Charts.setAxisCrossesAt(c, valax, :inherit)                  # absent: no-op
+            @test XLSX.Charts.getAxisCrosses(c, valax) === :max
+            c = XLSX.Charts.setAxisCrosses(c, valax, :inherit)
+            @test isnothing(XLSX.Charts.getAxisCrosses(c, valax))
+
+            # number format: setting a code unlinks it from the source cells
+            @test XLSX.Charts.getAxisNumberFormatLinked(c, valax) === true
+            c = XLSX.Charts.setAxisNumberFormatCode(c, valax, "0%;0%")
+            @test XLSX.Charts.getAxisNumberFormatCode(c, valax) == "0%;0%"
+            @test XLSX.Charts.getAxisNumberFormatLinked(c, valax) === false
+            c = XLSX.Charts.setAxisNumberFormatLinked(c, valax, true)
+            @test XLSX.Charts.getAxisNumberFormatCode(c, valax) == "0%;0%"
+            c = XLSX.Charts.setAxisNumberFormatCode(c, valax, :inherit)
+            @test isnothing(XLSX.Charts.getAxisNumberFormatCode(c, valax))
+            @test isnothing(XLSX.Charts.getAxisNumberFormatLinked(c, valax))
+            c = XLSX.Charts.setAxisNumberFormatLinked(c, valax, false)
+            @test XLSX.Charts.getAxisNumberFormatCode(c, valax) == "General"
+            escaped = "0\" pts & more\";0"
+            c = XLSX.Charts.setAxisNumberFormatCode(c, catax, escaped)            # checked after reopen
+
+            # group gap width and overlap
+            @test XLSX.Charts.getGroupGapWidth(c, g) == 150
+            @test XLSX.Charts.getGroupOverlap(c, g) == 100
+            c = XLSX.Charts.setGroupGapWidth(c, g, 50)
+            @test XLSX.Charts.getGroupGapWidth(c, g) == 50
+            @test_throws XLSX.XLSXError XLSX.Charts.setGroupGapWidth(c, g, 501)
+            @test_throws XLSX.XLSXError XLSX.Charts.setGroupGapWidth(c, g, 1.5)
+            @test_throws XLSX.XLSXError XLSX.Charts.setGroupOverlap(c, g, -101)
+            c = XLSX.Charts.setGroupOverlap(c, g, :inherit)
+            @test isnothing(XLSX.Charts.getGroupOverlap(c, g))
+            c = XLSX.Charts.setGroupOverlap(c, g, 100)
+
+            # legend entries: keyed by series, kept sorted, one call for several
+            @test isnothing(XLSX.Charts.getLegendEntryDeleted(c, 1))
+            c = XLSX.Charts.setLegendEntryDeleted(c, [3, 1], true)
+            @test XLSX.Charts.getLegendEntryDeleted(c, 1) === true
+            @test XLSX.Charts.getLegendEntryDeleted(c, 3) === true
+            @test isnothing(XLSX.Charts.getLegendEntryDeleted(c, 2))
+            c = XLSX.Charts.setLegendEntryDeleted(c, 2, false)
+            @test XLSX.Charts.getLegendEntryDeleted(c, 2) === false
+            lg = XLSX.Charts.getChartLegend(c)
+            entries = [k for k in XML.eachelement(lg) if XLSX.localname(k) == "legendEntry"]
+            @test [XLSX.Charts._int_val(k, "idx") for k in entries] == [0, 1, 2]
+            @test issorted([findfirst(==(XLSX.localname(k)), XLSX.Charts.CHILD_ORDER[(XLSX.Charts.NS_C, "legend")])
+                            for k in XML.eachelement(lg)])
+            @test_throws XLSX.XLSXError XLSX.Charts.setLegendEntryDeleted(c, 1, :hide)
+            @test XLSX.Charts.setLegendEntryDeleted(c, Int[], true) === c
+            c = XLSX.Charts.setLegendEntryDeleted(c, 1:3, :inherit)
+            @test all(i -> isnothing(XLSX.Charts.getLegendEntryDeleted(c, i)), 1:3)
+            c = XLSX.Charts.setLegendEntryDeleted(c, 1, true)
+
+            # survives a write and reopen
+            SAVE_FILES && save_outfile(xf)
+            XLSX.writexlsx(tmp, xf; overwrite=true)
+            xf2 = XLSX.openxlsx(tmp)
+            SAVE_FILES && save_outfile(xf2)
+            c2 = first(XLSX.Charts.getCharts(xf2["stackedbar"]))
+            ax2 = XLSX.Charts.getChartAxes(c2)
+            cat2 = only(filter(a -> a.kind === :catAx, ax2))
+            val2 = only(filter(a -> a.kind === :valAx, ax2))
+            g2 = only(XLSX.Charts.getChartGroups(c2))
+            @test XLSX.Charts.getAxisTickLabelPos(c2, cat2) === :low
+            @test XLSX.Charts.getAxisOrientation(c2, cat2) === :maxMin
+            @test XLSX.Charts.getAxisMin(c2, val2) ≈ -1.0
+            @test XLSX.Charts.getAxisMax(c2, val2) ≈ 1.0
+            @test XLSX.Charts.getAxisNumberFormatCode(c2, cat2) == escaped
+            @test XLSX.Charts.getGroupGapWidth(c2, g2) == 50
+            @test XLSX.Charts.getLegendEntryDeleted(c2, 1) === true
+        finally
+            isfile(tmp) && rm(tmp)
+        end
+
+        @testset "axis styling, units and title overlay" begin
+            tmp = "chart_styling_stackedbar.xlsx"
+            cp(joinpath(data_directory, "chart_kinds.xlsx"), tmp; force=true)
+            try
+                xf = XLSX.openxlsx(tmp; mode="rw")
+                c = first(XLSX.Charts.getCharts(xf["stackedbar"]))
+                axs = XLSX.Charts.getChartAxes(c)
+                catax = only(filter(a -> a.kind === :catAx, axs))
+                valax = only(filter(a -> a.kind === :valAx, axs))
+                snapshot(c) = XML.write(XLSX.Charts.chart_root(c))
+                axorder(c, ax) = issorted([findfirst(==(XLSX.localname(k)),
+                    XLSX.Charts.CHILD_ORDER[(XLSX.Charts.NS_C, String(ax.kind))])
+                                           for k in XML.eachelement(XLSX.Charts._axnode(c, ax))])
+
+                # tick marks, in either vocabulary
+                @test XLSX.Charts.getAxisMajorTickMark(c, catax) === :none
+                c = XLSX.Charts.setAxisMajorTickMark(c, catax, :cross)
+                @test XLSX.Charts.getAxisMajorTickMark(c, catax) === :cross
+                c = XLSX.Charts.setAxisMajorTickMark(c, valax, :outside)
+                @test XLSX.Charts.getAxisMajorTickMark(c, valax) === :out
+                c = XLSX.Charts.setAxisMinorTickMark(c, valax, :inside)
+                @test XLSX.Charts.getAxisMinorTickMark(c, valax) === :in
+                before = snapshot(c)
+                @test_throws XLSX.XLSXError XLSX.Charts.setAxisMajorTickMark(c, valax, :sideways)
+                @test snapshot(c) == before                                          # atomic
+                c = XLSX.Charts.setAxisMinorTickMark(c, valax, :inherit)
+                @test isnothing(XLSX.Charts.getAxisMinorTickMark(c, valax))
+
+                # gridlines: presence is the switch
+                has(c, ax, tag) = !isnothing(XLSX.first_element_with_tag(XLSX.Charts._axnode(c, ax), tag))
+                @test has(c, valax, "majorGridlines")
+                c = XLSX.Charts.setAxisGridlines(c, valax; major=false)
+                @test !has(c, valax, "majorGridlines")
+                c = XLSX.Charts.setAxisGridlines(c, valax; major=true, minor=true)
+                @test has(c, valax, "majorGridlines") && has(c, valax, "minorGridlines")
+                @test axorder(c, valax)
+                c = XLSX.Charts.setAxisGridlines(c, valax; major=true)                # already there: no-op
+                @test count(k -> XLSX.localname(k) == "majorGridlines",
+                    XML.eachelement(XLSX.Charts._axnode(c, valax))) == 1
+                @test_throws XLSX.XLSXError XLSX.Charts.setAxisGridlines(c, valax; minor=:off)
+                @test XLSX.Charts.setAxisGridlines(c, valax) === c
+                c = XLSX.Charts.setAxisGridlines(c, valax; major=false, minor=false)
+
+                # tick label text
+                c = XLSX.Charts.setAxisTextProp(c, catax, :size, 14)
+                c = XLSX.Charts.setAxisTextProp(c, catax, :latin, "Comic Sans MS")
+                txpr = XLSX.first_element_with_tag(XLSX.Charts._axnode(c, catax), "txPr")
+                p = XLSX.first_element_with_tag(txpr, "p")
+                rpr = XLSX.first_element_with_tag(XLSX.first_element_with_tag(p, "pPr"), "defRPr")
+                @test XLSX.Charts._attr(rpr, "sz") == "1400"
+                @test XLSX.Charts._attr(XLSX.first_element_with_tag(rpr, "latin"), "typeface") == "Comic Sans MS"
+                @test_throws XLSX.XLSXError XLSX.Charts.setAxisTextProp(c, catax, :font, "Arial")
+
+                # axis line and plot area border
+                @test !XLSX.Charts.has_line(XLSX.Charts.getAxisShapeProps(c, valax))  # template: noFill
+                c = XLSX.Charts.setAxisLine(c, valax; color="000000", width=1)
+                @test XLSX.Charts.has_line(XLSX.Charts.getAxisShapeProps(c, valax))
+                @test XLSX.Charts.setAxisLine(c, valax) === c
+                c = XLSX.Charts.setAxisLine(c, valax, :none)
+                @test !XLSX.Charts.has_line(XLSX.Charts.getAxisShapeProps(c, valax))
+                c = XLSX.Charts.setAxisLine(c, valax, :inherit)
+                @test isnothing(XLSX.first_element_with_tag(XLSX.Charts.getAxisShapeProps(c, valax).raw, "ln"))
+                @test_throws XLSX.XLSXError XLSX.Charts.setAxisLine(c, valax, :dotted)
+
+                @test !XLSX.Charts.has_line(XLSX.Charts.getPlotAreaShapeProps(c))
+                c = XLSX.Charts.setPlotAreaLine(c; color="000000")
+                @test XLSX.Charts.has_line(XLSX.Charts.getPlotAreaShapeProps(c))
+                c = XLSX.Charts.setPlotAreaLine(c, :inherit)
+                @test isnothing(XLSX.first_element_with_tag(XLSX.Charts.getPlotAreaShapeProps(c).raw, "ln"))
+                c = XLSX.Charts.setPlotAreaLine(c; color="000000")
+
+                # major and minor units: value and date axes only
+                @test isnothing(XLSX.Charts.getAxisMajorUnit(c, valax))
+                c = XLSX.Charts.setAxisMajorUnit(c, valax, 0.2)
+                @test XLSX.Charts.getAxisMajorUnit(c, valax) ≈ 0.2
+                c = XLSX.Charts.setAxisMinorUnit(c, valax, 0.05)
+                @test XLSX.Charts.getAxisMinorUnit(c, valax) ≈ 0.05
+                @test axorder(c, valax)
+                @test_throws XLSX.XLSXError XLSX.Charts.setAxisMajorUnit(c, valax, 0)
+                @test_throws XLSX.XLSXError XLSX.Charts.setAxisMajorUnit(c, valax, -1)
+                before = snapshot(c)
+                @test_throws XLSX.XLSXError XLSX.Charts.setAxisMajorUnit(c, catax, 1)
+                @test snapshot(c) == before
+                c = XLSX.Charts.setAxisMinorUnit(c, valax, :inherit)
+                @test isnothing(XLSX.Charts.getAxisMinorUnit(c, valax))
+
+                # a title created by a setter is not drawn over the plot area
+                title(c, ax) = XLSX.first_element_with_tag(XLSX.Charts._axnode(c, ax), "title")
+                @test isnothing(title(c, valax))
+                c = XLSX.Charts.setAxisTitleText(c, valax, "Proportion of responses")
+                @test XLSX.Charts._bool_val(title(c, valax), "overlay") === false
+                @test [XLSX.localname(k) for k in XML.eachelement(title(c, valax))] == ["tx", "overlay"]
+                c = XLSX.Charts.setAxisTitleText(c, valax, "Share of responses")       # replaced, not duplicated
+                @test count(k -> XLSX.localname(k) == "overlay", XML.eachelement(title(c, valax))) == 1
+                @test axorder(c, valax)
+                # the chart title's own overlay is kept as it was
+                ov = XLSX.Charts._bool_val(XLSX.Charts.getChartTitleNode(c), "overlay")
+                c = XLSX.Charts.setChartTitleText(c, "Course feedback")
+                @test XLSX.Charts._bool_val(XLSX.Charts.getChartTitleNode(c), "overlay") === ov
+
+                # survives a write and reopen
+                SAVE_FILES && save_outfile(xf)
+                XLSX.writexlsx(tmp, xf; overwrite=true)
+                xf2 = XLSX.openxlsx(tmp)
+                SAVE_FILES && save_outfile(xf2)
+                c2 = first(XLSX.Charts.getCharts(xf2["stackedbar"]))
+                ax2 = XLSX.Charts.getChartAxes(c2)
+                cat2 = only(filter(a -> a.kind === :catAx, ax2))
+                val2 = only(filter(a -> a.kind === :valAx, ax2))
+                @test XLSX.Charts.getAxisMajorTickMark(c2, cat2) === :cross
+                @test XLSX.Charts.getAxisMajorUnit(c2, val2) ≈ 0.2
+                @test XLSX.Charts.has_line(XLSX.Charts.getPlotAreaShapeProps(c2))
+                @test XLSX.Charts._bool_val(title(c2, val2), "overlay") === false
+                @test isnothing(XLSX.first_element_with_tag(XLSX.Charts._axnode(c2, val2), "majorGridlines"))
+            finally
+                isfile(tmp) && rm(tmp)
+            end
+        end
+    end
+
+end

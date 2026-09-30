@@ -38,12 +38,13 @@ julia> ws["B2:B6"] = reshape([500.0, 320.0, 180.0, 90.0, 60.0], 5, 1);
 
 julia> c = addChartEx(ws, :funnel, "B2:B6"; categories = "A2:A6",
                       anchor = "D8:K23", title = "Pipeline")
-XLSX.Charts.ChartEx "chartEx1" on sheet "Sheet1" at D2:K17
+XLSX.Charts.ChartEx "chartEx1" on sheet "Sheet1" at D8:K23
   title: "Pipeline"
   type: funnel
   layouts: funnel
   series: 1
   refs: Sheet1!$A$2:$A$6, Sheet1!$B$2:$B$6
+
 ```
 
 That is the difference from [`addChart`](@ref), which creates an empty chart for
@@ -81,7 +82,7 @@ julia> ws["F2:F5"] = reshape([120.0, 85.0, 200.0, 140.0], 4, 1);
 
 julia> tm = addChartEx(ws, :treemap, "F2:F5"; categories = "D2:E5",
                        anchor = "D25:K40", title = "Sales")
-XLSX.Charts.ChartEx "chartEx2" on sheet "Sheet1" at H2:O17
+XLSX.Charts.ChartEx "chartEx2" on sheet "Sheet1" at D25:K40
   title: "Sales"
   type: treemap
   layouts: treemap
@@ -93,12 +94,13 @@ A histogram takes no category at all, since Excel works out the bins from the va
 
 ```julia
 julia> h = addChartEx(ws, :histogram, "B2:B6"; anchor = "D42:K57")
-XLSX.Charts.ChartEx "chartEx4" on sheet "Sheet1" at D42:K57
+XLSX.Charts.ChartEx "chartEx3" on sheet "Sheet1" at D42:K57
   type: histogram
   layouts: clusteredColumn
   series: 1
   refs: Sheet1!$B$2:$B$6
 ```
+
 Binning is a property of the series rather than of the data — see
 [`getSeriesBinning`](@ref) and [`setSeriesBinning`](@ref).
 

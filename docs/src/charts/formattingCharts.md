@@ -59,6 +59,17 @@ value is rejected, nothing is written. The single-property setters —
 [`setSeriesLineCompound`](@ref), [`setSeriesLineJoin`](@ref) and
 [`setSeriesLineMiterLimit`](@ref) — exist for when you want just one.
 
+The same keywords set the other outlines a chart has: [`setAxisLine`](@ref) for
+an axis line and [`setPlotAreaLine`](@ref) for the border round the plot area.
+Like `setSeriesLine`, each also takes `:none` for a line that draws nothing and
+`:inherit` to remove it:
+
+```julia
+julia> setPlotAreaLine(c; color = "000000");
+
+julia> setAxisLine(c, getChartAxes(c, :value)[1]; color = "000000", width = 1);
+```
+
 Widths are points, as in Excel's own boxes. Dash, cap and compound take the
 DrawingML name or Excel's name for the same thing, whichever you find easier to
 remember:
@@ -243,6 +254,16 @@ julia> setChartTitleTextProp(c, :bold, true);
 julia> setLabelTextProp(c, 1, :italic, true);          # a series' data labels
 ```
 
+Each text element has its own setter: [`setChartTitleTextProp`](@ref),
+[`setAxisTitleTextProp`](@ref), [`setAxisTextProp`](@ref) for an axis's tick
+labels, [`setLegendTextProp`](@ref), [`setLabelTextProp`](@ref) and
+[`setChartSpaceTextProp`](@ref) for the chart-wide default.
+
+The chart-wide default only reaches elements that don't set the field
+themselves, and the charts Excel creates set a typeface on every text element.
+So to change the font throughout a created chart, set `:latin` on each element
+rather than once on the chart space.
+
 The fields are those of [`DrawingRunProps`](@ref): `:size`, `:bold`, `:italic`,
 `:under`, `:strike`, `:caps`, `:baseline`, `:kern`, `:spacing`, `:latin`, `:ea`,
 `:cs`, `:lang`, plus `:fill` and `:line` for the text's own colour and outline.
@@ -281,6 +302,11 @@ julia> setChartTitleText(c, "Revenue by region");
 julia> setAxisTitleText(c, getChartAxes(c, :value)[1], "£m");
 ```
 
+A title these create is written with `c:overlay` off, as Excel writes every
+title it creates, so it sits beside the plot area rather than over it. A title
+that already has `c:overlay` keeps its value. The text is formatted separately,
+with [`setChartTitleTextProp`](@ref) and [`setAxisTitleTextProp`](@ref).
+
 Multi-line titles are written as a [`DrawingText`](@ref) with several
 paragraphs:
 
@@ -297,6 +323,22 @@ Legends are read through [`getChartLegend`](@ref) and its companions —
 [`getLegendPos`](@ref), [`getLegendOverlay`](@ref),
 [`getLegendShapeProps`](@ref), [`getLegendTextProps`](@ref) — and their text is
 set with [`setLegendTextProp`](@ref).
+
+A legend shows an entry for every series, in series order. Entries can be
+hidden, but not reordered. [`setLegendEntryDeleted`](@ref) hides or shows the
+entries of the series at the given positions, in one rebuild:
+
+```julia
+julia> setLegendEntryDeleted(c, [1, 3], true);
+
+julia> getLegendEntryDeleted(c, 1)
+true
+```
+
+To show a legend in some other order, add series that plot zeros in the order
+wanted, formatted to match, and hide the entries of the series that draw the
+data. [A Likert chart](../examples.md#A-diverging-stacked-bar-chart-for-Likert-scale-survey-data)
+does this.
 
 ## Axes and gridlines
 
@@ -321,7 +363,80 @@ means the element is absent and none are drawn; an element present with no
 series lines ([`getGroupSeriesLines`](@ref)) and up-down bars
 ([`getGroupUpDownBars`](@ref)).
 
-The axis scale itself — bounds, units, tick marks, label position, number format
-— is read through the `getAxis…` accessors listed on the
+[`setAxisGridlines`](@ref) shows or removes them. Since presence is the state,
+`false` removes the element rather than writing an "off" value, and `true` adds
+one that takes its line from the chart style:
+
+```julia
+julia> setAxisGridlines(c, ax; major = false);
+```
+
+## Axis scale and position
+
+The axis scale itself — bounds, units, tick marks, label position, number
+format — is read through the `getAxis…` accessors listed on the
 [Charts](../api/charts.md) API page. `nothing` there means Excel chooses
-automatically, which is the usual case.
+automatically, which is the usual case. Each has a setter, and `:inherit`
+returns a property to automatic:
+
+```julia
+julia> setAxisScaling(c, ax; min = -1, max = 1);      # both bounds in one call
+
+julia> setAxisMajorUnit(c, ax, 0.25);
+
+julia> setAxisNumberFormatCode(c, ax, "0%;0%");
+
+julia> setAxisMajorTickMark(c, ax, :out);
+```
+
+[`setAxisScaling`](@ref) sets the orientation and both bounds in one rebuild,
+checking them together, so a range can be moved past its old bounds in one
+call. [`setAxisMin`](@ref), [`setAxisMax`](@ref) and
+[`setAxisOrientation`](@ref) set one each.
+
+[`setAxisNumberFormatCode`](@ref) also unlinks the format from the source cells,
+without which Excel ignores it. A two-section code such as `"0%;0%"` shows
+negative values without a minus sign.
+
+Tick marks take `:out`, `:in`, `:cross` or `:none`, or Excel's `:outside` and
+`:inside`. [`setAxisTickLabelPos`](@ref) places the labels `:nextTo` the axis,
+at the `:low` or `:high` end of the crossing axis, or nowhere. `:low` keeps a
+category axis's labels at the edge of the plot area when the values go negative,
+rather than beside the zero line.
+
+Where an axis sits is set on the *other* axis: [`setAxisCrosses`](@ref) says
+where this axis crosses its partner, as a position on the partner — `:autoZero`,
+`:min` or `:max` — and [`setAxisCrossesAt`](@ref) gives the position as a value
+on the partner's scale. So Excel's "Horizontal axis crosses: At maximum
+category", set in the category axis's pane, is written on the value axis:
+
+```julia
+julia> catax = getChartAxes(c, :category)[1];
+
+julia> setAxisOrientation(c, catax, :maxMin);          # first category at the top
+
+julia> setAxisCrosses(c, ax, :max);                    # keep the value axis at the bottom
+```
+
+That pair is the usual fix for a bar chart, which plots its first category at
+the bottom: reversing the categories moves the value axis to the top, and
+crossing at the maximum category moves it back.
+
+## Bar spacing
+
+The gap between bars and the overlap between the bars of a cluster belong to the
+chart group rather than to a series, so they take a [`ChartGroup`](@ref). This
+uses the stacked bar chart from the file opened for [Markers](#Markers), since a
+chart with more than one group needs its bar group picked out first:
+
+```julia
+julia> bc = getCharts(k["stackedbar"])[1];
+
+julia> grp = only(getChartGroups(bc));
+
+julia> setGroupGapWidth(bc, grp, 50);                  # % of a bar's width, 0–500
+```
+
+[`setGroupOverlap`](@ref) sets the overlap, from −100 to 100. Both are
+percentages, as in Excel's boxes. A stacked group needs an overlap of 100 for
+each series to sit on the one before, which the stacked kinds already have.

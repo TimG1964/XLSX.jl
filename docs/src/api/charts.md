@@ -41,6 +41,8 @@ getLegendOverlay
 getLegendShapeProps
 getLegendTextProps
 setLegendTextProp
+getLegendEntryDeleted
+setLegendEntryDeleted
 getChartTitleText
 getChartTitleRef
 getChartTitleShapeProps
@@ -52,6 +54,7 @@ getPlotAreaShapeProps
 getChartSpaceShapeProps
 getChartSpaceTextProps
 setChartSpaceTextProp
+setPlotAreaLine
 ```
 
 ## Series
@@ -90,6 +93,10 @@ getGroupUpDownBars
 getUpBarShapeProps
 getDownBarShapeProps
 setGroupLabelTextProp
+getGroupGapWidth
+setGroupGapWidth
+getGroupOverlap
+setGroupOverlap
 ```
 
 ## Axes
@@ -123,6 +130,22 @@ getAxisMinorUnit
 getAxisLabelAlign
 getAxisLabelOffset
 getAxisMultiLevelLabels
+setAxisTickLabelPos
+setAxisScaling
+setAxisMin
+setAxisMax
+setAxisOrientation
+setAxisCrosses
+setAxisCrossesAt
+setAxisNumberFormatCode
+setAxisNumberFormatLinked
+setAxisMajorTickMark
+setAxisMinorTickMark
+setAxisGridlines
+setAxisTextProp
+setAxisLine
+setAxisMajorUnit
+setAxisMinorUnit
 ```
 
 ## Data points, markers and labels
@@ -171,4 +194,39 @@ getErrorBarsCustomRefs
 addChart
 addChartEx
 addSeries
+```
+
+## chartEx charts
+
+Charts in the Microsoft `cx:` namespace — waterfall, funnel, treemap, sunburst,
+histogram, Pareto, box & whisker and region map. Many of the functions above
+also take a [`ChartEx`](@ref); these are specific to it.
+
+```@docs
+getChartSeriesCount
+getChartDataBlocks
+getChartAxisIds
+getChartTitleRange
+getSeriesLayout
+getSeriesLayoutFlag
+getSeriesData
+getSeriesName
+getSeriesNameRange
+getSeriesOwner
+getSeriesHidden
+getSeriesAxisIds
+getSeriesSubtotals
+getSeriesBinning
+getSeriesAggregation
+getSeriesQuartileMethod
+getSeriesParentLabelLayout
+getLabelFlag
+getLabelPosition
+setSeriesName
+setSeriesLayoutFlag
+setSeriesSubtotals
+setSeriesBinning
+setSeriesAggregation
+setSeriesQuartileMethod
+setSeriesParentLabelLayout
 ```

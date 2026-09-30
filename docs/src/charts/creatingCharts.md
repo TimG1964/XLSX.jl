@@ -50,8 +50,9 @@ schema, where the data block is required.
 
 ## The kinds
 
-`kind` is one of `:column`, `:bar`, `:stackedColumn`, `:line`, `:lineMarkers`,
-`:area`, `:pie`, `:doughnut`, `:scatter`, `:bubble` or `:radar`.
+`kind` is one of `:column`, `:bar`, `:stackedColumn`, `:stackedBar`, `:line`,
+`:lineMarkers`, `:area`, `:pie`, `:doughnut`, `:scatter`, `:bubble` or `:radar`.
+`:bar` and `:stackedBar` are horizontal; `:column` and `:stackedColumn` vertical.
 
 Each comes from a chart part Excel itself wrote, kept verbatim in the package,
 so a created chart is what Excel would have produced for that kind — including
@@ -120,6 +121,13 @@ Whatever you pass, the chart part stores a sheet-qualified absolute reference,
 as Excel does. The cells' current values are cached in the chart at the same
 time, so the series reads back without opening the file in Excel — see
 [the chart cache](readingCharts.md#The-chart-cache).
+
+Cells holding formulas written by [`XLSX.setFormula`](@ref) have no values until
+Excel recalculates them, so a series plotting them is cached empty. Excel
+recalculates when it opens the file and draws the chart from the results, so it
+looks the same there; only reading the series back before then finds no values.
+[A Likert chart](../examples.md#A-diverging-stacked-bar-chart-for-Likert-scale-survey-data)
+plots formulas this way, so that sorting the data in Excel reorders the chart.
 
 `name` and `name_ref` differ: `name` is the series name as literal text, while
 `name_ref` points at a cell holding it, which is what Excel writes when you

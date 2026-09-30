@@ -32,7 +32,9 @@ two things follow:
   source has changed since, the cache is stale.
 - A file written by a tool that doesn't populate the cache has charts with no
   cached values at all, even though the chart is valid and displays correctly
-  once Excel opens and re-saves it.
+  once Excel opens and re-saves it. XLSX.jl is such a tool for one case: a
+  series plotting cells written by [`XLSX.setFormula`](@ref) is cached empty,
+  since those cells have no values until Excel calculates them.
 
 Where a series refers to a real range, [`getChartRanges`](@ref)
 gives you that range so you can read the live cells instead. See
