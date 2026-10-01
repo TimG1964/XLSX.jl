@@ -106,6 +106,28 @@ Binning is a property of the series rather than of the data — see
 
 ![image|320x500](../images/chartEx_simples.png)
 
+### Pareto charts
+
+Excel draws a Pareto chart as columns plus a line of cumulative percentages it
+calculates from them. The line has no data of its own, so, as in Excel's Select
+Data dialog, a Pareto chart has one series. The line is reached through that
+series with `pareto = true`, on any function that describes or formats a series:
+
+```julia
+julia> p = addChartEx(ws, :pareto, "F2:F5"; categories = "D2:D5", anchor = "H20:N34");
+
+julia> getChartSeriesCount(p)
+1
+
+julia> getSeriesLayout(p, 1), getSeriesLayout(p, 1; pareto = true)
+(:clusteredColumn, :paretoLine)
+
+julia> setSeriesLineColor(p, 1, "C00000"; pareto = true);   # the line, not the columns
+```
+
+Layout properties such as binning belong to the columns, and take no `pareto`
+keyword.
+
 ## Box and whisker: several series
 
 `:boxWhisker` is the one layout that takes more than one series, added with
@@ -145,9 +167,9 @@ neither does XLSX.jl. So a chart created this way shows nothing until Excel
 opens the file and computes it, and [`getChartData`](@ref) throws for a
 [`ChartEx`](@ref).
 
-The references themselves are written as hidden defined names of the form
-`_xlchart.v1.0`, which is how Excel does it.
-[`getChartRanges`](@ref) resolves them back to ranges.
+Excel writes a `cx:` chart's references indirectly, through hidden defined names
+of the form `_xlchart.v1.0`. XLSX.jl writes the range itself in `cx:f`, which
+Excel also reads. [`getChartRanges`](@ref) resolves either form to a range.
 
 ## Appearance
 

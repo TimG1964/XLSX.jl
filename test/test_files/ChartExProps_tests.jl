@@ -74,18 +74,19 @@
 
         @testset "pareto" begin
             c = chart("pareto")
-            @test XLSX.Charts.getChartSeriesCount(c) == 4
-            @test [XLSX.Charts.getSeriesLayout(c, i) for i in 1:4] ==
-                [:clusteredColumn, :paretoLine, :clusteredColumn, :paretoLine]
-            @test [XLSX.Charts.getSeriesOwner(c, i) for i in 1:4] == [nothing, 1, nothing, 3]
-            @test [XLSX.Charts.getSeriesHidden(c, i) for i in 1:4] == [nothing, nothing, true, nothing]
-            @test [XLSX.Charts.getSeriesAxisIds(c, i) for i in 1:4] == [[1], [2], [1], [2]]
-            @test [XLSX.Charts.getSeriesAggregation(c, i) for i in 1:4] == [true, false, true, false]
-            @test isnothing(XLSX.Charts.getSeriesData(c, 2))                # a paretoLine has no dataId
+            @test XLSX.Charts.getChartSeriesCount(c) == 2
+            @test [XLSX.Charts.getSeriesLayout(c, i) for i in 1:2] == [:clusteredColumn, :clusteredColumn]
+            @test [XLSX.Charts.getSeriesLayout(c, i; pareto = true) for i in 1:2] == [:paretoLine, :paretoLine]
+            @test [XLSX.Charts.getSeriesHidden(c, i) for i in 1:2] == [nothing, true]
+            @test [XLSX.Charts.getSeriesHidden(c, i; pareto = true) for i in 1:2] == [nothing, nothing]
+            @test [XLSX.Charts.getSeriesAxisIds(c, i) for i in 1:2] == [[1], [1]]
+            @test [XLSX.Charts.getSeriesAxisIds(c, i; pareto = true) for i in 1:2] == [[2], [2]]
+            @test [XLSX.Charts.getSeriesAggregation(c, i) for i in 1:2] == [true, true]
+            @test isnothing(XLSX.Charts.getSeriesData(c, 1; pareto = true))
             blocks = XLSX.Charts.getChartDataBlocks(c)
             @test length(blocks) == 2
             @test blocks[1].dimensions[1].formula == blocks[2].dimensions[1].formula  # shared name
-            @test XLSX.Charts.getSeriesData(c, 3) == blocks[2]
+            @test XLSX.Charts.getSeriesData(c, 2) == blocks[2]
             @test XLSX.Charts.getChartType(c) == :pareto
         end
 
@@ -519,4 +520,5 @@
             @test XLSX.Charts.getSeriesBinning(h, 1).binCount == 7
         end
     end
+    
 end

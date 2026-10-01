@@ -86,10 +86,11 @@ end
     ChartRange
 
 A resolved series reference: a `SheetCellRef`, `SheetCellRange`, `SheetRowRange`,
-`SheetColumnRange` or `NonContiguousRange`, or `nothing` where the series has no
-reference of that kind or it could not be resolved.
+`SheetColumnRange` or `NonContiguousRange`; `XL_REF` where Excel has replaced the
+reference with `#REF!`; or `nothing` where the series has no reference of that
+kind or it could not be resolved.
 """
-const ChartRange = Union{Nothing,SheetCellRef,SheetCellRange,SheetRowRange,SheetColumnRange,NonContiguousRange}
+const ChartRange = Union{Nothing,CellErrorType,SheetCellRef,SheetCellRange,SheetRowRange,SheetColumnRange,NonContiguousRange}
 
 """
     ChartRanges

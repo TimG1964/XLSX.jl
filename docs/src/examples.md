@@ -328,35 +328,6 @@ XLSX.setBorder(s, "B112:B114,D112:D115"; outside = ["style" => "thin", "color" =
 XLSX.writexlsx("myNewTemplate.xlsx", f, overwrite=true)
 ```
 
-## Adding a plot image
-
-Use Julia functionality to create a chart based upon data from a spreadsheet and then add that chart 
-(as a static image) back into the worksheet.
-
-![image|320x500](./images/Add_image_1.png)
-
-```julia
-using CairoMakie, XLSX
-
-f=opentemplate("Example_add_chart.xlsx")
-table = XLSX.gettable(f[1])
-x = 1:length(table.data[1])
-
-fig = Figure()
-ax = Axis(fig[1, 1], xticks=(x, table.data[1]))
-barplot!(ax, x, table.data[2])
-
-# Write PNG to IOBuffer
-io = IOBuffer()
-show(io, MIME("image/png"), fig)
-
-XLSX.addImage(f[1], "D2:H12", io)
-
-XLSX.writexlsx("Example_add_chart_out.xlsx", f, overwrite=true)
-```
-
-![image|320x500](./images/Add_image_2.png)
-
 ## Adding a dataBar with varying colors
 
 Excel's databar conditional format have a fixed color. The bar length 
@@ -419,6 +390,56 @@ This function therefore behaves like a static conditional format.
     This function is provided on an experimental basis and isn't public. It may be withdrawn 
     in future and only remain here (more fully documented) as an example.
 
+## Adding a plot image
+
+Use Julia functionality to create a chart based upon data from a spreadsheet and then add that chart 
+(as a static image) back into the worksheet.
+
+![image|320x500](./images/Add_image_1.png)
+
+```julia
+using CairoMakie, XLSX
+
+f=opentemplate("Example_add_chart.xlsx")
+table = XLSX.gettable(f[1])
+x = 1:length(table.data[1])
+
+fig = Figure()
+ax = Axis(fig[1, 1], xticks=(x, table.data[1]))
+barplot!(ax, x, table.data[2])
+
+# Write PNG to IOBuffer
+io = IOBuffer()
+show(io, MIME("image/png"), fig)
+
+XLSX.addImage(f[1], "D2:H12", io)
+
+XLSX.writexlsx("Example_add_chart_out.xlsx", f, overwrite=true)
+```
+
+![image|320x500](./images/Add_image_2.png)
+
+## Adding a simple native Excel chart
+
+The same plot as a native Excel chart rather than a static image. Excel draws
+it from the cells, so it updates when the data change, and it can be edited in
+Excel like any chart made there. Everything about its appearance is Excel's own
+default for a column chart.
+
+```julia
+using XLSX, XLSX.Charts
+
+f = XLSX.opentemplate("Example_add_chart.xlsx")
+n = length(XLSX.gettable(f[1]).data[1])
+
+c = addChart(f[1], :column; anchor = "D2:H12", title = false)
+addSeries(c, "B2:B$(n + 1)"; categories = "A2:A$(n + 1)", name_ref = "B1")
+
+XLSX.writexlsx("Example_add_native_chart_out.xlsx", f, overwrite=true)
+```
+
+![image|320x500](./images/Add_native_chart.png)
+
 ## A diverging stacked bar chart for Likert-scale survey data
 
 Survey questions answered on a five-point Likert scale, from *strongly disagree* to
@@ -439,7 +460,7 @@ every respondent answered every question, so the totals differ.
 The counts are written as an Excel table, so they can be sorted and filtered in Excel.
 
 ```julia
-using XLSX, XLSX.Charts, Colors
+using XLSX, XLSX.Charts
 
 questions = ["The course objectives were clear",
              "The pace of the course was about right",
@@ -528,7 +549,7 @@ the question texts in column A. The two neutral halves get the same colour, so t
 split can't be seen.
 
 ```julia
-palette = [colorant"red", colorant"orange", colorant"yellow", colorant"lightgreen", colorant"green"]
+palette = [:red, :orange, :yellow, :lightgreen, :green]
 cats = "Survey!A2:A$last"
 c = addChart(s, :stackedBar; anchor = "A9:N40", title = "Course feedback")
 
@@ -595,7 +616,8 @@ setAxisTitleText(c, valax, "Proportion of responses")
 Finally, the chart's appearance: no gridlines, a black border round the plot area,
 black axes with tick marks crossing the category axis and outside the value axis, and
 all the text in Comic Sans at sizes chosen for each element. Text properties use the
-DrawingML vocabulary: `:latin` is the typeface and `:fill` the text colour.
+Excel (rather than DrawingML) vocabulary: `:font` is the `:latin` typeface 
+and `:color` the text `:fill`.
 
 ```julia
 setAxisGridlines(c, valax; major = false)
@@ -606,19 +628,19 @@ for (ax, size, mark) in ((catax, 14, :cross), (valax, 10, :out))
     setAxisLine(c, ax; color = black)
     setAxisMajorTickMark(c, ax, mark)
     setAxisTextProp(c, ax, :size, size)
-    setAxisTextProp(c, ax, :latin, font)
-    setAxisTextProp(c, ax, :fill, black)
+    setAxisTextProp(c, ax, :font, font)
+    setAxisTextProp(c, ax, :color, black)
 end
 
 setAxisTitleTextProp(c, valax, :size, 12)
-setAxisTitleTextProp(c, valax, :latin, font)
-setAxisTitleTextProp(c, valax, :fill, black)
+setAxisTitleTextProp(c, valax, :font, font)
+setAxisTitleTextProp(c, valax, :color, black)
 
 setChartTitleTextProp(c, :size, 18)
-setChartTitleTextProp(c, :latin, font)
-setChartTitleTextProp(c, :fill, black)
+setChartTitleTextProp(c, :font, font)
+setChartTitleTextProp(c, :color, black)
 setLegendTextProp(c, :size, 12)
-setLegendTextProp(c, :latin, font)
+setLegendTextProp(c, :font, font)
 
 XLSX.writexlsx("likert.xlsx", xf; overwrite = true)
 ```

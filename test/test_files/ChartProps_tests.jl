@@ -1217,7 +1217,18 @@
                 rpr = XLSX.first_element_with_tag(XLSX.first_element_with_tag(p, "pPr"), "defRPr")
                 @test XLSX.Charts._attr(rpr, "sz") == "1400"
                 @test XLSX.Charts._attr(XLSX.first_element_with_tag(rpr, "latin"), "typeface") == "Comic Sans MS"
-                @test_throws XLSX.XLSXError XLSX.Charts.setAxisTextProp(c, catax, :font, "Arial")
+
+                            # Excel's names are accepted as aliases for the DrawingML fields
+                c = XLSX.Charts.setAxisTextProp(c, catax, :font, "Arial")
+                rpr = XLSX.first_element_with_tag(
+                        XLSX.first_element_with_tag(
+                            XLSX.first_element_with_tag(
+                                XLSX.first_element_with_tag(XLSX.Charts._axnode(c, catax), "txPr"),
+                            "p"), "pPr"), "defRPr")
+                @test XLSX.Charts._attr(XLSX.first_element_with_tag(rpr, "latin"), "typeface") == "Arial"
+                c = XLSX.Charts.setAxisTextProp(c, catax, :color, "FF0000")
+                @test XLSX.Charts.getAxisTextProps(c, catax) isa XLSX.Charts.DrawingText
+                @test_throws XLSX.XLSXError XLSX.Charts.setAxisTextProp(c, catax, :typeface, "Arial")
 
                 # axis line and plot area border
                 @test !XLSX.Charts.has_line(XLSX.Charts.getAxisShapeProps(c, valax))  # template: noFill

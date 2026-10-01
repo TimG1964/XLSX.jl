@@ -1120,6 +1120,7 @@ is treated as `(color = value,)`.
 """
 function _rpr_with_prop(rpr::XML.Node, field::Symbol, value, pfx::Dict{String,String})
     key = (NS_A, String(localname(rpr)))
+    field = get(_RUN_PROP_ALIASES, field, field)
 
     spec = _run_prop_attr(field)
     if !isnothing(spec)
@@ -1142,7 +1143,8 @@ function _rpr_with_prop(rpr::XML.Node, field::Symbol, value, pfx::Dict{String,St
     end
 
     throw(XLSXError("`$field` is not a run property. Valid fields: " *
-                    join(_RUN_PROP_FIELDS, ", ") * "."))
+                    join(_RUN_PROP_FIELDS, ", ") * "; or Excel's names " *
+                    join(("$k (= $v)" for (k, v) in _RUN_PROP_ALIASES), ", ") * "."))
 end
 
 """

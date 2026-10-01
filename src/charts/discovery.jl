@@ -839,13 +839,16 @@ getChartData(x::Union{Worksheet,XLSXFile}, name::AbstractString; kw...)::DataTab
 """
     parse_chart_range(ref) -> ChartRange
 
-A chart source formula as a range, or `nothing` when it has no addressable one:
-literal series, external-workbook references, and defined names.
+A chart source formula as a range; `XL_REF` when the reference is broken (Excel
+writes `#REF!` in place of a reference to a deleted sheet); or `nothing` when it
+has no addressable one: literal series, external-workbook references, and
+defined names.
 """
 function parse_chart_range(ref::Union{Nothing,AbstractString})
     isnothing(ref) && return nothing
     s = strip(ref)
     isempty(s) && return nothing
+    s == "#REF!" && return XL_REF                       # source sheet deleted
     occursin('[', s) && return nothing                  # external workbook
     if startswith(s, '(') && endswith(s, ')')           # multi-area
         s = s[nextind(s, firstindex(s)):prevind(s, lastindex(s))]

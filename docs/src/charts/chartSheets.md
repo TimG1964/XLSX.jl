@@ -29,7 +29,7 @@ julia> f = XLSX.opentemplate("chart_basic.xlsx");
 julia> XLSX.copysheet!(f["Data"], "Copy");
 
 julia> [(c.name, c.sheet) for c in getCharts(f)]
-2-element Vector{Tuple{String, Union{Nothing, String}}}:
+2-element Vector{Tuple{String, String}}:
  ("chart1", "Data")
  ("chart2", "Copy")
 ```
@@ -74,9 +74,26 @@ julia> isempty(getCharts(g))
 true
 ```
 
-A chart elsewhere in the workbook that plots from the deleted sheet keeps its
-reference, as a formula does — the chart will show its cached values, and Excel
-resolves the reference when it next opens the file.
+A chart elsewhere in the workbook that plots from the deleted sheet stays, but
+loses the reference, as it does in Excel. A `c:` chart's reference becomes
+`#REF!` and its cached values are kept, so the chart still shows what it last
+displayed; [`getChartRanges`](@ref) reports the broken reference as
+`XLSX.XL_REF`:
+
+```julia
+julia> h = XLSX.opentemplate("Chartsheet.xlsx");
+
+julia> XLSX.addsheet!(h, "Keep");
+
+julia> XLSX.deletesheet!(h, "Sheet1");
+
+julia> getChartRanges(getCharts(h)[1])[1].values
+XL_REF::CellErrorType = 0x0000000000000004
+```
+
+A `cx:` chart loses the reference outright, as Excel does it: the data is
+emptied, and a series name or title linked to a cell on the sheet is removed, so
+its ranges read as `nothing`.
 
 ## Chartsheets
 
@@ -89,12 +106,10 @@ julia> XLSX.deletesheet!(g, "Trend");
 ```
 
 Deleting the worksheet a chartsheet's chart plots from leaves the chartsheet in
-place with its cached values, since the chart lives on the chartsheet rather
-than on the data sheet.
+place, with its references invalidated as described above.
 
-Copying a chartsheet is not the same operation as copying a worksheet, and is
-not currently supported; create a second chart with
-[`addChart`](@ref) instead.
+Copying a chartsheet is not supported: [`XLSX.copysheet!`](@ref) throws an
+`XLSXError`. Create a second chart with [`addChart`](@ref) instead.
 
 ## What a sheet's charts cost
 

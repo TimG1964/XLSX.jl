@@ -1864,8 +1864,11 @@ function deletesheet!(wb::Workbook, name::AbstractString)::XLSXFile
     deleteat!(wb.relationships, r)
     deleteat!(wb.sheets, s)
 
-    # Defined names
+    # Defined names. Excel drops a chartEx chart's _xlchart names along with the
+    # sheet; note their values first, so the charts can be emptied to match.
+    dead_xlchart = Dict{String,String}()
     for k in [k for (k, v) in wb.workbook_names if v.value isa DefinedNameRangeTypes && v.value.sheet == name]
+        startswith(k, "_xlchart.") && (dead_xlchart[k] = string(wb.workbook_names[k].value))
         delete!(wb.workbook_names, k)
     end
     for k in [k for k in keys(wb.worksheet_names) if first(k) == sId]
@@ -1920,6 +1923,7 @@ function deletesheet!(wb::Workbook, name::AbstractString)::XLSXFile
     end
     remove_override!(xf, "/$sheet_path")
 
+    invalidate_chart_refs!(xf, name, dead_xlchart)
     update_formulas_missing_sheet!(wb, name)
     _shift_book_views!(xf, pos, length(wb.sheets))
     update_workbook_xml!(xf)

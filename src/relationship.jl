@@ -300,6 +300,43 @@ function clone_owned_part!(xl::XLSXFile, path::String)::String
     return new_path
 end
 
+# ---- chart source references: shared helpers --------------------------------
+
+# A reference names the sheet in `prefix` (e.g. `Data!` or `'My Sheet'!`) when
+# the prefix starts it: not preceded by a name character or quote, so `Data!`
+# does not match inside `MyData!`. Formulas naming an external workbook never
+# name a local sheet.
+_sheet_ref_regex(prefix::String) = Regex("(?<![\\w.'])\\Q" * prefix * "\\E")
+_names_sheet(s::AbstractString, prefix::String) =
+    !occursin('[', s) && occursin(_sheet_ref_regex(prefix), s)
+    
+# `s` with every reference to the sheet in `old_prefix` pointed at `new_prefix`
+# instead. Formulas naming an external workbook are left alone.
+function _repoint_ref_string(s::AbstractString, old_prefix::String, new_prefix::String)::String
+    occursin('[', s) && return String(s)
+    return replace(s, _sheet_ref_regex(old_prefix) => new_prefix)
+end
+
+# Any element named `f` in a chart part is a formula reference: series data,
+# titles, data labels in extLst, trendlines. Walking the whole tree rather than
+# enumerating paths means the extLst cases are covered too. `g` maps each
+# formula to its replacement; returning it unchanged leaves the element alone.
+function _rewrite_chart_formulas!(g, node::XML.Node)
+    for child in XML.eachelement(node)
+        if localname(child) == "f"
+            s = XML.is_simple_value(child)
+            isnothing(s) && continue
+            t = g(s)
+            t == s || (child[end] = XML.Text(t))
+        else
+            _rewrite_chart_formulas!(g, child)
+        end
+    end
+    return nothing
+end
+
+# ---- copying a sheet ---------------------------------------------------------
+
 """
 Repoint every source reference in a chart part from `old_sheet` to `new_sheet`.
 
@@ -314,34 +351,9 @@ empty for the copy.
 function repoint_chart_refs!(xl::XLSXFile, chart_path::String,
                              old_sheet::String, new_sheet::String)
     haskey(xl.data, chart_path) || return nothing
-    _repoint_refs!(xml_root_element(xl.data[chart_path]),
-                   quoteit(old_sheet) * "!", quoteit(new_sheet) * "!")
-    return nothing
-end
-
-# `s` with every reference to the sheet in `old_prefix` (e.g. `Data!` or
-# `'My Sheet'!`) pointed at `new_prefix` instead. The prefix must start a
-# reference: not preceded by a name character or quote, so `Data!` does not
-# match inside `MyData!`. Formulas naming an external workbook are left alone.
-function _repoint_ref_string(s::AbstractString, old_prefix::String, new_prefix::String)::String
-    occursin('[', s) && return String(s)
-    return replace(s, Regex("(?<![\\w.'])\\Q" * old_prefix * "\\E") => new_prefix)
-end
-
-# Any element named `f` in a chart part is a formula reference — series data,
-# titles, data labels in extLst, trendlines. Walking the whole tree rather than
-# enumerating paths means the extLst cases are covered too.
-function _repoint_refs!(node::XML.Node, old_prefix::String, new_prefix::String)
-    for child in XML.eachelement(node)
-        if localname(child) == "f"
-            s = XML.is_simple_value(child)
-            isnothing(s) && continue
-            t = _repoint_ref_string(s, old_prefix, new_prefix)
-            t == s || (child[end] = XML.Text(t))
-        else
-            _repoint_refs!(child, old_prefix, new_prefix)
-        end
-    end
+    old, new = quoteit(old_sheet) * "!", quoteit(new_sheet) * "!"
+    _rewrite_chart_formulas!(s -> _repoint_ref_string(s, old, new),
+                             xml_root_element(xl.data[chart_path]))
     return nothing
 end
 
@@ -380,30 +392,93 @@ function repoint_chartex_refs!(xl::XLSXFile, chart_path::String,
     # (a Pareto chart's data blocks share their categories), so each name is
     # cloned once and every occurrence repointed to the same clone.
     cloned = Dict{String,String}()
-    _repoint_cx_refs!(xml_root_element(xl.data[chart_path]), wb,
-                      old_sheet, new_sheet, series, counter, cloned)
+    old, new = quoteit(old_sheet) * "!", quoteit(new_sheet) * "!"
+    _rewrite_chart_formulas!(xml_root_element(xl.data[chart_path])) do s
+        n = _clone_xlchart_name!(wb, String(s), old_sheet, new_sheet, series, counter, cloned)
+        isnothing(n) ? _repoint_ref_string(s, old, new) : n    # direct reference, as stage 6 writes
+    end
     return nothing
 end
 
-function _repoint_cx_refs!(node::XML.Node, wb::Workbook, old_sheet::String,
-                           new_sheet::String, series::Int, counter::Ref{Int},
-                           cloned::Dict{String,String})
+# ---- deleting a sheet --------------------------------------------------------
+
+"""
+Invalidate every chart reference to `sheet`, as Excel does when a sheet is deleted.
+
+A `c:` chart keeps the reference's element and its cache: the whole `c:f` becomes
+`#REF!`. A `chartEx` chart loses the reference entirely: a dimension whose `cx:f`
+names the sheet is emptied to one `cx:lvl ptCount="0"` per level, and a `cx:tx`
+whose `cx:f` names it is removed. `dead` maps each `_xlchart` defined name that
+resolved to the sheet to its former value; the names themselves are deleted with
+the sheet's other defined names, as Excel drops them too.
+"""
+function invalidate_chart_refs!(xf::XLSXFile, sheet::String, dead::Dict{String,String})
+    prefix = quoteit(sheet) * "!"
+    for path in parts_with_content_type(xf, MIME_CHART)
+        haskey(xf.files, path) || continue        # removed with the sheet
+        _rewrite_chart_formulas!(s -> _names_sheet(s, prefix) ? "#REF!" : s,
+                                 xml_root_element(get_xml_data(xf, path)))
+    end
+    for path in parts_with_content_type(xf, MIME_CHARTEX)
+        haskey(xf.files, path) || continue
+        _empty_cx_refs!(xml_root_element(get_xml_data(xf, path)), prefix, dead)
+    end
+    return nothing
+end
+
+# cx: — the reference an `f` resolves to, if it names the deleted sheet, either
+# through a dead `_xlchart` name or directly (as stage 6 writes); else `nothing`.
+function _dead_cx_ref(f, prefix::String, dead::Dict{String,String})
+    isnothing(f) && return nothing
+    s = XML.is_simple_value(f)
+    isnothing(s) && return nothing
+    haskey(dead, s) && return dead[s]
+    _names_sheet(s, prefix) && return String(s)
+    return nothing
+end
+
+# Levels in a reference: its columns, or its rows when the `cx:f` has dir="row".
+function _ref_levels(ref::AbstractString, dir)::Int
+    m = match(r"\$?([A-Z]{1,3})\$?(\d*)(?::\$?([A-Z]{1,3})\$?(\d*))?$", ref)
+    (isnothing(m) || isnothing(m[3])) && return 1
+    if dir == "row"
+        (isempty(m[2]) || isempty(m[4])) && return 1
+        return abs(parse(Int, m[4]) - parse(Int, m[2])) + 1
+    end
+    return abs(decode_column_number(m[3]) - decode_column_number(m[1])) + 1
+end
+
+# `name` with the prefix `node`'s own tag carries.
+function _same_prefix_tag(node::XML.Node, name::String)::String
+    t = XML.tag(node)
+    i = findfirst(':', t)
+    return isnothing(i) ? name : t[1:i] * name
+end
+
+function _empty_cx_refs!(node::XML.Node, prefix::String, dead::Dict{String,String})
+    drop = XML.Node[]
     for child in XML.eachelement(node)
-        if localname(child) == "f"
-            s = XML.is_simple_value(child)
-            isnothing(s) && continue
-            new_name = _clone_xlchart_name!(wb, String(s), old_sheet, new_sheet,
-                                            series, counter, cloned)
-            if isnothing(new_name)          # a direct reference, as stage 6 writes
-                t = _repoint_ref_string(s, quoteit(old_sheet) * "!", quoteit(new_sheet) * "!")
-                t == s || (child[end] = XML.Text(t))
-            else
-                child[end] = XML.Text(new_name)
+        ln = localname(child)
+        if ln == "strDim" || ln == "numDim"
+            f = first_element_with_tag(child, "f")
+            ref = _dead_cx_ref(f, prefix, dead)
+            if !isnothing(ref)
+                n   = _ref_levels(ref, get_attr(f, "dir"))
+                lvl = _same_prefix_tag(f, "lvl")
+                empty!(XML.children(child))
+                for _ in 1:n
+                    push!(child, XML.Element(lvl; ptCount = "0"))
+                end
             end
+        elseif ln == "tx"
+            txd = first_element_with_tag(child, "txData")
+            f   = isnothing(txd) ? nothing : first_element_with_tag(txd, "f")
+            isnothing(_dead_cx_ref(f, prefix, dead)) || push!(drop, child)
         else
-            _repoint_cx_refs!(child, wb, old_sheet, new_sheet, series, counter, cloned)
+            _empty_cx_refs!(child, prefix, dead)
         end
     end
+    isempty(drop) || filter!(c -> !any(d -> d === c, drop), XML.children(node))
     return nothing
 end
 

@@ -853,7 +853,8 @@
             row += 16
             @test c isa XLSX.Charts.ChartEx
             @test XLSX.Charts.getChartType(c) === kind
-            @test XLSX.Charts.getChartSeriesCount(c) == (kind === :pareto ? 2 : 1)
+            @test XLSX.Charts.getChartSeriesCount(c) == 1
+            kind === :pareto && @test XLSX.Charts.getSeriesLayout(c, 1; pareto = true) === :paretoLine
             @test XLSX.Charts.getSeriesName(c, 1) == "Amount"
         end
 
@@ -873,7 +874,49 @@
         SAVE_FILES && save_outfile(xf)
         isfile(path) && rm(path)
     end
+    @testset "Pareto line is reached with pareto = true" begin
+        kinds = XLSX.getCharts(XLSX.readxlsx(joinpath(data_directory, "chartex_kinds.xlsx")))
+        p = kinds[6]                                        # Pareto
+        w = kinds[1]                                        # waterfall: no Pareto line
 
+        # One series, as in Excel's Select Data; the line belongs to it
+        @test XLSX.Charts.getChartType(p) === :pareto
+        @test XLSX.Charts.getChartSeriesCount(p) == 1
+        @test XLSX.Charts.getSeriesLayout(p, 1) === :clusteredColumn
+        @test XLSX.Charts.getSeriesLayout(p, 1; pareto = true) === :paretoLine
+        @test_throws XLSX.XLSXError XLSX.Charts.getSeriesLayout(p, 2)
+        # the line is drawn against the secondary (percentage) axis
+        @test XLSX.Charts.getSeriesAxisIds(p, 1; pareto = true) != XLSX.Charts.getSeriesAxisIds(p, 1)
+
+        # pareto = true on a chart with no Pareto line is an error, not the series itself
+        @test_throws XLSX.XLSXError XLSX.Charts.getSeriesLayout(w, 1; pareto = true)
+        @test_throws XLSX.XLSXError XLSX.Charts.getSeriesLine(w, 1; pareto = true)
+
+        # A setter with pareto = true formats the line and leaves the columns alone
+        xf = XLSX.openxlsx(joinpath(data_directory, "chartex_kinds.xlsx"); mode = "rw")
+        c  = XLSX.getCharts(xf)[6]
+        cols_before = XLSX.Charts.getSeriesLine(c, 1)
+        line_before = XLSX.Charts.getSeriesLine(c, 1; pareto = true)
+        XLSX.Charts.setSeriesLineColor(c, 1, "FF0000"; pareto = true)
+        XLSX.Charts.setSeriesLineWidth(c, 1, 2.5; pareto = true)
+        line_after = XLSX.Charts.getSeriesLine(c, 1; pareto = true)
+        @test line_after != line_before
+        line_after = XLSX.Charts.getSeriesLine(c, 1; pareto = true)
+        @test line_after.value != line_before.value
+        @test XLSX.Charts.getSeriesLine(c, 1).value == cols_before.value
+        @test XLSX.Charts.getChartSeriesCount(c) == 1         # formatting adds no series
+
+        f = "pareto_line.xlsx"
+        XLSX.writexlsx(f, xf; overwrite = true)
+        SAVE_FILES && save_outfile(xf)
+        yf = XLSX.readxlsx(f)
+        d  = XLSX.getCharts(yf)[6]
+        @test XLSX.Charts.getSeriesLine(d, 1; pareto = true).value == line_after.value
+        @test XLSX.Charts.getSeriesLine(d, 1).value == cols_before.value
+        @test XLSX.Charts.getChartSeriesCount(d) == 1
+        SAVE_FILES && save_outfile(yf)
+        rm(f; force = true)
+    end
     @testset "a failed addChartEx leaves no chartsheet behind" begin
         xf = XLSX.newxlsx("data")
         @test_throws XLSX.XLSXError XLSX.Charts.addChartEx(xf, :waterfall, "B2:B6")          # unqualified

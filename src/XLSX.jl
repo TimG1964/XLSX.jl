@@ -86,7 +86,9 @@ export
            getFormat, getFont, getBorder, getFill, getAlignment,
            DataTable, Table, TableStyleInfo, table, tables,
            getDefinedNames, getAllDefinedNames,
-           Workbook, XLSXError
+           Workbook, XLSXError, 
+           CellErrorType, XL_NULL, XL_DIV0, XL_VALUE, XL_REF, 
+           XL_NAME, XL_NUM, XL_NA, XL_SPILL
     """))
 end
  

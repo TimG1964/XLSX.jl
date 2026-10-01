@@ -36,6 +36,7 @@ julia> c = addChart(ws, :column; anchor = "D2:K17", title = "Revenue");
 julia> addSeries(c, "B2:B5"; categories = "A2:A5", name_ref = "B1");
 
 julia> XLSX.writexlsx("revenue.xlsx", f)
+"C:\\Users\\...\\revenue.xlsx"
 ```
 
 ![image|320x500](../images/chart_simple_bar.png)

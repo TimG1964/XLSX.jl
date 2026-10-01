@@ -121,12 +121,14 @@ not read.
 
 ## Colours
 
-Anywhere a colour is set, four forms are accepted:
+Anywhere a colour is set, these forms are accepted:
 
 ```julia
-julia> setSeriesFill(c, 1, "FF0000");                  # hex RGB or AARRGGBB
+julia> setSeriesFill(c, 1, "FF0000");                  # hex RGB, "#RRGGBB" or AARRGGBB
 
 julia> setSeriesFill(c, 1, "coral");                   # any Colors.jl named colour
+
+julia> setSeriesFill(c, 1, :coral);                    # the same name as a symbol
 
 julia> setSeriesFill(c, 1, colorant"seagreen");        # a Colors.jl value
 
@@ -267,6 +269,8 @@ rather than once on the chart space.
 The fields are those of [`DrawingRunProps`](@ref): `:size`, `:bold`, `:italic`,
 `:under`, `:strike`, `:caps`, `:baseline`, `:kern`, `:spacing`, `:latin`, `:ea`,
 `:cs`, `:lang`, plus `:fill` and `:line` for the text's own colour and outline.
+Excel's names are accepted as well: `:font` for `:latin`, `:color` for `:fill`, 
+`:underline` for `:under` and `:strikethrough` for `:strike`. Getters report the DrawingML names.
 
 [`getLabelTextProp`](@ref) is the resolving counterpart. It takes a field name
 and walks the chain from the series up through the group, plot area and chart

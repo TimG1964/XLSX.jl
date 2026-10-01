@@ -63,6 +63,7 @@ using ..XLSX:
     XLSXFile, Workbook, Worksheet, XLSXError, DataTable,
     CellRef, CellRange, NonContiguousRange,
     SheetCellRef, SheetCellRange, SheetColumnRange, SheetRowRange,
+    XL_REF, CellErrorType,
     # package parts and relationships
     REL_CHART, REL_CHARTEX, REL_CHARTSHEET, MIME_CHART, MIME_CHARTEX, MIME_CHARTSHEET,
     parts_with_content_type, register_content_type!, add_part_rel!,
@@ -109,7 +110,7 @@ export
     setChartTitleText, setChartTitleTextProp, setChartSpaceTextProp, setLegendTextProp,
     setLegendEntryDeleted, getLegendEntryDeleted, setPlotAreaLine,
     # Series
-    getSeriesName, getSeriesNameRange, getSeriesData, getSeriesOwner, getSeriesHidden,
+    getSeriesName, getSeriesNameRange, getSeriesData, getSeriesHidden,
     getSeriesGroup, getSeriesAxes, getSeriesAxisIds, getSeriesLayout,
     getSeriesShapeProps, getSeriesFill, getSeriesLine, getSeriesMarker,
     getSeriesLabelTextProps, getSeriesDataPoints, getSeriesDataPoint,

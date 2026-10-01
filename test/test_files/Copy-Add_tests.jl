@@ -205,6 +205,107 @@
         XLSX.deletesheet!(xf, "C")
         @test active(xf) == 0                                                  # C gone: clamped to B
     end
+
+    # Chart references to a deleted sheet, invalidated as Excel does it.
+
+    function _chart_elements(node, name)
+        out = []
+        for ch in XLSX.XML.eachelement(node)
+            XLSX.localname(ch) == name && push!(out, ch)
+            append!(out, _chart_elements(ch, name))
+        end
+        return out
+    end
+
+    _chart_f_texts(root) = [something(XLSX.XML.is_simple_value(f), "") for f in _chart_elements(root, "f")]
+
+    @testset "deletesheet! invalidates chart references" begin
+
+        @testset "c: chart becomes #REF!, cache kept" begin
+            xf = XLSX.openxlsx(joinpath(data_directory, "Chartsheet.xlsx"); mode = "rw")
+            XLSX.addsheet!(xf, "Keep")
+            XLSX.deletesheet!(xf, "Sheet1")
+
+            c = only(XLSX.getCharts(xf))
+            @test _chart_f_texts(XLSX.Charts.chart_root(c)) == ["#REF!", "#REF!"]   # as Excel writes it
+            @test all(r -> r.values === XLSX.XL_REF, XLSX.getChartRanges(c))
+            @test XLSX.getChartData(xf, c.name) isa XLSX.DataTable                  # cache kept
+
+            f = "deletesheet_chart_ref.xlsx"
+            XLSX.writexlsx(f, xf; overwrite = true)
+            SAVE_FILES && save_outfile(xf)
+            yf = XLSX.readxlsx(f)
+            d = only(XLSX.getCharts(yf))
+            @test all(r -> r.values === XLSX.XL_REF, XLSX.getChartRanges(d))
+            a, b = XLSX.getChartData(yf, d.name), XLSX.getChartData(xf, c.name)
+            @test a.column_labels == b.column_labels && a.data == b.data
+            SAVE_FILES && save_outfile(yf)
+            rm(f; force = true)
+        end
+
+        @testset "chartEx chart loses the reference" begin
+            # chartex_kinds.xlsx with the treemap moved to a chartsheet in Excel,
+            # so deleting its data sheet leaves the chart behind.
+            xf = XLSX.openxlsx(joinpath(data_directory, "chartex_chartsheet.xlsx"); mode = "rw")
+            others = filter(c -> XLSX.Charts.getChartType(c) !== :treemap, XLSX.getCharts(xf))
+            before = Dict(c.name => string.(XLSX.getChartRanges(c)) for c in others)
+
+            XLSX.deletesheet!(xf, "treemap")
+
+            c = only(filter(c -> XLSX.Charts.getChartType(c) === :treemap, XLSX.getCharts(xf)))
+            root = XLSX.Charts.chart_root(c)
+            @test isempty(_chart_f_texts(root))
+            strdim = only(_chart_elements(root, "strDim"))
+            numdim = only(_chart_elements(root, "numDim"))
+            @test length(_chart_elements(strdim, "lvl")) == 2                      # one per hierarchy level
+            @test length(_chart_elements(numdim, "lvl")) == 1
+            @test all(l -> XLSX.get_attr(l, "ptCount") == "0",
+                    vcat(_chart_elements(strdim, "lvl"), _chart_elements(numdim, "lvl")))
+            @test isnothing(XLSX.first_element_with_tag(only(_chart_elements(root, "series")), "tx"))
+            @test all(isnothing, XLSX.getChartRanges(c))
+
+            wb = XLSX.get_workbook(xf)
+            @test !any(v -> v.value isa XLSX.DefinedNameRangeTypes && v.value.sheet == "treemap",
+                    values(wb.workbook_names))
+
+            # charts plotting other sheets are untouched
+            for d in filter(d -> haskey(before, d.name), XLSX.getCharts(xf))
+                @test string.(XLSX.getChartRanges(d)) == before[d.name]
+            end
+
+            f = "deletesheet_chartex_ref.xlsx"
+            XLSX.writexlsx(f, xf; overwrite = true)
+            SAVE_FILES && save_outfile(xf)
+            yf = XLSX.readxlsx(f)
+            d = only(filter(d -> XLSX.Charts.getChartType(d) === :treemap, XLSX.getCharts(yf)))
+            @test all(isnothing, XLSX.getChartRanges(d))
+            SAVE_FILES && save_outfile(yf)
+            rm(f; force = true)
+        end
+    end
+    @testset "chartEx chart with direct references (as addChartEx writes)" begin
+        xf = XLSX.newxlsx("Data")
+        ws = xf["Data"]
+        rows = [("Region", "Country", "Sales"),
+                ("Europe", "France", 30), ("Europe", "Germany", 45), ("Europe", "Spain", 20),
+                ("Asia", "Japan", 50), ("Asia", "India", 35),
+                ("Americas", "USA", 60), ("Americas", "Brazil", 25)]
+        for (i, r) in enumerate(rows), (j, v) in enumerate(r)
+            ws[i, j] = v
+        end
+        XLSX.Charts.addChartEx(xf, :treemap, "Data!C2:C8"; categories = "Data!A2:B8", name_ref = "Data!C1")
+        XLSX.addsheet!(xf, "Keep")
+        XLSX.deletesheet!(xf, "Data")
+
+        c = only(XLSX.getCharts(xf))
+        root = XLSX.Charts.chart_root(c)
+        @test isempty(_chart_f_texts(root))
+        @test length(_chart_elements(only(_chart_elements(root, "strDim")), "lvl")) == 2
+        @test length(_chart_elements(only(_chart_elements(root, "numDim")), "lvl")) == 1
+        @test isnothing(XLSX.first_element_with_tag(only(_chart_elements(root, "series")), "tx"))
+        @test all(isnothing, XLSX.getChartRanges(c))
+        SAVE_FILES && save_outfile(xf)
+    end
     @testset "renamesheet!" begin
 
         f=XLSX.openxlsx("renamedelete.xlsx", mode="w")
@@ -509,7 +610,7 @@
             @test d.range.sheet == "pareto2"
         end
         @test XLSX.Charts.getSeriesNameRange(copy, 1).sheet == "pareto2"
-        @test XLSX.Charts.getSeriesNameRange(copy, 3).sheet == "pareto2"
+        @test XLSX.Charts.getSeriesNameRange(copy, 2).sheet == "pareto2"
 
         # data: cat (shared), val, val; series names: two. Five names, not six.
         @test length(unique(XLSX.Charts._cx_refs(copy))) == 3                      # data dimensions

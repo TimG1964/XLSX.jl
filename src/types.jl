@@ -174,16 +174,41 @@ end
     CT_DATETIME = 7
     CT_ERROR = 8
 end
+
+"""
+    CellErrorType
+
+Excel's error values, such as `#REF!`. [`getChartRanges`](@ref) returns
+`XL_REF` for a chart reference that Excel has replaced with `#REF!`, as it does
+when the referenced sheet is deleted.
+"""
 @enum CellErrorType::UInt64 begin
     XL_NULL = 1
     XL_DIV0 = 2
     XL_VALUE = 3
     XL_REF = 4
     XL_NAME = 5
-    XL_NUM = 6 
+    XL_NUM = 6
     XL_NA = 7
     XL_SPILL = 8 # Turns out #SPILL is not an official error. These will return #VALUE errors
 end
+
+"`#NULL!`: an intersection of ranges that do not intersect."
+XL_NULL
+"`#DIV/0!`: division by zero."
+XL_DIV0
+"`#VALUE!`: an argument of the wrong type."
+XL_VALUE
+"`#REF!`: a reference to a cell or sheet that no longer exists."
+XL_REF
+"`#NAME?`: an unrecognised name."
+XL_NAME
+"`#NUM!`: an invalid numeric value."
+XL_NUM
+"`#N/A`: a value that is not available."
+XL_NA
+"`#SPILL!`: a dynamic array that cannot spill. Not an official stored error; read as `#VALUE!`."
+XL_SPILL
 
 abstract type AbstractCell end
 

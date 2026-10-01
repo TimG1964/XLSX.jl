@@ -3,8 +3,8 @@
 #
 # A ChartEx holds identity only; everything here reads the current part, so
 # results never go stale. Series are indexed 1-based over cx:series in document
-# order. A Pareto chart is written as column series each owned by a paretoLine
-# series, and both count.
+# order. A Pareto chart's paretoLine is owned by its column series and is not
+# counted; it is reached with pareto = true.
 #
 # Discovery readers (_cx_root, _cx_chart, _cx_series_nodes, _cx_layouts,
 # _cx_has_binning, _cx_refs, _cx_title) live in discovery.jl, and the creation
@@ -13,18 +13,30 @@
 
 # ---- small readers ---------------------------------------------------------
 
-function _cx_series_node(c::ChartEx, root::XML.Node, i::Integer)
-    sers = _cx_series_nodes(root)
-    n = length(sers)
+# Series positions count the series a user sees: those not owned by another.
+# A Pareto chart's paretoLine is owned by its column series (`ownerIdx`, the
+# owner's 0-based position among the `cx:series`) and is reached with
+# `pareto = true` on the owner's position.
+function _cx_series_node(c::ChartEx, root::XML.Node, i::Integer; pareto::Bool = false)
+    sers   = _cx_series_nodes(root)
+    owners = findall(s -> isnothing(_cx_attr(s, "ownerIdx")), sers)
+    n = length(owners)
     n == 0 && throw(XLSXError("Chart `$(c.name)` has no series."))
     1 <= i <= n || throw(XLSXError("Chart `$(c.name)` has $n series; asked for series $i."))
-    return sers[i]
+    k = owners[i]
+    pareto || return sers[k]
+    j = findfirst(s -> _cx_attr(s, "ownerIdx") == string(k - 1), sers)
+    isnothing(j) && throw(XLSXError("Series $i of chart `$(c.name)` has no Pareto line."))
+    return sers[j]
 end
 
-_cx_series_node(c::ChartEx, i::Integer) = _cx_series_node(c, _cx_root(c), i)
+_cx_series_node(c::ChartEx, i::Integer; pareto::Bool = false) =
+    _cx_series_node(c, _cx_root(c), i; pareto)
 
-_cx_layoutpr(c::ChartEx, i::Integer) = first_element_with_tag(_cx_series_node(c, i), "layoutPr")
-_cx_datalabels(c::ChartEx, i::Integer) = first_element_with_tag(_cx_series_node(c, i), "dataLabels")
+_cx_layoutpr(c::ChartEx, i::Integer; pareto::Bool = false) =
+    first_element_with_tag(_cx_series_node(c, i; pareto), "layoutPr")
+_cx_datalabels(c::ChartEx, i::Integer; pareto::Bool = false) =
+    first_element_with_tag(_cx_series_node(c, i; pareto), "dataLabels")
 
 # Attribute value as written, or `nothing` when the node or attribute is absent.
 _cx_attr(node, name) = isnothing(node) ? nothing : (s = get_attr(node, name); isempty(s) ? nothing : s)
@@ -72,20 +84,22 @@ _cx_title_tx(c::ChartEx) = first_element_with_tag(first_element_with_tag(_cx_cha
 """
     getChartSeriesCount(c::ChartEx) -> Int
 
-Number of `cx:series` in the chart.
+Number of series in the chart. A Pareto chart's Pareto line is not counted: it
+belongs to its column series, and is reached with `pareto = true`.
 """
-getChartSeriesCount(c::ChartEx)::Int = length(_cx_series_nodes(c))
+getChartSeriesCount(c::ChartEx)::Int = count(s -> isnothing(_cx_attr(s, "ownerIdx")), _cx_series_nodes(c))
 
 """
-    getSeriesLayout(c::ChartEx, i) -> Symbol
+    getSeriesLayout(c::ChartEx, i; pareto=false) -> Symbol
 
 The layout of series `i` as written in its `layoutId` attribute, e.g.
-`:waterfall`, `:funnel`, `:treemap`, `:clusteredColumn`, `:paretoLine`.
+`:waterfall`, `:funnel`, `:treemap`, `:clusteredColumn`. With `pareto = true`,
+the layout of series `i`'s Pareto line, `:paretoLine`; an error if it has none.
 
 See also [`getChartType`](@ref), which describes the chart as a whole.
 """
-function getSeriesLayout(c::ChartEx, i::Integer)::Symbol
-    lid = get_attr(_cx_series_node(c, i), "layoutId")
+function getSeriesLayout(c::ChartEx, i::Integer; pareto::Bool = false)::Symbol
+    lid = get_attr(_cx_series_node(c, i; pareto), "layoutId")
     isempty(lid) && throw(XLSXError("Series $i of chart `$(c.name)` has no layoutId."))
     return Symbol(lid)
 end
@@ -115,13 +129,14 @@ function getChartDataBlocks(c::ChartEx)::Vector{ChartExData}
 end
 
 """
-    getSeriesData(c::ChartEx, i) -> Union{Nothing, ChartExData}
+    getSeriesData(c::ChartEx, i; pareto=false) -> Union{Nothing, ChartExData}
 
-The data block series `i` draws from, found through its `cx:dataId`.
-`nothing` if the series names no data block, as for a Pareto line.
+The data block series `i` draws from, found through its `cx:dataId`. With
+`pareto = true`, series `i`'s Pareto line instead; an error if it has none.
+`nothing` if the series names no data block.
 """
-function getSeriesData(c::ChartEx, i::Integer)::Union{Nothing,ChartExData}
-    idnode = first_element_with_tag(_cx_series_node(c, i), "dataId")
+function getSeriesData(c::ChartEx, i::Integer; pareto::Bool = false)::Union{Nothing,ChartExData}
+    idnode = first_element_with_tag(_cx_series_node(c, i; pareto), "dataId")
     isnothing(idnode) && return nothing
     id = parse(Int, get_attr(idnode, "val"))
     blocks = getChartDataBlocks(c)
@@ -132,51 +147,47 @@ function getSeriesData(c::ChartEx, i::Integer)::Union{Nothing,ChartExData}
 end
 
 """
-    getSeriesOwner(c::ChartEx, i) -> Union{Nothing, Int}
+    getSeriesHidden(c::ChartEx, i; pareto=false) -> Union{Nothing, Bool}
 
-For a series owned by another, such as a Pareto line, the 1-based index of the
-owning series; `nothing` otherwise. Read from `ownerIdx`, taken to be the
-owner's 0-based position among the chart's `cx:series`.
+The series' `hidden` attribute. With `pareto = true`, series `i`'s Pareto line
+instead; an error if it has none. `nothing` if not written.
 """
-function getSeriesOwner(c::ChartEx, i::Integer)::Union{Nothing,Int}
-    s = _cx_attr(_cx_series_node(c, i), "ownerIdx")
-    return isnothing(s) ? nothing : parse(Int, s) + 1
-end
+getSeriesHidden(c::ChartEx, i::Integer; pareto::Bool = false) =
+    _cx_bool(_cx_series_node(c, i; pareto), "hidden")
 
 """
-    getSeriesHidden(c::ChartEx, i) -> Union{Nothing, Bool}
-
-The series' `hidden` attribute. `nothing` if not written.
-"""
-getSeriesHidden(c::ChartEx, i::Integer) = _cx_bool(_cx_series_node(c, i), "hidden")
-
-"""
-    getSeriesAxisIds(c::ChartEx, i) -> Vector{Int}
+    getSeriesAxisIds(c::ChartEx, i; pareto=false) -> Vector{Int}
 
 The `id`s of the `cx:axis` elements series `i` is plotted against, as written.
 These are axis ids, not positions. Empty if the series names none.
+
+With `pareto = true`, series `i`'s Pareto line instead; an error if it has none.
 """
-getSeriesAxisIds(c::ChartEx, i::Integer)::Vector{Int} =
-    [parse(Int, get_attr(n, "val")) for n in elements_with_tag(_cx_series_node(c, i), "axisId")]
+getSeriesAxisIds(c::ChartEx, i::Integer; pareto::Bool = false)::Vector{Int} =
+    [parse(Int, get_attr(n, "val")) for n in elements_with_tag(_cx_series_node(c, i; pareto), "axisId")]
 
 # ---- names and titles ------------------------------------------------------
 
 """
-    getSeriesName(c::ChartEx, i) -> Union{Nothing, String}
+    getSeriesName(c::ChartEx, i; pareto=false) -> Union{Nothing, String}
 
 The name of series `i`, typed or the cached value of a cell binding.
 `nothing` if the series has no name of its own.
+
+With `pareto = true`, series `i`'s Pareto line instead; an error if it has none.
 """
-getSeriesName(c::ChartEx, i::Integer) =
-    _cx_tx_text(first_element_with_tag(_cx_series_node(c, i), "tx"))
+getSeriesName(c::ChartEx, i::Integer; pareto::Bool = false) =
+    _cx_tx_text(first_element_with_tag(_cx_series_node(c, i; pareto), "tx"))
 
 """
-    getSeriesNameRange(c::ChartEx, i) -> ChartRange
+    getSeriesNameRange(c::ChartEx, i; pareto=false) -> ChartRange
 
 The cell a series name is bound to. `nothing` if the name is typed or absent.
+
+With `pareto = true`, series `i`'s Pareto line instead; an error if it has none.
 """
-getSeriesNameRange(c::ChartEx, i::Integer) =
-    _cx_tx_range(c.package, first_element_with_tag(_cx_series_node(c, i), "tx"))
+getSeriesNameRange(c::ChartEx, i::Integer; pareto::Bool = false) =
+    _cx_tx_range(c.package, first_element_with_tag(_cx_series_node(c, i; pareto), "tx"))
 
 """
     getChartTitleRange(c::ChartEx) -> ChartRange
@@ -266,31 +277,34 @@ end
 const _CX_LABEL_FLAGS = (:seriesName, :categoryName, :value)
 
 """
-    getLabelFlag(c::ChartEx, i, flag) -> Union{Nothing, Bool}
+    getLabelFlag(c::ChartEx, i, flag; pareto=false) -> Union{Nothing, Bool}
 
 Whether series `i`'s data labels show `:seriesName`, `:categoryName` or
-`:value`, from `cx:dataLabels/cx:visibility`. `nothing` if not written.
+`:value`, from `cx:dataLabels/cx:visibility`. With `pareto = true`, series `i`'s
+Pareto line instead; an error if it has none. `nothing` if not written.
 """
-function getLabelFlag(c::ChartEx, i::Integer, flag::Symbol)::Union{Nothing,Bool}
+function getLabelFlag(c::ChartEx, i::Integer, flag::Symbol; pareto::Bool = false)::Union{Nothing,Bool}
     flag in _CX_LABEL_FLAGS ||
         throw(XLSXError("Unknown label flag `$flag`. Expected one of $(join(_CX_LABEL_FLAGS, ", "))."))
-    return _cx_bool(first_element_with_tag(_cx_datalabels(c, i), "visibility"), String(flag))
+    return _cx_bool(first_element_with_tag(_cx_datalabels(c, i; pareto), "visibility"), String(flag))
 end
 
 """
-    getLabelPosition(c::ChartEx, i) -> Union{Nothing, Symbol}
+    getLabelPosition(c::ChartEx, i; pareto=false) -> Union{Nothing, Symbol}
 
-Data label position for series `i`, e.g. `:outEnd`, `:inEnd`, `:ctr`.
+Data label position for series `i`, e.g. `:outEnd`, `:inEnd`, `:ctr`. With
+`pareto = true`, series `i`'s Pareto line instead; an error if it has none.
 """
-getLabelPosition(c::ChartEx, i::Integer) = _cx_symbol(_cx_datalabels(c, i), "pos")
+getLabelPosition(c::ChartEx, i::Integer; pareto::Bool = false) =
+    _cx_symbol(_cx_datalabels(c, i; pareto), "pos")
 
 # ---- formatting cascades ---------------------------------------------------
 
 # The cx:dataPt for 1-based `point` of series `i`, or `nothing` if Excel never
 # formatted that point. cx:dataPt idx is 0-based.
-function _cx_datapt(c::ChartEx, i::Integer, point::Integer)
+function _cx_datapt(c::ChartEx, i::Integer, point::Integer; pareto::Bool = false)
     point >= 1 || throw(XLSXError("Data point positions start at 1; asked for $point."))
-    for dp in elements_with_tag(_cx_series_node(c, i), "dataPt")
+    for dp in elements_with_tag(_cx_series_node(c, i; pareto), "dataPt")
         tryparse(Int, get_attr(dp, "idx")) == point - 1 && return dp
     end
     return nothing
@@ -298,49 +312,53 @@ end
 
 # spPr cascade: data point, then series. As for c:, nothing above the series
 # describes a series' graphic; the rest comes from the style part.
-function _cx_shape_chain(c::ChartEx, i::Integer; point::Union{Nothing,Integer}=nothing)
+function _cx_shape_chain(c::ChartEx, i::Integer; point::Union{Nothing,Integer} = nothing,
+                         pareto::Bool = false)
     chain = FormatSite[]
     if !isnothing(point)
-        dp = _cx_datapt(c, i, point)
+        dp = _cx_datapt(c, i, point; pareto)
         isnothing(dp) || push!(chain, _site_path(:point, :shape, dp, "spPr"))
     end
-    push!(chain, _site_path(:series, :shape, _cx_series_node(c, i), "spPr"))
+    push!(chain, _site_path(:series, :shape, _cx_series_node(c, i; pareto), "spPr"))
     return chain
 end
 
 # txPr cascade for data labels: series, then chart space. cx has no chart groups.
-_cx_text_chain(c::ChartEx, i::Integer) = FormatSite[
-    _site_path(:series,     :text, _cx_series_node(c, i), "dataLabels", "txPr"),
-    _site_path(:chartspace, :text, _cx_root(c),           "txPr"),
+_cx_text_chain(c::ChartEx, i::Integer; pareto::Bool = false) = FormatSite[
+    _site_path(:series,     :text, _cx_series_node(c, i; pareto), "dataLabels", "txPr"),
+    _site_path(:chartspace, :text, _cx_root(c),                   "txPr"),
 ]
 
 """
-    getSeriesFill(c::ChartEx, i::Integer; point=nothing) -> Effective{DrawingFill}
+    getSeriesFill(c::ChartEx, i::Integer; point=nothing, pareto=false) -> Effective{DrawingFill}
 
 Resolve the fill of series `i`, or of one data point of it, walking
-`cx:dataPt/cx:spPr` then `cx:series/cx:spPr`.
+`cx:dataPt/cx:spPr` then `cx:series/cx:spPr`. With `pareto = true`, series
+`i`'s Pareto line instead; an error if it has none.
 """
-getSeriesFill(c::ChartEx, i::Integer; point::Union{Nothing,Integer}=nothing) =
-    _walk_fill(_wb(c), _cx_shape_chain(c, i; point))
+getSeriesFill(c::ChartEx, i::Integer; point::Union{Nothing,Integer} = nothing, pareto::Bool = false) =
+    _walk_fill(_wb(c), _cx_shape_chain(c, i; point, pareto))
 
-    """
-    getSeriesLine(c::ChartEx, i::Integer; point=nothing) -> Effective{DrawingLine}
+"""
+    getSeriesLine(c::ChartEx, i::Integer; point=nothing, pareto=false) -> Effective{DrawingLine}
 
 Resolve the outline of series `i`, or of one data point of it, walking
-`cx:dataPt/cx:spPr` then `cx:series/cx:spPr`.
+`cx:dataPt/cx:spPr` then `cx:series/cx:spPr`. With `pareto = true`, series
+`i`'s Pareto line instead; an error if it has none.
 """
-getSeriesLine(c::ChartEx, i::Integer; point::Union{Nothing,Integer} = nothing) =
-    _walk_line(_wb(c), _cx_shape_chain(c, i; point))
+getSeriesLine(c::ChartEx, i::Integer; point::Union{Nothing,Integer} = nothing, pareto::Bool = false) =
+    _walk_line(_wb(c), _cx_shape_chain(c, i; point, pareto))
 
 """
-    getLabelTextProp(c::ChartEx, i::Integer, field::Symbol) -> Effective
+    getLabelTextProp(c::ChartEx, i::Integer, field::Symbol; pareto=false) -> Effective
 
 Resolve one field of the data-label text formatting for series `i`, walking
-`cx:dataLabels/cx:txPr` then `cx:chartSpace/cx:txPr`. See the `Chart` method
-for how fields inherit.
+`cx:dataLabels/cx:txPr` then `cx:chartSpace/cx:txPr`. With `pareto = true`,
+series `i`'s Pareto line instead; an error if it has none. See the `Chart`
+method for how fields inherit.
 """
-getLabelTextProp(c::ChartEx, i::Integer, field::Symbol) =
-    _resolve_text_field(_wb(c), _cx_text_chain(c, i), field)
+getLabelTextProp(c::ChartEx, i::Integer, field::Symbol; pareto::Bool = false) =
+    _resolve_text_field(_wb(c), _cx_text_chain(c, i; pareto), field)
 
 # ---- write path -------------------------------------------------------------
 #
@@ -353,8 +371,8 @@ const _CX_ROOT_KEY = (NS_CX, "chartSpace")
 
 # rebuild_path steps from `root` to series `i`. Matches by node identity, so the
 # series node must come from the same root the path is applied to.
-function _cx_series_path(c::ChartEx, root::XML.Node, i::Integer)
-    ser = _cx_series_node(c, root, i)
+function _cx_series_path(c::ChartEx, root::XML.Node, i::Integer; pareto::Bool = false)
+    ser = _cx_series_node(c, root, i; pareto)
     return [(NS_CX, "chart")          => "chart",
             (NS_CX, "plotArea")       => "plotArea",
             (NS_CX, "plotAreaRegion") => "plotAreaRegion",
@@ -363,10 +381,10 @@ end
 
 # Apply `f(ser, pfx)` to series `i` and write the part back once. A throw inside
 # `f` leaves the part untouched.
-function _cx_edit_series!(c::ChartEx, i::Integer, f)
+function _cx_edit_series!(c::ChartEx, i::Integer, f; pareto::Bool = false)
     root = _cx_root(c)
     pfx  = ns_prefixes(root)
-    new  = rebuild_path(root, _cx_series_path(c, root, i), ser -> f(ser, pfx);
+    new  = rebuild_path(root, _cx_series_path(c, root, i; pareto), ser -> f(ser, pfx);
                         prefixes = pfx, parent_key = _CX_ROOT_KEY)
     set_chart_root!(c, new)
     return c
@@ -374,9 +392,6 @@ end
 
 _cx_idx(n) = tryparse(Int, get_attr(n, "idx"))
 
-# Apply `f` to the cx:dataPt for 1-based `point`, creating it if absent. A new
-# one is inserted in idx order among its siblings: before the first dataPt with a
-# larger idx, or in schema position (after the last dataPt) if there is none.
 # Apply `f` to the `tag` child of `parent` whose index is `idx`, creating it with
 # `make()` if absent. A created child goes in index order among its `tag`
 # siblings, or at its schema position if it is the first. `idx_of` reads an
@@ -407,10 +422,6 @@ end
 # Apply `f` to the cx:dataPt for 1-based `point`, creating it if absent. A new
 # one is inserted in idx order among its siblings: before the first dataPt with a
 # larger idx, or in schema position (after the last dataPt) if there is none.
-# Apply `f` to the `tag` child of `parent` whose index is `idx`, creating it with
-# `make()` if absent. A created child goes in index order among its `tag`
-# siblings, or at its schema position if it is the first. `idx_of` reads an
-# index from a sibling; `parent_key` is `parent`'s SchemaKey.
 function _cx_with_datapt(ser::XML.Node, point::Integer, pfx, f)
     point >= 1 || throw(XLSXError("Data point positions start at 1; asked for $point."))
     return _with_indexed_child(ser, (NS_CX, "series"), "dataPt", point - 1, _cx_idx,
@@ -421,7 +432,7 @@ end
 # With `create = false`, a missing spPr (or dataPt) means there is nothing to
 # change, and nothing is created: removing a fill that was never written must
 # not leave an empty <cx:spPr/> behind.
-function _cx_set_shape!(c::ChartEx, i::Integer, point, f; create::Bool = true)
+function _cx_set_shape!(c::ChartEx, i::Integer, point, f; create::Bool = true, pareto::Bool = false)
     isnothing(point) || point >= 1 ||
         throw(XLSXError("Data point positions start at 1; asked for $point."))
     _cx_edit_series!(c, i, (ser, pfx) -> begin
@@ -432,7 +443,7 @@ function _cx_set_shape!(c::ChartEx, i::Integer, point, f; create::Bool = true)
         isnothing(point) && return edit(ser, (NS_CX, "series"))
         (!create && isnothing(_cx_datapt_in(ser, point))) && return ser
         return _cx_with_datapt(ser, point, pfx, dp -> edit(dp, (NS_CX, "dataPt")))
-    end)
+    end; pareto)
 end
 
 _cx_datapt_in(ser, point) =
@@ -440,12 +451,13 @@ _cx_datapt_in(ser, point) =
               isnothing(ser.children) ? XML.Node[] : ser.children)
 
 """
-    setSeriesFill(c::ChartEx, i, color; point=nothing) -> ChartEx
+    setSeriesFill(c::ChartEx, i, color; point=nothing, pareto=false) -> ChartEx
 
 Set the fill of series `i`, or of one data point of it. `color` may be a colour
 string or Symbol, a `Colors.Colorant`, a [`SchemeColor`](@ref), `:none` for an
 explicit `<a:noFill/>`, or `:inherit` to remove the fill so the chart style
-applies.
+applies. With `pareto = true`, series `i`'s Pareto line instead; an error if it
+has none.
 
 Setting a point's fill creates its `cx:dataPt` if Excel never formatted that
 point. `:inherit` never creates anything.
@@ -453,35 +465,36 @@ point. `:inherit` never creates anything.
 Returns `c`, which remains valid.
 """
 setSeriesFill(c::ChartEx, i::Integer, color::Union{AbstractString,Colors.Colorant,SchemeColor};
-              point::Union{Nothing,Integer} = nothing) =
-    _cx_set_shape!(c, i, point, (sp, pfx) -> _sp_with_fill(sp, (NS_A, "spPr"), color, pfx))
+              point::Union{Nothing,Integer} = nothing, pareto::Bool = false) =
+    _cx_set_shape!(c, i, point, (sp, pfx) -> _sp_with_fill(sp, (NS_A, "spPr"), color, pfx); pareto)
 
 function setSeriesFill(c::ChartEx, i::Integer, what::Symbol;
-                       point::Union{Nothing,Integer} = nothing)
+                       point::Union{Nothing,Integer} = nothing, pareto::Bool = false)
     what === :inherit &&
         return _cx_set_shape!(c, i, point, (sp, pfx) -> _sp_with_fill(sp, (NS_A, "spPr"), :inherit, pfx);
-                              create = false)
+                              create = false, pareto)
     what === :none &&
-        return _cx_set_shape!(c, i, point, (sp, pfx) -> _sp_with_fill(sp, (NS_A, "spPr"), :none, pfx))
-    return setSeriesFill(c, i, String(what); point)
+        return _cx_set_shape!(c, i, point, (sp, pfx) -> _sp_with_fill(sp, (NS_A, "spPr"), :none, pfx); pareto)
+    return setSeriesFill(c, i, String(what); point, pareto)
 end
 
 # Apply `f(ln, pfx)` to the a:ln of series `i`, or of one of its points,
 # creating the a:ln and its cx:spPr if absent. One rebuild; a throw inside `f`
 # leaves the part untouched.
-_cx_set_line!(c::ChartEx, i::Integer, point, f; create::Bool = true) =
+_cx_set_line!(c::ChartEx, i::Integer, point, f; create::Bool = true, pareto::Bool = false) =
     _cx_set_shape!(c, i, point,
                    (sp, pfx) -> _sp_with_line(sp, (NS_A, "spPr"), ln -> f(ln, pfx), pfx);
-                   create)
+                   create, pareto)
 
 """
-    setSeriesLine(c::ChartEx, i; point=nothing, color, width, dash, cap, compound, join, miterLimit) -> ChartEx
-    setSeriesLine(c::ChartEx, i, :none; point=nothing)
-    setSeriesLine(c::ChartEx, i, :inherit; point=nothing)
+    setSeriesLine(c::ChartEx, i; point=nothing, pareto=false, color, width, dash, cap, compound, join, miterLimit) -> ChartEx
+    setSeriesLine(c::ChartEx, i, :none; point=nothing, pareto=false)
+    setSeriesLine(c::ChartEx, i, :inherit; point=nothing, pareto=false)
 
 Set several outline properties of series `i`, or of one data point of it, in one
 rebuild of the chart part. A keyword left unspecified is left alone; pass
-`:inherit` to remove one that is set.
+`:inherit` to remove one that is set. With `pareto = true`, series `i`'s Pareto
+line instead; an error if it has none.
 
 The symbol form acts on the whole outline: `:none` writes an `a:ln` whose fill is
 `<a:noFill/>`, and `:inherit` removes the `a:ln` so the chart style supplies it.
@@ -489,51 +502,60 @@ The symbol form acts on the whole outline: `:none` writes an `a:ln` whose fill i
 Returns `c`, which remains valid.
 """
 function setSeriesLine(c::ChartEx, i::Integer; point::Union{Nothing,Integer} = nothing,
+                       pareto::Bool = false,
                        color = nothing, width = nothing, dash = nothing,
                        cap = nothing, compound = nothing,
                        join = nothing, miterLimit = nothing)
     all(isnothing, (color, width, dash, cap, compound, join, miterLimit)) && return c
     return _cx_set_line!(c, i, point, (ln, pfx) ->
-        _ln_with(ln, pfx; color, width, dash, cap, compound, join, miterLimit))
+        _ln_with(ln, pfx; color, width, dash, cap, compound, join, miterLimit); pareto)
 end
 
 function setSeriesLine(c::ChartEx, i::Integer, what::Symbol;
-                       point::Union{Nothing,Integer} = nothing)
+                       point::Union{Nothing,Integer} = nothing, pareto::Bool = false)
     what === :inherit &&
-        return _cx_set_shape!(c, i, point, (sp, _) -> remove_child(sp, "ln"); create = false)
-    what === :none && return setSeriesLineColor(c, i, :none; point)
+        return _cx_set_shape!(c, i, point, (sp, _) -> remove_child(sp, "ln"); create = false, pareto)
+    what === :none && return setSeriesLineColor(c, i, :none; point, pareto)
     throw(XLSXError("`$what` is not a line instruction; use `:none` or `:inherit`."))
 end
 
 """
-    setSeriesLineColor(c::ChartEx, i, color; point=nothing) -> ChartEx
+    setSeriesLineColor(c::ChartEx, i, color; point=nothing, pareto=false) -> ChartEx
 
 Set the colour of series `i`'s outline, or of one data point of it. `color` takes
 the same values as [`setSeriesFill`](@ref): `:none` writes an outline with
 `<a:noFill/>`, `:inherit` removes the colour and leaves the rest of the `a:ln`.
+With `pareto = true`, series `i`'s Pareto line instead; an error if it has none.
 """
-setSeriesLineColor(c::ChartEx, i::Integer, color; point::Union{Nothing,Integer} = nothing) =
-    _cx_set_line!(c, i, point, (ln, pfx) -> _ln_with_color(ln, color, pfx))
+setSeriesLineColor(c::ChartEx, i::Integer, color; point::Union{Nothing,Integer} = nothing,
+                   pareto::Bool = false) =
+    _cx_set_line!(c, i, point, (ln, pfx) -> _ln_with_color(ln, color, pfx); pareto)
 
-setSeriesLineWidth(c::ChartEx, i::Integer, pts; point::Union{Nothing,Integer} = nothing) =
-    _cx_set_line!(c, i, point, (ln, _) -> _ln_with_width(ln, pts))
+setSeriesLineWidth(c::ChartEx, i::Integer, pts; point::Union{Nothing,Integer} = nothing,
+                   pareto::Bool = false) =
+    _cx_set_line!(c, i, point, (ln, _) -> _ln_with_width(ln, pts); pareto)
 
-setSeriesLineDash(c::ChartEx, i::Integer, dash; point::Union{Nothing,Integer} = nothing) =
-    _cx_set_line!(c, i, point, (ln, pfx) -> _ln_with_dash(ln, dash, pfx))
+setSeriesLineDash(c::ChartEx, i::Integer, dash; point::Union{Nothing,Integer} = nothing,
+                  pareto::Bool = false) =
+    _cx_set_line!(c, i, point, (ln, pfx) -> _ln_with_dash(ln, dash, pfx); pareto)
 
-setSeriesLineCap(c::ChartEx, i::Integer, cap; point::Union{Nothing,Integer} = nothing) =
-    _cx_set_line!(c, i, point, (ln, _) -> _ln_with_cap(ln, cap))
+setSeriesLineCap(c::ChartEx, i::Integer, cap; point::Union{Nothing,Integer} = nothing,
+                 pareto::Bool = false) =
+    _cx_set_line!(c, i, point, (ln, _) -> _ln_with_cap(ln, cap); pareto)
 
-setSeriesLineCompound(c::ChartEx, i::Integer, cmpd; point::Union{Nothing,Integer} = nothing) =
-    _cx_set_line!(c, i, point, (ln, _) -> _ln_with_compound(ln, cmpd))
+setSeriesLineCompound(c::ChartEx, i::Integer, cmpd; point::Union{Nothing,Integer} = nothing,
+                      pareto::Bool = false) =
+    _cx_set_line!(c, i, point, (ln, _) -> _ln_with_compound(ln, cmpd); pareto)
 
-setSeriesLineJoin(c::ChartEx, i::Integer, join; point::Union{Nothing,Integer} = nothing) =
-    _cx_set_line!(c, i, point, (ln, pfx) -> _ln_with_join(ln, join, pfx))
+setSeriesLineJoin(c::ChartEx, i::Integer, join; point::Union{Nothing,Integer} = nothing,
+                  pareto::Bool = false) =
+    _cx_set_line!(c, i, point, (ln, pfx) -> _ln_with_join(ln, join, pfx); pareto)
 
-setSeriesLineMiterLimit(c::ChartEx, i::Integer, lim; point::Union{Nothing,Integer} = nothing) =
-    _cx_set_line!(c, i, point, (ln, _) -> _ln_with_miter_limit(ln, lim))
+setSeriesLineMiterLimit(c::ChartEx, i::Integer, lim; point::Union{Nothing,Integer} = nothing,
+                        pareto::Bool = false) =
+    _cx_set_line!(c, i, point, (ln, _) -> _ln_with_miter_limit(ln, lim); pareto)
 
-    # A created cx:dataLabels showing no flags would show labels with Excel's
+# A created cx:dataLabels showing no flags would show labels with Excel's
 # defaults, as c:dLbls does, so all three are written off when creating one.
 # Unlike c:, they are attributes on a single cx:visibility child.
 const _CX_LABEL_FLAG_NAMES = ("seriesName", "categoryName", "value")
@@ -546,12 +568,13 @@ function _cx_visibility_off(lbl::XML.Node, pfx::Dict{String,String})
 end
 
 """
-    setLabelTextProp(c::ChartEx, i, field, value) -> ChartEx
+    setLabelTextProp(c::ChartEx, i, field, value; pareto=false) -> ChartEx
 
 Set one field of the data-label text formatting for series `i`, writing it on the
 series' `cx:dataLabels/cx:txPr`. `field` is a field of `DrawingRunProps`; `:fill`
 and `:line` are composite and take a colour or a named tuple of line properties.
-Pass `:inherit` to remove a field so the cascade resolves it.
+Pass `:inherit` to remove a field so the cascade resolves it. With
+`pareto = true`, series `i`'s Pareto line instead; an error if it has none.
 
 Creating a `cx:dataLabels` to hold formatting writes `cx:visibility` with all
 three flags off, since one that names no flags shows labels with Excel's
@@ -559,14 +582,15 @@ defaults rather than none.
 
 Returns `c`, which remains valid.
 """
-function setLabelTextProp(c::ChartEx, i::Integer, field::Symbol, value)
+function setLabelTextProp(c::ChartEx, i::Integer, field::Symbol, value; pareto::Bool = false)
     field in _RUN_PROP_FIELDS || throw(XLSXError(
         "`$field` is not a resolvable text property. Valid fields: " *
         join(_RUN_PROP_FIELDS, ", ") * "."))
     return _cx_edit_series!(c, i, (ser, pfx) ->
         rebuild_path(ser, [(NS_CX, "dataLabels") => "dataLabels"],
                      lbl -> _cx_label_transform(lbl, field, value, pfx);
-                     prefixes = pfx, parent_key = (NS_CX, "series")))
+                     prefixes = pfx, parent_key = (NS_CX, "series"));
+        pareto)
 end
 
 # Apply `field` to the cx:dataLabels' cx:txPr, creating the text body and the
@@ -720,19 +744,21 @@ setChartTitleText(c::ChartEx, text::AbstractString) =
                  end)
 
 """
-    setSeriesName(c::ChartEx, i, name::AbstractString) -> ChartEx
+    setSeriesName(c::ChartEx, i, name::AbstractString; pareto=false) -> ChartEx
 
 Set the name of series `i` to `name`, typed rather than bound to a cell.
 Creates the series' `cx:tx` if it has none, and drops any `cx:f` binding.
+With `pareto = true`, series `i`'s Pareto line instead; an error if it has none.
 
 Returns `c`, which remains valid.
 """
-setSeriesName(c::ChartEx, i::Integer, name::AbstractString) =
+setSeriesName(c::ChartEx, i::Integer, name::AbstractString; pareto::Bool = false) =
     _cx_edit_series!(c, i, (ser, pfx) ->
         rebuild_path(ser, [(NS_CX, "tx") => "tx"],
                      tx -> _cx_tx_typed(tx, name, pfx);
-                     prefixes = pfx, parent_key = (NS_CX, "series")))
- 
+                     prefixes = pfx, parent_key = (NS_CX, "series"));
+        pareto)
+
 # ---- layout properties (write) ----------------------------------------------
 
 # Apply `f(layoutPr, pfx)` to series `i`'s cx:layoutPr, creating it if absent.

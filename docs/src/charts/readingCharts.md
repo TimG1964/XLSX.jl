@@ -55,8 +55,8 @@ julia> getChartTitle(c)
 
 julia> ss = getChartSeries(c)
 2-element Vector{XLSX.Charts.ChartSeries}:
- XLSX.Charts.ChartSeries 2024 (barChart)
- XLSX.Charts.ChartSeries 2025 (barChart)
+ XLSX.Charts.ChartSeries(2024, barChart)
+ XLSX.Charts.ChartSeries(2025, barChart)
 ```
 
 A [`ChartSeries`](@ref XLSX.Charts.ChartSeries) holds its `idx` and `order` as
@@ -199,6 +199,11 @@ bubble.
 Called with no name, `getChartRanges` covers every chart on the sheet or in the
 workbook, each paired with its chart name.
 
+A reference Excel has broken, as when its source sheet is deleted, comes back as
+`XLSX.XL_REF` rather than a range (see [Deleting a sheet](@ref)), so check for
+it before handing a range to [`XLSX.getdata`](@ref). `nothing` means the series
+has no reference of that kind.
+
 A range is `nothing` wherever the series has no addressable source: a literal
 series, or a reference to an external workbook.
 
@@ -288,7 +293,7 @@ julia> getChartTypes(cc)
  :lineChart
 
 julia> [(s.name, s.charttype) for s in getChartSeries(cc)]
-2-element Vector{Tuple{Union{Nothing, String}, Symbol}}:
+2-element Vector{Tuple{String, Symbol}}:
  ("2024", :barChart)
  ("2025", :lineChart)
 ```
@@ -348,14 +353,21 @@ the values.
 A [`ChartEx`](@ref) reads its title, type and source ranges the same way:
 
 ```julia
-julia> x = getCharts(XLSX.readxlsx("chartex_layouts.xlsx"))[1];
+julia> x = getCharts(XLSX.readxlsx("chartex_layouts.xlsx"))[8];
 
 julia> getChartType(x), getChartTitle(x)
-(:waterfall, "Cash flow")
+(:waterfall, "Title here")
 
 julia> getChartRanges(x)
-1-element Vector{Union{Nothing, XLSX.NonContiguousRange, XLSX.SheetCellRange, XLSX.SheetCellRef, XLSX.SheetColumnRange, XLSX.SheetRowRange}}:
- waterfall!A1:A5
+1-element Vector{Union{Nothing, XLSX.CellErrorType, XLSX.NonContiguousRange, XLSX.SheetCellRange, XLSX.SheetCellRef, XLSX.SheetColumnRange, XLSX.SheetRowRange}}:
+ bound!B1:B5
+ ```
+
+This chart's title is linked to a worksheet cell. `getChartTitle` returns the
+text cached in the chart part, which is the cell's value as of the last save
+in Excel.
+
+```julia
 
 julia> x = getCharts(XLSX.readxlsx("chartex_formatted.xlsx"))[1];
 

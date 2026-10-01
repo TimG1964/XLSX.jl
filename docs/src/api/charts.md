@@ -212,7 +212,6 @@ getSeriesLayoutFlag
 getSeriesData
 getSeriesName
 getSeriesNameRange
-getSeriesOwner
 getSeriesHidden
 getSeriesAxisIds
 getSeriesSubtotals

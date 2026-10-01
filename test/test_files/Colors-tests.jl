@@ -165,4 +165,98 @@
         @test byval("tx1",     [:lumMod => 65000, :lumOff => 35000])            == "595959"
         @test byval("tx1",     [:lumMod => 15000, :lumOff => 85000])            == "D9D9D9"
     end
+
+    @testset "every colour argument takes every colour form" begin
+        # The same colour in each accepted form. Coral rather than red, so a
+        # named colour is resolved through Colors.jl rather than a short table.
+        forms = ("FFFF7F50", "#FF7F50", :coral, "coral")
+        # Chart colours read back as RRGGBB, cell colours as AARRGGBB.
+        iscoral(rgb) = !isnothing(rgb) && endswith(uppercase(String(rgb)), "FF7F50")
+
+        function first_descendant(n, tag)
+            for k in XML.eachelement(n)
+                XLSX.localname(k) == tag && return k
+                d = first_descendant(k, tag)
+                isnothing(d) || return d
+            end
+            return nothing
+        end
+        # The colour in an element's own c:txPr
+        txfill(n) = XLSX.Charts._attr(
+            first_descendant(XLSX.first_element_with_tag(n, "txPr"), "srgbClr"), "val")
+
+        tmp = "colour_forms.xlsx"
+        cp(joinpath(data_directory, "chart_kinds.xlsx"), tmp; force = true)
+        try
+            xf = XLSX.openxlsx(tmp; mode = "rw")
+            c  = first(XLSX.Charts.getCharts(xf["stackedbar"]))
+            lc = first(XLSX.Charts.getCharts(xf["linemarkers"]))
+            catax = only(XLSX.Charts.getChartAxes(c, :category))
+            c = XLSX.Charts.setAxisTitleText(c, catax, "Questions")
+            ws = XLSX.addsheet!(xf, "colours")
+
+            for (i, col) in enumerate(forms)
+                @testset "$(repr(col))" begin
+                    # series fill and outline
+                    c = XLSX.Charts.setSeriesFill(c, 1, col)
+                    @test iscoral(XLSX.Charts.getSeriesFill(c, 1).value.fgcolor.rgb)
+                    c = XLSX.Charts.setSeriesLine(c, 1; color = col)
+                    @test iscoral(XLSX.Charts.getSeriesLine(c, 1).value.fill.fgcolor.rgb)
+                    c = XLSX.Charts.setSeriesLineColor(c, 2, col)
+                    @test iscoral(XLSX.Charts.getSeriesLine(c, 2).value.fill.fgcolor.rgb)
+
+                    # addSeries
+                    c = XLSX.Charts.addSeries(c, "stackedbar!B2:B5"; color = col)
+                    n = length(XLSX.Charts.getChartSeries(c))
+                    @test iscoral(XLSX.Charts.getSeriesFill(c, n).value.fgcolor.rgb)
+
+                    # axis line and plot area border
+                    c = XLSX.Charts.setAxisLine(c, catax; color = col)
+                    @test iscoral(XLSX.Charts.getAxisShapeProps(c, catax).line.fill.fgcolor.rgb)
+                    c = XLSX.Charts.setPlotAreaLine(c; color = col)
+                    @test iscoral(XLSX.Charts.getPlotAreaShapeProps(c).line.fill.fgcolor.rgb)
+
+                    # text colour, at every text setter
+                    c = XLSX.Charts.setLabelTextProp(c, 1, :fill, col)
+                    @test iscoral(XLSX.Charts.getLabelTextProp(c, 1, :fill).value.fgcolor.rgb)
+                    c = XLSX.Charts.setChartTitleTextProp(c, :fill, col)
+                    @test iscoral(txfill(XLSX.Charts.getChartTitleNode(c)))
+                    c = XLSX.Charts.setLegendTextProp(c, :fill, col)
+                    @test iscoral(txfill(XLSX.Charts.getChartLegend(c)))
+                    c = XLSX.Charts.setAxisTextProp(c, catax, :fill, col)
+                    @test iscoral(txfill(XLSX.Charts._axnode(c, catax)))
+                    c = XLSX.Charts.setAxisTitleTextProp(c, catax, :fill, col)
+                    @test iscoral(txfill(XLSX.first_element_with_tag(XLSX.Charts._axnode(c, catax), "title")))
+                    c = XLSX.Charts.setChartSpaceTextProp(c, :fill, col)
+                    @test iscoral(txfill(XLSX.Charts.chart_root(c)))
+
+                    # markers
+                    lc = XLSX.Charts.setMarkerFill(lc, 1, col)
+                    @test iscoral(XLSX.Charts.getSeriesMarker(lc, 1).shape.fill.fgcolor.rgb)
+                    lc = XLSX.Charts.setMarkerLineColor(lc, 1, col)
+                    @test iscoral(XLSX.Charts.getSeriesMarker(lc, 1).shape.line.fill.fgcolor.rgb)
+
+                    # cells: Symbol colours not yet accepted (borders need work)
+                    ws["A$i"] = "x"
+                    if col isa Symbol
+                        @test_broken (XLSX.setFont(ws, "A$i"; color = col); true)
+                    else
+                        XLSX.setFont(ws, "A$i"; color = col)
+                        @test iscoral(XLSX.getFont(ws, "A$i").font["color"]["rgb"])
+                    end
+                end
+            end
+
+            # The last form's colours survive a write and reopen
+            SAVE_FILES && save_outfile(xf)
+            XLSX.writexlsx(tmp, xf; overwrite = true)
+            xf2 = XLSX.openxlsx(tmp)
+            SAVE_FILES && save_outfile(xf2)
+            c2 = first(XLSX.Charts.getCharts(xf2["stackedbar"]))
+            @test iscoral(XLSX.Charts.getSeriesFill(c2, 1).value.fgcolor.rgb)
+            @test iscoral(XLSX.Charts.getPlotAreaShapeProps(c2).line.fill.fgcolor.rgb)
+        finally
+            isfile(tmp) && rm(tmp)
+        end
+    end
 end

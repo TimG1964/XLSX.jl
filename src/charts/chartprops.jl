@@ -1064,6 +1064,15 @@ const _RUN_PROP_TYPES = Dict{Symbol,Type}(
 )
 const _RUN_PROP_FIELDS = Tuple(f for f in fieldnames(DrawingRunProps) if haskey(_RUN_PROP_TYPES, f))
 
+# Excel's names for run properties, accepted by the text setters alongside
+# the DrawingML field names. Getters report the DrawingML names.
+const _RUN_PROP_ALIASES = Dict(
+    :font          => :latin,     # Excel's Font box sets the Latin typeface
+    :color         => :fill,      # Font Color
+    :underline     => :under,
+    :strikethrough => :strike,
+)
+
 """
     _walk_fill(wb, chain) -> Effective{DrawingFill}
 
@@ -1419,7 +1428,7 @@ explicit `<a:noFill/>`, or `:inherit` to remove it.
 
 Note `:none` here leaves the `a:ln` in place with no fill — the line exists and
 draws nothing, which is what Excel writes and is distinct from
-`setSeriesLine(c, i, :none)`, which removes the outline entirely.
+`setSeriesLine(c, i, :inherit)`, which removes the outline entirely.
 """
 setSeriesLineColor(c::Chart, i::Integer, color) =
     _set_series_line(c, i, (ln, pfx) -> _ln_with_color(ln, color, pfx))
