@@ -1,7 +1,7 @@
 using Documenter, XLSX
 makedocs(
     sitename = "XLSX.jl",
-    modules = [ XLSX ],
+    modules = [XLSX, XLSX.Charts],
     pages = [
         "Home" => "index.md",
         "Tutorial" => Any[
@@ -17,17 +17,31 @@ makedocs(
         ],
         "Using Formulas" => "formulae/formulas.md",
         "Using Excel Tables" => "tables/excelTables.md",
-        "Excel Charts" => "charts/excelCharts.md",
+        "Excel Charts" => Any[
+            "Overview" => "charts/excelCharts.md",
+            "Reading charts" => "charts/readingCharts.md",
+            "Formatting charts" => "charts/formattingCharts.md",
+            "Creating charts" => "charts/creatingCharts.md",
+            "Creating chartEx charts" => "charts/creatingChartEx.md",
+            "Sheets with charts" => "charts/chartSheets.md",
+            "Limitations" => "charts/chartLimitations.md",
+        ],
         "Examples" => "examples.md",
         "Migration Guide" => "migration.md",
         "API Reference" => Any[
             "Files and worksheets" => "api/files.md",
             "Cells and data" => "api/data.md",
-            "Formats" => "api/formats.md",
+            "Tables" => "api/tables.md",
+            "Cell formats" => "api/formats.md",
+            "Conditional formats" => "api/conditionalFormats.md",
+            "Sheet layout" => "api/sheetLayout.md",
             "Charts" => "api/charts.md",
+            "Chart axes and elements" => "api/chartElements.md",
+            "chartEx charts" => "api/chartEx.md",
+            "Chart types" => "api/chartTypes.md",
         ]
-     ],
-    checkdocs=:none,
+    ],
+    checkdocs = :public,
 )
 deploydocs(
     repo = "github.com/JuliaData/XLSX.jl.git",

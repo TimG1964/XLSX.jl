@@ -328,6 +328,68 @@ XLSX.setBorder(s, "B112:B114,D112:D115"; outside = ["style" => "thin", "color" =
 XLSX.writexlsx("myNewTemplate.xlsx", f, overwrite=true)
 ```
 
+## Adding a dataBar with varying colors
+
+Excel's databar conditional format have a fixed color. The bar length 
+changes with the cell value but the color doesn't. The function `setColoredDataBars`
+provides a pragmatic workaround to make this possible in XLSX.
+
+```
+xf = newxlsx()
+s=xf[1]
+s["B1"] = "dataBar"
+s["C1"] = "coloredDataBar"
+s["A2:A11"] = sort!(rand(10))
+s["B2:B11"] = s["A2:A11"]
+s["C2:C11"] = s["A2:A11"]
+setConditionalFormat(s, "B2:B11", :dataBar; showVal="false")
+XLSX.setColoredDataBars(s, "C2:C11"; 
+    bands=5, 
+    min_val="0", 
+    max_val="1",
+    breaks=[0.2, 0.4, 0.6, 0.8],
+    colors=[:red, :orange, :yellow3, :chartreuse3, :green], 
+    showVal="false")
+writexlsx("coloredDataBar.xlsx", xf)
+```
+
+![image|320x500](./images/coloredDataBars.png)
+
+This function uses the native databar conditional format, but it partitions the range 
+supplied based on cell values and applies different databars of different colors to 
+each partition at the time the function is called. If the data subsequently change,
+the bar lengths will allways change but the colors won't, and so become misleading.
+This function therefore behaves like a static conditional format.
+
+!!! note
+
+    `setColoredDataBars` requires cells to contain values. If cells contain formulas
+    written by `setFormula`, there values will be set to missing but will be recalculated
+    when the resulting file is opened by Excel. Until such a recalculation by Excel 
+    happens, `setColoredDataBars cannot work:
+
+    ```julia
+    xf = newxlsx()
+    s=xf[1]
+    s["A2:A11"] = sort!(rand(10))
+    setFormula(s, "B2:B11", "=A1") # setting a formula sets values to missing
+    setFormula(s, "C2:C11", "=A1") # values are are only populated when Excel recalculates
+    setConditionalFormat(s, "B2:B11", :dataBar; showVal="false") # works as it does not depend on cell contents
+    XLSX.setColoredDataBars(s, "C2:C11"; # fails
+        bands=5, 
+        min_val="0", 
+        max_val="1",
+        breaks=[0.2, 0.4, 0.6, 0.8],
+        colors=[:red, :orange, :yellow3, :chartreuse3, :green], 
+        showVal="false")
+    ERROR: XLSXError: No numeric values in `C2:C11` to band.
+    ```
+
+!!! note
+
+    This function is provided on an experimental basis and isn't public. It may be withdrawn 
+    in future and only remain here (more fully documented) as an example.
+
 ## Adding a plot image
 
 Use Julia functionality to create a chart based upon data from a spreadsheet and then add that chart 
@@ -356,3 +418,233 @@ XLSX.writexlsx("Example_add_chart_out.xlsx", f, overwrite=true)
 ```
 
 ![image|320x500](./images/Add_image_2.png)
+
+## Adding a simple native Excel chart
+
+The same plot as a native Excel chart rather than a static image. Excel draws
+it from the cells, so it updates when the data change, and it can be edited in
+Excel like any chart made there. Everything about its appearance is Excel's own
+default for a column chart.
+
+```julia
+using XLSX, XLSX.Charts
+
+f = XLSX.opentemplate("Example_add_chart.xlsx")
+n = length(XLSX.gettable(f[1]).data[1])
+
+c = addChart(f[1], :column; anchor = "D2:H12", title = false)
+addSeries(c, "B2:B$(n + 1)"; categories = "A2:A$(n + 1)", name_ref = "B1")
+
+XLSX.writexlsx("Example_add_native_chart_out.xlsx", f, overwrite=true)
+```
+
+![image|320x500](./images/Add_native_chart.png)
+
+## A diverging stacked bar chart for Likert-scale survey data
+
+Survey questions answered on a five-point Likert scale, from *strongly disagree* to
+*strongly agree*, are often shown as a diverging stacked bar chart. Each question gets
+one bar, the disagreeing responses run left of a central zero line, the agreeing
+responses run right, and the neutral responses straddle the line. This example builds
+one from scratch: raw counts in an Excel table, proportions calculated from them by
+Excel formulas, a native Excel chart of the proportions, and its formatting. Because
+the proportions are formulas, the finished workbook stays live: edit the counts, or
+sort the table in Excel, and the chart follows.
+
+### The raw data
+
+Six questions, with the number of responses at each level. The data are synthetic and
+written out in full, so the example gives the same result every time it is run. Not
+every respondent answered every question, so the totals differ.
+
+The counts are written as an Excel table, so they can be sorted and filtered in Excel.
+
+```julia
+using XLSX, XLSX.Charts
+
+questions = ["The course objectives were clear",
+             "The pace of the course was about right",
+             "The course materials were useful",
+             "The assessments were fair",
+             "I would recommend this course to others",
+             "The venue was comfortable"]
+levels = ["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"]
+counts = [2  5  8 20 15
+          4 10 12 15  7
+          1  3  6 22 18
+          6 12  9 12  6
+          3  6  9 18 14
+          9 12  9  8  4]
+n    = length(questions)
+last = n + 1
+
+xf = XLSX.newxlsx("Survey")
+s  = xf["Survey"]
+XLSX.writetable!(s, [questions, collect.(eachcol(counts))...], ["Question"; levels];
+                 as_table = true)
+```
+
+### Preparing the data
+
+Because the totals differ, each count is divided by its question's total before the
+questions are compared. To make the bars diverge, the disagreeing proportions are made
+negative, and the neutral proportion is split into two halves, one negative and one
+positive, so that the neutral block straddles zero. Excel's stacked bar chart draws
+negative values to the left of zero, so no invisible padding series is needed.
+
+The order of the negative columns matters. Excel stacks negative values outwards from
+zero in series order, so the first negative series sits against the zero line. The
+neutral half therefore comes first, then *disagree*, then *strongly disagree*, which
+ends up outermost.
+
+The proportions are Excel formulas, written beside the table after an empty column.
+Each call to `setFormula` fills a whole column: the formula is written for the first
+cell, and its relative references move down the range, so each row divides by its own
+total. A final column of zeros is added for the legend, as explained below.
+
+```julia
+headers = ["Neutral (left half)", "Disagree", "Strongly disagree",
+           "Neutral (right half)", "Agree", "Strongly agree", "Key"]
+for (col, h) in zip('H':'N', headers)
+    s["$(col)1"] = h
+end
+
+total = "SUM(B2:F2)"
+XLSX.setFormula(s, "H2:H$last", "=-D2/2/$total")   # neutral, left half
+XLSX.setFormula(s, "I2:I$last", "=-C2/$total")     # disagree
+XLSX.setFormula(s, "J2:J$last", "=-B2/$total")     # strongly disagree
+XLSX.setFormula(s, "K2:K$last", "=D2/2/$total")    # neutral, right half
+XLSX.setFormula(s, "L2:L$last", "=E2/$total")      # agree
+XLSX.setFormula(s, "M2:M$last", "=F2/$total")      # strongly agree
+s["N2:N$last"] = 0                                 # key series: plots nothing
+XLSX.setFormat(s, "H2:M$last"; format = "Percentage")
+```
+
+Because each formula refers only to its own row, sorting the table in Excel by any of
+its columns reorders the proportions with it, and so reorders the chart.
+
+The formulas are not evaluated until Excel opens the file, so their cells hold no
+values when the chart is made, and the chart is saved without cached values. Excel
+recalculates on opening and draws the chart from the results.
+
+The value axis will run from the furthest reach on the left to the furthest reach on
+the right, each rounded outwards to the next 20%. Excel has no formula for an axis
+bound, so these are calculated here, from the same counts, and are fixed when the file
+is written. On this data they are −80% and 100%.
+
+```julia
+p     = counts ./ sum(counts; dims = 2)
+half  = p[:, 3] ./ 2
+left  = vec(sum(p[:, 1:2]; dims = 2)) .+ half
+right = vec(sum(p[:, 4:5]; dims = 2)) .+ half
+lo = -ceil(maximum(left) * 5) / 5
+hi =  ceil(maximum(right) * 5) / 5
+```
+
+### Making the chart
+
+The chart is a horizontal stacked bar chart, `:stackedBar`, placed below the data. Each
+series takes its values from one column of proportions and its category labels from
+the question texts in column A. The two neutral halves get the same colour, so the
+split can't be seen.
+
+```julia
+palette = [:red, :orange, :yellow, :lightgreen, :green]
+cats = "Survey!A2:A$last"
+c = addChart(s, :stackedBar; anchor = "A9:N40", title = "Course feedback")
+
+plotted = [("H", 3), ("I", 2), ("J", 1), ("K", 3), ("L", 4), ("M", 5)]   # column, level
+for (col, level) in plotted
+    addSeries(c, "Survey!$(col)2:$(col)$last";
+              categories = cats, name = levels[level], color = palette[level])
+end
+```
+
+Excel draws a legend entry for every series, in series order. That would show two
+*Neutral* entries, and the disagreeing levels in reverse order. Excel's legend can hide
+entries but can't reorder them, so instead the chart gets five more series, one per
+level in natural order, all plotting the column of zeros. They draw nothing, but they
+each get a legend entry. The legend entries of the six series that draw the data are
+then hidden, leaving a legend that reads from *strongly disagree* to *strongly agree*.
+
+```julia
+for level in 1:5
+    addSeries(c, "Survey!N2:N$last";
+              categories = cats, name = levels[level], color = palette[level])
+end
+setLegendEntryDeleted(c, 1:6, true)
+```
+
+### Formatting the chart
+
+Thin black borders on the bars, and narrower gaps between them:
+
+```julia
+for i in 1:11
+    setSeriesLine(c, i; color = "000000", width = 0.75)
+end
+setGroupGapWidth(c, only(getChartGroups(c)), 50)
+```
+
+A bar chart plots its first category at the bottom. Reversing the category axis puts
+the first question at the top, but it also moves the value axis to the top of the
+chart, so the value axis is set to cross the category axis at its maximum, which is
+now the bottom. The question labels are placed at the `:low` end of the value axis,
+the left edge of the plot area, rather than beside the zero line where the category
+axis now sits.
+
+```julia
+catax = only(getChartAxes(c, :category))
+valax = only(getChartAxes(c, :value))
+
+setAxisOrientation(c, catax, :maxMin)
+setAxisTickLabelPos(c, catax, :low)
+setAxisCrosses(c, valax, :max)
+```
+
+The value axis gets the range calculated earlier, a tick every 20%, and the number
+format `0%;0%`. The second section of that format applies to negative values, and
+because it has no minus sign, both sides of the axis read as positive percentages.
+
+```julia
+setAxisScaling(c, valax; min = lo, max = hi)
+setAxisMajorUnit(c, valax, 0.2)
+setAxisNumberFormatCode(c, valax, "0%;0%")
+setAxisTitleText(c, valax, "Proportion of responses")
+```
+
+Finally, the chart's appearance: no gridlines, a black border round the plot area,
+black axes with tick marks crossing the category axis and outside the value axis, and
+all the text in Comic Sans at sizes chosen for each element. Text properties use the
+Excel (rather than DrawingML) vocabulary: `:font` is the `:latin` typeface 
+and `:color` the text `:fill`.
+
+```julia
+setAxisGridlines(c, valax; major = false)
+setPlotAreaLine(c; color = "000000")
+
+font, black = "Comic Sans MS", "000000"
+for (ax, size, mark) in ((catax, 14, :cross), (valax, 10, :out))
+    setAxisLine(c, ax; color = black)
+    setAxisMajorTickMark(c, ax, mark)
+    setAxisTextProp(c, ax, :size, size)
+    setAxisTextProp(c, ax, :font, font)
+    setAxisTextProp(c, ax, :color, black)
+end
+
+setAxisTitleTextProp(c, valax, :size, 12)
+setAxisTitleTextProp(c, valax, :font, font)
+setAxisTitleTextProp(c, valax, :color, black)
+
+setChartTitleTextProp(c, :size, 18)
+setChartTitleTextProp(c, :font, font)
+setChartTitleTextProp(c, :color, black)
+setLegendTextProp(c, :size, 12)
+setLegendTextProp(c, :font, font)
+
+XLSX.writexlsx("likert.xlsx", xf; overwrite = true)
+```
+
+The result, opened in Excel:
+
+![image|320x500](./images/likert.png)

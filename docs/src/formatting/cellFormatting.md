@@ -405,6 +405,20 @@ RichTextString: "The quick brown fox jumps over the lazy dog"
 
 ![image|320x500](../images/styledString.png)
 
+When an `AnnotatedString` is written to a cell, the cell's font is first reset
+to the workbook default, so any font applied to the cell beforehand does not
+leak into the new value. Other cell formatting — alignment, borders, fills,
+number format — is left untouched.
+
+Each styled region of the string then becomes a rich text run. A run's
+attributes come from its `StyledStrings` face, resolved against the default
+face, so named faces and their `inherit` chains are followed and any
+customisations in the user's `faces.toml` are applied.
+
+Attributes matching the default face are omitted from the run. A run that sets
+no font name or size therefore takes them from the cell's font, which is the
+workbook default until `setFont` is called on the cell afterwards.
+
 For more information on the use of styled strings, refer to the documentation for the [StyledStrings.jl](https://github.com/JuliaLang/StyledStrings.jl) package.
 
 !!! note

@@ -1166,6 +1166,7 @@ end
         
         isfile("hint.xlsx") && rm("hint.xlsx")
     end
+
     @testset "empty shared strings read as missing (issue 460 follow-up)" begin
         f = joinpath(data_directory, "empty_sst_numeric.xlsx")
 

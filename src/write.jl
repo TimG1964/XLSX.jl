@@ -75,7 +75,7 @@ function writexlsx(output_source::Union{AbstractString,IO}, xf::XLSXFile; overwr
         for f in keys(xf.files)
             if !occursin(r"^xl/worksheets/[^/]+\.xml$|^xl/sharedStrings\.xml$", f)
                 ZipArchives.zip_newfile(xlsx, f; compress=true)
-                xml_str = XML.write(xf.data[f])
+                xml_str = XML.write(xf.data[f]; indentsize=0)
                 write(xlsx, xml_str)
             end
         end
@@ -708,12 +708,11 @@ function update_workbook_xml!(xl::XLSXFile) # Need to update <sheets> and <defin
         end
 
         for (k, v) in wb.workbook_names
-            if typeof(v.value) <: DefinedNameRangeTypes
-                v = make_absolute(v)
-            else
-                v = string(v.value)
+            txt = v.value isa DefinedNameRangeTypes ? make_absolute(v) : string(v.value)
+            dn_node = XML.Element("$(pfx)definedName", name=k, XML.Text(txt))
+            if v.hidden
+                dn_node["hidden"] = "1"
             end
-            dn_node = XML.Element("$(pfx)definedName", name=k, XML.Text(v))
             push!(definedNames, dn_node)
         end
 
@@ -723,15 +722,14 @@ function update_workbook_xml!(xl::XLSXFile) # Need to update <sheets> and <defin
             ordinal = get(sheet_ordinals, first(k), nothing)
             isnothing(ordinal) &&
                 throw(XLSXError("Defined name `$(last(k))` is scoped to sheetId $(first(k)), which is not in the workbook."))
-            if typeof(v.value) <: DefinedNameRangeTypes
-                v = make_absolute(v)
-            else
-                v = string(v.value)
+            txt = v.value isa DefinedNameRangeTypes ? make_absolute(v) : string(v.value)
+            dn_node = XML.Element("$(pfx)definedName", name=last(k),
+                                localSheetId=string(ordinal - 1), XML.Text(txt))
+            if v.hidden
+                dn_node["hidden"] = "1"
             end
-            dn_node = XML.Element("$(pfx)definedName", name=last(k), localSheetId=string(ordinal - 1), XML.Text(v))
             push!(definedNames, dn_node)
         end
-
         wbdoc[i][j] = definedNames # Add the new definedNames block to the workbook's xml file
     end
 
@@ -1309,9 +1307,19 @@ See also [`addsheet!`](@ref), [`copysheet!`](@ref), [`deletesheet!`](@ref)
 """
 function renamesheet!(ws::Worksheet, name::AbstractString)
 
+    xf = get_xlsxfile(ws)
+
     # no-op if the name has not changed
     if ws.name == name
         return
+    end
+    
+    name ∈ sheetnames(xf) && throw(XLSXError("Sheetname $name is already in use."))
+    isempty(name) && throw(XLSXError("A sheet name cannot be empty."))
+    check_valid_sheetname(name)
+
+    for p in (parts_with_content_type(xf, MIME_CHART)..., parts_with_content_type(xf, MIME_CHARTEX)...)
+        repoint_chart_refs!(xf, p, ws.name, name)
     end
 
     xf = get_xlsxfile(ws)
@@ -1526,6 +1534,22 @@ function copysheet!(ws::Worksheet, name::AbstractString="")::Worksheet
         xl.data[new_drawing_rels]  = copynode(xl.data[src_drawing_rels])
         xl.files[new_drawing_rels] = true
 
+        # A chart part belongs to one drawing, unlike media, so the copy needs
+        # its own. Clone each and repoint the copied rels at the clone;
+        # otherwise both sheets render the same chart part and editing either
+        # changes both.
+        for n in elements_with_tag(xml_root_element(xl.data[new_drawing_rels]), "Relationship")
+            t = get_attr(n, "Type")
+            (t == REL_CHART || t == REL_CHARTEX) || continue
+            get_attr(n, "TargetMode") == "External" && continue
+            target = get_attr(n, "Target")
+            old_t  = resolve_relative_target("xl/drawings", target)
+            haskey(xl.data, old_t) || continue
+            new_t  = clone_owned_part!(xl, old_t)
+            t == REL_CHART   && repoint_chart_refs!(xl, new_t, ws.name, new_ws.name)
+            t == REL_CHARTEX && repoint_chartex_refs!(xl, new_t, ws.name, new_ws.name)
+            n["Target"] = _retarget(target, last(_split_zip_path(new_t)))        end
+        
         # Register content types for drawing and any media it references
         register_content_type!(xl, "[Content_Types].xml";
                             tag="Override", key="PartName", val="/$new_drawing_path",
@@ -1576,86 +1600,80 @@ function copysheet!(ws::Worksheet, name::AbstractString="")::Worksheet
     return new_ws
 end
 
-function insertsheet!(wb::Workbook, xdoc::XML.Node, new_cache::WorksheetCache, sst_count::Int, pfx::String, name::AbstractString=""; dim=CellRange("A1:A1"))::Worksheet
+const REL_WORKSHEET   = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+const REL_CHARTSHEET  = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet"
+const REL_CHART       = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart"
+const REL_CHARTEX     = "http://schemas.microsoft.com/office/2014/relationships/chartEx"
+const MIME_WORKSHEET  = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
+const MIME_CHARTSHEET = "application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml"
+const MIME_CHART      = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+const MIME_CHART      = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+const MIME_CHARTEX    = "application/vnd.ms-office.chartex+xml"
+
+# A sheet name Excel accepts: at most 31 characters, none of : \ / ? * [ ].
+function check_valid_sheetname(n::AbstractString)
+    max_length = 31
+    if length(n) > max_length
+        throw(XLSXError("Invalid sheetname $n: must have at most $max_length characters. Found $(length(n))"))
+    end
+    if occursin(r"[:\\/\?\*\[\]]+", n)
+        throw(XLSXError("Sheetname cannot contain characters: ':', '\\', '/', '?', '*', '[' or ']'."))
+    end
+end
+
+# Register `xdoc` as a new sheet: unique name, next sheetId, a free file in `dir`,
+# the workbook relationship, the content-type override (for the file actually
+# written), and <sheets>. Returns the Worksheet entry; the caller adds a cache
+# if the sheet holds cells.
+function _register_sheet!(wb::Workbook, xdoc::XML.Node, name::AbstractString;
+                          dir::String, reltype::String, mime::String,
+                          default_name::String, pfx::String = "",
+                          dim::CellRange = CellRange("A1:A1"))::Worksheet
     xf = get_xlsxfile(wb)
     !is_writable(xf) && throw(XLSXError("XLSXFile instance is not writable."))
 
-    if name == ""
-        new_name = ""
-    else
-        new_name = name
-    end
-    # ensure name is unique.
+    new_name = name
+    existing = sheetnames(wb)
     i = 1
-    current_sheet_names = sheetnames(wb)
-    while new_name ∈ current_sheet_names || new_name == ""
-        new_name = (name == "" ? "Sheet" : name * " ") * string(i)
+    while new_name == "" || new_name in existing
+        new_name = (name == "" ? default_name : name * " ") * string(i)
         i += 1
     end
-
-    new_name == "" && throw(XLSXError("Something wrong here!"))
-
-    # checks if name is a unique sheet name
-    function check_valid_sheetname(n::AbstractString)
-        max_length = 31
-        if length(n) > max_length
-            throw(XLSXError("Invalid sheetname $n: must have at most $max_length characters. Found $(length(n))"))
-        end
-
-        if occursin(r"[:\\/\?\*\[\]]+", n)
-            throw(XLSXError("Sheetname cannot contain characters: ':', '\\', '/', '?', '*', '[' or ']'."))
-        end
-    end
-
     check_valid_sheetname(new_name)
 
-    # generate sheetId
-    current_sheet_ids = [ws.sheetId for ws in wb.sheets]
-    sheetId = max(current_sheet_ids...) + 1
+    sheetId = maximum((ws.sheetId for ws in wb.sheets); init = 0) + 1
 
-    # generate a unique ID for the new sheet
-    let sheet_root = xml_root_element(xdoc)
-        !haskey(sheet_root, "xmlns:xr") && (sheet_root["xmlns:xr"] = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision")
-        sheet_root["xr:uid"] = "{" * uppercase(string(UUIDs.uuid4(wb.package.uuid_rng))) * "}"
+    let root = xml_root_element(xdoc)
+        haskey(root, "xmlns:xr") || (root["xmlns:xr"] = "http://schemas.microsoft.com/office/spreadsheetml/2014/revision")
+        root["xr:uid"] = "{" * uppercase(string(UUIDs.uuid4(wb.package.uuid_rng))) * "}"
     end
 
-    # generate a unique name for the XML
-    local xml_filename::String
-    i = 1
-    while true
-        xml_filename = "xl/worksheets/sheet" * string(i) * ".xml"
-        #        if !in(xml_filename, keys(xf.files))
-        if !haskey(xf.files, xml_filename)
-            break
-        end
-        i += 1
-    end
+    j = 1
+    while haskey(xf.files, "$dir/sheet$j.xml") || haskey(xf.data, "$dir/sheet$j.xml"); j += 1; end
+    xml_filename = "$dir/sheet$j.xml"
 
-    # adds doc do XLSXFile
-    xf.files[xml_filename] = true # is read
-    xf.data[xml_filename] = xdoc
+    xf.files[xml_filename]     = true
+    xf.data[xml_filename]      = xdoc
     xf.namespace[xml_filename] = pfx
 
-    # adds workbook-level relationship
-    # <Relationship Id="rId1" Target="worksheets/sheet1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
-    rId = add_relationship!(wb, xml_filename[4:end], "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet")
-
-    # creates Worksheet instance
-    ws = Worksheet(xf, sheetId, rId, new_name, dim, false)
-    ws.cache = new_cache
-    ws.sst_count = sst_count
-
-    # adds the new sheet to the list of sheets in the workbook
+    rId = add_relationship!(wb, xml_filename[4:end], reltype)
+    ws  = Worksheet(xf, sheetId, rId, new_name, dim, false)
     push!(wb.sheets, ws)
 
-    # update [Content_Types].xml (fix for issue #275)
-    add_override!(get_xlsxfile(wb), "/xl/worksheets/sheet" * string(sheetId) * ".xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml")
-
+    register_content_type!(xf, "[Content_Types].xml";
+                           tag = "Override", key = "PartName", val = "/$xml_filename", content_type = mime)
     update_workbook_xml!(xf)
-
     return ws
 end
 
+function insertsheet!(wb::Workbook, xdoc::XML.Node, new_cache::WorksheetCache, sst_count::Int,
+                      pfx::String, name::AbstractString = ""; dim = CellRange("A1:A1"))::Worksheet
+    ws = _register_sheet!(wb, xdoc, name; dir = "xl/worksheets", reltype = REL_WORKSHEET,
+                          mime = MIME_WORKSHEET, default_name = "Sheet", pfx, dim)
+    ws.cache     = new_cache
+    ws.sst_count = sst_count
+    return ws
+end
 
 # Deletes `path` and, recursively, everything transitively reachable through
 # its own `_rels` file — i.e. second/third/... order orphans. Used for parts
@@ -1705,27 +1723,25 @@ function remove_override!(xf::XLSXFile, part::String)
     return nothing
 end
 
-function renumber_files!(xf::XLSXFile, rId::String)
-    wb = get_workbook(xf)
-    id = parse(Int64, rId[4:end])
-
-    # update active tab
+# Keep bookViews' activeTab and firstSheet on the same sheet after the sheet at
+# 0-based position `pos` in <sheets> is removed, leaving `n` sheets. Both are
+# positions, not relationship ids.
+function _shift_book_views!(xf::XLSXFile, pos::Int, n::Int)
     wbdoc = xmlroot(xf, "xl/workbook.xml")
-    i, j = get_idces(wbdoc, "workbook", "bookViews")
-    w = XML.children(wbdoc[i][j])
-    if length(w) > 0
-        for c in w
-            if localname(c) == "workbookView"
-                a = XML.attributes(c)
-                if haskey(a, "activeTab")
-                    at = parse(Int64, a["activeTab"])
-                    if at >= id
-                        c["activeTab"] = string(at - 1)
-                    end
-                end
-            end
+    i, j  = get_idces(wbdoc, "workbook", "bookViews")
+    isnothing(j) && return nothing
+    for c in XML.children(wbdoc[i][j])
+        localname(c) == "workbookView" || continue
+        a = XML.attributes(c)
+        isnothing(a) && continue
+        for key in ("activeTab", "firstSheet")
+            haskey(a, key) || continue
+            t = parse(Int, a[key])
+            t > pos && (t -= 1)
+            c[key] = string(clamp(t, 0, n - 1))
         end
     end
+    return nothing
 end
 
 
@@ -1826,79 +1842,67 @@ deletesheet!(xl::XLSXFile, name::AbstractString) = deletesheet!(get_workbook(xl)
 function deletesheet!(wb::Workbook, name::AbstractString)::XLSXFile
     hassheet(wb, name) || throw(XLSXError("Worksheet `$name` not found in workbook."))
     sheetcount(wb) > 1 || throw(XLSXError("`$name` is this workbook's only sheet. Cannot delete the only sheet!"))
-    is_chartsheet(wb, name) && throw(XLSXError("Cannot delete a Chartsheet."))
-
+    ischart = is_chartsheet(wb, name)
+    ischart || count(sh -> !is_chartsheet(wb, sh.name), wb.sheets) > 1 || throw(XLSXError(
+        "`$name` is this workbook's only worksheet. A workbook must keep at least one, " *
+        "even when it has chartsheets."))
 
     xf = get_xlsxfile(wb)
 
-    # Worksheets and relationships
-    s = (findfirst(s -> s.name == name, wb.sheets))
-    sId = wb.sheets[s].sheetId
-    rId = wb.sheets[s].relationship_id
-    r = findfirst(y -> occursin("worksheet", y.Type) && y.Id == rId, wb.relationships)
+    # Locate the sheet by its relationship's actual target, before anything is removed.
+    s          = findfirst(sh -> sh.name == name, wb.sheets)
+    pos        = s - 1                                    # 0-based position in <sheets>
+    sId        = wb.sheets[s].sheetId
+    rId        = wb.sheets[s].relationship_id
+    sheet_path = get_worksheet_internal_file(wb.sheets[s])
+    sheet_dir, sheet_file = rsplit(sheet_path, "/"; limit=2)
+    sheet_rels = "$sheet_dir/_rels/$sheet_file.rels"
+
+    # Relationship and sheet list. Ids are unique, so the type needn't be checked.
+    r = findfirst(y -> y.Id == rId, wb.relationships)
     delete_relationships!(xf, wb.relationships[r])
     deleteat!(wb.relationships, r)
     deleteat!(wb.sheets, s)
 
-    # Defined Names
-    found_wbnames = Vector{String}()
-    for (k, v) in wb.workbook_names
-        wbn = v.value
-        if typeof(wbn) <: DefinedNameRangeTypes
-            if wbn.sheet == name
-                push!(found_wbnames, k)
-            end
-        end
+    # Defined names. Excel drops a chartEx chart's _xlchart names along with the
+    # sheet; note their values first, so the charts can be emptied to match.
+    dead_xlchart = Dict{String,String}()
+    for k in [k for (k, v) in wb.workbook_names if v.value isa DefinedNameRangeTypes && v.value.sheet == name]
+        startswith(k, "_xlchart.") && (dead_xlchart[k] = string(wb.workbook_names[k].value))
+        delete!(wb.workbook_names, k)
     end
-    found_wsnames = Vector{Tuple{Int64,String}}()
-    for (k, v) in wb.worksheet_names
-        if first(k) == sId
-            push!(found_wsnames, k)
-        end
-    end
-    for key in found_wbnames
-        delete!(wb.workbook_names, key)
-    end
-    for key in found_wsnames
-        delete!(wb.worksheet_names, key)
-    end
-    for (k, _) in wb.worksheet_names
-        first(k) == sId && throw(XLSXError("Something wrong here!"))
+    for k in [k for k in keys(wb.worksheet_names) if first(k) == sId]
+        delete!(wb.worksheet_names, k)
     end
 
-    # Sheet-owned parts cleanup. Drawings/media keep their existing dedup-aware
-    # logic (media can be shared across drawings). Every other relationship
-    # type the sheet's own rels file holds — tables, comments, VML legacy
-    # drawings, and anything transitively reachable from those — belongs to
-    # exactly one sheet in OOXML, so it's deleted unconditionally, recursively.
-    sheet_path = "xl/worksheets/sheet" * rId[4:end] * ".xml"
-    sheet_dir, sheet_file = rsplit(sheet_path, "/"; limit=2)
-    sheet_rels = "$sheet_dir/_rels/$sheet_file.rels"
-
+    # Sheet-owned parts. Drawings and media keep their dedup-aware handling (media
+    # can be shared across drawings); everything else the sheet's rels hold belongs
+    # to this sheet alone and is removed recursively. Worksheets and chartsheets
+    # alike: a chartsheet's rels hold only its drawing.
     drawing_path = _drawing_path_for_sheet(xf, sheet_path)
-
     if drawing_path !== nothing
         drawing_file = rsplit(drawing_path, "/"; limit=2)[2]
         drawing_rels = "xl/drawings/_rels/$drawing_file.rels"
 
-        # Remove media — but only if no other sheet references it
-        all_images = getImages(xf)
+        all_images     = getImages(xf)
         deleted_images = _images_for_drawing(xf, drawing_path, name)
         deleted_names  = Set(img.media_name for img in deleted_images)
-        still_used     = Set(img.media_name for img in all_images
-                            if img.sheet != name)
+        still_used     = Set(img.media_name for img in all_images if img.sheet != name)
         for media_name in deleted_names
-            if media_name ∉ still_used
-                delete!(xf.binary_data, "xl/media/$media_name")
-            end
+            media_name ∉ still_used && delete!(xf.binary_data, "xl/media/$media_name")
         end
 
-        # Remove drawing XML and rels
+        if haskey(xf.data, drawing_rels)
+            for n in elements_with_tag(xml_root_element(xf.data[drawing_rels]), "Relationship")
+                get_attr(n, "Type") == REL_IMAGE && continue
+                get_attr(n, "TargetMode") == "External" && continue
+                delete_part_and_orphans!(xf, resolve_relative_target("xl/drawings", get_attr(n, "Target")))
+            end
+        end
         for path in (drawing_path, drawing_rels)
             delete!(xf.files, path)
             delete!(xf.data, path)
         end
-
         remove_override!(xf, "/$drawing_path")
     end
 
@@ -1906,35 +1910,23 @@ function deletesheet!(wb::Workbook, name::AbstractString)::XLSXFile
         for node in elements_with_tag(xml_root_element(xf.data[sheet_rels]), "Relationship")
             get_attr(node, "Type") == REL_DRAWING && continue
             get_attr(node, "TargetMode") == "External" && continue
-            target = resolve_relative_target(sheet_dir, get_attr(node, "Target"))
-            delete_part_and_orphans!(xf, target)
+            delete_part_and_orphans!(xf, resolve_relative_target(sheet_dir, get_attr(node, "Target")))
         end
     end
-
     for store in (xf.files, xf.data)
-        haskey(store, sheet_rels) && delete!(store, sheet_rels)
+        delete!(store, sheet_rels)
     end
 
-    # Files
-    xml_filename = "xl/worksheets/sheet" * rId[4:end] * ".xml"
-    if in(xml_filename, keys(xf.files))
-        delete!(xf.files, xml_filename)
+    # The sheet's own part and its content type
+    for store in (xf.files, xf.data, xf.binary_data)
+        delete!(store, sheet_path)
     end
-    if in(xml_filename, keys(xf.data))
-        delete!(xf.data, xml_filename)
-    end
-    if in(xml_filename, keys(xf.binary_data))
-        delete!(xf.binary_data, xml_filename)
-    end
+    remove_override!(xf, "/$sheet_path")
 
-
-    # update [Content_Types].xml
-    remove_override!(xf, "/xl/worksheets/sheet" * rId[4:end] * ".xml")
-    
+    invalidate_chart_refs!(xf, name, dead_xlchart)
     update_formulas_missing_sheet!(wb, name)
-    renumber_files!(xf, rId)
+    _shift_book_views!(xf, pos, length(wb.sheets))
     update_workbook_xml!(xf)
-
     return xf
 end
 

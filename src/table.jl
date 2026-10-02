@@ -1151,13 +1151,13 @@ function parse_table_xml(table_doc::XML.Node, filename::AbstractString, sheet::W
     haskey(attrs, "name") || throw(XLSXError("<table> in $filename missing required `name` attribute."))
     haskey(attrs, "ref")  || throw(XLSXError("<table> in $filename missing required `ref` attribute."))
 
-    # Excel signals a totals row via EITHER `totalsRowShown="1"` or a nonzero
-    # `totalsRowCount` — hand-authored/older files tend to use the former,
-    # Excel's own writer favors the latter (confirmed against a real
-    # Excel-saved fixture: `totalsRowCount="1"` with no `totalsRowShown` at all).
-    totals_row_shown = get(attrs, "totalsRowShown", "0") == "1"
-    totals_row_count = something(tryparse(Int, get(attrs, "totalsRowCount", "0")), 0)
-    has_totals = totals_row_shown || totals_row_count > 0
+    # totalsRowCount is the number of totals rows in `ref` now. totalsRowShown is
+    # history — whether one has ever been shown — and defaults to true, so Excel
+    # writes "0" for a table that never had one and omits it otherwise. It says
+    # nothing about the current range. (Checked against Excel: a table with its
+    # totals row switched on, then off, carries neither attribute.)
+    has_totals = something(tryparse(Int, get(attrs, "totalsRowCount", "0")), 0) > 0
+    has_header_row = get(attrs, "headerRowCount", "1") != "0"
 
 return Table(
         parse(Int, attrs["id"]),
@@ -1165,6 +1165,7 @@ return Table(
         get(attrs, "displayName", attrs["name"]),
         CellRange(attrs["ref"]),
         parse_table_columns(table_doc),
+        has_header_row,
         has_totals,
         parse_table_style_info(table_doc),
         sheet,
@@ -2197,3 +2198,70 @@ function _normalize_append_rows(data, t::Table, name::AbstractString)
 
     return rows
 end
+
+"""
+    gettablerange(t::Table) -> SheetCellRange
+    gettablerange(t::Table, column; header=false) -> Union{SheetCellRange,SheetCellRef}
+    gettablerange(t::Table, first, last) -> SheetCellRange
+
+The cells of a table's data rows as a sheet-qualified range, excluding the header
+row and any totals row: the whole table, one column, or the adjacent columns from
+`first` to `last`. A column is given by name or by its 1-based position in the
+table. With `header = true`, the one-column form returns that column's header cell.
+
+The range is the table's extent when this is called; it does not follow the table
+if rows are added later. The table is looked up afresh, so `t` may be one obtained
+before the table was changed.
+
+These are the ranges to pass to a chart:
+
+    t = table(ws, "Sales")
+    addSeries(c, gettablerange(t, "Amount"); categories = gettablerange(t, "Region"),
+              name_ref = gettablerange(t, "Amount"; header = true))
+"""
+function gettablerange(t::Table)
+    t = table(t.sheet, t.name)
+    top, bottom = _table_data_rows(t)
+    return SheetCellRange(t.sheet.name, CellRange(CellRef(top, column_number(t.ref.start)),
+                                                  CellRef(bottom, column_number(t.ref.stop))))
+end
+
+function gettablerange(t::Table, column; header::Bool = false)
+    t   = table(t.sheet, t.name)
+    col = column_number(t.ref.start) + _table_column_index(t, column) - 1
+     if header
+        t.has_header_row || throw(XLSXError(
+            "Table `$(t.name)` has its header row hidden, so column `$column` has no header cell on the sheet."))
+        return SheetCellRef(t.sheet.name, CellRef(row_number(t.ref.start), col))
+    end
+    top, bottom = _table_data_rows(t)
+    return SheetCellRange(t.sheet.name, CellRange(CellRef(top, col), CellRef(bottom, col)))
+end
+
+function gettablerange(t::Table, first, last)
+    t    = table(t.sheet, t.name)
+    a, b = minmax(_table_column_index(t, first), _table_column_index(t, last))
+    c0   = column_number(t.ref.start) - 1
+    top, bottom = _table_data_rows(t)
+    return SheetCellRange(t.sheet.name, CellRange(CellRef(top, c0 + a), CellRef(bottom, c0 + b)))
+end
+
+# First and last data rows: below the header row, above any totals row.
+function _table_data_rows(t::Table)
+    top, bottom = _first_data_row(t), _last_data_row(t)
+    bottom >= top || throw(XLSXError("Table `$(t.name)` has no data rows."))
+    return top, bottom
+end
+
+function _table_column_index(t::Table, column)::Int
+    if column isa Integer
+        1 <= column <= length(t.columns) || throw(XLSXError(
+            "Table `$(t.name)` has $(length(t.columns)) columns; asked for column $column."))
+        return column
+    end
+    i = findfirst(==(String(column)), t.columns)
+    isnothing(i) && throw(XLSXError(
+        "Table `$(t.name)` has no column `$column`. Its columns are: " * join(t.columns, ", ") * "."))
+    return i
+end
+

@@ -1,11 +1,11 @@
-# Formatting
+# Cell formats
 
-## Cell format
 
 ```@docs
 XLSX.getFormat
 XLSX.setFormat
 XLSX.setUniformFormat
+XLSX.getFont
 XLSX.setFont
 XLSX.setUniformFont
 XLSX.getBorder
@@ -23,37 +23,3 @@ XLSX.RichTextString
 XLSX.getRichTextString
 ```
 
-## Conditional format
-
-```@docs
-XLSX.getConditionalFormats
-XLSX.setConditionalFormat
-```
-
-## Column width and row height
-
-```@docs
-XLSX.getColumnWidth
-XLSX.setColumnWidth
-XLSX.getRowHeight
-XLSX.setRowHeight
-```
-
-# Merged Cells
-
-```@docs
-XLSX.getMergedCells
-XLSX.isMergedCell
-XLSX.getMergedBaseCell
-XLSX.mergeCells
-XLSX.removeMergedCells
-```
-
-# Freeze/Split panes
-
-```@docs
-XLSX.freezePanes
-XLSX.splitFreeze
-XLSX.splitPanes
-XLSX.removePanes
-```

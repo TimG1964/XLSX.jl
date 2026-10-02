@@ -145,7 +145,7 @@
         @test sprint(show, f[1]) == "13×4 XLSX.Worksheet: [\"Tabelle1\"](A2:D14) "
         @test sprint(show, f[2]) == "Chartsheet: [\"Diagramm1\"] "
         @test_throws XLSX.XLSXError XLSX.copysheet!(f["Diagramm1"], "Diagramm1_copy")
-        @test_throws XLSX.XLSXError XLSX.deletesheet!(f["Diagramm1"])
+        @test_throws XLSX.XLSXError XLSX.deletesheet!(f["Tabelle1"])     # the only worksheet
         @test_throws XLSX.XLSXError XLSX.gettable(f["Diagramm1"])
         @test_throws XLSX.XLSXError XLSX.gettable(f["Diagramm1"], "A:B")
         XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
@@ -159,6 +159,10 @@
             @test sprint(show, f[1]) == "13×4 XLSX.Worksheet: [\"Tabelle1\"](A2:D14) "
             @test sprint(show, f[2]) == "Chartsheet: [\"Diagramm1\"] "
         end
+        f= XLSX.openxlsx("mytest.xlsx"; mode="rw")
+        XLSX.deletesheet!(f["Diagramm1"])
+        @test XLSX.sheetnames(f) == ["Tabelle1"]
+        @test isempty(XLSX.Charts.getCharts(f))
         isfile("mytest.xlsx") && rm("mytest.xlsx")
     end
     @testset "readtable on Strict OOXML with target_sheet" begin
@@ -169,5 +173,22 @@
         end
         @test XLSX.readtable(f, 1) isa XLSX.DataTable
     end
-    
+    @testset "Normalisation reaches every element" begin
+        # Strict namespaces can be declared below the root, e.g. xmlns:r on
+        # cx:chart inside mc:AlternateContent in a drawing part. A write must
+        # leave no Strict URI anywhere in the package.
+        for fixture in ("strict.xlsx", "Strict-foo.xlsx", "chart_ex.xlsx")
+            XLSX.writexlsx("mytest.xlsx", XLSX.openxlsx(joinpath(data_directory, fixture); mode="rw"), overwrite=true)
+            SAVE_FILES && save_outfile("mytest.xlsx")
+
+            r = ZipArchives.ZipReader(read("mytest.xlsx"))
+            for name in ZipArchives.zip_names(r)
+                (endswith(name, ".xml") || endswith(name, ".rels")) || continue
+                s = ZipArchives.zip_readentry(r, name, String)
+                @test !occursin("purl.oclc.org", s)
+                occursin("purl.oclc.org", s) && @info "Strict URI survived" fixture name
+            end
+            isfile("mytest.xlsx") && rm("mytest.xlsx")
+        end
+    end
 end

@@ -22,25 +22,6 @@ XLSX.iserror(::XLSX.Worksheet, ::AbstractString)
 XLSX.geterror(::XLSX.Worksheet, ::AbstractString)
 ```
 
-## Tables
-```@docs
-XLSX.DataTable
-XLSX.gettable
-XLSX.readtable
-XLSX.gettransposedtable
-XLSX.readtransposedtable
-XLSX.writetable!
-XLSX.Table
-XLSX.tables
-XLSX.table
-XLSX.addtable!
-XLSX.appendtable!
-XLSX.deletetable!
-XLSX.settotals!
-XLSX.gettotals
-XLSX.removetotals!
-```
-
 ## Cell formulas
 
 ```@docs
@@ -70,4 +51,18 @@ XLSX.getAllDefinedNames
 XLSX.addDefinedName
 XLSX.deleteDefinedName
 XLSX.deleteAllDefinedNames
+```
+
+## Error Values
+
+```@docs
+XLSX.CellErrorType
+XLSX.XL_NULL
+XLSX.XL_DIV0
+XLSX.XL_VALUE
+XLSX.XL_REF
+XLSX.XL_NAME
+XLSX.XL_NUM
+XLSX.XL_NA
+XLSX.XL_SPILL
 ```

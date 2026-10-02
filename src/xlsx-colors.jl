@@ -10,15 +10,15 @@ function get_colorant(color_string::String)
     end
 end
 get_color(s::Symbol)::String = get_color(String(s))
-function get_color(str::String)::String
-    if occursin(r"^[0-9A-F]{8}$"i, str) # is a valid 8 digit hexadecimal color
-        return uppercase(str)
-    end
+function get_color(str::AbstractString)::String
+    h = lstrip(str, '#')
+    occursin(r"^[0-9A-F]{8}$"i, h) && return uppercase(h)          # AARRGGBB
+    occursin(r"^[0-9A-F]{6}$"i, h) && return "FF" * uppercase(h)   # RRGGBB, opaque
     s = replace(lowercase(str), "grey" => "gray")
     c = get_colorant(s)
-    if isnothing(c)
-        throw(XLSXError("Invalid color specified: $s. Either give a valid color name (from Colors.jl) or an 8-digit rgb color in the form AARRGGBB"))
-    end
+    isnothing(c) && throw(XLSXError(
+        "Invalid color specified: $str. Give a color name from Colors.jl, or a hex " *
+        "color as RRGGBB or AARRGGBB, with or without a leading #."))
     return c
 end
 
@@ -60,27 +60,48 @@ function _theme_color_value(node::XML.Node)::Union{String,Nothing}
     return nothing
 end
 
+"""
+    _themeelements_element(wb::Workbook) -> XML.Node
+
+The theme's `<a:themeElements>`. Throws if the workbook's theme is malformed.
+Shared by the colour and font scheme lookups.
+"""
+function _themeelements_element(wb::Workbook)::XML.Node
+    xroot = xml_root_element(theme_xmlroot(wb))
+    els = xml_elements(xroot)
+
+    theme_els_idx = findfirst(c -> localname(c) == "themeElements", els)
+    isnothing(theme_els_idx) &&
+        throw(XLSXError("Malformed theme: no `themeElements` found in theme1.xml."))
+    return els[theme_els_idx]
+end
+
+function _clrscheme_element(wb::Workbook)::XML.Node
+    theme_els = _themeelements_element(wb)
+    els = xml_elements(theme_els)
+
+    clrscheme_idx = findfirst(c -> localname(c) == "clrScheme", els)
+    isnothing(clrscheme_idx) &&
+        throw(XLSXError("Malformed theme: no `clrScheme` found in theme1.xml."))
+    return els[clrscheme_idx]
+end
+
+# Unlike `clrScheme`, a missing `fontScheme` is not fatal: nothing downstream
+# needs a font the way `resolveColor` needs a palette, and `get_theme_fonts`
+# reads an absent scheme as "no theme fonts" rather than a broken workbook.
+_fontscheme_element(wb::Workbook) =
+    first_element_with_tag(_themeelements_element(wb), "fontScheme")
+
 # Read and cache the 12 theme colors for a workbook, in OOXML theme-index order
 # (see `THEME_COLOR_ORDER`). Reads the actual `xl/theme/theme1.xml` clrScheme, so this
 # reflects whatever theme the workbook was actually saved with - not just the Excel default.
 function get_theme_colors(wb::Workbook)::Vector{String}
     if wb.theme_colors === nothing
-        xroot = xml_root_element(theme_xmlroot(wb))
-
-        theme_els_idx = findfirst(c -> localname(c) == "themeElements", xml_elements(xroot))
-        isnothing(theme_els_idx) && throw(XLSXError("Malformed theme: no `themeElements` found in theme1.xml."))
-        theme_els = xml_elements(xroot)[theme_els_idx]
-
-        clrscheme_idx = findfirst(c -> localname(c) == "clrScheme", xml_elements(theme_els))
-        isnothing(clrscheme_idx) && throw(XLSXError("Malformed theme: no `clrScheme` found in theme1.xml."))
-        clrscheme = xml_elements(theme_els)[clrscheme_idx]
-
         lookup = Dict{String,String}()
-        for c in xml_elements(clrscheme)
+        for c in xml_elements(_clrscheme_element(wb))
             val = _theme_color_value(c)
             isnothing(val) || (lookup[localname(c)] = val)
         end
-
         wb.theme_colors = String[]
         for name in THEME_COLOR_ORDER
             if haskey(lookup, name)
@@ -237,3 +258,130 @@ function resolveColor(wb::Workbook, atts::AbstractDict; prefix::AbstractString="
         return "FF000000"
     end
 end
+
+"""
+The theme's `clrScheme` keyed by DrawingML name, as `<a:schemeClr val="..."/>`
+refers to it.
+
+Distinct from [`get_theme_colors`](@ref), which is index-ordered for the
+spreadsheet `<color theme="N"/>` attribute and applies Excel's documented dk/lt
+index swap. Names are not swapped. `tx1`/`dk1` and `bg1`/`lt1` are aliases in
+DrawingML, so both keys are populated.
+"""
+function get_theme_color_map(wb::Workbook)::Dict{String,String}
+    if wb.theme_color_map === nothing
+        m = Dict{String,String}()
+        for c in xml_elements(_clrscheme_element(wb))
+            val = _theme_color_value(c)
+            isnothing(val) || (m[localname(c)] = val)
+        end
+        haskey(m, "dk1") && (m["tx1"] = m["dk1"])
+        haskey(m, "lt1") && (m["bg1"] = m["lt1"])
+        haskey(m, "dk2") && (m["tx2"] = m["dk2"])
+        haskey(m, "lt2") && (m["bg2"] = m["lt2"])
+        wb.theme_color_map = m
+    end
+    return wb.theme_color_map
+end
+
+
+"""
+    get_theme_fonts(wb::Workbook) -> Dict{String,String}
+
+The workbook theme's font scheme, keyed by the reference tokens as they appear
+in DrawingML: `"+mj-lt"`, `"+mn-lt"`, `"+mj-ea"`, `"+mn-ea"`, `"+mj-cs"`,
+`"+mn-cs"` (major/minor × latin/east-asian/complex-script). Cached on
+`Workbook.theme_font_map`.
+
+Empty typefaces are omitted rather than stored as `""`. Excel writes
+`<a:ea typeface=""/>` to mean "no specific east-asian font, fall back", and a
+missing key expresses that better than an empty string a caller has to test for.
+
+Script-specific `<a:font script="Jpan" .../>` entries under each font are not
+modelled; they are in the theme node if ever needed.
+
+Distinct from `get_theme_color_map` only in what it reads — same theme part,
+same caching, same name-keyed contract.
+"""
+function get_theme_fonts(wb::Workbook)::Dict{String,String}
+    if wb.theme_font_map === nothing
+        m = Dict{String,String}()
+        for (tag, prefix) in (("majorFont", "+mj"), ("minorFont", "+mn"))
+            group = first_element_with_tag(_fontscheme_element(wb), tag)
+            for (child, suffix) in (("latin", "lt"), ("ea", "ea"), ("cs", "cs"))
+                tf = _attr(first_element_with_tag(group, child), "typeface")
+                isnothing(tf) || (m["$prefix-$suffix"] = tf)
+            end
+        end
+        wb.theme_font_map = m
+    end
+    return wb.theme_font_map
+end
+
+"""
+    resolve_theme_font(wb::Workbook, typeface) -> Union{Nothing,String}
+
+Resolve a DrawingML typeface reference. `"+mn-lt"` and friends look up the
+theme; any other string is a literal font name and passes through unchanged;
+`nothing` (the attribute was absent) stays `nothing`, meaning "inherit".
+
+Returns `nothing` for a theme reference the theme doesn't define, which is not
+the same as the caller's font being unset — check `startswith(tf, '+')` first
+if the distinction matters.
+"""
+resolve_theme_font(::Workbook, ::Nothing) = nothing
+resolve_theme_font(wb::Workbook, typeface::AbstractString) =
+    startswith(typeface, '+') ? get(get_theme_fonts(wb), typeface, nothing) : typeface
+
+"""
+Apply the DrawingML colour transforms to an "RRGGBB" hex string, in document
+order, returning the transformed hex and the resulting alpha.
+
+`lumMod`, `lumOff` and `satMod` operate in HSL, which is why they are applied
+via Colors.jl rather than with the spreadsheet `apply_tint` algorithm: Excel's
+`<color tint="...">` and DrawingML's transforms are different operations and
+give different results.
+"""
+function apply_drawingml_transforms(hex::AbstractString,
+                                    transforms::Vector{Pair{Symbol,Int}})
+    c = Colors.RGB{Float64}(parse(Colors.Colorant, "#" * hex))
+    alpha = 1.0
+
+    for (kind, v) in transforms
+        p = _pct(v)
+        if kind === :alpha
+            alpha = p
+        elseif kind === :lumMod || kind === :lumOff || kind === :satMod
+            h = convert(Colors.HSL{Float64}, c)
+            l, s = h.l, h.s
+            kind === :lumMod && (l *= p)
+            kind === :lumOff && (l += p)
+            kind === :satMod && (s *= p)
+            c = convert(Colors.RGB{Float64},
+                        Colors.HSL{Float64}(h.h, clamp(s, 0.0, 1.0), clamp(l, 0.0, 1.0)))
+        elseif kind === :shade
+            c = _linear_map(c, x -> x * p)
+        elseif kind === :tint
+            c = _linear_map(c, x -> x * p + (1.0 - p))
+        end
+        # Unhandled transforms (hueMod, red, green, blue, gamma, inv, gray,
+        # comp) are rare in chart parts and are left as no-ops rather than
+        # silently applied wrongly. The raw element is preserved regardless.
+    end
+
+    return Colors.hex(Colors.RGB{Float64}(clamp(c.r, 0, 1),
+                                          clamp(c.g, 0, 1),
+                                          clamp(c.b, 0, 1)), :RRGGBB), alpha
+end
+
+@inline _srgb_to_linear(x) = x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055)^2.4
+@inline _linear_to_srgb(x) = x <= 0.0031308 ? x * 12.92 : 1.055 * x^(1/2.4) - 0.055
+
+function _linear_map(c::Colors.RGB{Float64}, f)
+    r = _linear_to_srgb(clamp(f(_srgb_to_linear(c.r)), 0.0, 1.0))
+    g = _linear_to_srgb(clamp(f(_srgb_to_linear(c.g)), 0.0, 1.0))
+    b = _linear_to_srgb(clamp(f(_srgb_to_linear(c.b)), 0.0, 1.0))
+    return Colors.RGB{Float64}(r, g, b)
+end
+
+

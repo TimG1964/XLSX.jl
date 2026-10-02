@@ -148,9 +148,9 @@ end
 # ====================================================================================== Excel Tables
 #
 
-# Data rows are between the header row and (if present) the totals row —
+# Data rows are between the header row (if shown) and the totals row (if present).
 # never include either.
-_first_data_row(t::Table) = t.ref.start.row_number + 1
+_first_data_row(t::Table) = t.ref.start.row_number + (t.has_header_row ? 1 : 0)
 _last_data_row(t::Table)  = t.ref.stop.row_number - (t.has_totals_row ? 1 : 0)
 _col_start(t::Table) = column_number(t.ref.start)
 

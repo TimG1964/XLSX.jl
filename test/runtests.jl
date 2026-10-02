@@ -6,8 +6,9 @@ import DataFrames, Random
 import Distributions as Dist
 import CSV
 using StyledStrings
-using ZipArchives: ZipReader, zip_names, zip_readentry, ZipWriter, zip_newfile
+using ZipArchives
 using Logging
+using Colors
 
 # If SAVE_FILES is true then every testset that creates an XLSXFile in memory
 # or that writes an xlsx file will have a file created in `outdir`.
@@ -130,10 +131,15 @@ functions in tests is not complete and it wouuld be undesirable to make
 it so.
 =#
 include(joinpath(files_directory, "Cell-names_tests.jl"))
+include(joinpath(files_directory, "ChartImports_tests.jl"))
 include(joinpath(files_directory, "Charts_tests.jl"))
+include(joinpath(files_directory, "ChartProps_tests.jl"))
+include(joinpath(files_directory, "ChartExProps_tests.jl"))
+include(joinpath(files_directory, "ChartSchema_tests.jl"))
 include(joinpath(files_directory, "Colors-tests.jl"))
 include(joinpath(files_directory, "Conditional-format_tests.jl"))
 include(joinpath(files_directory, "Copy-Add_tests.jl"))
+include(joinpath(files_directory, "DrawingML_tests.jl"))
 include(joinpath(files_directory, "Defined-names_tests.jl"))
 include(joinpath(files_directory, "Edit_tests.jl"))
 include(joinpath(files_directory, "Errors_tests.jl"))

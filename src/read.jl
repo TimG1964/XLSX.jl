@@ -35,6 +35,12 @@ const STRICT_TO_TRANSITIONAL = Dict(
         "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
     "http://purl.oclc.org/ooxml/drawingml/spreadsheetDrawing" =>
         "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+    "http://purl.oclc.org/ooxml/drawingml/diagram" =>
+        "http://schemas.openxmlformats.org/drawingml/2006/diagram",
+    "http://purl.oclc.org/ooxml/drawingml/lockedCanvas" =>
+        "http://schemas.openxmlformats.org/drawingml/2006/lockedCanvas",
+    "http://purl.oclc.org/ooxml/schemaLibrary/main" =>
+        "http://schemas.openxmlformats.org/schemaLibrary/2006/main",
 
     # officeDocument and relationships
     "http://purl.oclc.org/ooxml/officeDocument/relationships" =>
@@ -100,6 +106,15 @@ const STRICT_TO_TRANSITIONAL = Dict(
     "http://purl.oclc.org/ooxml/markup-compatibility/2006" =>
         "http://schemas.openxmlformats.org/markup-compatibility/2006",
 )
+
+# Apply _strict_to_transitional_node! to `node` and every element beneath it.
+function _strict_to_transitional_tree!(node::XML.Node, filename::AbstractString)
+    _strict_to_transitional_node!(node, filename)
+    for el in xml_elements(node)
+        _strict_to_transitional_tree!(el, filename)
+    end
+    return nothing
+end
 
 @inline get_xlsxfile(xf::XLSXFile)::XLSXFile = xf
 @inline get_xlsxfile(wb::Workbook)::XLSXFile = wb.package
@@ -694,11 +709,7 @@ function convert_strict_to_transitional!(xf::XLSXFile, pass::Int)
             end
             els = xml_elements(data)
             isempty(els) && continue
-            xroot = last(els)
-            _strict_to_transitional_node!(xroot, filename)
-            for el in xml_elements(xroot)
-                _strict_to_transitional_node!(el, filename)
-            end
+            _strict_to_transitional_tree!(last(els), filename)
         end
     end
     return nothing
@@ -921,13 +932,14 @@ function parse_workbook!(xf::XLSXFile)
             defined_value, isabs = parse_defined_name_value(raw)
 
             attrs = XML.attributes(dn_node)
+            hidden = get(attrs, "hidden", "") in ("1", "true")
             if haskey(attrs, "localSheetId")
                 ordinal = parse(Int, attrs["localSheetId"]) + 1   # localSheetId is 0-based
                 (ordinal < 1 || ordinal > length(wb.sheets)) &&
                     throw(XLSXError("Defined name `$name` has localSheetId $(ordinal - 1), but the workbook has $(length(wb.sheets)) sheets."))
-                wb.worksheet_names[(wb.sheets[ordinal].sheetId, name)] = DefinedNameValue(defined_value, isabs)
+                wb.worksheet_names[(wb.sheets[ordinal].sheetId, name)] = DefinedNameValue(defined_value, isabs, hidden)
             else
-                wb.workbook_names[name] = DefinedNameValue(defined_value, isabs)
+                wb.workbook_names[name] = DefinedNameValue(defined_value, isabs, hidden)
             end
         end
         break
@@ -1129,7 +1141,11 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
     end
 
     consumer = @async begin
-        fill_tasks = Task[]
+        # Sheets to fill once reading is complete, with their raw XML. Spawning the
+        # fills inside this loop let them read xf.data and friends on other threads
+        # while this task was still inserting into those Dicts: a data race, seen as
+        # a rare KeyError for a part stored long before.
+        pending = Tuple{Worksheet,Any}[]
 
         for file in read_files
             if !isnothing(file.node)
@@ -1154,21 +1170,12 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
                     xf.data[file.name] = file.node
                     xf.files[file.name] = true
                     for sheet in wb.sheets
-                        target = get_relationship_target_by_id("xl", wb, sheet.relationship_id)
-                        if target == file.name
-                            local captured_sheet = sheet
-                            local captured_raw = file.raw
-                            t = Threads.@spawn begin
-                                lznode = parse(captured_raw, XML.LazyNode)
-                                first_cache_fill!(captured_sheet, lznode)
-                            end
-                            push!(fill_tasks, t)
-                        end
+                        get_relationship_target_by_id("xl", wb, sheet.relationship_id) == file.name &&
+                            push!(pending, (sheet, file.raw))
                     end
                 elseif xf.use_cache_for_sheet_data
                     # cache-on, read-only: keep full raw resident so streaming/lazy-fill/
                     # dimension lookups can use it without re-reading from ZIP.
-                    # (unchanged from prior behaviour)
                     xf.data[file.name] = file.raw
                     xf.files[file.name] = true
                 else
@@ -1187,9 +1194,10 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
             end
         end
 
-        for t in fill_tasks
-            wait(t)
-        end
+        # Every write to xf's Dicts is done; the fills now only read them.
+        fill_tasks = [Threads.@spawn(first_cache_fill!(sheet, parse(raw, XML.LazyNode)))
+                      for (sheet, raw) in pending]
+        foreach(wait, fill_tasks)
     end
 
     #@sync for _ in 1:MAX_THREADS

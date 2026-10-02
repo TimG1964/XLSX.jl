@@ -174,16 +174,41 @@ end
     CT_DATETIME = 7
     CT_ERROR = 8
 end
+
+"""
+    CellErrorType
+
+Excel's error values, such as `#REF!`. [`getChartRanges`](@ref) returns
+`XL_REF` for a chart reference that Excel has replaced with `#REF!`, as it does
+when the referenced sheet is deleted.
+"""
 @enum CellErrorType::UInt64 begin
     XL_NULL = 1
     XL_DIV0 = 2
     XL_VALUE = 3
     XL_REF = 4
     XL_NAME = 5
-    XL_NUM = 6 
+    XL_NUM = 6
     XL_NA = 7
     XL_SPILL = 8 # Turns out #SPILL is not an official error. These will return #VALUE errors
 end
+
+"`#NULL!`: an intersection of ranges that do not intersect."
+XL_NULL
+"`#DIV/0!`: division by zero."
+XL_DIV0
+"`#VALUE!`: an argument of the wrong type."
+XL_VALUE
+"`#REF!`: a reference to a cell or sheet that no longer exists."
+XL_REF
+"`#NAME?`: an unrecognised name."
+XL_NAME
+"`#NUM!`: an invalid numeric value."
+XL_NUM
+"`#N/A`: a value that is not available."
+XL_NA
+"`#SPILL!`: a dynamic array that cannot spill. Not an official stored error; read as `#VALUE!`."
+XL_SPILL
 
 abstract type AbstractCell end
 
@@ -425,6 +450,7 @@ struct Table
     display_name::String
     ref::CellRange
     columns::Vector{String}
+    has_header_row::Bool          # false when the header row is hidden (headerRowCount="0"); ref then starts at the data
     has_totals_row::Bool
     style::Union{TableStyleInfo,Nothing}
     sheet # untyped to resolve circular dependency with Worksheet
@@ -594,6 +620,7 @@ const DefinedNameRangeTypes = Union{SheetCellRef, SheetCellRange, NonContiguousR
 struct DefinedNameValue
     value::DefinedNameValueTypes
     isabs::Union{Bool, Vector{Bool}}
+    hidden::Bool
 end
 
 """
@@ -611,9 +638,11 @@ A defined name and its definition, as returned by [`getDefinedNames`](@ref) and
 - `absolute::Union{Bool,Vector{Bool}}` — whether the reference is written as an
   absolute one (`\$A\$1` rather than `A1`); a vector, one entry per part, for a
   `NonContiguousRange`. Always `false` for a constant.
+- `hidden::Bool` - whether the reference is hidden (system defined).
 
-Together these are enough to recreate the name:
-`addDefinedName(x, dn.name, dn.value; absolute=dn.absolute)`.
+Together these are enough to recreate the name: addDefinedName(x, dn.name, dn.value; absolute=dn.absolute). 
+This holds for the names getDefinedNames returns; names Excel generates for itself cannot be recreated, 
+and are excluded from that result.
 
 This is a snapshot of the definition at the time it was read, not a live handle:
 it does not track later edits, and renaming a worksheet does not update the
@@ -624,6 +653,7 @@ struct DefinedName
     scope::Union{Nothing,String}
     value::DefinedNameValueTypes
     absolute::Union{Bool,Vector{Bool}}
+    hidden::Bool
 end
 
 # Workbook is the result of parsing file `xl/workbook.xml`.
@@ -653,6 +683,8 @@ mutable struct Workbook
     num_style_index_cache::Dict{Int, CellDataFormat}
     theme_xroot::Union{XML.Node, Nothing}
     theme_colors::Union{Vector{String}, Nothing}
+    theme_color_map::Union{Nothing,Dict{String,String}}
+    theme_font_map::Union{Nothing,Dict{String,String}}
     cellXfs_cache::Union{Vector{XML.Node}, Nothing}   # cache for get_cellXfs_nodes
     numFmt_cache::Union{Dict{Int, String}, Nothing}   # cache for get_numFmt_cache
     style_table_cache::Dict{String, Vector{XML.Node}} # cache for fonts/borders/fills, keyed by tag ("fonts","borders","fills")
@@ -837,6 +869,26 @@ struct XPathInfo
     end
 end
 
+"""
+    XLSXError(msg::String)
+
+The exception type XLSX.jl throws for every error it raises itself: a malformed
+or unsupported file, an argument that names something the workbook does not
+contain, a value outside what the format allows, or an operation the file's mode
+does not permit.
+
+One type covers all of them, so `e isa XLSXError` in a `catch` distinguishes an
+error the package raised from one escaping out of Julia or a dependency. The
+message says what went wrong and, where it helps, what was found instead.
+
+# Fields
+- `msg::String` — the message, printed after `XLSXError: `.
+
+# Example
+
+    julia> XLSX.Charts.getChartAxis(c, 99)
+    ERROR: XLSXError: Chart `chart1` has no axis with axId 99. Found: 1, 2.
+"""
 struct XLSXError <: Exception
     msg::String
 end
@@ -848,100 +900,10 @@ struct FileArray <: AbstractVector{UInt8}
     len::Int64
 end
 
+#=
 mutable struct Locked{T}
     value::T
     lock::ReentrantLock
     Locked(x::T) where {T} = new{T}(x, ReentrantLock())
 end
-
-#=
-function withlock(f, obj::Locked)
-    lock(obj.lock) do
-        f(obj.value)
-    end
-end
 =#
-
-# ===========================================================================
-# Charts
-# ===========================================================================
-
-"""
-`ChartRef`
-
-One cached reference from a chart series: the formula it came from, the number
-format Excel recorded for it, and the cached values themselves.
-
-# Fields
-- `kind::Symbol` - one of `:num`, `:str`, `:multiLvlStr`, `:numLit`, `:strLit`.
-- `ref::Union{Nothing,String}` - the `c:f` formula (`Sheet1!\$B\$2:\$B\$9`).
-  `nothing` for literal (`c:numLit` / `c:strLit`) series, which have no source range.
-- `format_code::Union{Nothing,String}` - number format recorded in the cache.
-- `ptCount::Int` - number of points Excel declared, whether or not the cache was read.
-- `data::Vector` - cached values, length `ptCount`, gaps as `missing`. Empty when
-  the chart was read with `cache=false`.
-- `errors::Dict{Int,UInt64}` - index => error code for cached error values.
-
-Excel only caches the error values `#N/A` in the chart data cache. Others are written 
-a 0 and become indistinguishable from real zero in the chart cache.
-
-
-!!! note
-    For `kind == :multiLvlStr` each element of `data` is itself a level vector,
-    in document order (Excel writes the innermost/leaf level first).
-"""
-struct ChartRef
-    kind::Symbol
-    ref::Union{Nothing,String}
-    format_code::Union{Nothing,String}
-    ptCount::Int
-    data::Vector
-    errors::Dict{Int,UInt64}
-end
-
-"""
-    ChartSeries
-
-A single `c:ser` element.
-
-`categories` holds `c:cat` for category charts and `c:xVal` for scatter and bubble
-charts; `values` holds `c:val` or `c:yVal` correspondingly, so the two fields mean
-the same thing whatever the chart type.
-"""
-struct ChartSeries
-    idx::Int
-    order::Int
-    charttype::Symbol
-    name::Union{Nothing,String}
-    name_ref::Union{Nothing,ChartRef}
-    categories::Union{Nothing,ChartRef}
-    values::Union{Nothing,ChartRef}
-    bubble_sizes::Union{Nothing,ChartRef}
-end
-
-"""
-    Chart
-
-Metadata for one chart part, plus its series.
-
-# Fields
-- `path` - package path, e.g. `"xl/charts/chart1.xml"`.
-- `name` - part name without extension, e.g. `"chart1"`.
-- `rId` - relationship id of the chart within its drawing part, if resolved.
-- `sheet` - name of the sheet the chart is anchored to, if resolved.
-- `from`, `to` - anchor cell references as strings, following `getImages`.
-- `title` - chart title text; `nothing` if auto-generated or deleted.
-- `charttypes` - e.g. `[:barChart]`, or several for a combo chart.
-- `series` - `Vector{ChartSeries}` in document order.
-"""
-struct Chart
-    path::String
-    name::String
-    rId::Union{Nothing,String}
-    sheet::Union{Nothing,String}
-    from::Union{Nothing,String}
-    to::Union{Nothing,String}
-    title::Union{Nothing,String}
-    charttypes::Vector{Symbol}
-    series::Vector{ChartSeries}
-end
