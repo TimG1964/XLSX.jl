@@ -933,7 +933,7 @@
         f = "pareto_line.xlsx"
         XLSX.writexlsx(f, xf; overwrite = true)
         SAVE_FILES && save_outfile(xf)
-        yf = XLSX.readxlsx(f)
+        yf = XLSX.openxlsx(f; mode="rw")
         d  = XLSX.getCharts(yf)[6]
         @test XLSX.Charts.getSeriesLine(d, 1; pareto = true).value == line_after.value
         @test XLSX.Charts.getSeriesLine(d, 1).value == cols_before.value

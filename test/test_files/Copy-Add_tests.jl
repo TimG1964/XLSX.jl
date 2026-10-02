@@ -234,7 +234,7 @@
             f = "deletesheet_chart_ref.xlsx"
             XLSX.writexlsx(f, xf; overwrite = true)
             SAVE_FILES && save_outfile(xf)
-            yf = XLSX.readxlsx(f)
+            yf = XLSX.openxlsx(f; mode = "rw")
             d = only(XLSX.getCharts(yf))
             @test all(r -> r.values === XLSX.XL_REF, XLSX.getChartRanges(d))
             a, b = XLSX.getChartData(yf, d.name), XLSX.getChartData(xf, c.name)
@@ -276,7 +276,7 @@
             f = "deletesheet_chartex_ref.xlsx"
             XLSX.writexlsx(f, xf; overwrite = true)
             SAVE_FILES && save_outfile(xf)
-            yf = XLSX.readxlsx(f)
+            yf = XLSX.openxlsx(f; mode = "rw")
             d = only(filter(d -> XLSX.Charts.getChartType(d) === :treemap, XLSX.getCharts(yf)))
             @test all(isnothing, XLSX.getChartRanges(d))
             SAVE_FILES && save_outfile(yf)

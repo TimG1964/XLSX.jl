@@ -250,7 +250,7 @@
             # The last form's colours survive a write and reopen
             SAVE_FILES && save_outfile(xf)
             XLSX.writexlsx(tmp, xf; overwrite = true)
-            xf2 = XLSX.openxlsx(tmp)
+            xf2 = XLSX.openxlsx(tmp; mode = "rw")
             SAVE_FILES && save_outfile(xf2)
             c2 = first(XLSX.Charts.getCharts(xf2["stackedbar"]))
             @test iscoral(XLSX.Charts.getSeriesFill(c2, 1).value.fgcolor.rgb)

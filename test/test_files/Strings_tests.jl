@@ -364,9 +364,9 @@ end
 
             s["A1"] = "x"; XLSX.setFont(s, "A1"; name = "Arial", size = 14, italic = true)
             s["A1"] = styled"{bold:all bold}"                       # one run: merged into the cell font
-            f = XLSX.getFont(s, "A1").font
-            @test f["name"]["val"] == "Arial" && f["sz"]["val"] == "14"
-            @test haskey(f, "i") && haskey(f, "b")
+            ft = XLSX.getFont(s, "A1").font
+            @test ft["name"]["val"] == "Arial" && ft["sz"]["val"] == "14"
+            @test haskey(ft, "i") && haskey(ft, "b")
             SAVE_FILES && save_outfile(f)
         end
     end
