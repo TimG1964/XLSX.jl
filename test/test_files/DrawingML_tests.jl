@@ -450,6 +450,12 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 @test XLSX.Charts.text_content(XLSX.Charts.DrawingText("a\nb")) == "a\nb"
             end
 
+            @testset "DrawingText show" begin
+                t = XLSX.Charts.DrawingText("Revenue\nby region")
+                @test sprint(show, t) == "DrawingText(\"Revenue\\nby region\", 2 paragraph(s), 2 run(s))"
+                @test occursin("formatting only", sprint(show, XLSX.Charts.DrawingText("")))
+            end
+
             @testset "a newline in a DrawingParagraph is a line break" begin
                 P = XLSX.Charts.DrawingParagraph
                 R = XLSX.Charts.DrawingRun
@@ -458,7 +464,7 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 @test kinds(p) == [:run, :br, :run]
                 @test [r.text for r in p.runs] == ["a", "\n", "b"]
                 # the same paragraph the explicit form builds, and the reader produces
-                @test p == P("a", R("\n"; kind = :br), "b")
+                @test p == P("a", R("\n"; kind=:br), "b")
                 @test kinds(P("a\n\nb")) == [:run, :br, :br, :run]
                 @test kinds(P("a\n")) == [:run, :br]
                 @test kinds(P("a", R("b"))) == [:run, :run]               # no newline: unchanged

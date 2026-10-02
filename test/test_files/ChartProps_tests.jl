@@ -137,6 +137,42 @@
         end
     end
 
+    @testset "DrawingFill and DrawingColor show" begin
+        local xf = XLSX.openxlsx(joinpath(data_directory, "chart_basic.xlsx"); mode="rw")
+        local c = XLSX.getChart(xf["Data"], "chart1")
+        XLSX.Charts.setSeriesFill(c, 1, "FF0000")
+        local fl = XLSX.Charts.getSeriesFill(c, 1).value
+        local s = sprint(show, MIME"text/plain"(), fl)
+        @test startswith(s, "XLSX.Charts.DrawingFill ")
+        @test occursin("foreground: #FF0000", s)
+        local cs = sprint(show, MIME"text/plain"(), fl.fgcolor)
+        @test startswith(cs, "XLSX.Charts.DrawingColor ")
+        @test occursin("resolves to: #FF0000", cs)
+        @test !isempty(sprint(show, fl.fgcolor))
+        SAVE_FILES && save_outfile(xf)
+    end
+
+    @testset "show paths for scheme colours and absent formatting" begin
+        local xf = XLSX.openxlsx(joinpath(data_directory, "chart_basic.xlsx"); mode="rw")
+        local c = XLSX.getChart(xf["Data"], "chart1")
+
+        XLSX.Charts.setSeriesFill(c, 1, XLSX.Charts.SchemeColor(:accent2))
+        local s = sprint(show, MIME"text/plain"(), XLSX.Charts.getSeriesFill(c, 1).value)
+        @test occursin("foreground: #E97132", s)          # accent2, resolved through the theme
+
+        XLSX.Charts.setSeriesLine(c, 2, :none)
+        local sp = XLSX.Charts.getSeriesShapeProps(c, 2)
+        @test occursin("no line", sprint(show, sp))
+        XLSX.Charts.setSeriesFill(c, 2, :inherit)
+        XLSX.Charts.setSeriesLine(c, 2, :inherit)
+        sp = XLSX.Charts.getSeriesShapeProps(c, 2)
+        if !isnothing(sp)
+            s = sprint(show, sp)
+            @test occursin("fill inherited", s) || occursin("line inherited", s)
+        end
+        SAVE_FILES && save_outfile(xf)
+    end
+
     @testset "series data labels" begin
         tx1 = XLSX.Charts.getSeriesLabelTextProps(c, 1)
         @test !isnothing(tx1)
@@ -514,7 +550,7 @@
         cp(src, tmp)
 
         xf = XLSX.openxlsx(tmp; mode="rw")
-        c = first(XLSX.Charts.getCharts(xf[1]))
+        local c = first(XLSX.Charts.getCharts(xf[1]))
         wb = XLSX.get_workbook(xf[1])
 
         # Series 3 has an spPr with a line and no fill — the empty-slot case.
@@ -573,7 +609,7 @@
         cp(joinpath(data_directory, "chart_appearance.xlsx"), tmp)
 
         xf = XLSX.openxlsx(tmp; mode="rw")
-        c = first(XLSX.Charts.getCharts(xf[1]))
+        local c = first(XLSX.Charts.getCharts(xf[1]))
 
         # All three series have an a:ln written with noFill inside — the line exists
         # and draws nothing. Remove it to exercise creation from scratch.
@@ -650,6 +686,13 @@
         xf2 = XLSX.openxlsx(tmp)
         c2 = first(XLSX.Charts.getCharts(xf2[1]))
         @test XLSX.Charts.getSeriesLine(c2, 1).value.fill.fgcolor.rgb == "008000"
+
+    end
+
+    @testset "chart error branches" begin
+        local xf = XLSX.openxlsx(joinpath(data_directory, "chart_basic.xlsx"); mode="rw")
+        local c = XLSX.getChart(xf["Data"], "chart1")
+        @test_throws XLSX.XLSXError XLSX.Charts.setSeriesLine(c, 1, :bogus)       # not :none/:inherit
     end
 
     @testset "setMarker" begin
@@ -657,7 +700,7 @@
         cp(joinpath(data_directory, "chart_appearance.xlsx"), tmp)
 
         xf = XLSX.openxlsx(tmp; mode="rw")
-        c = first(XLSX.Charts.getCharts(xf[1]))
+        local c = first(XLSX.Charts.getCharts(xf[1]))
 
         # Series 3 is the line series: c:marker diamond size 9 with its own spPr.
         m = XLSX.Charts.getSeriesMarker(c, 3)
@@ -721,7 +764,7 @@
 
         xf = XLSX.openxlsx(tmp; mode="rw")
         wb = XLSX.get_workbook(xf[1])
-        c = first(XLSX.Charts.getCharts(xf[1]))
+        local c = first(XLSX.Charts.getCharts(xf[1]))
 
         # Series 1's labels are sz 1050 accent1+lumMod; series 2's are sz 900.
         @test XLSX.Charts.getLabelTextProp(c, 1, :size).value ≈ 10.5
@@ -811,11 +854,20 @@
         @test XLSX.Charts.getLabelTextProp(c2, 3, :size).value ≈ 11.0
     end
 
+    @testset "run properties written in hundredths" begin
+        local xf = XLSX.openxlsx(joinpath(data_directory, "chart_basic.xlsx"); mode="rw")
+        local c = XLSX.getChart(xf["Data"], "chart1")
+        for (field, v) in ((:kern, 12.0), (:spacing, 1.5), (:baseline, 0.3))
+            XLSX.Charts.setLabelTextProp(c, 1, field, v)
+            @test XLSX.Charts.getLabelTextProp(c, 1, field).value ≈ v
+        end
+        SAVE_FILES && save_outfile(xf)
+    end
     @testset "title and legend text" begin
         tmp = joinpath(mktempdir(), "appearance.xlsx")
         cp(joinpath(data_directory, "chart_appearance.xlsx"), tmp)
         xf = XLSX.openxlsx(tmp; mode="rw")
-        c = first(XLSX.Charts.getCharts(xf[1]))
+        local c = first(XLSX.Charts.getCharts(xf[1]))
         wb = XLSX.get_workbook(xf[1])
 
         # The fixture's chart title has spPr and txPr but no c:tx — Excel generates
@@ -871,7 +923,7 @@
         tmp = joinpath(mktempdir(), "prefix.xlsx")
         cp(joinpath(data_directory, "chart_appearance.xlsx"), tmp)
         xf = XLSX.openxlsx(tmp; mode="rw")
-        c = only(filter(x -> x isa XLSX.Charts.Chart, XLSX.Charts.getCharts(xf)))
+        local c = only(filter(x -> x isa XLSX.Charts.Chart, XLSX.Charts.getCharts(xf)))
 
         # strip series 1's spPr so the setter has to create one
         root = XLSX.Charts.chart_root(c)
@@ -887,7 +939,7 @@
         tmp = joinpath(mktempdir(), "c_runclear.xlsx")
         cp(joinpath(data_directory, "chart_basic.xlsx"), tmp)
         xf = XLSX.openxlsx(tmp; mode="rw")
-        c = only(filter(x -> x isa XLSX.Charts.Chart, XLSX.Charts.getCharts(xf)))
+        local c = only(filter(x -> x isa XLSX.Charts.Chart, XLSX.Charts.getCharts(xf)))
         c = XLSX.Charts.setChartTitleTextProp(c, :size, 18)
         @test XLSX.Charts.default_run_props(XLSX.Charts.getChartTitleTextProps(c)).size ≈ 18.0
         rich = XLSX.first_element_with_tag(
@@ -903,7 +955,7 @@
         out = "chart_durable_out.xlsx"
         cp(joinpath(data_directory, "chart_basic.xlsx"), path; force=true)
         xf = XLSX.openxlsx(path; mode="rw")
-        c = XLSX.Charts.getChart(xf, "chart1")
+        local c = XLSX.Charts.getChart(xf, "chart1")
         c2 = XLSX.Charts.getChart(xf, "chart1")          # obtained before the write
 
         n = length(XLSX.Charts.getChartSeries(c))
@@ -957,7 +1009,7 @@
         path = "chart_axis_durable.xlsx"
         cp(joinpath(data_directory, "chart_basic.xlsx"), path; force=true)
         xf = XLSX.openxlsx(path; mode="rw")
-        c = XLSX.Charts.getChart(xf, "chart1")
+        local c = XLSX.Charts.getChart(xf, "chart1")
         ax = only(XLSX.Charts.getChartAxes(c, :value))
 
         @test isnothing(XLSX.Charts.getAxisTitleText(c, ax))
@@ -975,7 +1027,7 @@
         path = "chart_create_points.xlsx"
         cp(joinpath(data_directory, "chart_gaps.xlsx"), path; force=true)
         xf = XLSX.openxlsx(path; mode="rw")
-        c = XLSX.Charts.getCharts(xf)[1]
+        local c = XLSX.Charts.getCharts(xf)[1]
         @test isempty(XLSX.Charts.getSeriesDataPoints(c, 1))
 
         # Created out of order; stored in c:idx order. Points 1 and 4 both plot.
@@ -1025,7 +1077,7 @@
         plain(x) = sprint(show, MIME("text/plain"), x)
 
         xf = XLSX.opentemplate(joinpath(data_directory, "chart_kinds.xlsx"))
-        c = XLSX.Charts.getCharts(xf["linemarkers"])[1]
+        local c = XLSX.Charts.getCharts(xf["linemarkers"])[1]
 
         XLSX.Charts.setMarker(c, 1; symbol=:circle, size=7)
         m = XLSX.Charts.getSeriesMarker(c, 1)
@@ -1051,7 +1103,7 @@
         cp(joinpath(data_directory, "chart_kinds.xlsx"), tmp; force=true)
         try
             xf = XLSX.openxlsx(tmp; mode="rw")
-            c = first(XLSX.Charts.getCharts(xf["stackedbar"]))
+            local c = first(XLSX.Charts.getCharts(xf["stackedbar"]))
             axs = XLSX.Charts.getChartAxes(c)
             catax = only(filter(a -> a.kind === :catAx, axs))
             valax = only(filter(a -> a.kind === :valAx, axs))
@@ -1183,7 +1235,7 @@
             cp(joinpath(data_directory, "chart_kinds.xlsx"), tmp; force=true)
             try
                 xf = XLSX.openxlsx(tmp; mode="rw")
-                c = first(XLSX.Charts.getCharts(xf["stackedbar"]))
+                local c = first(XLSX.Charts.getCharts(xf["stackedbar"]))
                 axs = XLSX.Charts.getChartAxes(c)
                 catax = only(filter(a -> a.kind === :catAx, axs))
                 valax = only(filter(a -> a.kind === :valAx, axs))
@@ -1230,12 +1282,12 @@
                 @test XLSX.Charts._attr(rpr, "sz") == "1400"
                 @test XLSX.Charts._attr(XLSX.first_element_with_tag(rpr, "latin"), "typeface") == "Comic Sans MS"
 
-                            # Excel's names are accepted as aliases for the DrawingML fields
+                # Excel's names are accepted as aliases for the DrawingML fields
                 c = XLSX.Charts.setAxisTextProp(c, catax, :font, "Arial")
                 rpr = XLSX.first_element_with_tag(
+                    XLSX.first_element_with_tag(
                         XLSX.first_element_with_tag(
-                            XLSX.first_element_with_tag(
-                                XLSX.first_element_with_tag(XLSX.Charts._axnode(c, catax), "txPr"),
+                            XLSX.first_element_with_tag(XLSX.Charts._axnode(c, catax), "txPr"),
                             "p"), "pPr"), "defRPr")
                 @test XLSX.Charts._attr(XLSX.first_element_with_tag(rpr, "latin"), "typeface") == "Arial"
                 c = XLSX.Charts.setAxisTextProp(c, catax, :color, "FF0000")

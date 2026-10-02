@@ -1,6 +1,6 @@
 @testset "ChartExProps" begin
     @testset "series, layout and data blocks" begin
-        f  = XLSX.readxlsx(joinpath(data_directory, "chart_ex.xlsx"))
+        f = XLSX.readxlsx(joinpath(data_directory, "chart_ex.xlsx"))
         cx = only(filter(x -> x isa XLSX.Charts.ChartEx, XLSX.Charts.getCharts(f)))
 
         @test XLSX.Charts.getChartSeriesCount(cx) == 1
@@ -76,13 +76,13 @@
             c = chart("pareto")
             @test XLSX.Charts.getChartSeriesCount(c) == 2
             @test [XLSX.Charts.getSeriesLayout(c, i) for i in 1:2] == [:clusteredColumn, :clusteredColumn]
-            @test [XLSX.Charts.getSeriesLayout(c, i; pareto = true) for i in 1:2] == [:paretoLine, :paretoLine]
+            @test [XLSX.Charts.getSeriesLayout(c, i; pareto=true) for i in 1:2] == [:paretoLine, :paretoLine]
             @test [XLSX.Charts.getSeriesHidden(c, i) for i in 1:2] == [nothing, true]
-            @test [XLSX.Charts.getSeriesHidden(c, i; pareto = true) for i in 1:2] == [nothing, nothing]
+            @test [XLSX.Charts.getSeriesHidden(c, i; pareto=true) for i in 1:2] == [nothing, nothing]
             @test [XLSX.Charts.getSeriesAxisIds(c, i) for i in 1:2] == [[1], [1]]
-            @test [XLSX.Charts.getSeriesAxisIds(c, i; pareto = true) for i in 1:2] == [[2], [2]]
+            @test [XLSX.Charts.getSeriesAxisIds(c, i; pareto=true) for i in 1:2] == [[2], [2]]
             @test [XLSX.Charts.getSeriesAggregation(c, i) for i in 1:2] == [true, true]
-            @test isnothing(XLSX.Charts.getSeriesData(c, 1; pareto = true))
+            @test isnothing(XLSX.Charts.getSeriesData(c, 1; pareto=true))
             blocks = XLSX.Charts.getChartDataBlocks(c)
             @test length(blocks) == 2
             @test blocks[1].dimensions[1].formula == blocks[2].dimensions[1].formula  # shared name
@@ -122,7 +122,7 @@
         @test e.value.fgcolor.val == "accent2"
 
         # Point 5 (idx 4) has its own fill: explicit colour with transforms.
-        e5 = XLSX.Charts.getSeriesFill(c, 1; point = 5)
+        e5 = XLSX.Charts.getSeriesFill(c, 1; point=5)
         @test e5.site.level == :point
         @test [s.level for s in e5.chain] == [:point, :series]
         @test e5.value.fgcolor.kind == :srgb
@@ -131,10 +131,10 @@
         @test e5.value.fgcolor.rgb == "8ED973"                                  # transforms applied
 
         # Point 1 has no dataPt: no point rung, resolves at the series.
-        e1 = XLSX.Charts.getSeriesFill(c, 1; point = 1)
+        e1 = XLSX.Charts.getSeriesFill(c, 1; point=1)
         @test e1.site.level == :series
         @test [s.level for s in e1.chain] == [:series]
-        @test_throws XLSX.XLSXError XLSX.Charts.getSeriesFill(c, 1; point = 0)
+        @test_throws XLSX.XLSXError XLSX.Charts.getSeriesFill(c, 1; point=0)
 
         # Label text: set on dataLabels/txPr defRPr.
         s = XLSX.Charts.getLabelTextProp(c, 1, :size)
@@ -169,7 +169,7 @@
     @testset "setSeriesFill" begin
         tmp = joinpath(mktempdir(), "cx_fill.xlsx")
         cp(joinpath(data_directory, "chartex_formatted.xlsx"), tmp)
-        xf = XLSX.openxlsx(tmp; mode = "rw")
+        xf = XLSX.openxlsx(tmp; mode="rw")
         c = only(filter(x -> x isa XLSX.Charts.ChartEx, XLSX.Charts.getCharts(xf)))
 
         # series fill, replacing a theme colour
@@ -177,27 +177,27 @@
         @test XLSX.Charts.getSeriesFill(c, 1).value.fgcolor.rgb == "FF0000"   # same handle, still valid
 
         # an existing dataPt (point 5, idx 4) is edited in place
-        XLSX.Charts.setSeriesFill(c, 1, XLSX.Charts.SchemeColor(:accent1); point = 5)
-        @test XLSX.Charts.getSeriesFill(c, 1; point = 5).value.fgcolor.val == "accent1"
+        XLSX.Charts.setSeriesFill(c, 1, XLSX.Charts.SchemeColor(:accent1); point=5)
+        @test XLSX.Charts.getSeriesFill(c, 1; point=5).value.fgcolor.val == "accent1"
 
         # new dataPts: one before idx 4, one after, kept in idx order
-        XLSX.Charts.setSeriesFill(c, 1, "blue";  point = 2)
-        XLSX.Charts.setSeriesFill(c, 1, "green"; point = 7)
+        XLSX.Charts.setSeriesFill(c, 1, "blue"; point=2)
+        XLSX.Charts.setSeriesFill(c, 1, "green"; point=7)
         ser = XLSX.Charts._cx_series_node(c, 1)
         @test [XLSX.Charts._cx_idx(n) for n in XLSX.elements_with_tag(ser, "dataPt")] == [1, 4, 6]
-        @test XLSX.Charts.getSeriesFill(c, 1; point = 2).site.level == :point
+        @test XLSX.Charts.getSeriesFill(c, 1; point=2).site.level == :point
 
         # child order of the series follows the schema
         @test [String(XLSX.localname(n)) for n in XLSX.XML.eachelement(ser)] ==
-              ["spPr", "dataPt", "dataPt", "dataPt", "dataLabels", "dataId", "layoutPr"]
+            ["spPr", "dataPt", "dataPt", "dataPt", "dataLabels", "dataId", "layoutPr"]
 
         # :none is an explicit setting; :inherit on an unformatted point creates nothing
-        XLSX.Charts.setSeriesFill(c, 1, :none; point = 2)
-        @test XLSX.Charts.getSeriesFill(c, 1; point = 2).value.kind === :none
-        XLSX.Charts.setSeriesFill(c, 1, :inherit; point = 3)
+        XLSX.Charts.setSeriesFill(c, 1, :none; point=2)
+        @test XLSX.Charts.getSeriesFill(c, 1; point=2).value.kind === :none
+        XLSX.Charts.setSeriesFill(c, 1, :inherit; point=3)
         @test length(XLSX.elements_with_tag(XLSX.Charts._cx_series_node(c, 1), "dataPt")) == 3
 
-        @test_throws XLSX.XLSXError XLSX.Charts.setSeriesFill(c, 1, "red"; point = 0)
+        @test_throws XLSX.XLSXError XLSX.Charts.setSeriesFill(c, 1, "red"; point=0)
         @test_throws XLSX.XLSXError XLSX.Charts.setSeriesFill(c, 2, "red")   # only one series
 
         @test all(n -> XLSX.XML.tag(XLSX.first_element_with_tag(n, "spPr")) == "cx:spPr",
@@ -205,18 +205,18 @@
 
         # the changes reach disk
         out = joinpath(mktempdir(), "cx_fill_out.xlsx")
-        XLSX.writexlsx(out, xf, overwrite = true)
+        XLSX.writexlsx(out, xf, overwrite=true)
         f = XLSX.readxlsx(out)
         d = only(filter(x -> x isa XLSX.Charts.ChartEx, XLSX.Charts.getCharts(f)))
         @test XLSX.Charts.getSeriesFill(d, 1).value.fgcolor.rgb == "FF0000"
-        @test XLSX.Charts.getSeriesFill(d, 1; point = 7).value.fgcolor.rgb == "008000"
-        @test XLSX.Charts.getSeriesFill(d, 1; point = 2).value.kind === :none
+        @test XLSX.Charts.getSeriesFill(d, 1; point=7).value.fgcolor.rgb == "008000"
+        @test XLSX.Charts.getSeriesFill(d, 1; point=2).value.kind === :none
     end
 
     @testset "setSeriesFill :inherit writes nothing where nothing was set" begin
         tmp = joinpath(mktempdir(), "cx_inherit.xlsx")
         cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp)
-        xf = XLSX.openxlsx(tmp; mode = "rw")
+        xf = XLSX.openxlsx(tmp; mode="rw")
         w = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "waterfall", XLSX.Charts.getCharts(xf)))
         XLSX.Charts.setSeriesFill(w, 1, :inherit)
         @test isnothing(XLSX.first_element_with_tag(XLSX.Charts._cx_series_node(w, 1), "spPr"))
@@ -225,11 +225,11 @@
     @testset "setSeriesLine" begin
         tmp = joinpath(mktempdir(), "cx_line.xlsx")
         cp(joinpath(data_directory, "chartex_formatted.xlsx"), tmp)
-        xf = XLSX.openxlsx(tmp; mode = "rw")
+        xf = XLSX.openxlsx(tmp; mode="rw")
         c = only(filter(x -> x isa XLSX.Charts.ChartEx, XLSX.Charts.getCharts(xf)))
 
         # several properties at once, on a series with no a:ln
-        XLSX.Charts.setSeriesLine(c, 1; color = "FFC00000", width = 2.25, dash = :dash, cap = :round)
+        XLSX.Charts.setSeriesLine(c, 1; color="FFC00000", width=2.25, dash=:dash, cap=:round)
         l = XLSX.Charts.getSeriesLine(c, 1).value
         @test l.fill.fgcolor.rgb == "C00000"
         @test l.width ≈ 2.25
@@ -241,15 +241,15 @@
         @test XLSX.Charts.getSeriesLine(c, 1).value.dash == "sysDot"
 
         # one property back to inherit, leaving the rest
-        XLSX.Charts.setSeriesLine(c, 1; width = :inherit)
+        XLSX.Charts.setSeriesLine(c, 1; width=:inherit)
         l = XLSX.Charts.getSeriesLine(c, 1).value
         @test isnothing(l.width) && l.fill.fgcolor.rgb == "C00000"
 
         # a created point gets its own outline
-        XLSX.Charts.setSeriesLine(c, 1; point = 2, color = "FF0070C0", width = 1.5)
-        @test XLSX.Charts.getSeriesLine(c, 1; point = 2).site.level == :point
+        XLSX.Charts.setSeriesLine(c, 1; point=2, color="FF0070C0", width=1.5)
+        @test XLSX.Charts.getSeriesLine(c, 1; point=2).site.level == :point
         dp = only(filter(n -> XLSX.Charts._cx_idx(n) == 1,
-                         XLSX.elements_with_tag(XLSX.Charts._cx_series_node(c, 1), "dataPt")))
+            XLSX.elements_with_tag(XLSX.Charts._cx_series_node(c, 1), "dataPt")))
         @test XLSX.XML.tag(XLSX.first_element_with_tag(dp, "spPr")) == "cx:spPr"
 
         # :none is explicit, :inherit removes the a:ln
@@ -257,7 +257,7 @@
         @test XLSX.Charts.getSeriesLine(c, 1).value.fill.kind === :none
         XLSX.Charts.setSeriesLine(c, 1, :inherit)
         @test isnothing(XLSX.first_element_with_tag(
-                  XLSX.first_element_with_tag(XLSX.Charts._cx_series_node(c, 1), "spPr"), "ln"))
+            XLSX.first_element_with_tag(XLSX.Charts._cx_series_node(c, 1), "spPr"), "ln"))
 
         # no keywords is a no-op; a bad symbol throws
         @test XLSX.Charts.setSeriesLine(c, 1) === c
@@ -265,15 +265,15 @@
 
         # reaches disk
         out = joinpath(mktempdir(), "cx_line_out.xlsx")
-        XLSX.writexlsx(out, xf, overwrite = true)
+        XLSX.writexlsx(out, xf, overwrite=true)
         d = only(filter(x -> x isa XLSX.Charts.ChartEx, XLSX.Charts.getCharts(XLSX.readxlsx(out))))
-        @test XLSX.Charts.getSeriesLine(d, 1; point = 2).value.width ≈ 1.5
+        @test XLSX.Charts.getSeriesLine(d, 1; point=2).value.width ≈ 1.5
     end
 
     @testset "setLabelTextProp" begin
         tmp = joinpath(mktempdir(), "cx_label.xlsx")
         cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp)
-        xf = XLSX.openxlsx(tmp; mode = "rw")
+        xf = XLSX.openxlsx(tmp; mode="rw")
         # the funnel has no cx:dataLabels at all
         c = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "funnel", XLSX.Charts.getCharts(xf)))
 
@@ -286,7 +286,7 @@
         @test XLSX.XML.tag(lbl) == "cx:dataLabels"
         @test [String(XLSX.localname(n)) for n in XLSX.XML.eachelement(lbl)] == ["txPr", "visibility"]
         @test all(f -> XLSX.Charts.getLabelFlag(c, 1, f) === false,
-                  (:seriesName, :categoryName, :value))
+            (:seriesName, :categoryName, :value))
         @test XLSX.XML.tag(XLSX.first_element_with_tag(lbl, "txPr")) == "cx:txPr"
 
         # more fields, and a composite one
@@ -307,7 +307,7 @@
         @test XLSX.Charts.getLabelTextProp(w, 1, :size).value ≈ 9.0
 
         out = joinpath(mktempdir(), "cx_label_out.xlsx")
-        XLSX.writexlsx(out, xf, overwrite = true)
+        XLSX.writexlsx(out, xf, overwrite=true)
         f = XLSX.readxlsx(out)
         d = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "funnel", XLSX.Charts.getCharts(f)))
         @test XLSX.Charts.getLabelTextProp(d, 1, :bold).value === true
@@ -316,7 +316,7 @@
     @testset "title, legend and axis text" begin
         tmp = joinpath(mktempdir(), "cx_text.xlsx")
         cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp)
-        xf = XLSX.openxlsx(tmp; mode = "rw")
+        xf = XLSX.openxlsx(tmp; mode="rw")
         w = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "waterfall", XLSX.Charts.getCharts(xf)))
 
         # title: cx:title exists but has no txPr
@@ -325,7 +325,7 @@
         tp = XLSX.Charts.default_run_props(XLSX.Charts.getChartTitleTextProps(w))
         @test tp.size ≈ 16.0 && tp.fill.fgcolor.rgb == "7030A0"
         @test XLSX.XML.tag(XLSX.first_element_with_tag(
-                  XLSX.first_element_with_tag(XLSX.Charts._cx_chart(w), "title"), "txPr")) == "cx:txPr"
+            XLSX.first_element_with_tag(XLSX.Charts._cx_chart(w), "title"), "txPr")) == "cx:txPr"
 
         # legend
         XLSX.Charts.setLegendTextProp(w, :bold, true)
@@ -346,16 +346,20 @@
         @test XLSX.Charts.default_run_props(XLSX.Charts.getLegendTextProps(fn)).size ≈ 9.0
 
         out = joinpath(mktempdir(), "cx_text_out.xlsx")
-        XLSX.writexlsx(out, xf, overwrite = true)
+        XLSX.writexlsx(out, xf, overwrite=true)
         d = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "waterfall",
-                        XLSX.Charts.getCharts(XLSX.readxlsx(out))))
+            XLSX.Charts.getCharts(XLSX.readxlsx(out))))
         @test XLSX.Charts.default_run_props(XLSX.Charts.getChartTitleTextProps(d)).size ≈ 16.0
+         
+        x = XLSX.getCharts(XLSX.readxlsx(joinpath(data_directory, "chartex_kinds.xlsx")))[1]
+        @test_throws XLSX.XLSXError XLSX.Charts.getAxisTitleTextProps(x, 999)     # no such axis id
+    
     end
 
     @testset "setChartTitleText and setSeriesName" begin
         tmp = joinpath(mktempdir(), "cx_text_set.xlsx")
         cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp)
-        xf = XLSX.openxlsx(tmp; mode = "rw")
+        xf = XLSX.openxlsx(tmp; mode="rw")
 
         # histogram: a typed title, with the text also in the txPr runs
         h = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "histogram", XLSX.Charts.getCharts(xf)))
@@ -388,7 +392,7 @@
         @test XLSX.Charts.getSeriesName(w, 1) == "Movement"
 
         out = joinpath(mktempdir(), "cx_text_set_out.xlsx")
-        XLSX.writexlsx(out, xf, overwrite = true)
+        XLSX.writexlsx(out, xf, overwrite=true)
         f = XLSX.readxlsx(out)
         d = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "histogram", XLSX.Charts.getCharts(f)))
         @test XLSX.Charts.getChartTitle(d) == "Distribution of values"
@@ -397,7 +401,7 @@
     @testset "setSeriesSubtotals" begin
         tmp = joinpath(mktempdir(), "cx_subtotals.xlsx")
         cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp)
-        xf = XLSX.openxlsx(tmp; mode = "rw")
+        xf = XLSX.openxlsx(tmp; mode="rw")
         w = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "waterfall", XLSX.Charts.getCharts(xf)))
 
         @test XLSX.Charts.getSeriesSubtotals(w, 1) == [2, 5]     # what Excel wrote
@@ -406,7 +410,7 @@
         XLSX.Charts.setSeriesSubtotals(w, 1, Int[])
         @test XLSX.Charts.getSeriesSubtotals(w, 1) == Int[]
         @test !isnothing(XLSX.first_element_with_tag(
-                  XLSX.Charts._cx_layoutpr(w, 1), "subtotals"))  # present but empty
+            XLSX.Charts._cx_layoutpr(w, 1), "subtotals"))  # present but empty
         XLSX.Charts.setSeriesSubtotals(w, 1, :inherit)
         @test isnothing(XLSX.Charts.getSeriesSubtotals(w, 1))
         @test_throws XLSX.XLSXError XLSX.Charts.setSeriesSubtotals(w, 1, [0, 2])
@@ -419,18 +423,18 @@
         @test XLSX.XML.tag(XLSX.Charts._cx_layoutpr(fn, 1)) == "cx:layoutPr"
 
         out = joinpath(mktempdir(), "cx_subtotals_out.xlsx")
-        XLSX.writexlsx(out, xf, overwrite = true)
+        XLSX.writexlsx(out, xf, overwrite=true)
         d = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "waterfall",
-                        XLSX.Charts.getCharts(XLSX.readxlsx(out))))
+            XLSX.Charts.getCharts(XLSX.readxlsx(out))))
         @test isnothing(XLSX.Charts.getSeriesSubtotals(d, 1))
     end
 
     @testset "layoutPr setters" begin
         tmp = joinpath(mktempdir(), "cx_layoutpr.xlsx")
         cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp)
-        xf = XLSX.openxlsx(tmp; mode = "rw")
+        xf = XLSX.openxlsx(tmp; mode="rw")
         chart(sheet) = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == sheet,
-                                   XLSX.Charts.getCharts(xf)))
+            XLSX.Charts.getCharts(xf)))
 
         @testset "quartile method and parent label layout" begin
             b = chart("boxwhisker")
@@ -481,29 +485,29 @@
         @testset "binning and aggregation" begin
             h = chart("histogram")
             @test XLSX.Charts.getSeriesBinning(h, 1) ==
-                  XLSX.Charts.ChartExBinning(:r, 0.0, 100.0, 10.0, nothing)
+                XLSX.Charts.ChartExBinning(:r, 0.0, 100.0, 10.0, nothing)
 
-            XLSX.Charts.setSeriesBinning(h, 1; binSize = 20, overflow = 80, intervalClosed = :l)
+            XLSX.Charts.setSeriesBinning(h, 1; binSize=20, overflow=80, intervalClosed=:l)
             @test XLSX.Charts.getSeriesBinning(h, 1) ==
-                  XLSX.Charts.ChartExBinning(:l, 0.0, 80.0, 20.0, nothing)
+                XLSX.Charts.ChartExBinning(:l, 0.0, 80.0, 20.0, nothing)
 
             # binCount replaces binSize
-            XLSX.Charts.setSeriesBinning(h, 1; binCount = 7)
+            XLSX.Charts.setSeriesBinning(h, 1; binCount=7)
             b = XLSX.Charts.getSeriesBinning(h, 1)
             @test isnothing(b.binSize) && b.binCount == 7
 
-            XLSX.Charts.setSeriesBinning(h, 1; underflow = :auto, overflow = :inherit)
+            XLSX.Charts.setSeriesBinning(h, 1; underflow=:auto, overflow=:inherit)
             b = XLSX.Charts.getSeriesBinning(h, 1)
             @test b.underflow === :auto && isnothing(b.overflow)
 
             @test XLSX.Charts.setSeriesBinning(h, 1) === h        # no keywords is a no-op
-            @test_throws XLSX.XLSXError XLSX.Charts.setSeriesBinning(h, 1; binSize = 5, binCount = 5)
-            @test_throws XLSX.XLSXError XLSX.Charts.setSeriesBinning(h, 1; intervalClosed = :x)
+            @test_throws XLSX.XLSXError XLSX.Charts.setSeriesBinning(h, 1; binSize=5, binCount=5)
+            @test_throws XLSX.XLSXError XLSX.Charts.setSeriesBinning(h, 1; intervalClosed=:x)
 
             # aggregation and binning exclude each other
             p = chart("pareto")
             @test XLSX.Charts.getSeriesAggregation(p, 1) === true
-            XLSX.Charts.setSeriesBinning(p, 1; binSize = 5)
+            XLSX.Charts.setSeriesBinning(p, 1; binSize=5)
             @test XLSX.Charts.getSeriesAggregation(p, 1) === false
             XLSX.Charts.setSeriesAggregation(p, 1, true)
             @test isnothing(XLSX.Charts.getSeriesBinning(p, 1))
@@ -513,12 +517,31 @@
 
         @testset "reaches disk" begin
             out = joinpath(mktempdir(), "cx_layoutpr_out.xlsx")
-            XLSX.writexlsx(out, xf, overwrite = true)
+            XLSX.writexlsx(out, xf, overwrite=true)
             f = XLSX.readxlsx(out)
             h = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "histogram",
-                            XLSX.Charts.getCharts(f)))
+                XLSX.Charts.getCharts(f)))
             @test XLSX.Charts.getSeriesBinning(h, 1).binCount == 7
         end
     end
-    
+    @testset "every line setter reaches a ChartEx" begin
+        xf = XLSX.openxlsx(joinpath(data_directory, "chartex_kinds.xlsx"); mode="rw")
+        c = XLSX.getCharts(xf)[1]
+        XLSX.Charts.setSeriesLineCap(c, 1, :round)
+        XLSX.Charts.setSeriesLineCompound(c, 1, :double)
+        XLSX.Charts.setSeriesLineJoin(c, 1, :miter)
+        XLSX.Charts.setSeriesLineMiterLimit(c, 1, 8)
+        ln = XLSX.Charts.getSeriesLine(c, 1).value
+        @test ln.cap == "rnd"
+        @test ln.compound == "dbl"
+        @test ln.join == "miter"
+        @test ln.miter_limit ≈ 8.0
+
+        XLSX.Charts.setSeriesFill(c, 1, :red)                       # a colour name as a Symbol
+        @test XLSX.Charts.getSeriesFill(c, 1).value.fgcolor.rgb == "FF0000"
+        XLSX.Charts.setSeriesFill(c, 1, :inherit)
+        @test isnothing(XLSX.Charts.getSeriesFill(c, 1).value)
+        SAVE_FILES && save_outfile(xf)
+    end
+
 end

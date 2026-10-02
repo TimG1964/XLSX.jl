@@ -771,7 +771,6 @@ julia> XLSX.partition(sheet, "B2:B101", v -> v isa Real ? (v < 0 ? :neg : :pos) 
  :neg => B8:B11,B13:B14,B99:B101
 ```
 
-See also [`setDataBands`](@ref).
 """
 function partition(ws::Worksheet, rng::CellRange, key::Function; compress::Bool=true)
     data = getdata(ws, rng)
@@ -845,8 +844,6 @@ break at its default:
 ```julia
 julia> XLSX.partition(sheet, "B2:B101", [10, 50]; gte=[false, true])
 ```
-
-See also [`setDataBands`](@ref).
 """
 function partition(ws::Worksheet, rng::CellRange, breaks::AbstractVector{<:Real};
                    labels=nothing, gte::Union{Bool,AbstractVector{Bool}}=true,

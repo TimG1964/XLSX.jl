@@ -313,9 +313,9 @@
         @test XLSX.Charts.getChartType(rmc) === :regionMap
         # survives a round trip
         f = "regionmap_rt.xlsx"
-        XLSX.writexlsx(f, XLSX.openxlsx(joinpath(data_directory, "chartex_regionmap.xlsx"); mode = "rw"); overwrite = true)
+        XLSX.writexlsx(f, XLSX.openxlsx(joinpath(data_directory, "chartex_regionmap.xlsx"); mode="rw"); overwrite=true)
         @test only(XLSX.getCharts(XLSX.readxlsx(f))) isa XLSX.Charts.ChartEx
-        rm(f; force = true)
+        rm(f; force=true)
     end
     @testset "external reference" begin  # chart_external.xlsx
         f = XLSX.readxlsx(joinpath(data_directory, "chart_external.xlsx"))
@@ -448,6 +448,26 @@
         @test Nothing <: XLSX.Charts.ChartRange
     end
 
+    @testset "literal series" begin
+        lit(tag, pts) = XLSX.XML.parse("""<c:val xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:$tag><c:ptCount val="$(length(pts))"/>""" *
+            join("<c:pt idx=\"$(i-1)\"><c:v>$p</c:v></c:pt>" for (i, p) in enumerate(pts)) *
+            "</c:$tag></c:val>", XLSX.XML.Node)
+        root(d) = first(XLSX.XML.eachelement(d))
+
+        n = XLSX.Charts.parse_chart_ref(root(lit("numLit", [1, 2.5])))
+        @test n.kind === :numLit
+        @test isnothing(n.ref)
+        @test n.data == [1.0, 2.5]
+        @test isnothing(XLSX.Charts.chart_range(n))                 # literal: no addressable range
+
+        s = XLSX.Charts.parse_chart_ref(root(lit("strLit", ["a", "b"])))
+        @test s.kind === :strLit
+        @test s.data == ["a", "b"]
+
+        m = XLSX.Charts.parse_chart_ref(root(lit("numLit", [1, 2])); read_cached_values=false)
+        @test isempty(m.data)
+        @test m.ptCount == 2
+    end
     @testset "unique labels" begin
         labels = Symbol[]
         @test XLSX.Charts.unique_label!(labels, "Sales") === :Sales
@@ -568,7 +588,7 @@
         # chart_scatter_xy has two scatter series on different x ranges, so the
         # categories can't collapse into one column.
         xf = XLSX.readxlsx(joinpath(data_directory, "chart_scatter_xy.xlsx"))
-        c  = XLSX.Charts.getChart(xf, "chart1")
+        c = XLSX.Charts.getChart(xf, "chart1")
 
         r = XLSX.Charts.getChartRanges(c)
         @test r[1].categories != r[2].categories        # the premise of the fixture
@@ -671,7 +691,7 @@
         # A chartsheet chart's series take their data from a worksheet.
         xf["data"]["B2:B5"] = [8, 7, 3, 9]
         xf["data"]["A2:A5"] = ["A", "B", "C", "D"]
-        XLSX.Charts.addSeries(c, "data!B2:B5"; categories = "data!A2:A5", name = "y")
+        XLSX.Charts.addSeries(c, "data!B2:B5"; categories="data!A2:A5", name="y")
         s = only(XLSX.Charts.getChartSeries(c))
         @test s.name == "y"
         @test s.values.ref == "data!\$B\$2:\$B\$5"
@@ -685,10 +705,10 @@
 
         # chartEx on a chartsheet: qualified references resolve through the workbook,
         # unqualified ones are refused before anything is written.
-        @test_throws XLSX.XLSXError XLSX.Charts.addChartEx(xf, :boxWhisker, "B2:B5"; sheetname = "Bad")
+        @test_throws XLSX.XLSXError XLSX.Charts.addChartEx(xf, :boxWhisker, "B2:B5"; sheetname="Bad")
         @test !("Bad" in XLSX.sheetnames(xf))
         xf["data"]["C2:C5"] = [5, 6, 2, 4]
-        bw = XLSX.Charts.addChartEx(xf, :boxWhisker, "data!B2:B5"; sheetname = "Box")
+        bw = XLSX.Charts.addChartEx(xf, :boxWhisker, "data!B2:B5"; sheetname="Box")
         XLSX.Charts.addSeries(bw, "data!C2:C5")
         @test XLSX.Charts.getChartSeriesCount(bw) == 2
         @test_throws XLSX.XLSXError XLSX.Charts.addSeries(bw, "C2:C5")
@@ -878,7 +898,7 @@
             @test c isa XLSX.Charts.ChartEx
             @test XLSX.Charts.getChartType(c) === kind
             @test XLSX.Charts.getChartSeriesCount(c) == 1
-            kind === :pareto && @test XLSX.Charts.getSeriesLayout(c, 1; pareto = true) === :paretoLine
+            kind === :pareto && @test XLSX.Charts.getSeriesLayout(c, 1; pareto=true) === :paretoLine
             @test XLSX.Charts.getSeriesName(c, 1) == "Amount"
         end
 
@@ -907,39 +927,39 @@
         @test XLSX.Charts.getChartType(p) === :pareto
         @test XLSX.Charts.getChartSeriesCount(p) == 1
         @test XLSX.Charts.getSeriesLayout(p, 1) === :clusteredColumn
-        @test XLSX.Charts.getSeriesLayout(p, 1; pareto = true) === :paretoLine
+        @test XLSX.Charts.getSeriesLayout(p, 1; pareto=true) === :paretoLine
         @test_throws XLSX.XLSXError XLSX.Charts.getSeriesLayout(p, 2)
         # the line is drawn against the secondary (percentage) axis
-        @test XLSX.Charts.getSeriesAxisIds(p, 1; pareto = true) != XLSX.Charts.getSeriesAxisIds(p, 1)
+        @test XLSX.Charts.getSeriesAxisIds(p, 1; pareto=true) != XLSX.Charts.getSeriesAxisIds(p, 1)
 
         # pareto = true on a chart with no Pareto line is an error, not the series itself
-        @test_throws XLSX.XLSXError XLSX.Charts.getSeriesLayout(w, 1; pareto = true)
-        @test_throws XLSX.XLSXError XLSX.Charts.getSeriesLine(w, 1; pareto = true)
+        @test_throws XLSX.XLSXError XLSX.Charts.getSeriesLayout(w, 1; pareto=true)
+        @test_throws XLSX.XLSXError XLSX.Charts.getSeriesLine(w, 1; pareto=true)
 
         # A setter with pareto = true formats the line and leaves the columns alone
-        xf = XLSX.openxlsx(joinpath(data_directory, "chartex_kinds.xlsx"); mode = "rw")
-        c  = XLSX.getCharts(xf)[6]
+        xf = XLSX.openxlsx(joinpath(data_directory, "chartex_kinds.xlsx"); mode="rw")
+        c = XLSX.getCharts(xf)[6]
         cols_before = XLSX.Charts.getSeriesLine(c, 1)
-        line_before = XLSX.Charts.getSeriesLine(c, 1; pareto = true)
-        XLSX.Charts.setSeriesLineColor(c, 1, "FF0000"; pareto = true)
-        XLSX.Charts.setSeriesLineWidth(c, 1, 2.5; pareto = true)
-        line_after = XLSX.Charts.getSeriesLine(c, 1; pareto = true)
+        line_before = XLSX.Charts.getSeriesLine(c, 1; pareto=true)
+        XLSX.Charts.setSeriesLineColor(c, 1, "FF0000"; pareto=true)
+        XLSX.Charts.setSeriesLineWidth(c, 1, 2.5; pareto=true)
+        line_after = XLSX.Charts.getSeriesLine(c, 1; pareto=true)
         @test line_after != line_before
-        line_after = XLSX.Charts.getSeriesLine(c, 1; pareto = true)
+        line_after = XLSX.Charts.getSeriesLine(c, 1; pareto=true)
         @test line_after.value != line_before.value
         @test XLSX.Charts.getSeriesLine(c, 1).value == cols_before.value
         @test XLSX.Charts.getChartSeriesCount(c) == 1         # formatting adds no series
 
         f = "pareto_line.xlsx"
-        XLSX.writexlsx(f, xf; overwrite = true)
+        XLSX.writexlsx(f, xf; overwrite=true)
         SAVE_FILES && save_outfile(xf)
         yf = XLSX.openxlsx(f; mode="rw")
-        d  = XLSX.getCharts(yf)[6]
-        @test XLSX.Charts.getSeriesLine(d, 1; pareto = true).value == line_after.value
+        d = XLSX.getCharts(yf)[6]
+        @test XLSX.Charts.getSeriesLine(d, 1; pareto=true).value == line_after.value
         @test XLSX.Charts.getSeriesLine(d, 1).value == cols_before.value
         @test XLSX.Charts.getChartSeriesCount(d) == 1
         SAVE_FILES && save_outfile(yf)
-        rm(f; force = true)
+        rm(f; force=true)
     end
     @testset "a failed addChartEx leaves no chartsheet behind" begin
         xf = XLSX.newxlsx("data")
@@ -962,6 +982,33 @@
         @test XLSX.Charts.getChartAxes(ca) == XLSX.Charts.getChartAxes(ca)
         @test XLSX.Charts.getSeriesShapeProps(ca, 1) == XLSX.Charts.getSeriesShapeProps(ca, 1)
         @test XLSX.Charts.getSeriesMarker(ca, 1) == XLSX.Charts.getSeriesMarker(ca, 1)
+    end
+
+    @testset "chart handles compare and hash by part" begin
+        f = XLSX.readxlsx(joinpath(data_directory, "chart_basic.xlsx"))
+        a = XLSX.getChart(f["Data"], "chart1")
+        b = only(XLSX.getCharts(f))
+        @test a == b
+        @test hash(a) == hash(b)
+        @test length(Set([a, b])) == 1
+
+        g = XLSX.readxlsx(joinpath(data_directory, "chartex_kinds.xlsx"))
+        x, y = XLSX.getCharts(g)[1], XLSX.getCharts(g)[1]
+        @test x == y
+        @test hash(x) == hash(y)
+        @test x != XLSX.getCharts(g)[2]
+        # the same part in a different file is a different chart
+        @test x != XLSX.getCharts(XLSX.readxlsx(joinpath(data_directory, "chartex_kinds.xlsx")))[1]
+    end
+
+    @testset "ChartEx show" begin
+        x = XLSX.getCharts(XLSX.readxlsx(joinpath(data_directory, "chartex_kinds.xlsx")))[1]
+        s = sprint(show, MIME"text/plain"(), x)
+        @test startswith(s, "XLSX.Charts.ChartEx \"chartEx1\"")
+        @test occursin("type: waterfall", s)
+        @test occursin("series: 1", s)
+        @test occursin("refs: ", s)
+        @test !isempty(sprint(show, x))
     end
 
     @testset "a value read before a write differs from one read after" begin

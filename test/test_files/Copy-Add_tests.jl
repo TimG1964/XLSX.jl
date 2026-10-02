@@ -157,7 +157,7 @@
         # XLSX.jl cannot currently create formula references that refer to other sheets, so we have to manually 
         # insert them into the workbook's formula cache to test. Excel cannot read such a workbook and deletes these 
         # formulas on opening. Tests are for completeness only
-        f=XLSX.openxlsx("renamedelete.xlsx", mode="w") 
+        f=XLSX.openxlsx("renamedelete.xlsx", mode="w")
         s=f[1]
         s[1:10, 1] = collect(1:10)
         XLSX.addsheet!(f)
@@ -186,19 +186,20 @@
         @test XLSX.getFormula(s2, "B4") == "=#REF!+10"
         @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A1")) == XLSX.Formula("=#REF!+10", nothing, nothing, nothing)
         @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B1")) == XLSX.ReferencedFormula("=#REF!+10", 0, "B1:B4", nothing)
-        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B2")) ==  XLSX.FormulaReference(0, nothing)
-        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B4")) ==  XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B2")) == XLSX.FormulaReference(0, nothing)
+        @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("B4")) == XLSX.FormulaReference(0, nothing)
         SAVE_FILES && save_outfile(f)
 
     end
     @testset "deletesheet! keeps the active tab on the same sheet" begin
         xf = XLSX.newxlsx("A")
-        XLSX.addsheet!(xf, "B"); XLSX.addsheet!(xf, "C")
+        XLSX.addsheet!(xf, "B")
+        XLSX.addsheet!(xf, "C")
         active(x) = parse(Int, XLSX.XML.attributes(first(XLSX.elements_with_tag(first(XLSX.elements_with_tag(
-                        XLSX.xml_root_element(XLSX.xmlroot(x, "xl/workbook.xml")), "bookViews")), "workbookView")))["activeTab"])
+            XLSX.xml_root_element(XLSX.xmlroot(x, "xl/workbook.xml")), "bookViews")), "workbookView")))["activeTab"])
         XLSX.xmlroot(xf, "xl/workbook.xml")                                    # ensure loaded
         wv = first(XLSX.elements_with_tag(first(XLSX.elements_with_tag(
-                 XLSX.xml_root_element(XLSX.xmlroot(xf, "xl/workbook.xml")), "bookViews")), "workbookView"))
+            XLSX.xml_root_element(XLSX.xmlroot(xf, "xl/workbook.xml")), "bookViews")), "workbookView"))
         wv["activeTab"] = "2"                                                  # C is active
         XLSX.deletesheet!(xf, "A")
         @test active(xf) == 1                                                  # still C
@@ -222,7 +223,7 @@
     @testset "deletesheet! invalidates chart references" begin
 
         @testset "c: chart becomes #REF!, cache kept" begin
-            xf = XLSX.openxlsx(joinpath(data_directory, "Chartsheet.xlsx"); mode = "rw")
+            xf = XLSX.openxlsx(joinpath(data_directory, "Chartsheet.xlsx"); mode="rw")
             XLSX.addsheet!(xf, "Keep")
             XLSX.deletesheet!(xf, "Sheet1")
 
@@ -232,21 +233,21 @@
             @test XLSX.getChartData(xf, c.name) isa XLSX.DataTable                  # cache kept
 
             f = "deletesheet_chart_ref.xlsx"
-            XLSX.writexlsx(f, xf; overwrite = true)
+            XLSX.writexlsx(f, xf; overwrite=true)
             SAVE_FILES && save_outfile(xf)
-            yf = XLSX.openxlsx(f; mode = "rw")
+            yf = XLSX.openxlsx(f; mode="rw")
             d = only(XLSX.getCharts(yf))
             @test all(r -> r.values === XLSX.XL_REF, XLSX.getChartRanges(d))
             a, b = XLSX.getChartData(yf, d.name), XLSX.getChartData(xf, c.name)
             @test a.column_labels == b.column_labels && a.data == b.data
             SAVE_FILES && save_outfile(yf)
-            rm(f; force = true)
+            rm(f; force=true)
         end
 
         @testset "chartEx chart loses the reference" begin
             # chartex_kinds.xlsx with the treemap moved to a chartsheet in Excel,
             # so deleting its data sheet leaves the chart behind.
-            xf = XLSX.openxlsx(joinpath(data_directory, "chartex_chartsheet.xlsx"); mode = "rw")
+            xf = XLSX.openxlsx(joinpath(data_directory, "chartex_chartsheet.xlsx"); mode="rw")
             others = filter(c -> XLSX.Charts.getChartType(c) !== :treemap, XLSX.getCharts(xf))
             before = Dict(c.name => string.(XLSX.getChartRanges(c)) for c in others)
 
@@ -260,13 +261,13 @@
             @test length(_chart_elements(strdim, "lvl")) == 2                      # one per hierarchy level
             @test length(_chart_elements(numdim, "lvl")) == 1
             @test all(l -> XLSX.get_attr(l, "ptCount") == "0",
-                    vcat(_chart_elements(strdim, "lvl"), _chart_elements(numdim, "lvl")))
+                vcat(_chart_elements(strdim, "lvl"), _chart_elements(numdim, "lvl")))
             @test isnothing(XLSX.first_element_with_tag(only(_chart_elements(root, "series")), "tx"))
             @test all(isnothing, XLSX.getChartRanges(c))
 
             wb = XLSX.get_workbook(xf)
             @test !any(v -> v.value isa XLSX.DefinedNameRangeTypes && v.value.sheet == "treemap",
-                    values(wb.workbook_names))
+                values(wb.workbook_names))
 
             # charts plotting other sheets are untouched
             for d in filter(d -> haskey(before, d.name), XLSX.getCharts(xf))
@@ -274,26 +275,31 @@
             end
 
             f = "deletesheet_chartex_ref.xlsx"
-            XLSX.writexlsx(f, xf; overwrite = true)
+            XLSX.writexlsx(f, xf; overwrite=true)
             SAVE_FILES && save_outfile(xf)
-            yf = XLSX.openxlsx(f; mode = "rw")
+            yf = XLSX.openxlsx(f; mode="rw")
             d = only(filter(d -> XLSX.Charts.getChartType(d) === :treemap, XLSX.getCharts(yf)))
             @test all(isnothing, XLSX.getChartRanges(d))
             SAVE_FILES && save_outfile(yf)
-            rm(f; force = true)
+            rm(f; force=true)
+        end
+        @testset "levels in a chartEx reference" begin
+            @test XLSX._ref_levels("Data!\$A\$2:\$B\$7", "") == 2         # columns, the default
+            @test XLSX._ref_levels("Data!\$A\$2:\$B\$7", "row") == 6      # rows, for dir="row"
+            @test XLSX._ref_levels("Data!\$C\$2", "") == 1                # a single cell
         end
     end
     @testset "chartEx chart with direct references (as addChartEx writes)" begin
         xf = XLSX.newxlsx("Data")
         ws = xf["Data"]
         rows = [("Region", "Country", "Sales"),
-                ("Europe", "France", 30), ("Europe", "Germany", 45), ("Europe", "Spain", 20),
-                ("Asia", "Japan", 50), ("Asia", "India", 35),
-                ("Americas", "USA", 60), ("Americas", "Brazil", 25)]
+            ("Europe", "France", 30), ("Europe", "Germany", 45), ("Europe", "Spain", 20),
+            ("Asia", "Japan", 50), ("Asia", "India", 35),
+            ("Americas", "USA", 60), ("Americas", "Brazil", 25)]
         for (i, r) in enumerate(rows), (j, v) in enumerate(r)
             ws[i, j] = v
         end
-        XLSX.Charts.addChartEx(xf, :treemap, "Data!C2:C8"; categories = "Data!A2:B8", name_ref = "Data!C1")
+        XLSX.Charts.addChartEx(xf, :treemap, "Data!C2:C8"; categories="Data!A2:B8", name_ref="Data!C1")
         XLSX.addsheet!(xf, "Keep")
         XLSX.deletesheet!(xf, "Data")
 
@@ -350,12 +356,12 @@
         # than assuming file numbering.
         function sheet_xml_path(zipbytes::Vector{UInt8}, sheetname::String)
             r = ZipReader(zipbytes)
-            wbxml  = String(zip_readentry(r, "xl/workbook.xml"))
+            wbxml = String(zip_readentry(r, "xl/workbook.xml"))
             wbrels = String(zip_readentry(r, "xl/_rels/workbook.xml.rels"))
             sheet_rid = Dict(m.captures[1] => m.captures[2]
-                for m in eachmatch(r"<sheet name=\"([^\"]+)\"[^>]*r:id=\"(rId\d+)\"", wbxml))
+                             for m in eachmatch(r"<sheet name=\"([^\"]+)\"[^>]*r:id=\"(rId\d+)\"", wbxml))
             rid_target = Dict(m.captures[1] => m.captures[2]
-                for m in eachmatch(r"<Relationship Id=\"(rId\d+)\"[^>]*Target=\"([^\"]+)\"", wbrels))
+                              for m in eachmatch(r"<Relationship Id=\"(rId\d+)\"[^>]*Target=\"([^\"]+)\"", wbrels))
             return "xl/" * rid_target[sheet_rid[sheetname]]
         end
 
@@ -428,9 +434,9 @@
             names = zip_names(r)
 
             source_path = sheet_xml_path(zipbytes, "Sheet1")
-            copy_path   = sheet_xml_path(zipbytes, "Copy")
-            source_xml  = String(zip_readentry(r, source_path))
-            copy_xml    = String(zip_readentry(r, copy_path))
+            copy_path = sheet_xml_path(zipbytes, "Copy")
+            source_xml = String(zip_readentry(r, source_path))
+            copy_xml = String(zip_readentry(r, copy_path))
 
             # Stripped from the copy...
             @test !occursin("tableParts", copy_xml)
@@ -501,7 +507,7 @@
 
         # The chartEx cluster and the drawing must all go.
         for p in ("xl/charts/chartEx1.xml", "xl/charts/style1.xml",
-                "xl/charts/colors1.xml", "xl/drawings/drawing1.xml")
+            "xl/charts/colors1.xml", "xl/drawings/drawing1.xml")
             @test !haskey(f.data, p)
         end
         @test isempty(XLSX.Charts.chartex_parts(f))
@@ -521,14 +527,14 @@
         @test allunique(c.path for c in charts)
         @test issetequal((c.sheet for c in charts), ["Data", "Copy"])
 
-        cp   = only(filter(c -> c.sheet == "Copy", charts))
+        cp = only(filter(c -> c.sheet == "Copy", charts))
         orig = only(filter(c -> c.sheet == "Data", charts))
 
         # The copy plots the copied sheet. getChartRanges returns one named
         # tuple per series for a `c:` chart, so the ranges are in its fields.
         cp_ranges = XLSX.Charts.getChartRanges(cp)
         @test [string(r.categories) for r in cp_ranges] == ["Copy!A2:A5", "Copy!A2:A5"]
-        @test [string(r.values)     for r in cp_ranges] == ["Copy!B2:B5", "Copy!C2:C5"]
+        @test [string(r.values) for r in cp_ranges] == ["Copy!B2:B5", "Copy!C2:C5"]
 
         # Series name refs are repointed too, not just categories and values.
         @test all(s -> startswith(s.name_ref.ref, "Copy!"), XLSX.Charts.getChartSeries(cp))
@@ -536,7 +542,7 @@
         # The original is untouched — catches copynode aliasing the two trees.
         orig_ranges = XLSX.Charts.getChartRanges(orig)
         @test [string(r.categories) for r in orig_ranges] == ["Data!A2:A5", "Data!A2:A5"]
-        @test [string(r.values)     for r in orig_ranges] == ["Data!B2:B5", "Data!C2:C5"]
+        @test [string(r.values) for r in orig_ranges] == ["Data!B2:B5", "Data!C2:C5"]
         @test all(s -> startswith(s.name_ref.ref, "Data!"), XLSX.Charts.getChartSeries(orig))
 
         # The cache is deliberately left alone, so the copy still reads.
@@ -547,7 +553,7 @@
         h = XLSX.readxlsx(g)
         cp2 = only(filter(c -> c.sheet == "Copy", XLSX.Charts.getCharts(h)))
         @test [string(r.values) for r in XLSX.Charts.getChartRanges(cp2)] ==
-              ["Copy!B2:B5", "Copy!C2:C5"]
+            ["Copy!B2:B5", "Copy!C2:C5"]
     end
     @testset "copysheet! with a chartEx chart" begin
         f = XLSX.opentemplate(joinpath(data_directory, "chart_ex.xlsx"))
@@ -576,7 +582,7 @@
         @test length(all_names) == 11
         @test all(dn -> dn.hidden, all_names)
         @test isempty(XLSX.getDefinedNames(f))
-        
+
         g = XLSX.writexlsx("mytest.xlsx", f; overwrite=true)
         h = XLSX.readxlsx(g)
         @test length(XLSX.Charts.getCharts(h)) == 2
@@ -584,14 +590,14 @@
     end
 
     @testset "copysheet! keeps a shared chartEx name shared" begin
-        xf = XLSX.openxlsx(joinpath(data_directory, "chartex_layouts.xlsx"); mode = "rw")
+        xf = XLSX.openxlsx(joinpath(data_directory, "chartex_layouts.xlsx"); mode="rw")
         XLSX.copysheet!(xf["pareto"], "pareto2")
-        XLSX.writexlsx("mytest.xlsx", xf, overwrite = true)
+        XLSX.writexlsx("mytest.xlsx", xf, overwrite=true)
         SAVE_FILES && save_outfile("mytest.xlsx")
 
         f = XLSX.readxlsx("mytest.xlsx")
         cxs = filter(x -> x isa XLSX.Charts.ChartEx, XLSX.Charts.getCharts(f))
-        orig = only(filter(x -> x.sheet == "pareto",  cxs))
+        orig = only(filter(x -> x.sheet == "pareto", cxs))
         copy = only(filter(x -> x.sheet == "pareto2", cxs))
 
         ob = XLSX.Charts.getChartDataBlocks(orig)
@@ -617,7 +623,7 @@
         @test length(XLSX.Charts._cx_refs(copy)) == 4                              # cat appears twice
         isfile("mytest.xlsx") && rm("mytest.xlsx")
     end
-    
+
     @testset "copysheet! clones chart parts for both schemas" begin
         f = XLSX.opentemplate(joinpath(data_directory, "chart_mixed.xlsx"))
         XLSX.copysheet!(f["Data"], "Copy")
@@ -627,11 +633,11 @@
         @test allunique(c.path for c in charts)
         @test count(c -> c.sheet == "Copy", charts) == 2
         @test issetequal((XLSX.Charts.getChartType(c) for c in charts if c.sheet == "Copy"),
-                        [:waterfall, :barChart])
+            [:waterfall, :barChart])
 
         # Stems are handled per family: chart1 -> chart2, chartEx1 -> chartEx2.
         @test issetequal((c.name for c in charts),
-                        ["chart1", "chart2", "chartEx1", "chartEx2"])
+            ["chart1", "chart2", "chartEx1", "chartEx2"])
 
         # Anchors come across with the drawing.
         @test issetequal((c.from for c in charts), ["F1", "F17"])
@@ -653,8 +659,8 @@
 
     @testset "renaming a sheet repoints chart references" begin
         path = "chart_rename.xlsx"
-        cp(joinpath(data_directory, "chart_basic.xlsx"), path; force = true)
-        xf = XLSX.openxlsx(path; mode = "rw")
+        cp(joinpath(data_directory, "chart_basic.xlsx"), path; force=true)
+        xf = XLSX.openxlsx(path; mode="rw")
         XLSX.renamesheet!(xf["Data"], "Sales")
         c = only(XLSX.Charts.getCharts(xf))
         @test all(r -> startswith(string(r.values), "Sales!"), XLSX.Charts.getChartRanges(c))
