@@ -103,14 +103,14 @@ So `setSeriesFill(c, 1, :none)` makes a series deliberately invisible, while
 `setSeriesFill(c, 1, :inherit)` removes the setting and lets the style decide.
 The same three states apply to lines, markers, labels and titles.
 
-[`has_fill`](@ref) and [`has_line`](@ref) collapse those three cases into the
+[`hasFill`](@ref) and [`hasLine`](@ref) collapse those three cases into the
 one question a call site usually asks — does this element say something is
 drawn?
 
 ```julia
 julia> sp = getSeriesShapeProps(c, 1);
 
-julia> has_fill(sp), has_line(sp)
+julia> hasFill(sp), hasLine(sp)
 (true, true)
 ```
 

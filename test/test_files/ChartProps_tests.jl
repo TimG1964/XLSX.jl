@@ -31,7 +31,7 @@
 #   No axis title is bound to a cell, so getAxisTitleRef is nothing throughout —
 #   as is getChartTitleRef. The c:strRef path for titles is untested.
 #
-#   Series 1: spPr accent1 (a:ln present but noFill — has_line false because the
+#   Series 1: spPr accent1 (a:ln present but noFill — hasLine false because the
 #     line has no fill, not because the element is absent). Series-level
 #     c:dLbls with txPr, sz 1050, accent1 lumMod 75000 -> 104862. One c:dPt at
 #     idx 1 filled plain red FF0000. Three c:dLbl —
@@ -115,16 +115,26 @@
         @test !isnothing(sp1)
         @test sp1.fill.kind == :solid
         @test sp1.fill.fgcolor.rgb == "156082"          # accent1, verified in Excel
-        @test XLSX.Charts.has_fill(sp1)
-        @test !XLSX.Charts.has_line(sp1)                        # no a:ln written at all
+        @test XLSX.Charts.hasFill(sp1)
+        @test !XLSX.Charts.hasLine(sp1)                        # no a:ln written at all
         @test !isnothing(sp1.line)
         @test sp1.line.fill.kind == :none
 
         # Series 3 is a line: a:ln present, no fill element. The mirror image.
         sp3 = XLSX.Charts.getSeriesShapeProps(c, 3)
-        @test XLSX.Charts.has_line(sp3)
-        @test !XLSX.Charts.has_fill(sp3)
+        @test XLSX.Charts.hasLine(sp3)
+        @test !XLSX.Charts.hasFill(sp3)
         @test isnothing(sp3.fill)
+
+        # hasFill / hasLine agree across every argument type
+        for i in 1:3
+            sp = XLSX.Charts.getSeriesShapeProps(c, i)
+            f, l = XLSX.Charts.getSeriesFill(c, i), XLSX.Charts.getSeriesLine(c, i)
+            @test XLSX.Charts.hasFill(f) == XLSX.Charts.hasFill(sp)
+            @test XLSX.Charts.hasLine(l) == XLSX.Charts.hasLine(sp)
+            isnothing(f.value) || @test XLSX.Charts.hasFill(f.value) == XLSX.Charts.hasFill(sp)
+            isnothing(l.value) || @test XLSX.Charts.hasLine(l.value) == XLSX.Charts.hasLine(sp)
+        end
     end
 
     @testset "series data labels" begin
@@ -151,7 +161,7 @@
         @test mk.symbol == :diamond
         @test mk.size == 9
         @test !isnothing(mk.shape)
-        @test XLSX.Charts.has_fill(mk.shape)
+        @test XLSX.Charts.hasFill(mk.shape)
     end
 
     @testset "chart groups" begin
@@ -227,11 +237,11 @@
         # noFill plus a real line, versus noFill on both: same has_* answers
         # from different XML, and both explicit rather than absent.
         spc = XLSX.Charts.getAxisShapeProps(c, cat)
-        @test !XLSX.Charts.has_fill(spc) && XLSX.Charts.has_line(spc)
+        @test !XLSX.Charts.hasFill(spc) && XLSX.Charts.hasLine(spc)
         @test spc.fill.kind == :none                     # explicit <a:noFill/>
 
         spp = XLSX.Charts.getAxisShapeProps(c, pri)
-        @test !XLSX.Charts.has_fill(spp) && !XLSX.Charts.has_line(spp)
+        @test !XLSX.Charts.hasFill(spp) && !XLSX.Charts.hasLine(spp)
 
         @test !isnothing(XLSX.Charts.getAxisGridlines(c, pri))
         @test isnothing(XLSX.Charts.getAxisGridlines(c, cat))
@@ -291,11 +301,11 @@
         @test XLSX.Charts.default_run_props(XLSX.Charts.getLegendTextProps(c)).size == 9.0
 
         pa = XLSX.Charts.getPlotAreaShapeProps(c)
-        @test !XLSX.Charts.has_fill(pa) && !XLSX.Charts.has_line(pa)
+        @test !XLSX.Charts.hasFill(pa) && !XLSX.Charts.hasLine(pa)
 
         # The only element in the file with both a real fill and a real line.
         cs = XLSX.Charts.getChartSpaceShapeProps(c)
-        @test XLSX.Charts.has_fill(cs) && XLSX.Charts.has_line(cs)
+        @test XLSX.Charts.hasFill(cs) && XLSX.Charts.hasLine(cs)
         @test cs.fill.fgcolor.rgb == "FFFFFF"            # bg1 -> lt1
         @test cs.line.width == 0.75                      # w="9525" EMU -> points
 
@@ -414,7 +424,7 @@
         @test e.no_end_cap === false
 
         sp = XLSX.Charts.getErrorBarsShapeProps(c, e)
-        @test XLSX.Charts.has_line(sp)
+        @test XLSX.Charts.hasLine(sp)
         @test sp.fill.kind == :none                      # explicit noFill
 
         # Only cust bars carry plus/minus references.
@@ -475,12 +485,12 @@
     end
 
     @testset "line cascade" begin
-        # Series 1: a:ln present but noFill — has_line false. The line element IS
+        # Series 1: a:ln present but noFill — hasLine false. The line element IS
         # written, so the walk stops here; the resolved DrawingLine has a :none fill.
         e = XLSX.Charts.getSeriesLine(c, 1)
         @test e.site.level === :series
         @test !isnothing(e.value) && e.value.fill.kind === :none
-        @test !XLSX.Charts.has_line(XLSX.Charts.getSeriesShapeProps(c, 1))
+        @test !XLSX.Charts.hasLine(XLSX.Charts.getSeriesShapeProps(c, 1))
     end
     @testset "empty txPr does not answer" begin
         e = XLSX.Charts.getLabelTextProp(c, 3, :size)          # series 3 has no dLbls at all
@@ -568,7 +578,7 @@
         # All three series have an a:ln written with noFill inside — the line exists
         # and draws nothing. Remove it to exercise creation from scratch.
         @test !isnothing(XLSX.Charts.getSeriesLine(c, 2).value)
-        @test !XLSX.Charts.has_line(XLSX.Charts.getSeriesShapeProps(c, 2))
+        @test !XLSX.Charts.hasLine(XLSX.Charts.getSeriesShapeProps(c, 2))
 
         c = XLSX.Charts.setSeriesLine(c, 2, :inherit)
         @test isnothing(XLSX.Charts.getSeriesLine(c, 2).value)
@@ -577,7 +587,7 @@
         e = XLSX.Charts.getSeriesLine(c, 2)
         @test e.site.level === :series
         @test e.value.fill.fgcolor.rgb == "FF0000"
-        @test XLSX.Charts.has_line(XLSX.Charts.getSeriesShapeProps(c, 2))
+        @test XLSX.Charts.hasLine(XLSX.Charts.getSeriesShapeProps(c, 2))
         # the fill is untouched
         @test !isnothing(XLSX.Charts.getSeriesFill(c, 2).value)
 
@@ -627,7 +637,9 @@
 
         # whole-line :none and :inherit
         c = XLSX.Charts.setSeriesLine(c, 3, :none)
-        @test !XLSX.Charts.has_line(XLSX.Charts.getSeriesShapeProps(c, 3))          # element present, fill off
+        @test !XLSX.Charts.hasLine(XLSX.Charts.getSeriesLine(c, 3))
+        @test !XLSX.Charts.hasLine(XLSX.Charts.getSeriesLine(c, 3).value)
+        @test !XLSX.Charts.hasLine(XLSX.Charts.getSeriesShapeProps(c, 3))          # element present, fill off
         @test !isnothing(XLSX.first_element_with_tag(XLSX.Charts.getSeriesShapeProps(c, 3).raw, "ln"))
         c = XLSX.Charts.setSeriesLine(c, 3, :inherit)
         @test isnothing(XLSX.first_element_with_tag(XLSX.Charts.getSeriesShapeProps(c, 3).raw, "ln"))
@@ -1231,19 +1243,19 @@
                 @test_throws XLSX.XLSXError XLSX.Charts.setAxisTextProp(c, catax, :typeface, "Arial")
 
                 # axis line and plot area border
-                @test !XLSX.Charts.has_line(XLSX.Charts.getAxisShapeProps(c, valax))  # template: noFill
+                @test !XLSX.Charts.hasLine(XLSX.Charts.getAxisShapeProps(c, valax))  # template: noFill
                 c = XLSX.Charts.setAxisLine(c, valax; color="000000", width=1)
-                @test XLSX.Charts.has_line(XLSX.Charts.getAxisShapeProps(c, valax))
+                @test XLSX.Charts.hasLine(XLSX.Charts.getAxisShapeProps(c, valax))
                 @test XLSX.Charts.setAxisLine(c, valax) === c
                 c = XLSX.Charts.setAxisLine(c, valax, :none)
-                @test !XLSX.Charts.has_line(XLSX.Charts.getAxisShapeProps(c, valax))
+                @test !XLSX.Charts.hasLine(XLSX.Charts.getAxisShapeProps(c, valax))
                 c = XLSX.Charts.setAxisLine(c, valax, :inherit)
                 @test isnothing(XLSX.first_element_with_tag(XLSX.Charts.getAxisShapeProps(c, valax).raw, "ln"))
                 @test_throws XLSX.XLSXError XLSX.Charts.setAxisLine(c, valax, :dotted)
 
-                @test !XLSX.Charts.has_line(XLSX.Charts.getPlotAreaShapeProps(c))
+                @test !XLSX.Charts.hasLine(XLSX.Charts.getPlotAreaShapeProps(c))
                 c = XLSX.Charts.setPlotAreaLine(c; color="000000")
-                @test XLSX.Charts.has_line(XLSX.Charts.getPlotAreaShapeProps(c))
+                @test XLSX.Charts.hasLine(XLSX.Charts.getPlotAreaShapeProps(c))
                 c = XLSX.Charts.setPlotAreaLine(c, :inherit)
                 @test isnothing(XLSX.first_element_with_tag(XLSX.Charts.getPlotAreaShapeProps(c).raw, "ln"))
                 c = XLSX.Charts.setPlotAreaLine(c; color="000000")
@@ -1288,7 +1300,7 @@
                 val2 = only(filter(a -> a.kind === :valAx, ax2))
                 @test XLSX.Charts.getAxisMajorTickMark(c2, cat2) === :cross
                 @test XLSX.Charts.getAxisMajorUnit(c2, val2) ≈ 0.2
-                @test XLSX.Charts.has_line(XLSX.Charts.getPlotAreaShapeProps(c2))
+                @test XLSX.Charts.hasLine(XLSX.Charts.getPlotAreaShapeProps(c2))
                 @test XLSX.Charts._bool_val(title(c2, val2), "overlay") === false
                 @test isnothing(XLSX.first_element_with_tag(XLSX.Charts._axnode(c2, val2), "majorGridlines"))
             finally

@@ -3,7 +3,7 @@ module StyledStringsSstsExt
 @static if VERSION >= v"1.11-"
 
     using XLSX
-    import XLSX: setdata!, RichTextString, RichTextRun, resetFont, getcell, EmptyCell
+    import XLSX: setdata!, RichTextString, RichTextRun
 
     import StyledStrings: StyledStrings, AnnotatedString
     import StyledStrings: load_customisations!, getface, Face, FACES, SimpleColor
@@ -15,7 +15,6 @@ module StyledStringsSstsExt
 const _AnnStr = Union{AnnotatedString, SubString{<:AnnotatedString}}
 
 function setdata!(sheet::Worksheet, ref::CellRef, ss::_AnnStr)
-    getcell(sheet, ref) isa EmptyCell || resetFont(sheet, ref)
     isempty(ss) && return setdata!(sheet, ref, "")
     return setdata!(sheet, ref, RichTextString(_ssToRuns(ss)))
 end

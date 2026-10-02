@@ -41,9 +41,12 @@ module Charts
 # an `Effective`; `get…TextProps` (plural) returns the text-properties struct as
 # written at that site.
 #
-# The DrawingML layer keeps snake_case — `parse_drawing_fill`, `has_line`,
-# `text_content`, `resolve_color_base` — because those are parsers and
+# The DrawingML layer keeps snake_case — `parse_drawing_fill`, `text_content`, 
+# `resolve_color_base` — because those are parsers and
 # predicates rather than accessors, and are internal.
+#
+# The predicates users call, `hasFill` and `hasLine`, are camelCase like the rest of
+# the exported API.
 #
 # Two senses of "resolve" are kept apart. `resolve_color_base` and
 # `apply_drawingml_transforms` resolve a colour to RGB. The `get<Subject>`
@@ -154,7 +157,7 @@ export
     # Types users construct
     SchemeColor,
     # Predicates
-    has_fill, has_line
+    hasFill, hasLine
 
 @static if VERSION >= v"1.11"
     eval(Meta.parse("""

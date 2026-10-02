@@ -306,6 +306,16 @@
 
         # Sheet-scoped discovery finds it too.
         @test length(XLSX.Charts.getCharts(f["Data"])) == 1
+
+        rm_xf = XLSX.readxlsx(joinpath(data_directory, "chartex_regionmap.xlsx"))
+        rmc = only(XLSX.getCharts(rm_xf))
+        @test rmc isa XLSX.Charts.ChartEx
+        @test XLSX.Charts.getChartType(rmc) === :regionMap
+        # survives a round trip
+        f = "regionmap_rt.xlsx"
+        XLSX.writexlsx(f, XLSX.openxlsx(joinpath(data_directory, "chartex_regionmap.xlsx"); mode = "rw"); overwrite = true)
+        @test only(XLSX.getCharts(XLSX.readxlsx(f))) isa XLSX.Charts.ChartEx
+        rm(f; force = true)
     end
     @testset "external reference" begin  # chart_external.xlsx
         f = XLSX.readxlsx(joinpath(data_directory, "chart_external.xlsx"))
@@ -670,10 +680,24 @@
         # An unqualified reference has no sheet to mean.
         @test_throws XLSX.XLSXError XLSX.Charts.addSeries(c, "B2:B5")
 
+        # A $-fixed reference is just as unqualified.
+        @test_throws XLSX.XLSXError XLSX.Charts.addSeries(c, "\$B\$2:\$B\$5")
+
+        # chartEx on a chartsheet: qualified references resolve through the workbook,
+        # unqualified ones are refused before anything is written.
+        @test_throws XLSX.XLSXError XLSX.Charts.addChartEx(xf, :boxWhisker, "B2:B5"; sheetname = "Bad")
+        @test !("Bad" in XLSX.sheetnames(xf))
+        xf["data"]["C2:C5"] = [5, 6, 2, 4]
+        bw = XLSX.Charts.addChartEx(xf, :boxWhisker, "data!B2:B5"; sheetname = "Box")
+        XLSX.Charts.addSeries(bw, "data!C2:C5")
+        @test XLSX.Charts.getChartSeriesCount(bw) == 2
+        @test_throws XLSX.XLSXError XLSX.Charts.addSeries(bw, "C2:C5")
+        @test XLSX.Charts.getChartSeriesCount(bw) == 2
+
         XLSX.writexlsx(path, xf, overwrite=true)
         g = XLSX.readxlsx(path)
-        @test XLSX.sheetnames(g) == ["data", "Trend", "Chart1"]
-        @test length(XLSX.Charts.getCharts(g)) == 2
+        @test XLSX.sheetnames(g) == ["data", "Trend", "Chart1", "Box"]
+        @test length(XLSX.Charts.getCharts(g)) == 3
 
         SAVE_FILES && save_outfile(xf)
         isfile(path) && rm(path)
@@ -970,8 +994,8 @@
         @test isnothing(XLSX.Charts.getGroupDropLines(c, g))
         b = XLSX.Charts.getGroupUpDownBars(c, g)
         @test b.gap_width == 150
-        @test XLSX.Charts.has_fill(XLSX.Charts.getUpBarShapeProps(c, b))
-        @test XLSX.Charts.has_fill(XLSX.Charts.getDownBarShapeProps(c, b))
+        @test XLSX.Charts.hasFill(XLSX.Charts.getUpBarShapeProps(c, b))
+        @test XLSX.Charts.hasFill(XLSX.Charts.getDownBarShapeProps(c, b))
 
         # Polynomial and moving-average trendlines, one per series.
         c = chart("trends")
@@ -1042,6 +1066,16 @@
             @test getglobal(XLSX, n) === getglobal(XLSX.Charts, n)
             VERSION >= v"1.11" && @test Base.ispublic(XLSX, n)
         end
+    end
+
+    @testset "v0.12 API still works, deprecated" begin
+        c = XLSX.getChart(XLSX.readxlsx(joinpath(data_directory, "chart_basic.xlsx"))["Data"], "chart1")
+        @test (@test_deprecated c.title) == XLSX.Charts.getChartTitle(c)
+        @test (@test_deprecated c.charttypes) == XLSX.Charts.getChartTypes(c)
+        @test (@test_deprecated c.series) == XLSX.Charts.getChartSeries(c)
+        @test (@test_deprecated c.series[1].values.data) == [10.0, 20.0, 15.0, 5.0]
+        @test (@test_deprecated XLSX.chartType(c)) === XLSX.Charts.getChartType(c)
+        @test (@test_deprecated XLSX.chartSchema(c)) === XLSX.Charts.getChartSchema(c)
     end
 
     @testset "Non-sequential series c:idx" begin

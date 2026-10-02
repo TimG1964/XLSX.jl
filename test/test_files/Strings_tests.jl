@@ -343,22 +343,30 @@ end
             @test count("&amp;", raw) == 3             # all three ampersands escaped
             @test !occursin(" & ", raw)                # none left bare
 
-            dflt = XLSX.getDefaultFont(s).font
             s["E1"] = styled"{bold:first}"
             XLSX.setFont(s, "E1"; size = 14)
+            ft = XLSX.getFont(s, "E1").font
             s["E1"] = styled"plain {italic:second}"        # mixed → stays rich text
             @test s["E1"] == "plain second"
-            @test XLSX.getFont(s, "E1").font == dflt
+            @test XLSX.getFont(s, "E1").font == ft
 
             s["E2"] = "text"
             XLSX.setFont(s, "E2"; size = 20)
+            ft = XLSX.getFont(s, "E2").font
             s["E2"] = styled""
-            @test XLSX.getFont(s, "E2").font == dflt   
+            @test XLSX.getFont(s, "E2").font == ft
 
+
+            dflt = XLSX.getDefaultFont(s).font
             s["E3"] = styled"{italic:all italic}"
             @test XLSX.getFont(s, "E3").font["sz"] == dflt["sz"]
             @test haskey(XLSX.getFont(s, "E3").font, "i")
 
+            s["A1"] = "x"; XLSX.setFont(s, "A1"; name = "Arial", size = 14, italic = true)
+            s["A1"] = styled"{bold:all bold}"                       # one run: merged into the cell font
+            f = XLSX.getFont(s, "A1").font
+            @test f["name"]["val"] == "Arial" && f["sz"]["val"] == "14"
+            @test haskey(f, "i") && haskey(f, "b")
             SAVE_FILES && save_outfile(f)
         end
     end

@@ -168,8 +168,9 @@ opens the file and computes it, and [`getChartData`](@ref) throws for a
 [`ChartEx`](@ref).
 
 Excel writes a `cx:` chart's references indirectly, through hidden defined names
-of the form `_xlchart.v1.0`. XLSX.jl writes the range itself in `cx:f`, which
-Excel also reads. [`getChartRanges`](@ref) resolves either form to a range.
+of the form `_xlchart.v1.0`. XLSX.jl writes the range itself in `cx:f`; Excel
+reads that, and replaces it with its own names the next time it saves the file.
+[`getChartRanges`](@ref) resolves either form to a range.
 
 ## Appearance
 
@@ -181,4 +182,4 @@ reaches less than it does for a `c:` chart. See
 
 Region maps cannot be created: Excel resolves their geography through an online
 service, and the package has no template for one. They are read like any other
-[`ChartEx`](@ref).
+[`ChartEx`](@ref), and preserved when the file is written.

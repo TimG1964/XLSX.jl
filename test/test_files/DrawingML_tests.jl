@@ -450,6 +450,28 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 @test XLSX.Charts.text_content(XLSX.Charts.DrawingText("a\nb")) == "a\nb"
             end
 
+            @testset "a newline in a DrawingParagraph is a line break" begin
+                P = XLSX.Charts.DrawingParagraph
+                R = XLSX.Charts.DrawingRun
+                kinds(p) = [r.kind for r in p.runs]
+                p = P("a\nb")
+                @test kinds(p) == [:run, :br, :run]
+                @test [r.text for r in p.runs] == ["a", "\n", "b"]
+                # the same paragraph the explicit form builds, and the reader produces
+                @test p == P("a", R("\n"; kind = :br), "b")
+                @test kinds(P("a\n\nb")) == [:run, :br, :br, :run]
+                @test kinds(P("a\n")) == [:run, :br]
+                @test kinds(P("a", R("b"))) == [:run, :run]               # no newline: unchanged
+                @test length(P("").runs) == 1
+                # Windows and lone-CR line endings
+                @test kinds(P("a\r\nb")) == [:run, :br, :run]
+                @test [r.text for r in P("a\r\nb").runs] == ["a", "\n", "b"]   # no stray \r
+                @test kinds(P("a\rb")) == [:run, :br, :run]
+                # DrawingText still splits into paragraphs first, on every line ending
+                @test length(XLSX.Charts.DrawingText("a\r\nb").paragraphs) == 2
+                @test only(first(XLSX.Charts.DrawingText("a\r\nb").paragraphs).runs).text == "a"
+            end
+
             @testset "indented XML (nodetype guard)" begin
                 # Excel writes chart parts unindented; a formatted or
                 # hand-edited part has whitespace text nodes between runs.
@@ -750,8 +772,8 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 @test sp.line.width == 1.5              # points, converted at parse
                 @test sp.line.dash == "dash"
                 @test sp.line.fill.fgcolor.rgb == "203864"
-                @test XLSX.Charts.has_fill(sp)
-                @test XLSX.Charts.has_line(sp)
+                @test XLSX.Charts.hasFill(sp)
+                @test XLSX.Charts.hasLine(sp)
                 @test sp.effects === nothing
                 @test sp.bwmode === nothing
                 @test sp.raw !== nothing
@@ -768,11 +790,11 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 sp = XLSX.Charts.parse_drawing_shape_props(wb, node)
                 @test sp.fill !== nothing               # present...
                 @test sp.fill.kind == :none             # ...and explicitly invisible
-                @test !XLSX.Charts.has_fill(sp)
+                @test !XLSX.Charts.hasFill(sp)
 
                 @test sp.line !== nothing
                 @test sp.line.fill.kind == :none
-                @test !XLSX.Charts.has_line(sp)
+                @test !XLSX.Charts.hasLine(sp)
             end
 
             @testset "absence is inheritance" begin
@@ -782,8 +804,8 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 @test sp !== nothing                    # the element exists
                 @test sp.fill === nothing               # but sets nothing
                 @test sp.line === nothing
-                @test !XLSX.Charts.has_fill(sp)
-                @test !XLSX.Charts.has_line(sp)
+                @test !XLSX.Charts.hasFill(sp)
+                @test !XLSX.Charts.hasLine(sp)
             end
 
             @testset "parse from parent, and no spPr at all" begin
@@ -824,7 +846,7 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 sp = XLSX.Charts.parse_drawing_shape_props(wb, node)
                 @test sp.fill.kind == :pattern
                 @test sp.fill.preset == "ltUpDiag"      # not "lightUp"
-                @test XLSX.Charts.has_fill(sp)
+                @test XLSX.Charts.hasFill(sp)
             end
         end
 
@@ -846,15 +868,15 @@ const _NSDECL = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main
                 @test sp !== nothing
                 @test sp.raw !== nothing
 
-                @test XLSX.Charts.has_fill(sp)
+                @test XLSX.Charts.hasFill(sp)
                 @test sp.fill.kind == :solid
                 @test sp.fill.fgcolor.rgb == "156082"     # accent1
 
                 # Excel writes an explicit "no border", which is not the same as
-                # omitting a:ln. has_line must be false while sp.line is not nothing.
+                # omitting a:ln. hasLine must be false while sp.line is not nothing.
                 @test sp.line !== nothing
                 @test sp.line.fill.kind == :none
-                @test !XLSX.Charts.has_line(sp)
+                @test !XLSX.Charts.hasLine(sp)
 
                 @test sp.effects !== nothing
                 @test XLSX.localname(sp.effects) == "effectLst"

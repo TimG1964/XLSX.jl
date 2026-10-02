@@ -77,8 +77,8 @@ setSeriesLineCap
 setSeriesLineCompound
 setSeriesLineJoin
 setSeriesLineMiterLimit
-has_fill
-has_line
+hasFill
+hasLine
 ```
 
 ## Chart groups
@@ -99,95 +99,6 @@ getGroupOverlap
 setGroupOverlap
 ```
 
-## Axes
-
-```@docs
-getChartAxes
-getChartAxis
-getAxisPartner
-getAxisShapeProps
-getAxisTextProps
-getAxisGridlines
-getAxisTitleText
-getAxisTitleRef
-getAxisTitleTextProps
-setAxisTitleText
-setAxisTitleTextProp
-getAxisNumberFormatCode
-getAxisNumberFormatLinked
-getAxisMajorTickMark
-getAxisMinorTickMark
-getAxisTickLabelPos
-getAxisOrientation
-getAxisMin
-getAxisMax
-getAxisLogBase
-getAxisCrosses
-getAxisCrossesAt
-getAxisCrossBetween
-getAxisMajorUnit
-getAxisMinorUnit
-getAxisLabelAlign
-getAxisLabelOffset
-getAxisMultiLevelLabels
-setAxisTickLabelPos
-setAxisScaling
-setAxisMin
-setAxisMax
-setAxisOrientation
-setAxisCrosses
-setAxisCrossesAt
-setAxisNumberFormatCode
-setAxisNumberFormatLinked
-setAxisMajorTickMark
-setAxisMinorTickMark
-setAxisGridlines
-setAxisTextProp
-setAxisLine
-setAxisMajorUnit
-setAxisMinorUnit
-```
-
-## Data points, markers and labels
-
-```@docs
-getSeriesDataPoints
-getSeriesDataPoint
-getDataPointShapeProps
-getDataPointMarker
-getMarkerFill
-setMarker
-setMarkerSymbol
-setMarkerSize
-setMarkerFill
-setMarkerLineColor
-setMarkerLineWidth
-getSeriesDataLabels
-getSeriesDataLabel
-getDataLabelText
-getDataLabelTextProps
-getDataLabelShapeProps
-getDataLabelPosition
-getDataLabelOffset
-getLabelTextProp
-setLabelText
-setLabelTextProp
-setLabelDeleted
-```
-
-## Trendlines and error bars
-
-```@docs
-getSeriesTrendlines
-getTrendlineShapeProps
-getTrendlineLabelText
-getTrendlineLabelTextProps
-getTrendlineLabelShapeProps
-getSeriesErrorBars
-getErrorBarsShapeProps
-getErrorBarsCustomRefs
-```
-
 ## Creating charts
 
 ```@docs
@@ -196,36 +107,3 @@ addChartEx
 addSeries
 ```
 
-## chartEx charts
-
-Charts in the Microsoft `cx:` namespace — waterfall, funnel, treemap, sunburst,
-histogram, Pareto, box & whisker and region map. Many of the functions above
-also take a [`ChartEx`](@ref); these are specific to it.
-
-```@docs
-getChartSeriesCount
-getChartDataBlocks
-getChartAxisIds
-getChartTitleRange
-getSeriesLayout
-getSeriesLayoutFlag
-getSeriesData
-getSeriesName
-getSeriesNameRange
-getSeriesHidden
-getSeriesAxisIds
-getSeriesSubtotals
-getSeriesBinning
-getSeriesAggregation
-getSeriesQuartileMethod
-getSeriesParentLabelLayout
-getLabelFlag
-getLabelPosition
-setSeriesName
-setSeriesLayoutFlag
-setSeriesSubtotals
-setSeriesBinning
-setSeriesAggregation
-setSeriesQuartileMethod
-setSeriesParentLabelLayout
-```

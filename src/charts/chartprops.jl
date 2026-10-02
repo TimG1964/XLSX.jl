@@ -34,7 +34,7 @@
 # `nothing` means the element or attribute was not written — which in this
 # schema means "inherit" or "Excel decides", never "off". An explicit
 # `<a:noFill/>` means deliberately off, `<c:delete val="1"/>` means deliberately
-# hidden. `has_fill`/`has_line` exist because conflating the two at a call site
+# hidden. `hasFill`/`hasLine` exist because conflating the two at a call site
 # is easy and wrong. This matters for writing as much as reading: emitting a
 # `val="0"` into a chart that never had one is a change to the file for no
 # reason.
@@ -291,7 +291,7 @@ getChartTypes(c::Chart)::Vector{Symbol} =
 Fill, line and effects for the graphic of series `i` (`c:ser/c:spPr`), where `i`
 is a position in getChartSeries(c), not the `c:idx` value. `nothing` means no `spPr`
 was written, which in DrawingML means inherit from the chart style — not "no
-formatting". Contrast an explicit `<a:noFill/>`, which `has_fill` reports as
+formatting". Contrast an explicit `<a:noFill/>`, which `hasFill` reports as
 deliberately off.
 """
 getSeriesShapeProps(c::Chart, i::Integer) =

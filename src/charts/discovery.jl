@@ -587,6 +587,7 @@ one, [`getChartTitleRange`](@ref) the same for a `cx:` chart, and
 getChartTitle(c::Chart)   = parse_chart_title(first_element_with_tag(chart_root(c), "chart"))
 getChartTitle(c::ChartEx) = _cx_title(c)
 
+# The sheet the chart's drawing is anchored to; for a chart on a chartsheet, the chartsheet itself.
 sheetname(c::AbstractChart)  = c.sheet
 
 

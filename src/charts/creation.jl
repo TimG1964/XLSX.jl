@@ -257,15 +257,24 @@ end
 _data_sheet(c::AbstractChart) =
     isnothing(c.sheet) || is_chartsheet(get_workbook(c.package), c.sheet) ? nothing : c.sheet
 
-function _series_ref(c::AbstractChart, ref)
-    sheet = _data_sheet(c)
-    if isnothing(sheet) && ref isa AbstractString &&
-       (is_valid_cellname(ref) || is_valid_cellrange(ref) ||
-        is_valid_column_range(ref) || is_valid_row_range(ref))
-        throw(XLSXError(
+# A bare reference (`B2:B5`, `$B$2:$B$5`, `B:B`, `2:5`) names no sheet. On a
+# chartsheet that has nothing to mean, since the chartsheet holds no cells.
+_is_unqualified_ref(ref) = ref isa AbstractString &&
+    (r = replace(ref, '$' => "");
+     is_valid_cellname(r) || is_valid_cellrange(r) || is_valid_column_range(r) || is_valid_row_range(r))
+
+function _require_qualified(refs...)
+    for ref in refs
+        _is_unqualified_ref(ref) && throw(XLSXError(
             "`$ref` names no sheet. A chart on a chartsheet has no cells of its own, " *
             "so its series must name the sheet holding the data, as in `\"Sheet1!$ref\"`."))
     end
+    return nothing
+end
+
+function _series_ref(c::AbstractChart, ref)
+    sheet = _data_sheet(c)
+    isnothing(sheet) && _require_qualified(ref)
     return _resolve_ref(c.package, sheet, ref)
 end
 
@@ -654,6 +663,7 @@ end
 function addChartEx(xf::XLSXFile, kind::Symbol, values; sheetname::AbstractString = "",
                     categories = nothing, name = nothing, name_ref = nothing,
                     title::Union{Nothing,Bool,AbstractString} = nothing)::ChartEx
+    _require_qualified(values, categories, name_ref)        # a chartsheet holds no cells
     doc = _chartex_doc(xf, nothing, kind, values; categories, name, name_ref, title)
     ws  = _register_sheet!(get_workbook(xf), parse(CHARTSHEET_TEMPLATE, XML.Node), sheetname;
                            dir = "xl/chartsheets", reltype = REL_CHARTSHEET,
@@ -684,7 +694,9 @@ function _place_chartex!(ws::Worksheet, doc::XML.Node, kind::Symbol, anchor, tit
 end
 
 function addSeries(c::ChartEx, values; categories = nothing, name = nothing, name_ref = nothing)::ChartEx
-    set_chart_root!(c, _cx_add_series(_cx_root(c), c.package, c.sheet, getChartType(c), values;
+    sheet = _data_sheet(c)                                  # nothing on a chartsheet
+    isnothing(sheet) && _require_qualified(values, categories, name_ref)
+    set_chart_root!(c, _cx_add_series(_cx_root(c), c.package, sheet, getChartType(c), values;
                                       categories, name, name_ref))
     return c
 end

@@ -31,8 +31,13 @@ makedocs(
         "API Reference" => Any[
             "Files and worksheets" => "api/files.md",
             "Cells and data" => "api/data.md",
-            "Formats" => "api/formats.md",
+            "Tables" => "api/tables.md",
+            "Cell formats" => "api/formats.md",
+            "Conditional formats" => "api/conditionalFormats.md",
+            "Sheet layout" => "api/sheetLayout.md",
             "Charts" => "api/charts.md",
+            "Chart axes and elements" => "api/chartElements.md",
+            "chartEx charts" => "api/chartEx.md",
             "Chart types" => "api/chartTypes.md",
         ]
     ],

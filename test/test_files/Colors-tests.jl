@@ -239,7 +239,7 @@
                     # cells: Symbol colours not yet accepted (borders need work)
                     ws["A$i"] = "x"
                     if col isa Symbol
-                        @test_broken (XLSX.setFont(ws, "A$i"; color = col); true)
+                        @test_broken (XLSX.setFont(ws, "A$i"; color = col); true) # formatting setters can't take a symbol for a colour yet.
                     else
                         XLSX.setFont(ws, "A$i"; color = col)
                         @test iscoral(XLSX.getFont(ws, "A$i").font["color"]["rgb"])

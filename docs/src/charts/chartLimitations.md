@@ -25,8 +25,8 @@ with no template cannot be created at all, rather than being approximated:
 - combo charts — a plot area with more than one group
 - region maps (the `cx:` filled map), whose geography Excel resolves online
 
-All of these are *read* normally, including their series, formatting and cached
-data. The restriction is on creating them.
+All of these are *read* normally, including their series and formatting and,
+for the `c:` kinds, their cached data. The restriction is on creating them.
 
 A combo chart is also the one case [`addSeries`](@ref) cannot extend, since
 there is no single group to add the series to.

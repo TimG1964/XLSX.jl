@@ -519,7 +519,7 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    has_fill(x) -> Bool
+    hasFill(x) -> Bool
 
 Whether `x` sets a visible fill. `x` is a [`DrawingShapeProps`](@ref), a
 [`DrawingFill`](@ref), or the [`Effective`](@ref) a resolver returns.
@@ -532,27 +532,27 @@ with `kind === :none` for the second.
 `false` never means Excel draws nothing: a property written at no rung comes
 from the chart style, which this layer does not read.
 """
-has_fill(sp::DrawingShapeProps) = !isnothing(sp.fill) && sp.fill.kind !== :none
-has_fill(f::DrawingFill) = f.kind !== :none
-has_fill(e::Effective{DrawingFill}) = !isnothing(e.value) && has_fill(e.value)
+hasFill(sp::DrawingShapeProps) = !isnothing(sp.fill) && sp.fill.kind !== :none
+hasFill(f::DrawingFill) = f.kind !== :none
+hasFill(e::Effective{DrawingFill}) = !isnothing(e.value) && hasFill(e.value)
 
 """
-    has_line(x) -> Bool
+    hasLine(x) -> Bool
 
 Whether `x` sets a visible outline. `x` is a [`DrawingShapeProps`](@ref), a
 [`DrawingLine`](@ref), or the [`Effective`](@ref) a resolver returns.
 
 `false` when `a:ln` is absent, so the outline is inherited, and also when it
 contains `<a:noFill/>`, which is how Excel writes "no border". As with
-[`has_fill`](@ref), read the line itself to tell those apart.
+[`hasFill`](@ref), read the line itself to tell those apart.
 
 `false` never means Excel draws nothing: a property written at no rung comes
 from the chart style, which this layer does not read.
 """
-has_line(sp::DrawingShapeProps) =
+hasLine(sp::DrawingShapeProps) =
     !isnothing(sp.line) && !isnothing(sp.line.fill) && sp.line.fill.kind !== :none
-has_line(l::DrawingLine) = !isnothing(l.fill) && l.fill.kind !== :none
-has_line(e::Effective{DrawingLine}) = !isnothing(e.value) && has_line(e.value)
+hasLine(l::DrawingLine) = !isnothing(l.fill) && l.fill.kind !== :none
+hasLine(e::Effective{DrawingLine}) = !isnothing(e.value) && hasLine(e.value)
 
 function Base.show(io::IO, sp::DrawingShapeProps)
     parts = String[]

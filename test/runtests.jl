@@ -131,6 +131,7 @@ functions in tests is not complete and it wouuld be undesirable to make
 it so.
 =#
 include(joinpath(files_directory, "Cell-names_tests.jl"))
+include(joinpath(files_directory, "ChartImports_tests.jl"))
 include(joinpath(files_directory, "Charts_tests.jl"))
 include(joinpath(files_directory, "ChartProps_tests.jl"))
 include(joinpath(files_directory, "ChartExProps_tests.jl"))

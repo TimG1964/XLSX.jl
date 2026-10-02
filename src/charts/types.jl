@@ -152,6 +152,22 @@ struct Chart <: AbstractChart
     to::Union{Nothing,String}
 end
 
+# v0.12 exposed these as fields; Chart is now a handle that reads the part on
+# demand. Kept for one release with a deprecation warning.
+function Base.getproperty(c::Chart, s::Symbol)
+    if s === :title
+        Base.depwarn("`chart.title` is deprecated; use `getChartTitle(chart)`.", :title)
+        return getChartTitle(c)
+    elseif s === :charttypes
+        Base.depwarn("`chart.charttypes` is deprecated; use `getChartTypes(chart)`.", :charttypes)
+        return getChartTypes(c)
+    elseif s === :series
+        Base.depwarn("`chart.series` is deprecated; use `getChartSeries(chart)`.", :series)
+        return getChartSeries(c)
+    end
+    return getfield(c, s)
+end
+
 """
     ChartEx
 
@@ -594,13 +610,36 @@ end
     DrawingParagraph(runs...; props = nothing, endprops = nothing)
 
 One paragraph. Runs may be `DrawingRun`s or plain strings, which become runs
-with no properties of their own — they inherit the paragraph default.
+with no properties of their own — they inherit the paragraph default. A newline
+in a string is a line break within the paragraph: the string becomes one run
+per line with an `a:br` between them, as Excel writes Shift+Enter. To start a
+new paragraph instead, pass separate paragraphs to [`DrawingText`](@ref).
 """
 DrawingParagraph(runs::Union{DrawingRun,AbstractString}...;
                  props = nothing, endprops = nothing) =
-    DrawingParagraph(props,
-                     DrawingRun[r isa DrawingRun ? r : DrawingRun(r) for r in runs],
+    DrawingParagraph(props, DrawingRun[x for r in runs for x in _as_runs(r)],
                      endprops, nothing)
+
+# A line break in user text: \r\n, a lone \r, or \n. XML parsers normalise all
+# three to \n, so treating them alike keeps a stray \r out of the written text.
+const _NEWLINE = r"\r\n?|\n"
+
+_as_paragraphs(p::DrawingParagraph) = (p,)
+_as_paragraphs(s::AbstractString) = (DrawingParagraph(line) for line in split(s, _NEWLINE))
+
+# A string becomes one run per line with a break between them: the same `:br`
+# run, text "\n", that reading an `a:br` produces. An empty line contributes its
+# break but no empty run. A string with no newline is one run, as before.
+_as_runs(r::DrawingRun) = (r,)
+function _as_runs(s::AbstractString)
+    occursin(_NEWLINE, s) || return (DrawingRun(s),)
+    out = DrawingRun[]
+    for (i, piece) in enumerate(split(s, _NEWLINE))
+        i > 1 && push!(out, DrawingRun("\n"; kind = :br))
+        isempty(piece) || push!(out, DrawingRun(piece))
+    end
+    return out
+end
 
 """
     DrawingBodyProps
@@ -658,9 +697,6 @@ struct DrawingText
     paragraphs::Vector{DrawingParagraph}
     raw::Union{Nothing,XML.Node}
 end
-
-_as_paragraphs(p::DrawingParagraph) = (p,)
-_as_paragraphs(s::AbstractString) = (DrawingParagraph(line) for line in split(s, "\n"))
 
 """
     DrawingText(paragraphs...; body = nothing, liststyle = nothing)
