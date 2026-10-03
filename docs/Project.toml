@@ -3,7 +3,7 @@ Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 XLSX = "fdbf4ff8-1666-58a4-91e7-1b58723a45e0"
 
 [sources]
-XLSX = {path = "D:\\dev\\XLSX-agent"}
+XLSX = {path = ".."}
 
 [compat]
 Documenter = "1"
