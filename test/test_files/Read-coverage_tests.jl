@@ -569,3 +569,79 @@ end
         @test XLSX.getdata(ws, "B1") == 7 && XLSX.getdata(ws, "A2") == 8
     end
 end
+
+
+# `_parse_cell_float` must give exactly what `parse(Float64, s)` gives, bit for bit,
+# and throw exactly where it throws (#462: an exact fast path for plain decimals).
+@testset "cell value float parsing" begin
+    same_as_base(s) = begin
+        b = try parse(Float64, s) catch e; typeof(e) end
+        f = try XLSX._parse_cell_float(s) catch e; typeof(e) end
+        b isa Float64 && f isa Float64 ? reinterpret(UInt64, b) == reinterpret(UInt64, f) : b == f
+    end
+
+    @testset "edge cases" begin
+        for s in ["0", "-0", "0.0", "-0.0", "00012.500", "1", "-1", ".5", "-.5", "1.", "5E0",
+                  "1E+22", "1E22", "1E23", "1E-22", "1E-23", "1e5", "2.5E-3", "2.5e-03", "1E+05",
+                  "123456789012345", "1234567890123456", "9007199254740993", "999999999999999",
+                  "0.000000000000000000001", "1.50000000000000000000", "0.30000000000000004",
+                  "1.7976931348623157E+308", "2.2250738585072014E-308", "4.9E-324", "1E+400", "1E-400",
+                  "45000.5", "-123.456", "12345678901234.5", "1234567890123.45",
+                  # not plain decimals: both must agree (Base parses some, rejects others)
+                  "", "-", ".", "-.", "1e", "1E+", "1e-", "E5", "abc", "1.2.3", " 1.5", "1.5 ",
+                  "+1.5", "1_0", "0x10", "Inf", "-Inf", "NaN", "1,5", "1d5", "--1", "1e5.5"]
+            ok = same_as_base(s)
+            ok || println("float parse differs from Base for ", repr(s))
+            @test ok
+        end
+        @test XLSX._fast_decimal("-0") === -0.0
+        @test XLSX._fast_decimal("1E+22") === 1.0e22
+        @test XLSX._fast_decimal("1E23") === nothing          # outside the exact range
+        @test XLSX._fast_decimal("1234567890123456") === nothing   # 16 digits
+        @test XLSX._fast_decimal("123456789012345") === 1.23456789012345e14
+    end
+
+    @testset "random values in the forms Excel writes" begin
+        rng = Random.MersenneTwister(462)
+        nfast = 0
+        nbad = 0
+        for _ in 1:300_000
+            x = (2rand(rng) - 1) * 10.0^rand(rng, -30:30)
+            k = rand(rng, 1:17)
+            for s in (string(x), string(round(x; sigdigits = k)),
+                      uppercase(string(round(x; sigdigits = k))),
+                      string(round(x; digits = rand(rng, 0:6))),
+                      string(rand(rng, -10^9:10^9)))
+                XLSX._fast_decimal(s) === nothing || (nfast += 1)
+                same_as_base(s) || (nbad += 1; nbad <= 5 && println("float parse differs from Base for ", repr(s)))
+            end
+        end
+        @test nbad == 0
+        @test nfast > 500_000
+        # extremes of the exponent range: all fall back to Base
+        @test all(same_as_base(string((2rand(rng) - 1) * 10.0^rand(rng, -307:308))) for _ in 1:20_000)
+    end
+
+    @testset "every <v> in test/data" begin
+        nvals = 0
+        nbad = 0
+        for file in sort(readdir(data_directory))
+            any(ext -> endswith(lowercase(file), ext), (".xlsx", ".xlsm", ".xltx", ".xltm")) || continue
+            zip = try ZipArchives.ZipReader(read(joinpath(data_directory, file))) catch; continue end
+            for name in ZipArchives.zip_names(zip)
+                occursin(r"xl/worksheets/sheet\d*\.xml", name) || continue
+                xml = String(ZipArchives.zip_readentry(zip, name))
+                for m in eachmatch(r"<(?:\w+:)?v>([^<]*)</(?:\w+:)?v>", xml)
+                    s = m.captures[1]
+                    tryparse(Float64, s) === nothing && continue
+                    nvals += 1
+                    same_as_base(s) && continue
+                    nbad += 1
+                    nbad <= 5 && println("float parse differs from Base for ", repr(s), " in ", file)
+                end
+            end
+        end
+        @test nbad == 0
+        @test nvals > 1000
+    end
+end
