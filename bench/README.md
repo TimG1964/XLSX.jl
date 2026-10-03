@@ -1,8 +1,8 @@
 ## Benchmarks
 
 This directory contains a benchmark suite comparing XLSX.jl performance across the
-released versions v0.10–v0.13, plus a quick check of the working tree (`dev`) against
-them.
+released versions v0.10–v0.13, upstream `master` on GitHub, and the working tree
+(`dev`), with a quick check of `dev` against the releases.
 
 ### Setup
 
@@ -13,15 +13,25 @@ them.
             results/
             envs/
                 dev/
+                master/
                 v0_10/
                 v0_11/
                 v0_12/
                 v0_13/
 
-   This folder can be a standalone benchmark project outside the XLSX.jl repository,
-   or the repository's own `bench/` directory. `envs/dev` points at the repository
-   checkout (`[sources] XLSX = {path = "../../.."}`), so it only works when `bench/`
-   sits inside a checkout; in a standalone folder, point its `path` at your checkout.
+   This folder can be the repository's own `bench/` directory or a standalone
+   benchmark project outside the repository. Two environments track unreleased code:
+
+   - `envs/dev` is the checkout `bench/` sits in (`[sources] XLSX = {path = "../../.."}`):
+     whatever branch you have checked out, including uncommitted changes. It works
+     only when `bench/` is inside a clone of XLSX.jl. In a standalone folder, point its
+     `path` at a checkout, or use `envs/master`.
+   - `envs/master` is upstream `master` on GitHub
+     (`[sources] XLSX = {url = "https://github.com/JuliaData/XLSX.jl", rev = "master"}`),
+     fetched when the environment is instantiated. It works anywhere.
+
+   Both need Julia 1.11 or later for `[sources]`. The `v0_*` environments pin
+   registered releases.
 
 2. If using a standalone folder, copy the benchmark scripts from the XLSX.jl repo into it:
 
@@ -39,16 +49,17 @@ them.
 3. Copy the appropriate `Project.toml` into each env sub-folder:
 
         envs/dev/Project.toml
+        envs/master/Project.toml
         envs/v0_10/Project.toml
         envs/v0_11/Project.toml
         envs/v0_12/Project.toml
         envs/v0_13/Project.toml
 
-4. Instantiate the environments (each pins a specific XLSX.jl version; `dev` uses the
-   checkout and needs Julia 1.11 or later for `[sources]`):
+4. Instantiate the environments:
 
         julia --project=.          -e "using Pkg; Pkg.instantiate()"
         julia --project=envs/dev   -e "using Pkg; Pkg.instantiate()"
+        julia --project=envs/master -e "using Pkg; Pkg.update()"    # fetch the latest master
         julia --project=envs/v0_10 -e "using Pkg; Pkg.instantiate()"
         julia --project=envs/v0_11 -e "using Pkg; Pkg.instantiate()"
         julia --project=envs/v0_12 -e "using Pkg; Pkg.instantiate()"
@@ -67,7 +78,8 @@ them.
 
 6. Run benchmarks (results written to `bench/results/`):
 
-        julia --project=. run_benchmarks.jl
+        julia --project=. run_benchmarks.jl                 # all versions
+        julia --project=. run_benchmarks.jl master dev      # just these
 
    This script calls `bench_worker.jl` once per version, activating the right
    environment each time. A version whose results file already exists is skipped.
@@ -146,4 +158,5 @@ sheets and every workbook in `test/data`. Two environment variables extend it:
 - `v0.11` — First XML.jl based implementation using XML.jl v0.3
 - `v0.12` — Updated XLSX.jl implementation adopting XML.jl v0.4
 - `v0.13` — Adds native Excel chart support
+- `master` — upstream `master` on GitHub
 - `dev` — the working tree

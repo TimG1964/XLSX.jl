@@ -1,6 +1,6 @@
 # run_benchmarks.jl
 # Orchestrates all benchmark runs and prints a comparison table.
-# Usage: julia --project=. run_benchmarks.jl
+# Usage: julia --project=. run_benchmarks.jl [versions...]   e.g. `v0.12 dev`; default all
 
 using Pkg
 
@@ -14,7 +14,10 @@ VERSIONS = [
     ("v0.11", joinpath(ROOT, "envs", "v0_11")),
     ("v0.12", joinpath(ROOT, "envs", "v0_12")),
     ("v0.13", joinpath(ROOT, "envs", "v0_13")),
+    ("master", joinpath(ROOT, "envs", "master")), # upstream master on GitHub
+    ("dev",   joinpath(ROOT, "envs", "dev")),     # the working tree
 ]
+isempty(ARGS) || filter!(v -> first(v) in ARGS, VERSIONS)
 
 for (ver_label, env_path) in VERSIONS
     outfile = joinpath(RESULTS_DIR, "$(ver_label).json")

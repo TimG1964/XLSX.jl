@@ -9,6 +9,8 @@ VERSIONS = [
     ("v0.11", joinpath(ROOT, "envs", "v0_11")),
     ("v0.12", joinpath(ROOT, "envs", "v0_12")),
     ("v0.13", joinpath(ROOT, "envs", "v0_13")),
+    ("master", joinpath(ROOT, "envs", "master")), # upstream master on GitHub
+    ("dev",   joinpath(ROOT, "envs", "dev")),     # the working tree
 ]
 
 const fixtures = [
@@ -49,7 +51,9 @@ let
     ver_labels = first.(VERSIONS)
     # (column label, numerator, denominator)
     ratios = [("v0.11/v0.10", "v0.11", "v0.10"), ("v0.12/v0.10", "v0.12", "v0.10"),
-              ("v0.13/v0.10", "v0.13", "v0.10"), ("v0.13/v0.12", "v0.13", "v0.12")]
+              ("v0.13/v0.10", "v0.13", "v0.10"), ("v0.13/v0.12", "v0.13", "v0.12"),
+              ("dev/v0.10", "dev", "v0.10"), ("dev/v0.12", "dev", "v0.12"), ("dev/v0.13", "dev", "v0.13"),
+              ("dev/master", "dev", "master")]
 
     header = @sprintf("%-30s", "fixture / benchmark")
     for v in ver_labels
