@@ -602,10 +602,11 @@ as an integer inside the spreadsheet XML.
 
 If `cell` has empty value or empty `String`, this function will return `missing`.
 """
-function getdata(ws::Worksheet, cell::Cell)
-    dt = cell.datatype
-    v  = cell.value
+getdata(ws::Worksheet, cell::Cell) = _cell_value(ws, cell.datatype, cell.value, cell)
 
+# The Julia value of a cell from its datatype and raw value. Shared by `getdata` and
+# the value-only rows `readtable` reads (src/valuerows.jl), so both convert alike.
+function _cell_value(ws::Worksheet, dt::CellValueType, v::UInt64, cell=nothing)
     # Fast path for common non-date types — avoids fetching workbook date mode
     dt == CT_EMPTY  && return missing
     dt == CT_ERROR  && return missing
@@ -623,7 +624,7 @@ function getdata(ws::Worksheet, cell::Cell)
     dt == CT_DATETIME && return excel_value_to_datetime(reinterpret(Float64, v), is1904)
     dt == CT_TIME     && return excel_value_to_time(reinterpret(Float64, v))
 
-    throw(XLSXError("Couldn't parse data for $cell."))
+    throw(XLSXError(isnothing(cell) ? "Couldn't parse data of type $dt." : "Couldn't parse data for $cell."))
 end
 
 # Extract cells from a <row> LazyNode and push them (in place) into a Dict(column -> Cell)

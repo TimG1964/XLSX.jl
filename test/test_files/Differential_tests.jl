@@ -243,12 +243,13 @@ function _diff_compare_rows(rows, oracle)::Union{Nothing,String}
     return nothing
 end
 
-# Known, pre-existing differences of `readtable(…; enable_cache=false)` (the streaming
-# path) from the cache path, accepted only until Stage 5 of #462:
-#  - sheets with out-of-order or duplicated `<row r>` (which Excel never writes) are
-#    read differently.
+# With `readtable` on the cache path (`XLSX._READTABLE_VALUE_ROWS[] = false`),
+# `enable_cache=false` streams the sheet, which reads sheets with out-of-order or
+# duplicated `<row r>` (never written by Excel) differently from the cache. That is
+# the one accepted difference. With value rows (the default), `enable_cache` has no
+# effect and such sheets fall back to the cache, so agreement must be exact.
 function _diff_nocache_allowed(oracle, subject, malformed::Bool)::Bool
-    return malformed
+    return malformed && !XLSX._READTABLE_VALUE_ROWS[]
 end
 
 """
@@ -290,9 +291,7 @@ function _diff_check(bytes::Vector{UInt8}, xf, sheet, cols, kw::NamedTuple, sec:
             XLSX.readtable(IOBuffer(bytes), sheet, cols; common(log_b)..., infer_eltypes, enable_cache)
         end)
 
-    # Known differences of the streaming path (enable_cache=false) from the cache
-    # path, accepted until Stage 5 of #462 makes enable_cache a no-op for readtable.
-    # Remove `_diff_nocache_allowed` then, and require exact agreement everywhere.
+    # The one known difference of the streaming path (see `_diff_nocache_allowed`)
     !enable_cache && _diff_nocache_allowed(oracle, subject, malformed) && return nothing
 
     m = _diff_compare(oracle, subject)
@@ -398,102 +397,228 @@ end
         end
     end
 
-    @testset "empty-row corpus" begin
-        _DIFF_CHECKS[] = 0; t0 = time()
-        mismatches = String[]
-        n = 0
-        for len in 0:3, states in Iterators.product(ntuple(_ -> _DIFF_ROW_STATES, len)...)
-            n += 1
-            bytes = _diff_corpus_sheet(collect(states))
-            append!(mismatches, _diff_product("corpus $(collect(states))", bytes, 1,
-                                              (nothing, 1, 2, 3, 4, 5), _DIFF_COLUMNS, cover, n))
-        end
-        @test n == 585
-        for (name, bytes) in _diff_special_sheets()
-            n += 1
-            append!(mismatches, _diff_product("special \"$name\"", bytes, 1,
-                                              (nothing, 1, 2, 3, 5, 6, 7, 13), _DIFF_COLUMNS, cover, n;
-                                              malformed = name in ("out-of-order rows", "duplicated row")))
-        end
-        _diff_report(mismatches, "empty-row corpus", t0)
-        @test isempty(mismatches)
-    end
-
-    @testset "randomised sheets" begin
-        _DIFF_CHECKS[] = 0; t0 = time()
-        mismatches = String[]
-        for seed in 1:500
-            rng = Random.MersenneTwister(seed)
-            bytes = _diff_random_sheet(rng)
-            for _ in 1:8
-                cols = rand(rng, _DIFF_COLUMNS)
-                kw = (; header = rand(rng, Bool), stop_in_empty_row = rand(rng, Bool),
-                        keep_empty_rows = rand(rng, Bool), first_row = rand(rng, (nothing, 1:8...)))
-                sec = rand(rng, cover)
-                xf = XLSX.readxlsx(IOBuffer(bytes))
-                m = _diff_check(bytes, xf, 1, cols, kw, sec)
-                m === nothing || push!(mismatches, "seed $seed cols=$(repr(cols)) $kw sec=$sec: $m")
-            end
-        end
-        _diff_report(mismatches, "randomised", t0)
-        @test isempty(mismatches)
-    end
-
-    @testset "test/data workbooks" begin
-        _DIFF_CHECKS[] = 0; t0 = time()
-        mismatches = String[]
-        n = 0
-        for file in sort(readdir(data_directory))
-            any(ext -> endswith(lowercase(file), ext), (".xlsx", ".xlsm", ".xltx", ".xltm")) || continue
-            bytes = read(joinpath(data_directory, file))
-            xf = _diff_run(() -> XLSX.readxlsx(IOBuffer(bytes)))
-            sheets = xf isa Exception ? [1] : collect(1:XLSX.sheetcount(xf))
-            # Large workbooks get the row-deciding booleans only, unless XLSX_FULL_DIFF=1.
-            _diff_run(() -> XLSX.readtable(IOBuffer(bytes), 1))
-            slow = !_DIFF_FULL && (@elapsed _diff_run(() -> XLSX.readtable(IOBuffer(bytes), 1))) > 0.02
-            for sheet in sheets
-                n += 1
-                dim = xf isa Exception ? nothing : _diff_run(() -> XLSX.get_dimension(xf[sheet]))
-                columns = Any[nothing]
-                first_rows = Any[nothing, 1, 2]
-                if slow
-                    append!(mismatches, _diff_product("$file sheet $sheet", bytes, sheet,
-                                                      Any[nothing], columns, cover, n))
-                    continue
+    # Every check runs with readtable on its value rows (the default, #462) and on the
+    # worksheet cache, so neither path can drift from `gettable`.
+    for value_rows in (true, false)
+      @testset "readtable via $(value_rows ? "value rows" : "the cache")" begin
+        XLSX._READTABLE_VALUE_ROWS[] = value_rows
+        try
+            @testset "empty-row corpus" begin
+                _DIFF_CHECKS[] = 0; t0 = time()
+                mismatches = String[]
+                n = 0
+                for len in 0:3, states in Iterators.product(ntuple(_ -> _DIFF_ROW_STATES, len)...)
+                    n += 1
+                    bytes = _diff_corpus_sheet(collect(states))
+                    append!(mismatches, _diff_product("corpus $(collect(states))", bytes, 1,
+                                                      (nothing, 1, 2, 3, 4, 5), _DIFF_COLUMNS, cover, n))
                 end
-                if dim isa XLSX.CellRange
-                    c1, c2 = XLSX.column_number(dim.start), XLSX.column_number(dim.stop)
-                    r2 = XLSX.row_number(dim.stop)
-                    col(i) = XLSX.encode_column_number(i)
-                    append!(columns, ["$(col(c1)):$(col(c2))", "$(col(c1)):$(col(c1))",
-                                      "$(col(c1)):$(col(c2 + 2))"])
-                    append!(first_rows, [r2, r2 + 1])
+                @test n == 585
+                for (name, bytes) in _diff_special_sheets()
+                    n += 1
+                    append!(mismatches, _diff_product("special \"$name\"", bytes, 1,
+                                                      (nothing, 1, 2, 3, 5, 6, 7, 13), _DIFF_COLUMNS, cover, n;
+                                                      malformed = name in ("out-of-order rows", "duplicated row")))
                 end
-                append!(mismatches, _diff_product("$file sheet $sheet", bytes, sheet,
-                                                  first_rows, columns, cover, n))
+                _diff_report(mismatches, "empty-row corpus", t0)
+                @test isempty(mismatches)
             end
+        
+            @testset "randomised sheets" begin
+                _DIFF_CHECKS[] = 0; t0 = time()
+                mismatches = String[]
+                for seed in 1:500
+                    rng = Random.MersenneTwister(seed)
+                    bytes = _diff_random_sheet(rng)
+                    for _ in 1:8
+                        cols = rand(rng, _DIFF_COLUMNS)
+                        kw = (; header = rand(rng, Bool), stop_in_empty_row = rand(rng, Bool),
+                                keep_empty_rows = rand(rng, Bool), first_row = rand(rng, (nothing, 1:8...)))
+                        sec = rand(rng, cover)
+                        xf = XLSX.readxlsx(IOBuffer(bytes))
+                        m = _diff_check(bytes, xf, 1, cols, kw, sec)
+                        m === nothing || push!(mismatches, "seed $seed cols=$(repr(cols)) $kw sec=$sec: $m")
+                    end
+                end
+                _diff_report(mismatches, "randomised", t0)
+                @test isempty(mismatches)
+            end
+        
+            @testset "test/data workbooks" begin
+                _DIFF_CHECKS[] = 0; t0 = time()
+                mismatches = String[]
+                n = 0
+                for file in sort(readdir(data_directory))
+                    any(ext -> endswith(lowercase(file), ext), (".xlsx", ".xlsm", ".xltx", ".xltm")) || continue
+                    bytes = read(joinpath(data_directory, file))
+                    xf = _diff_run(() -> XLSX.readxlsx(IOBuffer(bytes)))
+                    sheets = xf isa Exception ? [1] : collect(1:XLSX.sheetcount(xf))
+                    # Large workbooks get the row-deciding booleans only, unless XLSX_FULL_DIFF=1.
+                    _diff_run(() -> XLSX.readtable(IOBuffer(bytes), 1))
+                    slow = !_DIFF_FULL && (@elapsed _diff_run(() -> XLSX.readtable(IOBuffer(bytes), 1))) > 0.02
+                    for sheet in sheets
+                        n += 1
+                        dim = xf isa Exception ? nothing : _diff_run(() -> XLSX.get_dimension(xf[sheet]))
+                        columns = Any[nothing]
+                        first_rows = Any[nothing, 1, 2]
+                        if slow
+                            append!(mismatches, _diff_product("$file sheet $sheet", bytes, sheet,
+                                                              Any[nothing], columns, cover, n))
+                            continue
+                        end
+                        if dim isa XLSX.CellRange
+                            c1, c2 = XLSX.column_number(dim.start), XLSX.column_number(dim.stop)
+                            r2 = XLSX.row_number(dim.stop)
+                            col(i) = XLSX.encode_column_number(i)
+                            append!(columns, ["$(col(c1)):$(col(c2))", "$(col(c1)):$(col(c1))",
+                                              "$(col(c1)):$(col(c2 + 2))"])
+                            append!(first_rows, [r2, r2 + 1])
+                        end
+                        append!(mismatches, _diff_product("$file sheet $sheet", bytes, sheet,
+                                                          first_rows, columns, cover, n))
+                    end
+                end
+                _diff_report(mismatches, "test/data", t0)
+                @test isempty(mismatches)
+            end
+        
+            fixtures = get(ENV, "XLSX_DIFF_FIXTURES", "")
+            if !isempty(fixtures)
+                @testset "bench fixtures ($fixtures)" begin
+                    _DIFF_CHECKS[] = 0; t0 = time()
+                    mismatches = String[]
+                    for file in sort(readdir(fixtures))
+                        startswith(file, "xl_") || continue
+                        bytes = read(joinpath(fixtures, file))
+                        xf = XLSX.readxlsx(IOBuffer(bytes))
+                        for (i, sec) in enumerate(cover)
+                            kw = (; header = true, stop_in_empty_row = isodd(i), keep_empty_rows = i % 4 < 2, first_row = 5)
+                            m = _diff_check(bytes, xf, 2, "A:CF", kw, sec; check_rows = false)
+                            m === nothing || push!(mismatches, "$file $kw sec=$sec: $m")
+                        end
+                    end
+                    _diff_report(mismatches, "bench fixtures", t0)
+                    @test isempty(mismatches)
+                end
+            end
+        finally
+            XLSX._READTABLE_VALUE_ROWS[] = true
         end
-        _diff_report(mismatches, "test/data", t0)
-        @test isempty(mismatches)
+      end
     end
+end
 
+# ── Value rows vs cache rows, row by row (#462) ───────────────────────────────
+
+# Rows of `bytes`' sheet `sheet` from a `ValueRowIterator` (decoding `cols`, or all
+# columns) and from the worksheet cache, or the exceptions they threw.
+function _both_row_sources(bytes, sheet, cols)
+    value_rows = _diff_run() do
+        xf = XLSX.open_or_read_xlsx(IOBuffer(bytes), true, true, false; split_sheets = false)
+        ws = xf[sheet]
+        raw = xf.data[XLSX.get_relationship_target_by_id("xl", XLSX.get_workbook(xf), ws.relationship_id)]
+        collect(XLSX.ValueRowIterator(ws, raw, cols))
+    end
+    cache_rows = _diff_run(() -> collect(XLSX.eachrow(XLSX.readxlsx(IOBuffer(bytes))[sheet])))
+    return value_rows, cache_rows
+end
+
+# First difference between value rows and cache rows, or `nothing`.
+function _compare_row_sources(value_rows, cache_rows, cols)
+    if value_rows isa Exception || cache_rows isa Exception
+        value_rows isa XLSX._RowsNotAscending && return nothing   # readtable falls back to the cache
+        return _diff_compare(cache_rows, value_rows)
+    end
+    length(value_rows) == length(cache_rows) || return "$(length(value_rows)) value rows vs $(length(cache_rows)) cache rows"
+    for (v, c) in zip(value_rows, cache_rows)
+        XLSX.row_number(v) == XLSX.row_number(c) || return "row numbers $(XLSX.row_number(v)) vs $(XLSX.row_number(c))"
+        r = XLSX.row_number(c)
+        isempty(v) == isempty(c) || return "row $r: isempty $(isempty(v)) vs $(isempty(c))"
+        ws = XLSX.get_worksheet(c)
+        check = if isnothing(cols)
+            present = XLSX._present_columns(c)
+            XLSX._present_columns(v) == present || return "row $r: present columns $(XLSX._present_columns(v)) vs $present"
+            vcat(present, isempty(present) ? [1] : [maximum(present) + 1])   # plus an absent column
+        else
+            collect(cols)
+        end
+        for col in check
+            a, b = XLSX._row_value(ws, v, col), XLSX._row_value(ws, c, col)
+            (isequal(a, b) && typeof(a) == typeof(b)) || return "row $r col $col: $(repr(a)) vs $(repr(b))"
+            la, lb = String[], String[]
+            XLSX._push_header_label!(la, ws, v, col)
+            XLSX._push_header_label!(lb, ws, c, col)
+            la == lb || return "row $r col $col: header label $la vs $lb"
+        end
+    end
+    return nothing
+end
+
+@testset "value rows match cache rows" begin
+    sheets = Tuple{String,Vector{UInt8},Int}[]
+    for len in 0:3, states in Iterators.product(ntuple(_ -> _DIFF_ROW_STATES, len)...)
+        push!(sheets, ("corpus $(collect(states))", _diff_corpus_sheet(collect(states)), 1))
+    end
+    append!(sheets, [("special \"$k\"", v, 1) for (k, v) in _diff_special_sheets()])
+    append!(sheets, [("random seed $s", _diff_random_sheet(Random.MersenneTwister(s)), 1) for s in 1:200])
+    for file in sort(readdir(data_directory))
+        any(ext -> endswith(lowercase(file), ext), (".xlsx", ".xlsm", ".xltx", ".xltm")) || continue
+        bytes = read(joinpath(data_directory, file))
+        xf = try XLSX.readxlsx(IOBuffer(bytes)) catch; continue end
+        wb = XLSX.get_workbook(xf)
+        for (i, ws) in enumerate(wb.sheets)
+            XLSX.is_chartsheet(wb, ws.name) || push!(sheets, ("$file sheet $i", bytes, i))
+        end
+    end
     fixtures = get(ENV, "XLSX_DIFF_FIXTURES", "")
     if !isempty(fixtures)
-        @testset "bench fixtures ($fixtures)" begin
-            _DIFF_CHECKS[] = 0; t0 = time()
-            mismatches = String[]
-            for file in sort(readdir(fixtures))
-                startswith(file, "xl_") || continue
-                bytes = read(joinpath(fixtures, file))
-                xf = XLSX.readxlsx(IOBuffer(bytes))
-                for (i, sec) in enumerate(cover)
-                    kw = (; header = true, stop_in_empty_row = isodd(i), keep_empty_rows = i % 4 < 2, first_row = 5)
-                    m = _diff_check(bytes, xf, 2, "A:CF", kw, sec; check_rows = false)
-                    m === nothing || push!(mismatches, "$file $kw sec=$sec: $m")
-                end
-            end
-            _diff_report(mismatches, "bench fixtures", t0)
-            @test isempty(mismatches)
+        for file in sort(readdir(fixtures))
+            startswith(file, "xl_") && push!(sheets, ("$file", read(joinpath(fixtures, file)), 2))
         end
     end
+
+    mismatches = String[]
+    for (label, bytes, sheet) in sheets, cols in (nothing, 2:4, 1:7, 3:3)
+        m = _compare_row_sources(_both_row_sources(bytes, sheet, cols)..., cols)
+        m === nothing || push!(mismatches, "$label cols=$cols: $m")
+    end
+    foreach(println, first(mismatches, 20))
+    @test isempty(mismatches)
+    @test length(sheets) > 900
+
+    # the malformed sheets make value rows hand over to the cache
+    for (name, bytes) in _diff_special_sheets()
+        name in ("out-of-order rows", "duplicated row") || continue
+        @test _both_row_sources(bytes, 1, nothing)[1] isa XLSX._RowsNotAscending
+    end
+end
+
+@testset "value rows: invalid cells outside the read area" begin
+    # By design (src/valuerows.jl), readtable decodes only the cells it returns, so an
+    # invalid cell elsewhere raises no error; the cache path decodes every cell.
+    header = "<row r=\"1\"><c r=\"B1\" t=\"inlineStr\"><is><t>a</t></is></c><c r=\"C1\" t=\"inlineStr\"><is><t>b</t></is></c></row>"
+    good(r) = "<row r=\"$r\"><c r=\"B$r\"><v>$r</v></c><c r=\"C$r\"><v>$(10r)</v></c></row>"
+    bad_bool(ref) = "<c r=\"$ref\" t=\"b\"><v>2</v></c>"
+    outside_column = _diff_build_xlsx(header * good(2) * "<row r=\"3\"><c r=\"B3\"><v>3</v></c><c r=\"C3\"><v>30</v></c>$(bad_bool("E3"))</row>", String[])
+    # the table ends at the gap before row 6; row 6 is read to find that end, row 7 never is
+    after_table = _diff_build_xlsx(header * good(2) * good(3) * good(6) * "<row r=\"7\">$(bad_bool("B7"))</row>", String[])
+    inside = _diff_build_xlsx(header * good(2) * "<row r=\"3\">$(bad_bool("B3"))<c r=\"C3\"><v>30</v></c></row>", String[])
+
+    for (label, bytes) in ("outside the columns" => outside_column, "after the table" => after_table)
+        t = XLSX.readtable(IOBuffer(bytes), 1, "B:C")
+        @test t.column_labels == [:a, :b]
+        @test t.data == Any[[2, 3], [20, 30]]
+        XLSX._READTABLE_VALUE_ROWS[] = false
+        try
+            @test_throws XLSX.XLSXError XLSX.readtable(IOBuffer(bytes), 1, "B:C")
+        finally
+            XLSX._READTABLE_VALUE_ROWS[] = true
+        end
+    end
+    # inside the read area: the same error on both paths
+    e1 = try XLSX.readtable(IOBuffer(inside), 1, "B:C") catch e; e end
+    XLSX._READTABLE_VALUE_ROWS[] = false
+    e2 = try XLSX.readtable(IOBuffer(inside), 1, "B:C") catch e; e end
+    XLSX._READTABLE_VALUE_ROWS[] = true
+    @test e1 isa XLSX.XLSXError && e2 isa XLSX.XLSXError && e1.msg == e2.msg
 end

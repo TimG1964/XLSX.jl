@@ -50,8 +50,10 @@ _colname_prefix_string(::Worksheet, ::EmptyCell) = "#Empty"
 # helper function to manage problematic column labels
 # Empty cell -> "#Empty"
 # No_unique_label -> No_unique_label_2
-function push_unique!(vect::Vector{String}, sheet::Worksheet, cell::AbstractCell)
-    base = _colname_prefix_string(sheet, cell)
+push_unique!(vect::Vector{String}, sheet::Worksheet, cell::AbstractCell) =
+    push_unique!(vect, _colname_prefix_string(sheet, cell))
+
+function push_unique!(vect::Vector{String}, base::String)
     name = base
     i = 1
     while name in vect
@@ -154,6 +156,25 @@ function eachtablerow(
     normalizenames::Bool=false,
     missing_strings::Union{AbstractString, AbstractVector{<:AbstractString}, Nothing}=nothing
 )::TableRowIterator
+    return _eachtablerow(sheet, nothing, cols; first_row, column_labels, header, stop_in_empty_row,
+                         stop_in_row_function, keep_empty_rows, normalizenames, missing_strings)
+end
+
+# `eachtablerow`, reading rows from `rows`: `nothing` for the worksheet cache (or its
+# stream, with `enable_cache=false`), or a `ValueRowIterator` (readtable, src/valuerows.jl).
+function _eachtablerow(
+    sheet::Worksheet,
+    rows::Union{Nothing,ValueRowIterator},
+    cols::Union{ColumnRange,AbstractString};
+    first_row::Union{Nothing,Int}=nothing,
+    column_labels=nothing,
+    header::Bool=true,
+    stop_in_empty_row::Bool=true,
+    stop_in_row_function::Union{Nothing,Function}=nothing,
+    keep_empty_rows::Bool=false,
+    normalizenames::Bool=false,
+    missing_strings::Union{AbstractString, AbstractVector{<:AbstractString}, Nothing}=nothing
+)::TableRowIterator
 
     ms = if isnothing(missing_strings)
         Set{String}()
@@ -170,15 +191,17 @@ function eachtablerow(
     end
 
     if isnothing(first_row)
-        first_row = _find_first_row_with_data(sheet, column_range.start)
+        first_row = _find_first_row_with_data(sheet, rows, column_range.start)
     end
 
-    itr = eachrow(sheet)
+    itr = isnothing(rows) ? eachrow(sheet) : rows
     col_lab = Vector{String}()
 
     if isnothing(column_labels)
         if header
-            sheet_row = if is_cache_enabled(sheet)
+            sheet_row = if !isnothing(rows)
+                _find_value_row(rows, first_row)
+            elseif is_cache_enabled(sheet)
                 find_row(itr, first_row)   # cheap: itr is the persistent cache
             else
                 # Streaming mode: avoid restarting the whole iterator just to
@@ -187,8 +210,7 @@ function eachtablerow(
                 isempty(matched) ? throw(XLSXError("Row $first_row not found in worksheet $(sheet.name).")) : matched[1]
             end
             for column_index in column_range.start:column_range.stop
-                cell = getcell(sheet_row, column_index)
-                push_unique!(col_lab, sheet, cell)
+                _push_header_label!(col_lab, sheet, sheet_row, column_index)
             end
         else
             for c in column_range
@@ -205,7 +227,9 @@ function eachtablerow(
 
     first_data_row = header ? first_row + 1 : first_row
 
-    return TableRowIterator(sheet, Index(column_range, column_labels), first_data_row, stop_in_empty_row, stop_in_row_function, keep_empty_rows, ms)
+    index = Index(column_range, column_labels)
+    isnothing(rows) && return TableRowIterator(sheet, index, first_data_row, stop_in_empty_row, stop_in_row_function, keep_empty_rows, ms)
+    return TableRowIterator(rows, index, first_data_row, stop_in_empty_row, stop_in_row_function, keep_empty_rows, ms, nothing)
 end
 
 function TableRowIterator(sheet::Worksheet, index::Index, first_data_row::Int, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Nothing,Function}=nothing, keep_empty_rows::Bool=false, missing_strings::Set{String}=Set{String}(), resume::Union{Nothing,Tuple}=nothing)
@@ -238,12 +262,30 @@ function eachtablerow(
     normalizenames::Bool=false,
     missing_strings::Union{AbstractString, AbstractVector{<:AbstractString}, Nothing}=nothing
 )::TableRowIterator
+    return _eachtablerow(sheet, nothing; first_row, column_labels, header, stop_in_empty_row,
+                         stop_in_row_function, keep_empty_rows, normalizenames, missing_strings)
+end
+
+# `eachtablerow` with the column range found from the data, reading rows from `rows`
+# (see the ranged `_eachtablerow`).
+function _eachtablerow(
+    sheet::Worksheet,
+    rows::Union{Nothing,ValueRowIterator};
+    first_row::Union{Nothing,Int}=nothing,
+    column_labels=nothing,
+    header::Bool=true,
+    stop_in_empty_row::Bool=true,
+    stop_in_row_function::Union{Nothing,Function}=nothing,
+    keep_empty_rows::Bool=false,
+    normalizenames::Bool=false,
+    missing_strings::Union{AbstractString, AbstractVector{<:AbstractString}, Nothing}=nothing
+)::TableRowIterator
     if isnothing(first_row)
         first_row = 1
     end
     # Bundle shared kwargs to avoid repetition in recursive calls
     shared_kwargs = (; column_labels, header, stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames, missing_strings)
-    itr = eachrow(sheet)
+    itr = isnothing(rows) ? eachrow(sheet) : rows
     next = iterate(itr)
     while next !== nothing
         r, state = next
@@ -251,7 +293,7 @@ function eachtablerow(
             next = iterate(itr, state)
             continue
         end
-        columns_ordered = sort(collect(keys(r.rowcells)))
+        columns_ordered = _present_columns(r)
         # Find the first column with non-missing data
         ci = findfirst(cn -> !ismissing(getdata(r, cn)), columns_ordered)
         if isnothing(ci)
@@ -260,13 +302,34 @@ function eachtablerow(
         end
         first_row = row_number(r)
         column_range = _detect_column_range(r, columns_ordered, ci)
-        return eachtablerow(sheet, column_range; first_row, shared_kwargs...)
+        narrowed = isnothing(rows) ? nothing : _narrow(rows, column_range)
+        return _eachtablerow(sheet, narrowed, column_range; first_row, shared_kwargs...)
     end
     throw(XLSXError("Couldn't find a table in sheet $(sheet.name)"))
 end
 
-function _find_first_row_with_data(sheet::Worksheet, column_number::Int)
-    for r in eachrow(sheet)
+# Row access shared by the worksheet cache's `SheetRow`s and readtable's `ValueRow`s
+# (src/valuerows.jl): the table code reads rows only through these.
+@inline _row_value(ws::Worksheet, r::SheetRow, column::Int) = getdata(ws, getcell(r, column))
+@inline _row_value(::Worksheet, r::ValueRow, column::Int) = getdata(r, column)
+
+# Columns holding a `<c>` (present, even if empty), in order.
+_present_columns(r::SheetRow) = sort(collect(keys(r.rowcells)))
+_present_columns(r::ValueRow) = [r.firstcol + i - 1 for i in eachindex(r.values) if r.values[i] !== _ABSENT]
+
+# The header label for `column`: "#Empty" for an absent cell, else the value as text.
+_push_header_label!(labels::Vector{String}, sheet::Worksheet, r::SheetRow, column::Int) =
+    push_unique!(labels, sheet, getcell(r, column))
+function _push_header_label!(labels::Vector{String}, ::Worksheet, r::ValueRow, column::Int)
+    v = _value_or_absent(r, column)
+    push_unique!(labels, v === _ABSENT ? "#Empty" : v isa String ? v : string(v))
+end
+
+_find_first_row_with_data(sheet::Worksheet, column_number::Int) =
+    _find_first_row_with_data(sheet, nothing, column_number)
+
+function _find_first_row_with_data(sheet::Worksheet, rows::Union{Nothing,ValueRowIterator}, column_number::Int)
+    for r in (isnothing(rows) ? eachrow(sheet) : rows)
         if !ismissing(getdata(r, column_number))
             return row_number(r)
         end
@@ -315,13 +378,13 @@ Base.getindex(r::TableRow, x) = getdata(r, x)
     return val
 end
 
-function TableRow(table_row::Int, index::Index, sheet_row::SheetRow,
+function TableRow(table_row::Int, index::Index, sheet_row::AbstractSheetRow,
                   missing_strings::Set{String}=Set{String}())
     ws = get_worksheet(sheet_row)
 
     cell_values = map(table_column_numbers(index)) do table_column_number
         sheet_column = table_column_to_sheet_column_number(index, table_column_number)
-        val = getdata(ws, getcell(sheet_row, sheet_column))
+        val = _row_value(ws, sheet_row, sheet_column)
         _apply_missing_strings(val, missing_strings)
     end
 
@@ -342,10 +405,10 @@ function getdata(r::TableRow, column_label::Symbol)
 end
 
 # Checks if there are any data inside column range (row not entirely empty)
-function is_empty_table_row(itr::TableRowIterator, sheet_row::SheetRow)::Bool
+function is_empty_table_row(itr::TableRowIterator, sheet_row::AbstractSheetRow)::Bool
     isempty(sheet_row) && return true
     ws = get_worksheet(itr)
-    return all(c -> ismissing(getdata(ws, getcell(sheet_row, c))), sheet_column_numbers(itr.index))
+    return all(c -> ismissing(_row_value(ws, sheet_row, c)), sheet_column_numbers(itr.index))
 end
 
 Base.IteratorSize(::Type{<:TableRowIterator}) = Base.SizeUnknown()
@@ -549,7 +612,7 @@ function gettable(itr::TableRowIterator; infer_eltypes::Bool=true)::DataTable
                 end
             else
                 for ci in 1:columns_count
-                    val = getdata(ws, getcell(sheet_row, sheet_columns[ci]))
+                    val = _row_value(ws, sheet_row, sheet_columns[ci])
                     push!(data[ci], _apply_missing_strings(val, itr.missing_strings))
                 end
             end

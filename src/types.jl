@@ -764,7 +764,11 @@ end
 # Iterators
 #
 
-struct SheetRow
+# A worksheet row as the table code reads it: `SheetRow` (from the worksheet cache) or
+# `ValueRow` (readtable's value rows, src/valuerows.jl).
+abstract type AbstractSheetRow end
+
+struct SheetRow <: AbstractSheetRow
     sheet::Worksheet
     row::Int                     # index of the row in the worksheet
     ht::Union{Float64, Nothing}  # row height
@@ -818,7 +822,7 @@ struct TableRowIteratorState{S}
     sheet_row_index::Int
     sheet_row_iterator_state::S
     missing_rows::Int # number of completely empty rows between the last row and the current row
-    row_pending::Union{Nothing, SheetRow} # if the last row was empty, this is the row that was pending to be returned
+    row_pending::Union{Nothing, AbstractSheetRow} # if the last row was empty, this is the row that was pending to be returned
 end
 
 struct XLSXTableRow
