@@ -8,10 +8,12 @@ options selected, as follows:
     at open (cheap, scales with total file size); each sheet's actual row data lazily cache-filled only on 
     first access to that sheet. Any sheets from which cell data are never accessed do not get cached.
 
-- `readtable`/`readtransposedtable`: only the one target worksheet's XML is ever 
-    decompressed at all — structural processing for every other sheet is skipped entirely, and the 
-    target sheet's row data is then cache-filled (or streamed, if enable_cache=false) exactly as in the 
-    `mode="r"` case, just scoped to a single worksheet file from the very first byte read.
+- `readtable`/`readtransposedtable`: only the one target worksheet's XML is ever
+    decompressed at all — structural processing for every other sheet is skipped entirely.
+    `readtransposedtable` then cache-fills (or streams, if enable_cache=false) the target sheet's
+    row data exactly as in the `mode="r"` case. `readtable` (without `table_name`) instead reads
+    the values it needs straight from the sheet XML, with no cache and no `<sheetData>` split
+    (src/valuerows.jl; `_READTABLE_VALUE_ROWS` switches it back to the cache).
 =#
 
 # Name space conversion map for converting Strict OOXML files (ISO/IEC 29500) to Transitional format (ECMA-376)
@@ -672,6 +674,14 @@ function _strict_to_transitional_node!(node::XML.Node, filename::AbstractString)
     return nothing
 end
 
+# Worksheet XML kept as a String: swap Strict namespaces for Transitional ones.
+function _strict_ns_to_transitional(xml::String)::String
+    for (strict_ns, transitional_ns) in STRICT_TO_TRANSITIONAL
+        xml = replace(xml, strict_ns => transitional_ns)
+    end
+    return replace(xml, r"\s+conformance\s*=\s*\"strict\""=>"")
+end
+
 function convert_strict_to_transitional!(xf::XLSXFile, pass::Int)
     for filename in keys(xf.files)
         haskey(xf.data, filename) || continue      # target_sheet: only some files are loaded
@@ -692,12 +702,11 @@ function convert_strict_to_transitional!(xf::XLSXFile, pass::Int)
                 # a handful of xmlns attributes.
                 data = xf.data[filename]
                 if data isa String
-                    converted = data
-                    for (strict_ns, transitional_ns) in STRICT_TO_TRANSITIONAL
-                        converted = replace(converted, strict_ns => transitional_ns)
-                    end
-                    converted = replace(converted, r"\s+conformance\s*=\s*\"strict\""=>"")
-                    xf.data[filename] = converted
+                    xf.data[filename] = _strict_ns_to_transitional(data)
+                end
+                # The stub kept for `eachrow` (read-only, cache-on) needs the same fix.
+                if haskey(xf.sheet_stubs, filename)
+                    xf.sheet_stubs[filename] = _strict_ns_to_transitional(xf.sheet_stubs[filename])
                 end
                 continue
             end
@@ -717,7 +726,8 @@ end
 
 function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable_cache::Bool, _write::Bool;
                             target_sheet::Union{Nothing,AbstractString,Integer}=nothing,
-                            load_formulas::Bool=true)::XLSXFile
+                            load_formulas::Bool=true,
+                            split_sheets::Bool=true)::XLSXFile
 
     if _write
         !(_read && enable_cache) && throw(XLSXError("Cache must be enabled for files in `write` mode."))
@@ -762,7 +772,7 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
         nothing
     end
 
-    load_files!(xf, zip_io; pass=3, target_file=target_file)
+    load_files!(xf, zip_io; pass=3, target_file=target_file, split_sheets=split_sheets)
     if strict
         convert_strict_to_transitional!(xf, 3)
     end
@@ -1046,6 +1056,25 @@ function strip_bom_and_lf!(bytes::Vector{UInt8})
     end
 end
 
+# Byte span `start:stop-1` of element `n` in its source, found with XML.jl's raw
+# element scanner (the one `XML.skip_element!` uses), which hops between `<`s without
+# building tokens. `XML.sourcespan` gives the same span but runs the full tokenizer
+# over the element, which for a large `<sheetData>` costs several times more (#462).
+# Switch to `XML.sourcespan` once XML.jl#157 makes it use the raw scanner too.
+#
+# The raw scanner returns `ncodeunits + 1` both for an element that ends the source and
+# for one that is never closed; that case defers to `XML.sourcespan`, so malformed XML
+# fails exactly as before.
+function _element_span(n::XML.LazyNode)
+    start = n.token.offset + 1
+    stop = XML.XMLTokenizer._skip_element_raw(n.data, start)
+    if stop > ncodeunits(n.data)
+        span = XML.sourcespan(n)
+        return first(span), nextind(n.data, last(span))
+    end
+    return start, stop
+end
+
 function splitNode(xml_str::String, skipnode::String)
     c = XML.Cursor(xml_str)
 
@@ -1080,7 +1109,9 @@ function splitNode(xml_str::String, skipnode::String)
         "<$(target_tag) $(attr_str)/>"
     end
 
-    stripped_xml = XML.splicetext(target_lazy, replacement)
+    start, stop = _element_span(target_lazy)
+    stripped_xml = string(SubString(xml_str, firstindex(xml_str), prevind(xml_str, start)),
+                          replacement, SubString(xml_str, stop))
     return stripped_xml, ""
 end
 
@@ -1111,7 +1142,8 @@ end
 # pass 2 - only read sharedStrings (needed before worksheets)
 # pass 3 - only read worksheets
 function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
-                     target_file::Union{Nothing,String}=nothing)
+                     target_file::Union{Nothing,String}=nothing,
+                     split_sheets::Bool=true)
 
     (pass < 1 || pass > 3) && throw(XLSXError("Unknown pass to read files."))
     wb = get_workbook(xf)
@@ -1167,7 +1199,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
                 will_eager_fill = xf.use_cache_for_sheet_data && xf.is_writable
                 if will_eager_fill
                     # store stub now; full raw only needed transiently for the fill below
-                    xf.data[file.name] = file.node
+                    xf.data[file.name] = something(file.node, first(splitNode(file.raw, "sheetData")))
                     xf.files[file.name] = true
                     for sheet in wb.sheets
                         get_relationship_target_by_id("xl", wb, sheet.relationship_id) == file.name &&
@@ -1175,8 +1207,10 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
                     end
                 elseif xf.use_cache_for_sheet_data
                     # cache-on, read-only: keep full raw resident so streaming/lazy-fill/
-                    # dimension lookups can use it without re-reading from ZIP.
+                    # dimension lookups can use it without re-reading from ZIP. Keep the
+                    # stub too, for `eachrow` to swap in once the cache is filled.
                     xf.data[file.name] = file.raw
+                    isnothing(file.node) || (xf.sheet_stubs[file.name] = file.node)
                     xf.files[file.name] = true
                 else
                     # enable_cache=false: do NOT retain worksheet XML in memory.
@@ -1205,7 +1239,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
     @sync for _ in 1:max(nworkers, 1)
         Threads.@spawn begin
             for file in filtered_files
-                readfile = process_file(zip_io, file)
+                readfile = process_file(zip_io, file, split_sheets)
                 put!(read_files, readfile)
             end
         end
@@ -1215,7 +1249,9 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
     wait(consumer)
 end
 
-function process_file(zip_io::ZipArchives.ZipReader, filename::String)
+# `split_sheets=false` (readtable's value rows, src/valuerows.jl) keeps a worksheet whole:
+# no `<sheetData>` stub is made, as nothing will use it.
+function process_file(zip_io::ZipArchives.ZipReader, filename::String, split_sheets::Bool=true)
 
     node = nothing
     raw  = nothing
@@ -1230,8 +1266,7 @@ function process_file(zip_io::ZipArchives.ZipReader, filename::String)
                 node = XML.Element("sst")  # placeholder; SST is loaded via sst_load!
                 raw  = xml_str
             elseif occursin(r"xl/worksheets/sheet\d*\.xml", filename)
-                stripped_xml, _ = splitNode(xml_str, "sheetData")
-                node = stripped_xml
+                node = split_sheets ? first(splitNode(xml_str, "sheetData")) : nothing
                 raw  = xml_str      # full worksheet for LazyNode construction
             else
                 node = parse(xml_str, XML.Node)
@@ -1446,10 +1481,13 @@ function stop_function(r)
 end
 ```
 
-`enable_cache` is a boolean that determines whether cell data are loaded 
-into the worksheet cache on reading. Using `readtable` with `enable_cache=true` 
-is faster than with `enable_cache=false` for large files, but uses more 
-memory. The default behavior is `enable_cache=true`.
+`enable_cache` has no effect on `readtable` and is kept for compatibility.
+`readtable` reads the values it needs straight from the worksheet, without
+filling the worksheet cache, which is faster and uses less memory. It decodes
+only the cells in the table's columns and rows (and the one row after the
+table that shows where it ends), so an invalid cell anywhere else in the sheet
+does not raise an error, as it does when the sheet is read through
+[`XLSX.readxlsx`](@ref) or [`XLSX.openxlsx`](@ref).
 
 `keep_empty_rows` determines whether rows where all column values are equal 
 to `missing` are kept (`true`) or dropped (`false`) from the resulting table. 
@@ -1506,8 +1544,10 @@ function readtable(source::Union{AbstractString,IO};
         throw(XLSXError("No Excel Table named `$table_name` found in any worksheet of $(xf.source)."))
     end
 
+    kw = (; first_row, column_labels, header, infer_eltypes, stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames, missing_strings)
+    _READTABLE_VALUE_ROWS[] && return _readtable_value_rows(source, 1, nothing; kw...)
     xf = open_or_read_xlsx(source, true, enable_cache, false; target_sheet=1, load_formulas=false)
-    return gettable(getsheet(xf, 1); first_row, column_labels, header, infer_eltypes, stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames, missing_strings)
+    return gettable(getsheet(xf, 1); kw...)
 end
 
 function readtable(source::Union{AbstractString,IO}, sheet::Union{AbstractString,Int}; 
@@ -1527,6 +1567,9 @@ function readtable(source::Union{AbstractString,IO}, sheet::Union{AbstractString
         throw(XLSXError("File $source not found."))
     end
 
+    kw = (; first_row, column_labels, header, infer_eltypes, stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames, missing_strings)
+    isnothing(table_name) && _READTABLE_VALUE_ROWS[] && return _readtable_value_rows(source, sheet, nothing; kw...)
+
     xf = open_or_read_xlsx(source, true, enable_cache, false; target_sheet=sheet, load_formulas=false)
 
     if !isnothing(table_name)
@@ -1536,7 +1579,7 @@ function readtable(source::Union{AbstractString,IO}, sheet::Union{AbstractString
         return gettable(table(getsheet(xf, sheet), table_name); infer_eltypes, normalizenames, missing_strings)
     end
 
-    return gettable(getsheet(xf, sheet); first_row, column_labels, header, infer_eltypes, stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames, missing_strings)
+    return gettable(getsheet(xf, sheet); kw...)
 end
 
 function readtable(source::Union{AbstractString,IO}, sheet::Union{AbstractString,Int}, columns::ColumnRange; 
@@ -1558,8 +1601,10 @@ function readtable(source::Union{AbstractString,IO}, sheet::Union{AbstractString
     if !(source isa IO || isfile(source))
         throw(XLSXError("File $source not found."))
     end
+    kw = (; first_row, column_labels, header, infer_eltypes, stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames, missing_strings)
+    _READTABLE_VALUE_ROWS[] && return _readtable_value_rows(source, sheet, columns; kw...)
     xf = open_or_read_xlsx(source, true, enable_cache, false; target_sheet=sheet, load_formulas=false)
-    return gettable(getsheet(xf, sheet), columns; first_row, column_labels, header, infer_eltypes, stop_in_empty_row, stop_in_row_function, keep_empty_rows, normalizenames, missing_strings)
+    return gettable(getsheet(xf, sheet), columns; kw...)
 end
 
 function readtable(source::Union{AbstractString,IO}, sheet::Union{AbstractString,Int}, range::AbstractString; 
@@ -1584,6 +1629,44 @@ function readtable(source::Union{AbstractString,IO}, sheet::Union{AbstractString
         throw(XLSXError("The columns argument must be a valid column range."))
     end
     return readtable(source, sheet, range; first_row, column_labels, header, infer_eltypes, stop_in_empty_row, stop_in_row_function, enable_cache, keep_empty_rows, normalizenames, missing_strings)
+end
+
+# `readtable` reads its sheet through value rows (src/valuerows.jl), not the worksheet
+# cache. Set to `false` to send `readtable` through the cache path, as before #462;
+# the tests run with both settings.
+const _READTABLE_VALUE_ROWS = Ref(true)
+
+# `readtable` (without `table_name`) through value rows. Falls back to the cache path
+# for a chartsheet, a sheet not held as XML text, or rows out of ascending order;
+# results are the same as `gettable` on the cache except that invalid cells outside the
+# returned area aren't decoded, so they raise no error (see src/valuerows.jl).
+function _readtable_value_rows(source, sheet, cols; infer_eltypes::Bool, kw...)
+    xf = open_or_read_xlsx(source, true, true, false; target_sheet=sheet, load_formulas=false,
+                           split_sheets=false)
+    ws = getsheet(xf, sheet)
+    wb = get_workbook(xf)
+    cache_path() = isnothing(cols) ? gettable(ws; infer_eltypes, kw...) : gettable(ws, cols; infer_eltypes, kw...)
+    is_chartsheet(wb, ws.name) && return cache_path()
+    raw = get(xf.data, get_relationship_target_by_id("xl", wb, ws.relationship_id), nothing)
+    raw isa String || return cache_path()
+    try
+        # A `stop_in_row_function` sees rows as they're read, so check the row order
+        # first: a fallback after it had been called would call it on rows twice.
+        get(kw, :stop_in_row_function, nothing) === nothing ||
+            _check_all_rows_ascending(ValueRowIterator(ws, raw, nothing))
+        itr = if isnothing(cols)
+            _eachtablerow(ws, ValueRowIterator(ws, raw, nothing); kw...)
+        else
+            cr = convert(ColumnRange, cols)
+            _eachtablerow(ws, ValueRowIterator(ws, raw, cr.start:cr.stop), cr; kw...)
+        end
+        t = gettable(itr; infer_eltypes)
+        _check_rows_ascending!(itr.itr)    # the rows after the table, too
+        return t
+    catch e
+        e isa _RowsNotAscending || rethrow()
+    end
+    return cache_path()
 end
 
 """

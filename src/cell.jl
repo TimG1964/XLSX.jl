@@ -205,11 +205,11 @@ end
 # Resolves unhandled_attributes to nothing if empty, for compact Formula construction.
 _extra_attrs(d::Dict) = isempty(d) ? nothing : d
 
-function Cell(c::XML.LazyNode, ws::Worksheet, sst_pfx::String,
-              local_formulas::Union{Nothing, Dict{SheetCellRef, AbstractFormula}}=nothing,
-              load_formulas::Bool=true)::Union{Cell,EmptyCell}
-    wb = get_workbook(ws)
-    @assert localname(c) == "c" "`Cell` expects a `c` (cell) XML node."
+# The pieces of a `<c>` element, shared by `Cell(::LazyNode, …)` and the cursor walk in
+# `first_cache_fill!` so the two read cells identically.
+
+# `r`, `t`, `s` and `cm` of a `<c>`, in one pass over its start tag.
+@inline function _cell_attributes(c::XML.LazyNode)
     ref_str::SubString{String} = SubString("")
     t::SubString{String}       = SubString("")
     s_str::SubString{String}   = SubString("")
@@ -221,9 +221,60 @@ function Cell(c::XML.LazyNode, ws::Worksheet, sst_pfx::String,
         elseif k == "cm"; m_str   = v
         end
     end
-    ref   = CellRef(ref_str)
+    ref = CellRef(ref_str)
     style, num_style = _parse_style(s_str)
     meta = isempty(m_str) ? UInt32(0) : parse(UInt32, m_str)
+    return ref, ref_str, t, style, num_style, meta
+end
+
+# The text of a `<v>` that isn't a single text or CDATA node: its first text or CDATA
+# child, if any. Warns (once) when it has children but no text.
+function _v_text_fallback(v::XML.LazyNode, ref_str::AbstractString)
+    sv = nothing
+    has_children = false
+    for ch in XML.eachchildnode(v)
+        has_children = true
+        nt = XML.nodetype(ch)
+        if nt === XML.Text || nt === XML.CData
+            sv = XML.value(ch)
+            break
+        end
+    end
+    if isnothing(sv) && has_children
+        @warn "Could not read value of cell $ref_str: `<v>` element has no text content. Treating as empty." maxlog=1
+    end
+    return sv
+end
+
+# (datatype, value) of an inline string `<is>`, or `nothing` when it has no text.
+function _inline_string(wb::Workbook, is::XML.LazyNode, sst_pfx::String)
+    isempty(unformatted_text(wb, is)) && return nothing
+    ft = _build_si_xml(is, sst_pfx)
+    return CT_STRING, reinterpret(UInt64, Int64(add_formatted_string!(wb, ft)))
+end
+
+# Parse an `<f>` and record it: in `local_formulas` when filling a cache (merged into
+# the workbook later), else straight into the workbook under its lock.
+function _record_formula!(wb::Workbook, ws::Worksheet, ref::CellRef, f_node::XML.LazyNode,
+                          local_formulas::Union{Nothing, Dict{SheetCellRef, AbstractFormula}})
+    f = parse_formula_from_element(wb, f_node)
+    key = SheetCellRef(combine_sheet_ref(ws, ref))
+    if isnothing(local_formulas)
+        lock(wb.formulas_lock) do
+            wb.formulas[key] = f
+        end
+    else
+        local_formulas[key] = f
+    end
+    return nothing
+end
+
+function Cell(c::XML.LazyNode, ws::Worksheet, sst_pfx::String,
+              local_formulas::Union{Nothing, Dict{SheetCellRef, AbstractFormula}}=nothing,
+              load_formulas::Bool=true)::Union{Cell,EmptyCell}
+    wb = get_workbook(ws)
+    @assert localname(c) == "c" "`Cell` expects a `c` (cell) XML node."
+    ref, ref_str, t, style, num_style, meta = _cell_attributes(c)
     datatype = CT_EMPTY
     value    = UInt64(0)
     formula  = false
@@ -232,48 +283,18 @@ function Cell(c::XML.LazyNode, ws::Worksheet, sst_pfx::String,
         tag = localname(child)
         if t == "inlineStr"
             tag == "is" || continue
-            uft = unformatted_text(wb, child)
-            if !isempty(uft)
-                ft = _build_si_xml(child, sst_pfx)
-                datatype = CT_STRING
-                value = reinterpret(UInt64, Int64(add_formatted_string!(wb, ft)))
-            end
+            r = _inline_string(wb, child, sst_pfx)
+            isnothing(r) || ((datatype, value) = r)
             break
-        else
-        if tag == "v"
+        elseif tag == "v"
             sv = XML.is_simple_value(child)
-            if isnothing(sv)
-                has_children = false
-                for ch in XML.eachchildnode(child)
-                    has_children = true
-                    nt = XML.nodetype(ch)
-                    if nt === XML.Text || nt === XML.CData
-                        sv = XML.value(ch)
-                        break
-                    end
-                end
-                if isnothing(sv) && has_children
-                    @warn "Could not read value of cell $ref_str: `<v>` element has no text content. Treating as empty." maxlog=1
-                end
-            end
+            isnothing(sv) && (sv = _v_text_fallback(child, ref_str))
             if !isnothing(sv) && !isempty(sv)
                 datatype, value = process_tv(wb, t, sv, num_style)
             end
-            elseif tag == "f"
-                if load_formulas
-                    f = parse_formula_from_element(wb, child)
-                    if isnothing(local_formulas)
-                        # streaming path — write directly under lock
-                        lock(wb.formulas_lock) do
-                            wb.formulas[SheetCellRef(combine_sheet_ref(ws, ref))] = f
-                        end
-                    else
-                        # cache fill path — write to local dict, merged later
-                        local_formulas[SheetCellRef(combine_sheet_ref(ws, ref))] = f
-                    end
-                end
-                formula = true
-            end
+        elseif tag == "f"
+            load_formulas && _record_formula!(wb, ws, ref, child, local_formulas)
+            formula = true
         end
     end
     return Cell(ref, value, style, meta, datatype, formula)
@@ -331,10 +352,102 @@ end
 
 # Returns (raw_value::UInt64, datatype::CellValueType) for datetime strings,
 # keeping the value in its Excel numeric form for storage in Cell.
+# Cell values are parsed as Float64 millions of times per sheet, and
+# `parse(Float64, s)` goes through C `strtod` (often copying the text first), which
+# here costs ~300 ns a value (#462). `_parse_cell_float` reads plain decimals itself and
+# hands everything else to `parse(Float64, s)`.
+#
+# The fast path takes only `-?digits[.digits][(E|e)[+-]digits]` with at most 15
+# significant digits and a value `m × 10^p` with |p| ≤ 22. Then `m` (< 10^15 < 2^53)
+# and `10^|p|` (5^22 < 2^53) are both exact Float64s, and IEEE-754 rounds the single
+# multiply or divide correctly, which is the one correctly rounded result `strtod`
+# gives too (Clinger's fast path). Anything else, including 16- and 17-digit values,
+# whitespace, `inf`/`nan`, hex and malformed text, goes to `parse(Float64, s)`, so
+# values and errors outside the fast path are unchanged. Needs IEEE double arithmetic
+# without x87 extended precision, as on every platform Julia supports (SSE2 on i686).
+const _EXACT_POW10 = ntuple(i -> 10.0^(i - 1), 23)  # 1e0 … 1e22, all exact
+
+@inline function _fast_decimal(s::AbstractString)::Union{Nothing,Float64}
+    cu = codeunits(s)
+    n = length(cu)
+    n == 0 && return nothing
+    i = 1
+    neg = false
+    if cu[1] == UInt8('-')
+        neg = true
+        i = 2
+        i > n && return nothing
+    end
+    m = UInt64(0)        # significant digits
+    ndig = 0             # count of significant digits
+    frac = 0             # digits after the point
+    seen_digit = false
+    seen_dot = false
+    @inbounds while i <= n
+        b = cu[i]
+        if UInt8('0') <= b <= UInt8('9')
+            seen_digit = true
+            if !(m == 0 && b == UInt8('0'))      # leading zeros aren't significant
+                ndig += 1
+                ndig > 15 && return nothing
+                m = m * 10 + (b - UInt8('0'))
+            end
+            seen_dot && (frac += 1)
+        elseif b == UInt8('.') && !seen_dot
+            seen_dot = true
+        else
+            break
+        end
+        i += 1
+    end
+    seen_digit || return nothing
+    e = 0
+    if i <= n
+        b = cu[i]
+        (b == UInt8('E') || b == UInt8('e')) || return nothing
+        i += 1
+        i > n && return nothing
+        eneg = false
+        if cu[i] == UInt8('-')
+            eneg = true
+            i += 1
+        elseif cu[i] == UInt8('+')
+            i += 1
+        end
+        i > n && return nothing
+        @inbounds while i <= n
+            b = cu[i]
+            UInt8('0') <= b <= UInt8('9') || return nothing
+            e = e * 10 + (b - UInt8('0'))
+            e > 400 && return nothing
+            i += 1
+        end
+        eneg && (e = -e)
+    end
+    p = e - frac         # value = m × 10^p
+    x = Float64(m)
+    if m != 0
+        if p >= 0
+            p > 22 && return nothing
+            x *= _EXACT_POW10[p + 1]
+        else
+            p < -22 && return nothing
+            x /= _EXACT_POW10[1 - p]
+        end
+    end
+    return neg ? -x : x
+end
+
+# `parse(Float64, s)`, with the exact fast path above for plain decimals.
+@inline function _parse_cell_float(s::AbstractString)::Float64
+    x = _fast_decimal(s)
+    return isnothing(x) ? parse(Float64, s) : x
+end
+
 function _parse_excel_datetime_raw(v::AbstractString)
     isempty(v) && throw(XLSXError("Cannot convert an empty string into a datetime value."))
     if occursin('.', v) || v == "0"
-        time_value = parse(Float64, v)
+        time_value = _parse_cell_float(v)
         time_value >= 0 || throw(XLSXError("Cannot have a datetime value < 0. Got $time_value"))
         datatype = time_value < 1.0 ? CT_TIME : CT_DATETIME
         return reinterpret(UInt64, time_value), datatype
@@ -355,7 +468,7 @@ function process_tv(wb::Workbook, t::AbstractString, v::AbstractString, num_styl
             value, datatype = _parse_excel_datetime_raw(v)
         elseif styles_is_float(wb, num_style)
             datatype = CT_FLOAT
-            value = reinterpret(UInt64, parse(Float64, v))
+            value = reinterpret(UInt64, _parse_cell_float(v))
         else
             parsed_int = tryparse(Int64, v)
             if parsed_int !== nothing
@@ -363,7 +476,7 @@ function process_tv(wb::Workbook, t::AbstractString, v::AbstractString, num_styl
                 value = reinterpret(UInt64, parsed_int)
             else
                 datatype = CT_FLOAT
-                value = reinterpret(UInt64, parse(Float64, v))
+                value = reinterpret(UInt64, _parse_cell_float(v))
             end
         end
 
@@ -489,10 +602,11 @@ as an integer inside the spreadsheet XML.
 
 If `cell` has empty value or empty `String`, this function will return `missing`.
 """
-function getdata(ws::Worksheet, cell::Cell)
-    dt = cell.datatype
-    v  = cell.value
+getdata(ws::Worksheet, cell::Cell) = _cell_value(ws, cell.datatype, cell.value, cell)
 
+# The Julia value of a cell from its datatype and raw value. Shared by `getdata` and
+# the value-only rows `readtable` reads (src/valuerows.jl), so both convert alike.
+function _cell_value(ws::Worksheet, dt::CellValueType, v::UInt64, cell=nothing)
     # Fast path for common non-date types — avoids fetching workbook date mode
     dt == CT_EMPTY  && return missing
     dt == CT_ERROR  && return missing
@@ -510,7 +624,7 @@ function getdata(ws::Worksheet, cell::Cell)
     dt == CT_DATETIME && return excel_value_to_datetime(reinterpret(Float64, v), is1904)
     dt == CT_TIME     && return excel_value_to_time(reinterpret(Float64, v))
 
-    throw(XLSXError("Couldn't parse data for $cell."))
+    throw(XLSXError(isnothing(cell) ? "Couldn't parse data of type $dt." : "Couldn't parse data for $cell."))
 end
 
 # Extract cells from a <row> LazyNode and push them (in place) into a Dict(column -> Cell)
