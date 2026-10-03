@@ -301,6 +301,8 @@ function _iterate_tablerow(r::TableRow, next)
     return r[col], state
 end
 
+Base.length(r::TableRow) = table_columns_count(r)
+Base.eltype(::Type{TableRow}) = CellConcreteType
 Base.iterate(r::TableRow) = _iterate_tablerow(r, iterate(table_column_numbers(r)))
 Base.iterate(r::TableRow, state) = _iterate_tablerow(r, iterate(table_column_numbers(r), state))
 
@@ -354,20 +356,19 @@ Base.eltype(::TableRowIterator) = TableRow
     !isnothing(itr.stop_in_row_function) && itr.stop_in_row_function(row)
 
 # Handles a gap between expected and actual row numbers.
-# Returns: (TableRow, state) if emitting a missing row, :skip to continue past gap, or nothing to stop.
-function _handle_gap(itr::TableRowIterator, table_row_index::Int, col_count::Int, expected_row::Int, actual_row::Int, sheet_row, sheet_row_iterator_state)
+# Returns: (nothing, state) to emit a missing row, :skip to continue past the gap, or
+# nothing to stop.
+function _handle_gap(itr::TableRowIterator, table_row_index::Int, expected_row::Int, actual_row::Int, sheet_row, sheet_row_iterator_state)
     itr.stop_in_empty_row && return nothing
     itr.keep_empty_rows || return :skip
 
-    table_row = TableRow(table_row_index, itr.index, fill(missing, col_count))
-    _should_stop(itr, table_row) && return nothing
     newstate = TableRowIteratorState(
         table_row_index, expected_row,
         sheet_row_iterator_state,
         actual_row - expected_row - 1,
         sheet_row
     )
-    return table_row, newstate
+    return nothing, newstate
 end
 
 # Advances past empty XML rows, respecting keep_empty_rows and stop_in_empty_row.
@@ -387,16 +388,9 @@ function _skip_empty_rows(itr::TableRowIterator, sheet_row, sheet_row_iterator_s
     return sheet_row, sheet_row_iterator_state
 end
 
-# Constructs and returns a data TableRow and its successor state.
-function _return_table_row(itr::TableRowIterator, table_row_index::Int,
-                           actual_row::Int, sheet_row, sheet_row_iterator_state)
-    table_row = TableRow(table_row_index, itr.index, sheet_row, itr.missing_strings)
-    _should_stop(itr, table_row) && return nothing
-    newstate = TableRowIteratorState(table_row_index, actual_row, sheet_row_iterator_state, 0, nothing)
-    return table_row, newstate
-end
-
-function Base.iterate(itr::TableRowIterator)
+# The state a table read starts from, or `nothing` if the sheet has no rows from
+# `first_data_row` on.
+function _table_start(itr::TableRowIterator)
     next = if !isnothing(itr.resume)
         itr.resume  # already-fetched (row, state) — skip the expensive restart
     else
@@ -408,19 +402,21 @@ function Base.iterate(itr::TableRowIterator)
     isnothing(next) && return nothing
 
     sheet_row, sheet_row_state = next
-    initial_state = TableRowIteratorState(0, itr.first_data_row - 1, sheet_row_state, 0, sheet_row)
-    return iterate(itr, initial_state)
+    return TableRowIteratorState(0, itr.first_data_row - 1, sheet_row_state, 0, sheet_row)
 end
 
-function Base.iterate(itr::TableRowIterator, state::TableRowIteratorState)
+# One step of a table read: `(sheet_row, state)` for the next table row — `sheet_row`
+# is `nothing` for a row absent from the sheet that `keep_empty_rows` turns into an
+# all-missing row — or `nothing` at the end of the table. The row's table index is
+# `state.table_row_index`. Shared by `iterate`, which wraps each step in a `TableRow`,
+# and `gettable`, which writes it straight into columns, so both see the same rows.
+# `stop_in_row_function` is not applied here: it needs the `TableRow`.
+function _table_step(itr::TableRowIterator, state::TableRowIteratorState)
     table_row_index = state.table_row_index + 1
-    col_count = length(sheet_column_numbers(itr.index))
 
     # Emit any pending missing rows before advancing to the next sheet row
     if state.missing_rows > 0
         @assert itr.keep_empty_rows "Inconsistent state: missing_rows > 0 but keep_empty_rows=false"
-        table_row = TableRow(table_row_index, itr.index, fill(missing, col_count))
-        _should_stop(itr, table_row) && return nothing
         newstate = TableRowIteratorState(
             table_row_index,
             state.sheet_row_index + 1,
@@ -428,7 +424,7 @@ function Base.iterate(itr::TableRowIterator, state::TableRowIteratorState)
             state.missing_rows - 1,
             state.row_pending
         )
-        return table_row, newstate
+        return nothing, newstate
     end
 
     # Get next sheet row: from pending (gap case) or from the iterator
@@ -447,8 +443,8 @@ function Base.iterate(itr::TableRowIterator, state::TableRowIteratorState)
 
     # Handle gap between expected and actual row numbers
     if actual_row > expected_row
-        result = _handle_gap(itr, table_row_index, col_count, expected_row, actual_row, sheet_row, sheet_row_iterator_state)
-        result === :skip || return result  # return if nothing or (TableRow, state)
+        result = _handle_gap(itr, table_row_index, expected_row, actual_row, sheet_row, sheet_row_iterator_state)
+        result === :skip || return result  # return if nothing or (nothing, state)
         # :skip means keep_empty_rows=false — fall through to process actual_row
     end
 
@@ -457,7 +453,26 @@ function Base.iterate(itr::TableRowIterator, state::TableRowIteratorState)
     isnothing(result) && return nothing
     sheet_row, sheet_row_iterator_state = result
 
-    return _return_table_row(itr, table_row_index, row_number(sheet_row), sheet_row, sheet_row_iterator_state)
+    return sheet_row, TableRowIteratorState(table_row_index, row_number(sheet_row), sheet_row_iterator_state, 0, nothing)
+end
+
+function Base.iterate(itr::TableRowIterator)
+    state = _table_start(itr)
+    isnothing(state) && return nothing
+    return iterate(itr, state)
+end
+
+function Base.iterate(itr::TableRowIterator, state::TableRowIteratorState)
+    step = _table_step(itr, state)
+    isnothing(step) && return nothing
+    sheet_row, newstate = step
+    table_row = if isnothing(sheet_row)
+        TableRow(newstate.table_row_index, itr.index, fill(missing, length(sheet_column_numbers(itr.index))))
+    else
+        TableRow(newstate.table_row_index, itr.index, sheet_row, itr.missing_strings)
+    end
+    _should_stop(itr, table_row) && return nothing
+    return table_row, newstate
 end
 
 function infer_eltype(v::Vector{Any})
@@ -518,9 +533,33 @@ function gettable(itr::TableRowIterator; infer_eltypes::Bool=true)::DataTable
     columns_count = table_columns_count(itr)
     data = Vector{Any}([Vector{Any}() for _ in 1:columns_count])
 
-    for r in itr
-        for (ci, cv) in enumerate(r)
-            push!(data[ci], cv)
+    if isnothing(itr.stop_in_row_function)
+        # Straight into the columns: the rows `iterate` would give, without building a
+        # `TableRow` (and its vector) for each one.
+        ws = get_worksheet(itr)
+        sheet_columns = [table_column_to_sheet_column_number(itr.index, ci) for ci in 1:columns_count]
+        state = _table_start(itr)
+        while !isnothing(state)
+            step = _table_step(itr, state)
+            isnothing(step) && break
+            sheet_row, state = step
+            if isnothing(sheet_row)
+                for ci in 1:columns_count
+                    push!(data[ci], missing)
+                end
+            else
+                for ci in 1:columns_count
+                    val = getdata(ws, getcell(sheet_row, sheet_columns[ci]))
+                    push!(data[ci], _apply_missing_strings(val, itr.missing_strings))
+                end
+            end
+        end
+    else
+        # The callback needs each `TableRow`
+        for r in itr
+            for (ci, cv) in enumerate(r)
+                push!(data[ci], cv)
+            end
         end
     end
 

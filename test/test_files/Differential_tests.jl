@@ -245,16 +245,10 @@ end
 
 # Known, pre-existing differences of `readtable(…; enable_cache=false)` (the streaming
 # path) from the cache path, accepted only until Stage 5 of #462:
-#  - a missing `first_row` throws "Row N not found in worksheet X." where the cache
-#    path throws "Row N not found." (same exception type, same N);
 #  - sheets with out-of-order or duplicated `<row r>` (which Excel never writes) are
 #    read differently.
 function _diff_nocache_allowed(oracle, subject, malformed::Bool)::Bool
-    malformed && return true
-    (oracle isa XLSX.XLSXError && subject isa XLSX.XLSXError) || return false
-    a = match(r"^Row (\d+) not found\.$", oracle.msg)
-    b = match(r"^Row (\d+) not found in worksheet .*\.$", subject.msg)
-    return a !== nothing && b !== nothing && a[1] == b[1]
+    return malformed
 end
 
 """

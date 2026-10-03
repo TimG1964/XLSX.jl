@@ -248,13 +248,13 @@ function find_row(itr::SheetRowIterator, row::Int) :: SheetRow
             return SheetRow(ws, row, ht, c)
         end
 
-        throw(XLSXError("Row $row not found."))
+        throw(XLSXError("Row $row not found in worksheet $(ws.name)."))
 
     # If can't use cache then lazily iterate sheetrows
     else
         r = first(match_rows(ws, [row]))
         if isnothing(r)
-            throw(XLSXError("Row $row not found."))
+            throw(XLSXError("Row $row not found in worksheet $(ws.name)."))
         else
             return r
         end
