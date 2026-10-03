@@ -15,10 +15,11 @@ const fixtures = [
     "small", "medium", "large", "wide_few", "tall_few",
     "sst_unique", "sst_repeated", "sst_mixed",
     "numeric_only", "dates_heavy", "multi_sheet",
+    "xl_medium", "xl_issue462", "xl_gaps",
 ]
 
 const benchmarks = [
-    "readtable", "readxlsx", "eachrow",
+    "open", "readtable", "readtable_subset", "readtable_gaps", "readxlsx", "eachrow",
     "single_cell", "writetable", "open_readwrite",
     "readtable_all_sheets",
 ]
