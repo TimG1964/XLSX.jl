@@ -454,3 +454,118 @@ end
         end
     end
 end
+
+
+# The cache fill reads each `<c>` in the same cursor walk as its children (#462). It
+# must build exactly the cells `Cell(::LazyNode, …)` builds from the same XML.
+
+# Every cell of a sheet, built one at a time with `Cell(::LazyNode, …)`, and the
+# formulas they record.
+function _cells_by_lazynode(xf, ws)
+    wb = XLSX.get_workbook(xf)
+    target = XLSX.get_relationship_target_by_id("xl", wb, ws.relationship_id)
+    raw = xf.data[target]
+    sst_pfx = XLSX.get_sst_prefix(ws)
+    formulas = Dict{XLSX.SheetCellRef, XLSX.AbstractFormula}()
+    cells = Dict{Tuple{Int,Int}, XLSX.Cell}()
+    c = XML.Cursor(raw)
+    in_data = false
+    while XML.next!(c) !== nothing
+        XML.nodetype(c) == XML.Element || continue
+        name = XLSX.localname(c)
+        d = XML.depth(c)
+        if d == 2
+            in_data = name == "sheetData"
+            in_data || XML.skip_element!(c)
+        elseif in_data && d == 4 && name == "c"
+            cell = XLSX.Cell(XML.LazyNode(c), ws, sst_pfx, formulas, xf.load_formulas)
+            XML.skip_element!(c)
+            cells[(XLSX.row_number(cell), XLSX.column_number(cell))] = cell
+        elseif in_data && d == 4
+            XML.skip_element!(c)
+        end
+    end
+    return cells, formulas
+end
+
+_same_fields(a, b) = typeof(a) == typeof(b) &&
+    all(isequal(getfield(a, f), getfield(b, f)) for f in fieldnames(typeof(a)))
+
+@testset "cache fill reads cells as Cell(::LazyNode) does" begin
+    dirs = [data_directory]
+    fixtures = get(ENV, "XLSX_DIFF_FIXTURES", "")
+    isempty(fixtures) || push!(dirs, fixtures)
+    nsheets = 0
+    for dir in dirs, file in sort(readdir(dir))
+        any(ext -> endswith(lowercase(file), ext), (".xlsx", ".xlsm", ".xltx", ".xltm")) || continue
+        path = joinpath(dir, file)
+        xf = try XLSX.readxlsx(path) catch; continue end
+        ref_xf = XLSX.readxlsx(path)                  # a second copy for the reference
+        wb, ref_wb = XLSX.get_workbook(xf), XLSX.get_workbook(ref_xf)
+        for (ws, ref_ws) in zip(wb.sheets, ref_wb.sheets)
+            XLSX.is_chartsheet(wb, ws.name) && continue
+            expected, expected_formulas = _cells_by_lazynode(ref_xf, ref_ws)
+            XLSX.eachrow(ws)                         # fill the cache
+            got = Dict((r, col) => cell for (r, row) in ws.cache.cells for (col, cell) in row)
+            same = keys(got) == keys(expected) &&
+                   all(_same_fields(got[k], expected[k]) for k in keys(expected))
+            same || println("cache fill differs from Cell(::LazyNode): $file, sheet $(ws.name)")
+            @test same
+            got_formulas = filter(p -> first(p).sheet == ws.name, wb.formulas)
+            @test keys(got_formulas) == keys(expected_formulas)
+            @test all(_same_fields(got_formulas[k], expected_formulas[k]) for k in keys(expected_formulas))
+            @test ws.sst_count == count(c -> c.datatype == XLSX.CT_STRING, values(expected))
+            nsheets += 1
+        end
+    end
+    @test nsheets > 100
+end
+
+@testset "cache fill: cell forms" begin
+    # Each cell form on its own, through the cache fill and through Cell(::LazyNode).
+    sst = "<si><t>a</t></si><si><t>b</t></si>"
+    forms = [
+        "number"            => "<c r=\"A1\"><v>1.5</v></c>",
+        "styled number"     => "<c r=\"A1\" s=\"1\"><v>45000</v></c>",
+        "shared string"     => "<c r=\"A1\" t=\"s\"><v>1</v></c>",
+        "inline string"     => "<c r=\"A1\" t=\"inlineStr\"><is><t>hi</t></is></c>",
+        "inline rich text"  => "<c r=\"A1\" t=\"inlineStr\"><is><r><rPr><b/></rPr><t>b</t></r><r><t>x</t></r></is></c>",
+        "inline, empty"     => "<c r=\"A1\" t=\"inlineStr\"><is><t/></is></c>",
+        "inline, two is"    => "<c r=\"A1\" t=\"inlineStr\"><is><t>1</t></is><is><t>2</t></is></c>",
+        "inline with v, f"  => "<c r=\"A1\" t=\"inlineStr\"><f>X()</f><v>9</v><is><t>z</t></is></c>",
+        "formula + value"   => "<c r=\"A1\"><f>1+1</f><v>2</v></c>",
+        "formula, no value" => "<c r=\"A1\"><f>1+1</f></c>",
+        "shared formula"    => "<c r=\"A1\"><f t=\"shared\" ref=\"A1:A3\" si=\"0\">B1*2</f><v>4</v></c>",
+        "shared reference"  => "<c r=\"A1\"><f t=\"shared\" si=\"0\"/><v>4</v></c>",
+        "array formula"     => "<c r=\"A1\"><f t=\"array\" ref=\"A1:A2\">SEQUENCE(2)</f><v>1</v></c>",
+        "cm metadata"       => "<c r=\"A1\" cm=\"1\"><f t=\"array\" ref=\"A1\">X()</f><v>1</v></c>",
+        "empty v"           => "<c r=\"A1\"><v/></c>",
+        "v, empty text"     => "<c r=\"A1\"><v></v></c>",
+        "v holding CDATA"   => "<c r=\"A1\" t=\"str\"><v><![CDATA[a<b]]></v></c>",
+        "v with entity"     => "<c r=\"A1\" t=\"str\"><v>a&amp;b</v></c>",
+        "styled empty"      => "<c r=\"A1\" s=\"2\"/>",
+        "error"             => "<c r=\"A1\" t=\"e\"><v>#N/A</v></c>",
+        "boolean"           => "<c r=\"A1\" t=\"b\"><v>1</v></c>",
+        "formula string"    => "<c r=\"A1\" t=\"str\"><f>\"x\"</f><v>x</v></c>",
+        "unknown child"     => "<c r=\"A1\"><extLst><ext/></extLst><v>3</v></c>",
+        "comment inside"    => "<c r=\"A1\"><!-- note --><v>3</v></c>",
+        "whitespace inside" => "<c r=\"A1\">\n  <v>3</v>\n</c>",
+        "two v"             => "<c r=\"A1\"><v>1</v><v>2</v></c>",
+    ]
+    for (name, cxml) in forms
+        rows = "<row r=\"1\">$cxml<c r=\"B1\"><v>7</v></c></row><row r=\"2\"><c r=\"A2\"><v>8</v></c></row>"
+        bytes = _diff_build_xlsx(rows, ["a", "b"])
+        xf, ref_xf = XLSX.readxlsx(IOBuffer(bytes)), XLSX.readxlsx(IOBuffer(bytes))
+        expected, expected_formulas = _cells_by_lazynode(ref_xf, ref_xf[1])
+        ws = xf[1]
+        XLSX.eachrow(ws)
+        got = Dict((r, col) => cell for (r, row) in ws.cache.cells for (col, cell) in row)
+        same = keys(got) == keys(expected) && all(_same_fields(got[k], expected[k]) for k in keys(expected))
+        same || println("cache fill differs from Cell(::LazyNode): $name")
+        @test same
+        wbf = XLSX.get_workbook(xf).formulas
+        @test keys(wbf) == keys(expected_formulas)
+        @test all(_same_fields(wbf[k], expected_formulas[k]) for k in keys(expected_formulas))
+        @test XLSX.getdata(ws, "B1") == 7 && XLSX.getdata(ws, "A2") == 8
+    end
+end

@@ -205,11 +205,11 @@ end
 # Resolves unhandled_attributes to nothing if empty, for compact Formula construction.
 _extra_attrs(d::Dict) = isempty(d) ? nothing : d
 
-function Cell(c::XML.LazyNode, ws::Worksheet, sst_pfx::String,
-              local_formulas::Union{Nothing, Dict{SheetCellRef, AbstractFormula}}=nothing,
-              load_formulas::Bool=true)::Union{Cell,EmptyCell}
-    wb = get_workbook(ws)
-    @assert localname(c) == "c" "`Cell` expects a `c` (cell) XML node."
+# The pieces of a `<c>` element, shared by `Cell(::LazyNode, …)` and the cursor walk in
+# `first_cache_fill!` so the two read cells identically.
+
+# `r`, `t`, `s` and `cm` of a `<c>`, in one pass over its start tag.
+@inline function _cell_attributes(c::XML.LazyNode)
     ref_str::SubString{String} = SubString("")
     t::SubString{String}       = SubString("")
     s_str::SubString{String}   = SubString("")
@@ -221,9 +221,60 @@ function Cell(c::XML.LazyNode, ws::Worksheet, sst_pfx::String,
         elseif k == "cm"; m_str   = v
         end
     end
-    ref   = CellRef(ref_str)
+    ref = CellRef(ref_str)
     style, num_style = _parse_style(s_str)
     meta = isempty(m_str) ? UInt32(0) : parse(UInt32, m_str)
+    return ref, ref_str, t, style, num_style, meta
+end
+
+# The text of a `<v>` that isn't a single text or CDATA node: its first text or CDATA
+# child, if any. Warns (once) when it has children but no text.
+function _v_text_fallback(v::XML.LazyNode, ref_str::AbstractString)
+    sv = nothing
+    has_children = false
+    for ch in XML.eachchildnode(v)
+        has_children = true
+        nt = XML.nodetype(ch)
+        if nt === XML.Text || nt === XML.CData
+            sv = XML.value(ch)
+            break
+        end
+    end
+    if isnothing(sv) && has_children
+        @warn "Could not read value of cell $ref_str: `<v>` element has no text content. Treating as empty." maxlog=1
+    end
+    return sv
+end
+
+# (datatype, value) of an inline string `<is>`, or `nothing` when it has no text.
+function _inline_string(wb::Workbook, is::XML.LazyNode, sst_pfx::String)
+    isempty(unformatted_text(wb, is)) && return nothing
+    ft = _build_si_xml(is, sst_pfx)
+    return CT_STRING, reinterpret(UInt64, Int64(add_formatted_string!(wb, ft)))
+end
+
+# Parse an `<f>` and record it: in `local_formulas` when filling a cache (merged into
+# the workbook later), else straight into the workbook under its lock.
+function _record_formula!(wb::Workbook, ws::Worksheet, ref::CellRef, f_node::XML.LazyNode,
+                          local_formulas::Union{Nothing, Dict{SheetCellRef, AbstractFormula}})
+    f = parse_formula_from_element(wb, f_node)
+    key = SheetCellRef(combine_sheet_ref(ws, ref))
+    if isnothing(local_formulas)
+        lock(wb.formulas_lock) do
+            wb.formulas[key] = f
+        end
+    else
+        local_formulas[key] = f
+    end
+    return nothing
+end
+
+function Cell(c::XML.LazyNode, ws::Worksheet, sst_pfx::String,
+              local_formulas::Union{Nothing, Dict{SheetCellRef, AbstractFormula}}=nothing,
+              load_formulas::Bool=true)::Union{Cell,EmptyCell}
+    wb = get_workbook(ws)
+    @assert localname(c) == "c" "`Cell` expects a `c` (cell) XML node."
+    ref, ref_str, t, style, num_style, meta = _cell_attributes(c)
     datatype = CT_EMPTY
     value    = UInt64(0)
     formula  = false
@@ -232,48 +283,18 @@ function Cell(c::XML.LazyNode, ws::Worksheet, sst_pfx::String,
         tag = localname(child)
         if t == "inlineStr"
             tag == "is" || continue
-            uft = unformatted_text(wb, child)
-            if !isempty(uft)
-                ft = _build_si_xml(child, sst_pfx)
-                datatype = CT_STRING
-                value = reinterpret(UInt64, Int64(add_formatted_string!(wb, ft)))
-            end
+            r = _inline_string(wb, child, sst_pfx)
+            isnothing(r) || ((datatype, value) = r)
             break
-        else
-        if tag == "v"
+        elseif tag == "v"
             sv = XML.is_simple_value(child)
-            if isnothing(sv)
-                has_children = false
-                for ch in XML.eachchildnode(child)
-                    has_children = true
-                    nt = XML.nodetype(ch)
-                    if nt === XML.Text || nt === XML.CData
-                        sv = XML.value(ch)
-                        break
-                    end
-                end
-                if isnothing(sv) && has_children
-                    @warn "Could not read value of cell $ref_str: `<v>` element has no text content. Treating as empty." maxlog=1
-                end
-            end
+            isnothing(sv) && (sv = _v_text_fallback(child, ref_str))
             if !isnothing(sv) && !isempty(sv)
                 datatype, value = process_tv(wb, t, sv, num_style)
             end
-            elseif tag == "f"
-                if load_formulas
-                    f = parse_formula_from_element(wb, child)
-                    if isnothing(local_formulas)
-                        # streaming path — write directly under lock
-                        lock(wb.formulas_lock) do
-                            wb.formulas[SheetCellRef(combine_sheet_ref(ws, ref))] = f
-                        end
-                    else
-                        # cache fill path — write to local dict, merged later
-                        local_formulas[SheetCellRef(combine_sheet_ref(ws, ref))] = f
-                    end
-                end
-                formula = true
-            end
+        elseif tag == "f"
+            load_formulas && _record_formula!(wb, ws, ref, child, local_formulas)
+            formula = true
         end
     end
     return Cell(ref, value, style, meta, datatype, formula)

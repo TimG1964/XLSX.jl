@@ -404,12 +404,58 @@ function first_cache_fill!(ws::Worksheet, lznode::XML.LazyNode)
     expected_cols = isnothing(dim) ? 16 :
         XLSX.column_number(dim.stop) - XLSX.column_number(dim.start) + 1
 
+    # The cell being read. A `<c>` is read in the same cursor walk as its children
+    # (rather than skipped and re-read through `Cell(::LazyNode, …)`), so its bytes are
+    # tokenized once (#462). It is completed when the walk leaves it (depth ≤ 3), using
+    # the same helpers as `Cell(::LazyNode, …)`.
+    in_cell    = false
+    cell_done  = false          # an inline string's `<is>` has been read: ignore the rest
+    cell_ref   = CellRef(1, 1)
+    cell_rstr  = SubString("")
+    cell_t     = SubString("")
+    cell_style = UInt32(0)
+    cell_nstyle = 0
+    cell_meta  = UInt32(0)
+    cell_type  = CT_EMPTY
+    cell_value = UInt64(0)
+    cell_formula = false
+
     c2 = XML.Cursor(sheetdata_lazy)
     while XML.next!(c2) !== nothing
         d  = XML.depth(c2)
         nt = XML.nodetype(c2)
 
-        if d == 2 && nt == XML.Element && localname(c2) == "row"
+        if in_cell && d <= 3
+            cell = Cell(cell_ref, cell_value, cell_style, cell_meta, cell_type, cell_formula)
+            sst_total += cell_type == CT_STRING ? 1 : 0
+            rowcells[column_number(cell)] = cell
+            in_cell = false
+        end
+
+        if d == 4 && in_cell
+            nt == XML.Element || continue
+            tag = localname(c2)
+            if cell_done
+                # past an inline string's `<is>`
+            elseif cell_t == "inlineStr"
+                if tag == "is"
+                    r = _inline_string(wb, XML.LazyNode(c2), sst_pfx)
+                    isnothing(r) || ((cell_type, cell_value) = r)
+                    cell_done = true
+                end
+            elseif tag == "v"
+                sv = XML.is_simple_value(c2)
+                isnothing(sv) && (sv = _v_text_fallback(XML.LazyNode(c2), cell_rstr))
+                if !isnothing(sv) && !isempty(sv)
+                    cell_type, cell_value = process_tv(wb, cell_t, sv, cell_nstyle)
+                end
+            elseif tag == "f"
+                load_formulas && _record_formula!(wb, ws, cell_ref, XML.LazyNode(c2), local_formulas)
+                cell_formula = true
+            end
+            XML.skip_element!(c2)
+
+        elseif d == 2 && nt == XML.Element && localname(c2) == "row"
             if !isnothing(row_num)
                 sr = SheetRow(ws, row_num, row_ht, rowcells)
                 !isempty(unhandled) && (unhandled_attributes[row_num] = unhandled)
@@ -436,11 +482,10 @@ function first_cache_fill!(ws::Worksheet, lznode::XML.LazyNode)
             end
 
         elseif d == 3 && nt == XML.Element && localname(c2) == "c"
-            cell_node = XML.LazyNode(c2)
-            XML.skip_element!(c2)
-            cell = Cell(cell_node, ws, sst_pfx, local_formulas, load_formulas)
-            sst_total += cell.datatype == CT_STRING ? 1 : 0
-            rowcells[column_number(cell)] = cell
+            cell_ref, cell_rstr, cell_t, cell_style, cell_nstyle, cell_meta =
+                _cell_attributes(XML.LazyNode(c2))
+            cell_type, cell_value, cell_formula = CT_EMPTY, UInt64(0), false
+            in_cell, cell_done = true, false
 
         elseif d == 2 && nt == XML.Element
             XML.skip_element!(c2)
@@ -449,6 +494,12 @@ function first_cache_fill!(ws::Worksheet, lznode::XML.LazyNode)
             XML.skip_element!(c2)
 
         end
+    end
+
+    if in_cell
+        cell = Cell(cell_ref, cell_value, cell_style, cell_meta, cell_type, cell_formula)
+        sst_total += cell_type == CT_STRING ? 1 : 0
+        rowcells[column_number(cell)] = cell
     end
 
     if !isnothing(row_num)
