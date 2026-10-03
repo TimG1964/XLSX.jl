@@ -44,7 +44,6 @@ XLSX.Charts.ChartEx "chartEx1" on sheet "Sheet1" at D8:K23
   layouts: funnel
   series: 1
   refs: Sheet1!$A$2:$A$6, Sheet1!$B$2:$B$6
-
 ```
 
 That is the difference from [`addChart`](@ref), which creates an empty chart for

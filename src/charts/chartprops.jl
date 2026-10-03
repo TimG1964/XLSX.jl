@@ -407,7 +407,8 @@ getChartLegend(c::Chart) =
 """
     getLegendPos(c::Chart) -> Union{Nothing,Symbol}
 
-`:b`, `:t`, `:l`, `:r` or `:tr` from `c:legendPos`. `nothing` means no legend,
+`:b` (bottom), `:t` (top), `:l` (left), `:r` (right) or `:tr` (top-right) from
+`c:legendPos`. `nothing` means no legend,
 or a legend with no explicit position.
 """
 function getLegendPos(c::Chart)
@@ -680,7 +681,8 @@ end
 """
     getAxisLabelAlign(c::Chart, ax::ChartAxis) -> Union{Nothing,Symbol}
 
-`c:lblAlgn` — `:ctr`, `:l` or `:r`. Category and date axes only.
+`c:lblAlgn` — `:ctr` (centre), `:l` (left) or `:r` (right). Category and date
+axes only.
 """
 function getAxisLabelAlign(c::Chart, ax::ChartAxis)
     n = _axnode(c, ax)
@@ -863,7 +865,8 @@ getDataLabelText(c::Chart, d::ChartDataLabel) =
 """
     getDataLabelPosition(c::Chart, d::ChartDataLabel) -> Union{Nothing,Symbol}
 
-`c:dLblPos` — `:ctr`, `:inEnd`, `:inBase`, `:outEnd`, `:l`, `:r`, `:t`, `:b`,
+`c:dLblPos` — `:ctr` (centre), `:inEnd` (inside-end), `:inBase` (inside-base),
+`:outEnd` (outside-end), `:l` (left), `:r` (right), `:t` (above), `:b` (below),
 `:bestFit`. Which values are legal depends on the chart type.
 """
 getDataLabelPosition(c::Chart, d::ChartDataLabel) = _sym_val(_node(c, d), "dLblPos")
