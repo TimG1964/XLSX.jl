@@ -1,6 +1,5 @@
 using BenchmarkTools
 using Printf
-#using UnicodePlots
 
 const ROOT        = @__DIR__
 const RESULTS_DIR = joinpath(ROOT, "results")
@@ -9,6 +8,7 @@ VERSIONS = [
     ("v0.10", joinpath(ROOT, "envs", "v0_10")),
     ("v0.11", joinpath(ROOT, "envs", "v0_11")),
     ("v0.12", joinpath(ROOT, "envs", "v0_12")),
+    ("v0.13", joinpath(ROOT, "envs", "v0_13")),
 ]
 
 const fixtures = [
@@ -46,58 +46,40 @@ println("="^60)
 
 let
     ver_labels = first.(VERSIONS)
+    # (column label, numerator, denominator)
+    ratios = [("v0.11/v0.10", "v0.11", "v0.10"), ("v0.12/v0.10", "v0.12", "v0.10"),
+              ("v0.13/v0.10", "v0.13", "v0.10"), ("v0.13/v0.12", "v0.13", "v0.12")]
 
     header = @sprintf("%-30s", "fixture / benchmark")
     for v in ver_labels
         header *= @sprintf("%15s", v)
     end
-    header *= @sprintf("%15s%15s", "v0.11/v0.10", "v0.12/v0.10")
+    for (label, _, _) in ratios
+        header *= @sprintf("%15s", label)
+    end
     println(header)
-    println("-"^(30 + 15*length(ver_labels) + 30))
+    println("-"^(30 + 15*(length(ver_labels) + length(ratios))))
 
     for fix in fixtures, bench in benchmarks
-        row = @sprintf("%-30s", "$(fix)/$(bench)")
         medians = Dict{String,Float64}()
         for v in ver_labels
             haskey(all_results, v)             || continue
             haskey(all_results[v], fix)        || continue
             haskey(all_results[v][fix], bench) || continue
-            t = median(all_results[v][fix][bench]).time / 1e6
-            medians[v] = t
-            row *= @sprintf("%14.1fms", t)
+            medians[v] = median(all_results[v][fix][bench]).time / 1e6
         end
-        base = get(medians, "v0.10", NaN)
-        for (_, key) in [("v0.11/v0.10", "v0.11"), ("v0.12/v0.10", "v0.12")]
-            t = get(medians, key, NaN)
+        isempty(medians) && continue
+        row = @sprintf("%-30s", "$(fix)/$(bench)")
+        for v in ver_labels
+            row *= haskey(medians, v) ? @sprintf("%13.1fms", medians[v]) : @sprintf("%15s", "N/A")
+        end
+        for (_, num, den) in ratios
+            t, base = get(medians, num, NaN), get(medians, den, NaN)
             row *= isnan(base) || isnan(t) || base == 0 ?
                 @sprintf("%15s", "N/A") :
                 @sprintf("%14.2fx", t / base)
         end
         println(row)
     end
-    println("\nMedian times in milliseconds. Ratio < 1.0x = faster than v0.10.")
-end
-
-
-# ── Bar charts ────────────────────────────────────────────────────────────────
-
-println("\n" * "="^60)
-println("BAR CHARTS")
-println("="^60)
-
-ver_labels = first.(VERSIONS)   # must be visible here — defined at top level
-
-for bench in benchmarks, fix in fixtures
-    times  = Float64[]
-    labels = String[]
-    for v in ver_labels
-        haskey(all_results, v)             || continue
-        haskey(all_results[v], fix)        || continue
-        haskey(all_results[v][fix], bench) || continue
-        push!(times,  median(all_results[v][fix][bench]).time / 1e6)
-        push!(labels, v)
-    end
-    isempty(times) && continue
-    println()
-    display(barplot(labels, times; title="$(fix) / $(bench)", xlabel="milliseconds", width=60))
+    println("\nMedian times in milliseconds. Ratio < 1.0x = numerator version is faster.")
 end

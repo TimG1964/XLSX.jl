@@ -1,6 +1,6 @@
 ## Benchmarks
 
-This directory contains a benchmark suite comparing XLSX.jl performance across three versions.
+This directory contains a benchmark suite comparing XLSX.jl performance across four versions.
 
 ### Setup
 
@@ -14,6 +14,7 @@ This directory contains a benchmark suite comparing XLSX.jl performance across t
                 v0_10/
                 v0_11/
                 v0_12/
+                v0_13/
 
    This folder is your local standalone benchmark project.  
    It is **not** inside the XLSX.jl repository and does **not** contain a checkout of XLSX.jl.
@@ -33,13 +34,15 @@ This directory contains a benchmark suite comparing XLSX.jl performance across t
         env/v0_10/Project.toml
         env/v0_11/Project.toml
         env/v0_12/Project.toml
+        env/v0_13/Project.toml
         
-4. Instantiate all three environments (each pins a specific XLSX.jl version):
+4. Instantiate all the environments (each pins a specific XLSX.jl version):
 
         julia --project=envs/dev   -e "using Pkg; Pkg.instantiate()"
         julia --project=envs/v0_12 -e "using Pkg; Pkg.instantiate()"
         julia --project=envs/v0_10 -e "using Pkg; Pkg.instantiate()"
         julia --project=envs/v0_11 -e "using Pkg; Pkg.instantiate()"
+        julia --project=envs/v0_13 -e "using Pkg; Pkg.instantiate()"
 
    Each environment contains a different XLSX.jl version.  
    Julia will load the correct version automatically when benchmarks run.
@@ -80,3 +83,4 @@ This directory contains a benchmark suite comparing XLSX.jl performance across t
 - `v0.10` — EzXML.jl based implementation
 - `v0.11` — First XML.jl based implementation using XML.jl v0.3
 - `v0.12` — Updated XLSX.jl implementation adopting XML.jl v0.4 
+- `v0.13` — Adds native Excel chart support
