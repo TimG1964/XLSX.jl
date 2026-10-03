@@ -331,8 +331,10 @@ function eachrow(ws::Worksheet) :: SheetRowIterator
             raw isa String || throw(XLSXError("Expected raw XML string for $target_file, got parsed node."))
             lznode = parse(raw, XML.LazyNode)
             first_cache_fill!(ws, lznode)
-            stripped, _ = splitNode(raw, "sheetData")
-            xf.data[target_file] = stripped   # swap back to stub
+            # swap back to the stub made at open, or make one if there isn't one
+            stripped = pop!(xf.sheet_stubs, target_file, nothing)
+            isnothing(stripped) && ((stripped, _) = splitNode(raw, "sheetData"))
+            xf.data[target_file] = stripped
         end
         return ws.cache
     else

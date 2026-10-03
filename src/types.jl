@@ -721,6 +721,10 @@ mutable struct XLSXFile <: MSOfficePackage
     data::Dict{String, Union{XML.Node, String}}
     namespace::Dict{String, Union{String, Nothing}}
     binary_data::Dict{String, Vector{UInt8}}
+    # Read-only, cache-on: the `<sheetData>`-stripped stub of each worksheet, made at
+    # open while `data` keeps the full XML. The first `eachrow` swaps it in after filling
+    # the cache, instead of splitting the XML a second time (#462).
+    sheet_stubs::Dict{String, String}
     workbook::Workbook
     relationships::Vector{Relationship}
     is_writable::Bool
@@ -737,6 +741,7 @@ mutable struct XLSXFile <: MSOfficePackage
             Dict{String, Union{XML.Node, String}}(),
             Dict{String, Union{String, Nothing}}(),
             Dict{String, Vector{UInt8}}(),
+            Dict{String, String}(),
             EmptyWorkbook(),
             Vector{Relationship}(),
             is_writable,

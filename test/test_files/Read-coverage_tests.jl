@@ -376,3 +376,81 @@ end
         @test XLSX.parse_file_mode("RW") == (true, true)
     end
 end
+
+# Read-only, cache-on: the `<sheetData>` stub made at open is kept and swapped in by
+# the first `eachrow`, instead of splitting the sheet XML a second time (#462).
+@testset "sheet stub reuse" begin
+
+    @testset "stub kept at open and swapped in after the cache fill" begin
+        nsheets = 0
+        for file in sort(readdir(data_directory))
+            any(ext -> endswith(lowercase(file), ext), (".xlsx", ".xlsm", ".xltx", ".xltm")) || continue
+            xf = try XLSX.readxlsx(joinpath(data_directory, file)) catch; continue end
+            wb = XLSX.get_workbook(xf)
+            for ws in wb.sheets
+                XLSX.is_chartsheet(wb, ws.name) && continue
+                target = XLSX.get_relationship_target_by_id("xl", wb, ws.relationship_id)
+                raw = xf.data[target]
+                @test raw isa String
+                expected = XLSX.splitNode(raw, "sheetData")[1]
+                @test get(xf.sheet_stubs, target, nothing) == expected
+                XLSX.eachrow(ws)
+                @test xf.data[target] == expected
+                @test !haskey(xf.sheet_stubs, target)
+                XLSX.eachrow(ws)                       # already filled: nothing changes
+                @test xf.data[target] == expected
+                nsheets += 1
+            end
+            @test isempty(xf.sheet_stubs)
+        end
+        @test nsheets > 100
+    end
+
+    @testset "stub of a Strict OOXML sheet is converted with the sheet" begin
+        for file in ("strict.xlsx", "Strict-foo.xlsx", "chart_strict.xlsx")
+            xf = XLSX.readxlsx(joinpath(data_directory, file))
+            wb = XLSX.get_workbook(xf)
+            ws = first(s for s in wb.sheets if !XLSX.is_chartsheet(wb, s.name))
+            target = XLSX.get_relationship_target_by_id("xl", wb, ws.relationship_id)
+            stub = xf.sheet_stubs[target]
+            @test !occursin("purl.oclc.org/ooxml", stub)
+            XLSX.eachrow(ws)
+            doc = XLSX.get_xml_data(xf, target)
+            @test !occursin("purl.oclc.org/ooxml", XML.write(doc))
+            @test XLSX.readtable(joinpath(data_directory, file), ws.name).column_labels ==
+                  XLSX.gettable(ws).column_labels
+        end
+    end
+
+    @testset "no stubs where the cache isn't used lazily" begin
+        file = joinpath(data_directory, "general.xlsx")
+        XLSX.openxlsx(file; enable_cache = false) do xf
+            @test isempty(xf.sheet_stubs)
+            @test !isempty(collect(XLSX.eachrow(xf[1])))
+        end
+        # "rw" writes back on close, so use a copy
+        copy_path = joinpath(mktempdir(), "general.xlsx")
+        cp(file, copy_path)
+        XLSX.openxlsx(copy_path; mode = "rw") do xf
+            @test isempty(xf.sheet_stubs)
+        end
+    end
+
+    @testset "reading the stub-swapped sheet afterwards" begin
+        # Code that parses the worksheet XML after the cache fill must see the same
+        # document whether the stub came from open or from the fallback split.
+        for file in ("testmerge.xlsx", "Book1.xlsx", "strict.xlsx")
+            path = joinpath(data_directory, file)
+            xf = XLSX.readxlsx(path)
+            wb = XLSX.get_workbook(xf)
+            target = XLSX.get_relationship_target_by_id("xl", wb, xf[1].relationship_id)
+            XLSX.eachrow(xf[1])
+            doc = XLSX.get_xml_data(xf, target)
+            xf2 = XLSX.readxlsx(path)
+            empty!(xf2.sheet_stubs)                  # force the fallback split
+            XLSX.eachrow(xf2[1])
+            doc2 = XLSX.get_xml_data(xf2, target)
+            @test XML.write(doc) == XML.write(doc2)
+        end
+    end
+end

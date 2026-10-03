@@ -672,6 +672,14 @@ function _strict_to_transitional_node!(node::XML.Node, filename::AbstractString)
     return nothing
 end
 
+# Worksheet XML kept as a String: swap Strict namespaces for Transitional ones.
+function _strict_ns_to_transitional(xml::String)::String
+    for (strict_ns, transitional_ns) in STRICT_TO_TRANSITIONAL
+        xml = replace(xml, strict_ns => transitional_ns)
+    end
+    return replace(xml, r"\s+conformance\s*=\s*\"strict\""=>"")
+end
+
 function convert_strict_to_transitional!(xf::XLSXFile, pass::Int)
     for filename in keys(xf.files)
         haskey(xf.data, filename) || continue      # target_sheet: only some files are loaded
@@ -692,12 +700,11 @@ function convert_strict_to_transitional!(xf::XLSXFile, pass::Int)
                 # a handful of xmlns attributes.
                 data = xf.data[filename]
                 if data isa String
-                    converted = data
-                    for (strict_ns, transitional_ns) in STRICT_TO_TRANSITIONAL
-                        converted = replace(converted, strict_ns => transitional_ns)
-                    end
-                    converted = replace(converted, r"\s+conformance\s*=\s*\"strict\""=>"")
-                    xf.data[filename] = converted
+                    xf.data[filename] = _strict_ns_to_transitional(data)
+                end
+                # The stub kept for `eachrow` (read-only, cache-on) needs the same fix.
+                if haskey(xf.sheet_stubs, filename)
+                    xf.sheet_stubs[filename] = _strict_ns_to_transitional(xf.sheet_stubs[filename])
                 end
                 continue
             end
@@ -1196,8 +1203,10 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
                     end
                 elseif xf.use_cache_for_sheet_data
                     # cache-on, read-only: keep full raw resident so streaming/lazy-fill/
-                    # dimension lookups can use it without re-reading from ZIP.
+                    # dimension lookups can use it without re-reading from ZIP. Keep the
+                    # stub too, for `eachrow` to swap in once the cache is filled.
                     xf.data[file.name] = file.raw
+                    xf.sheet_stubs[file.name] = file.node
                     xf.files[file.name] = true
                 else
                     # enable_cache=false: do NOT retain worksheet XML in memory.
