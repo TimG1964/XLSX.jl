@@ -180,7 +180,6 @@ XLSX.Charts.Chart "chart1" on sheet "Data" at G9:N23
     [1] 2024 - Data!$B$2:$B$5 (4 pts)
     [2] 2025 - Data!$C$2:$C$5 (4 pts)
 
-
 julia> addSeries(ec, "Data!D2:D5"; categories = "Data!A2:A5", name = "2026");
 
 julia> ec
@@ -197,13 +196,12 @@ The new series takes the next accent colour and the chart's own style, so it
 looks like the ones already there.
 
 ```julia
-
 julia> [getSeriesFill(ec, i).value.fgcolor.val for i in 1:3]
 3-element Vector{String}:
  "accent1"
  "accent2"
  "accent3"
- ```
+```
 
 A chart with more than one group — a combo chart — has no single group to add
 to, so `addSeries` throws on one.

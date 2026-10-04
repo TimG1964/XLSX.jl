@@ -5,6 +5,7 @@ import Base.convert
 import Base.Threads
 import Colors
 import Dates
+import Parsers
 import Printf.@printf
 import Random
 import Tables
@@ -105,6 +106,7 @@ include("formula.jl")
 include("cellref.jl")
 include("sst.jl")
 include("stream.jl")
+include("valuerows.jl")
 include("table.jl")
 include("tables_interface.jl")
 include("relationship.jl")

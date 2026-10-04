@@ -292,7 +292,8 @@ end
 """
     getLabelPosition(c::ChartEx, i; pareto=false) -> Union{Nothing, Symbol}
 
-Data label position for series `i`, e.g. `:outEnd`, `:inEnd`, `:ctr`. With
+Data label position for series `i`, e.g. `:outEnd` (outside-end), `:inEnd`
+(inside-end), `:ctr` (centre). With
 `pareto = true`, series `i`'s Pareto line instead; an error if it has none.
 """
 getLabelPosition(c::ChartEx, i::Integer; pareto::Bool = false) =
@@ -882,7 +883,7 @@ setSeriesAggregation(c::ChartEx, i::Integer, on::Bool) =
 Set histogram binning for series `i` in one rebuild. A keyword left unspecified
 is left alone; pass `:inherit` to remove one that is set.
 
-`intervalClosed` is `:r` or `:l`. `underflow` and `overflow` take a number or
+`intervalClosed` is `:r` (right-closed) or `:l` (left-closed). `underflow` and `overflow` take a number or
 `:auto`. `binSize` and `binCount` are alternatives: setting one removes the
 other. `cx:binning` excludes `cx:aggregation`, which is removed if present.
 """

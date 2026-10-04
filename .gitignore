@@ -8,4 +8,4 @@ docs/Manifest.toml
 .claude
 bench/fixtures/
 bench/results/
-tests/data/output_files/
+test/data/output_files/

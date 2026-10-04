@@ -1,6 +1,6 @@
 # run_benchmarks.jl
-# Orchestrates all three benchmark runs and prints a comparison table.
-# Usage: julia --project=. run_benchmarks.jl
+# Orchestrates all benchmark runs and prints a comparison table.
+# Usage: julia --project=. run_benchmarks.jl [versions...]   e.g. `v0.12 dev`; default all
 
 using Pkg
 
@@ -13,7 +13,11 @@ VERSIONS = [
     ("v0.10", joinpath(ROOT, "envs", "v0_10")),
     ("v0.11", joinpath(ROOT, "envs", "v0_11")),
     ("v0.12", joinpath(ROOT, "envs", "v0_12")),
+    ("v0.13", joinpath(ROOT, "envs", "v0_13")),
+    ("master", joinpath(ROOT, "envs", "master")), # upstream master on GitHub
+    ("dev",   joinpath(ROOT, "envs", "dev")),     # the working tree
 ]
+isempty(ARGS) || filter!(v -> first(v) in ARGS, VERSIONS)
 
 for (ver_label, env_path) in VERSIONS
     outfile = joinpath(RESULTS_DIR, "$(ver_label).json")
@@ -28,7 +32,7 @@ for (ver_label, env_path) in VERSIONS
     println("="^60)
 
     println("Instantiating environment…")
-    run(`julia --project=$env_path -e "using Pkg; Pkg.instantiate()"`)
+    run(`julia --project=$env_path -e "using Pkg; Pkg.resolve(); Pkg.instantiate()"`)
 
     cmd = `julia --project=$env_path --threads=8
                  $(joinpath(ROOT, "bench_worker.jl"))

@@ -361,14 +361,13 @@ julia> getChartType(x), getChartTitle(x)
 julia> getChartRanges(x)
 1-element Vector{Union{Nothing, XLSX.CellErrorType, XLSX.NonContiguousRange, XLSX.SheetCellRange, XLSX.SheetCellRef, XLSX.SheetColumnRange, XLSX.SheetRowRange}}:
  bound!B1:B5
- ```
+```
 
 This chart's title is linked to a worksheet cell. `getChartTitle` returns the
 text cached in the chart part, which is the cell's value as of the last save
 in Excel.
 
 ```julia
-
 julia> x = getCharts(XLSX.readxlsx("chartex_formatted.xlsx"))[1];
 
 julia> getChartType(x), getChartTitle(x)

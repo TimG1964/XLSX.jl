@@ -46,7 +46,6 @@ end
     @test XML.unescape("hello&amp;world&lt;&apos;") == "hello&world<'"
 
     esc_filename = "output_table_escape_test.xlsx"
-    isfile(esc_filename) && rm(esc_filename)
 
     esc_col_names = ["&' & \" < > '", "I❤Julia", "\"<'&O-O&'>\"", "<&>"]
     esc_sheetname = "& & \" > < "
@@ -65,7 +64,6 @@ end
     @test r1_col_names[3] == Symbol(esc_col_names[3])
     @test r1_col_names[2] == Symbol(esc_col_names[2])
     @test r1_col_names[1] == Symbol(esc_col_names[1])
-    isfile(esc_filename) && rm(esc_filename)
 
     # compare to the backup version: escape.xlsx
     dtable = XLSX.readtable(joinpath(data_directory, "escape.xlsx"), esc_sheetname)
@@ -107,4 +105,119 @@ end
     @test r4_col_names[1] == Symbol( esc_col_names[1] )
 
 
+end
+
+# The `splicetext`-based `splitNode` that preceded the raw-scanner version (#462),
+# kept here as the reference the faster one must match exactly.
+function _splitnode_reference(xml_str::String, skipnode::String)
+    c = XML.Cursor(xml_str)
+    XML.next!(c)
+    while !XML.eof(c) && XML.nodetype(c) != XML.Element
+        XML.next!(c)
+    end
+    XML.eof(c) && return xml_str, ""
+    target_lazy = nothing
+    while XML.next!(c) !== nothing
+        XML.depth(c) == 0 && break
+        XML.depth(c) != 2 && (XML.skip_element!(c); continue)
+        XML.nodetype(c) == XML.Element || continue
+        if XLSX.localname(c) == skipnode
+            target_lazy = XML.LazyNode(c)
+            XML.skip_element!(c)
+            break
+        end
+        XML.skip_element!(c)
+    end
+    isnothing(target_lazy) && return xml_str, ""
+    target_tag = XML.tag(target_lazy)
+    attrs = XML.attributes(target_lazy)
+    replacement = if isnothing(attrs) || isempty(attrs)
+        "<$(target_tag)/>"
+    else
+        "<$(target_tag) $(join(("$(k)=\"$(v)\"" for (k,v) in attrs), " "))/>"
+    end
+    return XML.splicetext(target_lazy, replacement), ""
+end
+
+# Both must return the same result, or throw the same type of exception.
+function _splitnode_agree(xml_str::String)
+    expected = try _splitnode_reference(xml_str, "sheetData") catch e; e end
+    actual   = try XLSX.splitNode(xml_str, "sheetData") catch e; e end
+    expected isa Exception && return actual isa Exception && typeof(actual) == typeof(expected)
+    return actual == expected
+end
+
+@testset "splitNode" begin
+
+    @testset "matches the splicetext reference on every worksheet" begin
+        dirs = [data_directory]
+        fixtures = get(ENV, "XLSX_DIFF_FIXTURES", "")
+        isempty(fixtures) || push!(dirs, fixtures)
+        nsheets = 0
+        for dir in dirs, file in sort(readdir(dir))
+            any(ext -> endswith(lowercase(file), ext), (".xlsx", ".xlsm", ".xltx", ".xltm")) || continue
+            zip = try ZipArchives.ZipReader(read(joinpath(dir, file))) catch; continue end
+            for name in ZipArchives.zip_names(zip)
+                occursin(r"xl/worksheets/sheet\d*\.xml", name) || continue
+                bytes = ZipArchives.zip_readentry(zip, name)
+                XLSX.strip_bom_and_lf!(bytes)
+                nsheets += 1
+                ok = _splitnode_agree(String(bytes))
+                ok || println("splitNode differs from the reference: $file $name")
+                @test ok
+            end
+        end
+        @test nsheets > 100
+    end
+
+    ws(body; ns = "") = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n" *
+        "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"$ns>$body</worksheet>"
+    rows = "<row r=\"1\"><c r=\"A1\"><v>1</v></c></row><row r=\"2\"><c r=\"A2\" t=\"inlineStr\"><is><t>x</t></is></c></row>"
+
+    @testset "edge cases" begin
+        cases = [
+            "plain"               => ws("<dimension ref=\"A1:A2\"/><sheetData>$rows</sheetData><pageMargins left=\"0.7\"/>"),
+            "attributes"          => ws("<sheetData foo=\"1\" bar=\"a&amp;b\">$rows</sheetData><pageMargins left=\"0.7\"/>"),
+            "self-closing"        => ws("<dimension ref=\"A1\"/><sheetData/><pageMargins left=\"0.7\"/>"),
+            "self-closing, attrs" => ws("<sheetData foo=\"1\"/><pageMargins left=\"0.7\"/>"),
+            "empty element"       => ws("<sheetData></sheetData><pageMargins left=\"0.7\"/>"),
+            "prefixed"            => "<x:worksheet xmlns:x=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><x:sheetData><x:row r=\"1\"><x:c r=\"A1\"><x:v>1</x:v></x:c></x:row></x:sheetData><x:pageMargins left=\"0.7\"/></x:worksheet>",
+            "comment with close"  => ws("<sheetData><!-- </sheetData> -->$rows</sheetData><pageMargins left=\"0.7\"/>"),
+            "CDATA with close"    => ws("<sheetData><row r=\"1\"><c r=\"A1\" t=\"str\"><v><![CDATA[</sheetData>]]></v></c></row></sheetData><pageMargins left=\"0.7\"/>"),
+            "PI inside"           => ws("<sheetData><?pi </sheetData> ?>$rows</sheetData><pageMargins left=\"0.7\"/>"),
+            "multi-byte around"   => ws("<sheetPr codeName=\"日本語é\"/><sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>😀ü</t></is></c></row></sheetData><headerFooter><oddHeader>Ωmega ✓</oddHeader></headerFooter>"),
+            "multi-byte adjacent" => ws("<sheetPr codeName=\"é\"/><sheetData>$rows</sheetData><!--ü-->"),
+            "no sheetData"        => ws("<dimension ref=\"A1\"/><pageMargins left=\"0.7\"/>"),
+            "nested, not depth 2" => ws("<extLst><sheetData>$rows</sheetData></extLst>"),
+            "second sheetData"    => ws("<sheetData>$rows</sheetData><sheetData><row r=\"9\"/></sheetData>"),
+            "root not closed"     => "<worksheet><sheetData>$rows</sheetData>",
+            "sheetData not closed" => "<worksheet><sheetData>$rows",
+            "only the root"       => "<worksheet/>",
+            "no elements"         => "<?xml version=\"1.0\"?>",
+        ]
+        for (name, xml) in cases
+            ok = _splitnode_agree(xml)
+            ok || println("splitNode differs from the reference: $name")
+            @test ok
+        end
+        # The result itself, for the cases where it's easy to state
+        @test XLSX.splitNode(ws("<sheetData foo=\"1\">$rows</sheetData><pageMargins left=\"0.7\"/>"), "sheetData")[1] ==
+              ws("<sheetData foo=\"1\"/><pageMargins left=\"0.7\"/>")
+        @test XLSX.splitNode(ws("<sheetPr codeName=\"é\"/><sheetData>$rows</sheetData><!--ü-->"), "sheetData")[1] ==
+              ws("<sheetPr codeName=\"é\"/><sheetData/><!--ü-->")
+        @test XLSX.splitNode(ws("<dimension ref=\"A1\"/>"), "sheetData")[1] == ws("<dimension ref=\"A1\"/>")
+    end
+
+    @testset "_element_span" begin
+        xml = ws("<sheetPr codeName=\"é\"/><sheetData>$rows</sheetData><pageMargins left=\"0.7\"/>")
+        c = XML.Cursor(xml)
+        while XML.next!(c) !== nothing
+            XML.nodetype(c) == XML.Element && XLSX.localname(c) == "sheetData" && break
+        end
+        n = XML.LazyNode(c)
+        start, stop = XLSX._element_span(n)
+        @test SubString(xml, start, prevind(xml, stop)) == XML.sourcetext(n)
+        @test xml[start:start+10] == "<sheetData>"
+        @test xml[prevind(xml, stop, 12):prevind(xml, stop)] == "</sheetData>"
+    end
 end

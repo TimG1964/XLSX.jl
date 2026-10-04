@@ -9,7 +9,8 @@ One cached reference from a chart series: the formula it came from, the number
 format Excel recorded for it, and the cached values themselves.
 
 # Fields
-- `kind::Symbol` - one of `:num`, `:str`, `:multiLvlStr`, `:numLit`, `:strLit`.
+- `kind::Symbol` - one of `:num`, `:str`, `:multiLvlStr` (multi-level),
+  `:numLit` (literal-numbers), `:strLit` (literal-text).
 - `ref::Union{Nothing,String}` - the `c:f` formula (`Sheet1!\$B\$2:\$B\$9`).
   `nothing` for literal (`c:numLit` / `c:strLit`) series, which have no source range.
 - `format_code::Union{Nothing,String}` - number format recorded in the cache.
@@ -214,8 +215,9 @@ One data dimension of a chartEx data block: a `cx:numDim` or `cx:strDim`.
 
 # Fields
 - `kind` - `:num` or `:str`.
-- `type` - the dimension's role as written, e.g. `:val`, `:cat`, `:size`,
-  `:x`, `:y`, `:colorVal`, `:colorStr`, `:entityId`.
+- `type` - the dimension's role as written, e.g. `:val` (values), `:cat`
+  (categories), `:size`, `:x`, `:y`, `:colorVal` (numeric-colour), `:colorStr`
+  (text-colour), `:entityId` (region).
 - `formula` - the text of `cx:f`, usually a hidden `_xlchart.*` defined name;
   `nothing` if the dimension has no formula.
 - `range` - the resolved source range; `nothing` if unresolved.
@@ -244,7 +246,7 @@ Histogram binning from `cx:layoutPr/cx:binning`. Field names follow the XML.
 A numeric field may also be `:auto`; `nothing` means not written.
 
 # Fields
-- `intervalClosed` - `:r` or `:l`, the closed side of each bin interval.
+- `intervalClosed` - `:r` (right-closed) or `:l` (left-closed), the closed side of each bin interval.
 - `underflow`, `overflow` - the underflow and overflow bin cut-offs.
 - `binSize` - bin width.
 - `binCount` - number of bins.
@@ -277,8 +279,9 @@ plus any transforms applied to it. Distinct from the spreadsheet
 `<color theme="N"/>` mechanism, which is index-ordered and uses a different
 tint algorithm — see `get_theme_colors` for that.
 
-`token` is one of `:bg1`, `:tx1`, `:bg2`, `:tx2`, `:accent1` … `:accent6`,
-`:hlink`, `:folHlink`, or the aliases `:lt1`, `:dk1`, `:lt2`, `:dk2`.
+`token` is one of `:bg1` (background), `:tx1` (text), `:bg2`, `:tx2` (likewise),
+`:accent1` … `:accent6`, `:hlink` (hyperlink), `:folHlink` (visited-hyperlink),
+or the aliases `:lt1` (light), `:dk1` (dark), `:lt2`, `:dk2`.
 
 The `:lt1`, `:dk1`, `:lt2` and `:dk2` aliases are preserved as written, so a
 round trip keeps the spelling the file used, but two spellings of one slot
@@ -351,7 +354,8 @@ order. `rgb` and `alpha` give the resolved result for anyone who just wants to
 know what it looks like.
 
 # Fields
-- `kind::Symbol` - `:srgb`, `:scheme`, `:sys`, `:prst`, `:hsl` or `:scrgb`.
+- `kind::Symbol` - `:srgb` (hex), `:scheme` (theme), `:sys` (system), `:prst`
+  (named), `:hsl` or `:scrgb` (linear-RGB).
 - `val::String` - the `val` attribute: `"FF0000"`, `"accent1"`, `"windowText"`.
 - `transforms::Vector{Pair{Symbol,Int}}` - e.g. `[:lumMod => 60000, :lumOff => 40000]`,
   in thousandths of a percent, in the order DrawingML applies them. A
@@ -396,7 +400,8 @@ but not modelled further: `raw` holds the element as read, so nothing is lost
 on write.
 
 # Fields
-- `kind::Symbol` - `:none`, `:solid`, `:gradient`, `:pattern`, `:blip` or `:group`.
+- `kind::Symbol` - `:none`, `:solid`, `:gradient`, `:pattern`, `:blip` (picture)
+  or `:group`.
 - `fgcolor` - the colour of a solid fill, or a pattern's foreground.
 - `bgcolor` - a pattern's background; `nothing` otherwise.
 - `preset::Union{Nothing,String}` - a pattern's `prst` attribute, e.g. `"pct25"`,
@@ -417,7 +422,7 @@ end
     DrawingFill(kind; fgcolor = nothing, bgcolor = nothing, preset = nothing)
 
 A fill built rather than parsed. `kind` is `:none`, `:solid`, `:gradient`,
-`:pattern`, `:blip` or `:group`; only `:none` and `:solid` can be serialized
+`:pattern`, `:blip` (picture) or `:group`; only `:none` and `:solid` can be serialized
 from a constructed value, since the others are modelled partially and written
 back from `raw`.
 A fill read from a file carries a DrawingColor with `rgb` resolved; one built
@@ -573,7 +578,8 @@ DrawingParaProps(; align = nothing, level = nothing,
 """
     DrawingRun
 
-One `a:r`, `a:br` or `a:fld`, distinguished by `kind` (`:run`, `:br`, `:fld`).
+One `a:r`, `a:br` or `a:fld`, distinguished by `kind` (`:run`, `:br` (line-break),
+`:fld` (field)).
 A break carries `"\\n"` as its text so `text_content` needs no special case.
 """
 struct DrawingRun
@@ -586,7 +592,7 @@ end
 """
     DrawingRun(text; props = nothing, kind = :run)
 
-One run of text. `kind` is `:run`, `:br` or `:fld`; a break carries `"\\n"` as
+One run of text. `kind` is `:run`, `:br` (line-break) or `:fld` (field); a break carries `"\\n"` as
 its text.
 """
 DrawingRun(text::AbstractString; props = nothing, kind::Symbol = :run) =
@@ -750,7 +756,7 @@ One axis (`c:catAx`, `c:valAx`, `c:dateAx` or `c:serAx`), as read.
 # Fields
 - `kind` — the element tag as a Symbol, e.g. `:valAx`.
 - `axid` — `c:axId`, the key.
-- `pos` — `c:axPos`: `:b`, `:t`, `:l` or `:r`.
+- `pos` — `c:axPos`: `:b` (bottom), `:t` (top), `:l` (left) or `:r` (right).
 - `crossax` — `c:crossAx`, the `axid` of the axis this one crosses.
 - `deleted` — `c:delete`; a deleted axis is not drawn but remains formattable.
 - `raw` — the element as read, or `nothing` for an axis built in code.
@@ -849,7 +855,8 @@ A trendline on a series (`c:trendline`), as read.
 # Fields
 - `series_idx` — `c:idx` of the owning series.
 - `ordinal` — 1-based position among the series' `c:trendline` elements.
-- `kind` — `c:trendlineType`: `:linear`, `:exp`, `:log`, `:movingAvg`, `:poly`, `:power`.
+- `kind` — `c:trendlineType`: `:linear`, `:exp` (exponential), `:log`,
+  `:movingAvg` (moving-average), `:poly` (polynomial), `:power`.
 - `name`, `order`, `period`, `forward`, `backward`, `intercept`, `disp_rsqr`,
   `disp_eq` — as written; `nothing` means absent.
 - `raw` — the element as read, or `nothing` for a trendline built in code.

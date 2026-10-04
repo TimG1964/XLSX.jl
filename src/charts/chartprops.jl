@@ -407,7 +407,8 @@ getChartLegend(c::Chart) =
 """
     getLegendPos(c::Chart) -> Union{Nothing,Symbol}
 
-`:b`, `:t`, `:l`, `:r` or `:tr` from `c:legendPos`. `nothing` means no legend,
+`:b` (bottom), `:t` (top), `:l` (left), `:r` (right) or `:tr` (top-right) from
+`c:legendPos`. `nothing` means no legend,
 or a legend with no explicit position.
 """
 function getLegendPos(c::Chart)
@@ -680,7 +681,8 @@ end
 """
     getAxisLabelAlign(c::Chart, ax::ChartAxis) -> Union{Nothing,Symbol}
 
-`c:lblAlgn` — `:ctr`, `:l` or `:r`. Category and date axes only.
+`c:lblAlgn` — `:ctr` (centre), `:l` (left) or `:r` (right). Category and date
+axes only.
 """
 function getAxisLabelAlign(c::Chart, ax::ChartAxis)
     n = _axnode(c, ax)
@@ -863,7 +865,8 @@ getDataLabelText(c::Chart, d::ChartDataLabel) =
 """
     getDataLabelPosition(c::Chart, d::ChartDataLabel) -> Union{Nothing,Symbol}
 
-`c:dLblPos` — `:ctr`, `:inEnd`, `:inBase`, `:outEnd`, `:l`, `:r`, `:t`, `:b`,
+`c:dLblPos` — `:ctr` (centre), `:inEnd` (inside-end), `:inBase` (inside-base),
+`:outEnd` (outside-end), `:l` (left), `:r` (right), `:t` (above), `:b` (below),
 `:bestFit`. Which values are legal depends on the chart type.
 """
 getDataLabelPosition(c::Chart, d::ChartDataLabel) = _sym_val(_node(c, d), "dLblPos")
@@ -1305,7 +1308,6 @@ function _point_node(parent::Union{Nothing,XML.Node}, tag::AbstractString, point
     return _idx_child(parent, tag, point - 1)
 end
 
-_dpt_node(ser::XML.Node, point::Integer)  = _point_node(ser, "dPt", point)
 _dlbl_node(ser::XML.Node, point::Integer) = _point_node(first_element_with_tag(ser, "dLbls"), "dLbl", point)
 
 _group_axids(n::XML.Node) =
@@ -2309,8 +2311,6 @@ function setAxisNumberFormatLinked(c::Chart, ax::ChartAxis, linked::Bool)
 end
 
 # ── Group setters ─────────────────────────────────────────────────────────────
-
-_group_axids(el) = [parse(Int, _attr(k, "val")) for k in XML.children(el) if localname(k) == "axId"]
 
 function _group_path(c::Chart, root::XML.Node, g::ChartGroup)
     tag = String(g.kind)

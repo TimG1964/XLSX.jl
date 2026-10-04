@@ -1,6 +1,8 @@
 [deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 XLSX = "fdbf4ff8-1666-58a4-91e7-1b58723a45e0"
 
 [compat]
-XLSX = "=0.12"
+BenchmarkTools = "1"
+XLSX = "0.12"
 julia = "1"
