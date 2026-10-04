@@ -4,9 +4,9 @@ options selected, as follows:
 
 - `mode="rw"`: every sheet's data fully, eagerly, parallel-cached at open.
 
-- `mode="r"`, plain `openxlsx`/`readxlsx`: every sheet's structural XML decompressed/stripped 
-    at open (cheap, scales with total file size); each sheet's actual row data lazily cache-filled only on 
-    first access to that sheet. Any sheets from which cell data are never accessed do not get cached.
+- `mode="r"`, plain `openxlsx`/`readxlsx`: every sheet's XML decompressed at open;
+    each sheet's row data lazily cache-filled on first access, then its stored XML stripped.
+    Any sheets from which cell data are never accessed do not get cached.
 
 - `readtable`/`readtransposedtable`: only the one target worksheet's XML is ever 
     decompressed at all — structural processing for every other sheet is skipped entirely, and the 
@@ -1205,7 +1205,9 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
     @sync for _ in 1:max(nworkers, 1)
         Threads.@spawn begin
             for file in filtered_files
-                readfile = process_file(zip_io, file)
+                # Cached read-only sheets need full XML until their first row access.
+                readfile = process_file(zip_io, file;
+                    strip_worksheet = xf.is_writable || !xf.use_cache_for_sheet_data)
                 put!(read_files, readfile)
             end
         end
@@ -1215,7 +1217,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
     wait(consumer)
 end
 
-function process_file(zip_io::ZipArchives.ZipReader, filename::String)
+function process_file(zip_io::ZipArchives.ZipReader, filename::String; strip_worksheet::Bool = true)
 
     node = nothing
     raw  = nothing
@@ -1230,8 +1232,7 @@ function process_file(zip_io::ZipArchives.ZipReader, filename::String)
                 node = XML.Element("sst")  # placeholder; SST is loaded via sst_load!
                 raw  = xml_str
             elseif occursin(r"xl/worksheets/sheet\d*\.xml", filename)
-                stripped_xml, _ = splitNode(xml_str, "sheetData")
-                node = stripped_xml
+                node = strip_worksheet ? first(splitNode(xml_str, "sheetData")) : xml_str
                 raw  = xml_str      # full worksheet for LazyNode construction
             else
                 node = parse(xml_str, XML.Node)
