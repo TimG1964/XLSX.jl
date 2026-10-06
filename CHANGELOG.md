@@ -20,7 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fix uncached reads that lost formulas recorded in `wb.formulas`: the row iterator merged them only every 500 rows, so those after the last merge were dropped
 - `find_row` on an uncached sheet now raises `XLSXError` for an absent row, rather than `ArgumentError`
 - Uncached range, cell and table reads no longer raise an error for an invalid cell outside the cells they return, as `readtable` already did. Uncached reads assume rows are in ascending order, as the spec requires and Excel writes
-- Numeric cell values are now parsed with [Parsers.jl](https://github.com/JuliaData/Parsers.jl) (new dependency, v3), giving results identical to `Base.parse`
+- Numeric cell values are now parsed with [Parsers.jl](https://github.com/JuliaData/Parsers.jl) (new dependency, v2.8 or v3), giving results identical to `Base.parse`
 - Fix `Tables.getcolumn(row, i)` on `eachtablerow` rows, which threw a `MethodError` for every integer index
 - Column numbers and row ranges outside Excel's limits are now rejected (e.g. `CellRef(1, 20000)` no longer gives `]OF1`)
 - An invalid reference passed to `setdata!` with a vector now raises `XLSXError` rather than `UndefVarError`

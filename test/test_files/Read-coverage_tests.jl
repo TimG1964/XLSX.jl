@@ -672,7 +672,7 @@ end
     end
 end
 
-# General-format cells and SST indices use `Parsers.tryparse(Int64, v)`, which must give
+# General-format cells and SST indices use `_parse_cell_int(v)` (Parsers.jl), which must give
 # exactly what `tryparse(Int64, v)` gives.
 @testset "cell value integer parsing" begin
     for s in ["0", "-0", "+5", "00012", "42", "-42", "9223372036854775807", "9223372036854775808",
@@ -680,17 +680,17 @@ end
               "1E3", "12345.678901234567", "", "-", "+", " 12 ", "	7
 ", "_1", "1_0", "0x1F", "0b101",
               "0o17", "1,0", "١٢", "abc"]
-        ok = isequal(XLSX.Parsers.tryparse(Int64, s), tryparse(Int64, s))
+        ok = isequal(XLSX._parse_cell_int(s), tryparse(Int64, s))
         ok || println("integer parse differs from Base for ", repr(s))
         @test ok
         w = "<v>" * s * "</v>"
-        @test isequal(XLSX.Parsers.tryparse(Int64, SubString(w, 4, prevind(w, ncodeunits(w) - 3))), tryparse(Int64, s))
+        @test isequal(XLSX._parse_cell_int(SubString(w, 4, prevind(w, ncodeunits(w) - 3))), tryparse(Int64, s))
     end
     rng = Random.MersenneTwister(462)
     nbad = 0
     for _ in 1:200_000
         s = string(rand(rng, (rand(rng, -10^6:10^6), rand(rng, Int64), rand(rng, Int128), (2rand(rng) - 1) * 10.0^rand(rng, -5:20))))
-        isequal(XLSX.Parsers.tryparse(Int64, s), tryparse(Int64, s)) || (nbad += 1)
+        isequal(XLSX._parse_cell_int(s), tryparse(Int64, s)) || (nbad += 1)
     end
     @test nbad == 0
 end
