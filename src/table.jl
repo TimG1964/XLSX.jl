@@ -233,7 +233,23 @@ function _eachtablerow(
 end
 
 function TableRowIterator(sheet::Worksheet, index::Index, first_data_row::Int, stop_in_empty_row::Bool=true, stop_in_row_function::Union{Nothing,Function}=nothing, keep_empty_rows::Bool=false, missing_strings::Set{String}=Set{String}(), resume::Union{Nothing,Tuple}=nothing)
-    return TableRowIterator(eachrow(sheet), index, first_data_row, stop_in_empty_row, stop_in_row_function, keep_empty_rows, missing_strings, resume)
+    cols = sheet_column_numbers(index)
+    return TableRowIterator(_table_sheet_rows(sheet, minimum(cols):maximum(cols)), index, first_data_row, stop_in_empty_row,
+                            stop_in_row_function, keep_empty_rows, missing_strings, resume)
+end
+
+# The sheet rows a table read over `cols` iterates: the cache, or uncached, a stream
+# that decodes only `cols`. The table code reads a row only through those columns, its
+# number and `isempty` (which, for a row with cells only outside `cols`, gives the same
+# empty-table-row answer). When `cols` spans the sheet's known dimension, the stream
+# decodes every cell, saving the column test.
+function _table_sheet_rows(sheet::Worksheet, cols::UnitRange{Int})
+    is_cache_enabled(sheet) && return eachrow(sheet)
+    dim = sheet.dimension
+    if !isnothing(dim) && first(cols) <= column_number(dim.start) && column_number(dim.stop) <= last(cols)
+        return SheetRowStreamIterator(sheet)
+    end
+    return SheetRowStreamIterator(sheet, cols)
 end
 
 # Detects the contiguous column range starting from `columns_ordered[ci]`
@@ -329,7 +345,7 @@ _find_first_row_with_data(sheet::Worksheet, column_number::Int) =
     _find_first_row_with_data(sheet, nothing, column_number)
 
 function _find_first_row_with_data(sheet::Worksheet, rows::Union{Nothing,ValueRowIterator}, column_number::Int)
-    for r in (isnothing(rows) ? eachrow(sheet) : rows)
+    for r in (isnothing(rows) ? _table_sheet_rows(sheet, column_number:column_number) : rows)
         if !ismissing(getdata(r, column_number))
             return row_number(r)
         end

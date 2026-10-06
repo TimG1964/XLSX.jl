@@ -533,18 +533,3 @@ function _cell_value(ws::Worksheet, dt::CellValueType, v::UInt64, cell=nothing)
     throw(XLSXError(isnothing(cell) ? "Couldn't parse data of type $dt." : "Couldn't parse data for $cell."))
 end
 
-# Extract cells from a <row> LazyNode and push them (in place) into a Dict(column -> Cell)
-# Extract cells from a <row> LazyNode and push them (in place) into a Dict(column -> Cell)
-function get_rowcells!(rowcells::Dict{Int,Cell}, row::XML.LazyNode, ws::Worksheet, sst_pfx::String,
-                        local_formulas::Dict{SheetCellRef,AbstractFormula}, load_formulas::Bool=true)
-    sst_count = 0
-    for child in XML.eachchildnode(row)
-        XML.nodetype(child) == XML.Element || continue
-        localname(child) == "c" || continue
-        cell = Cell(child, ws, sst_pfx, local_formulas, load_formulas)
-        sst_count += cell.datatype == CT_STRING ? 1 : 0
-        rowcells[column_number(cell)] = cell
-    end
-    return nothing, sst_count
-end
-

@@ -14,9 +14,8 @@ Design — one row source, one table reader:
     type inference. That code reads rows through a few generic accessors
     (`row_number`, `isempty`, `_row_value`, `_present_columns`, `_push_header_label!`)
     with one method for `SheetRow` (the cache) and one for `ValueRow` (here).
-  - Cells are decoded by the same helpers the cache fill uses (`_cell_attributes`,
-    `_v_text_fallback`, `_inline_string`, `process_tv`, `_cell_value`), with the same
-    rules: an inline string's first `<is>` only, the last `<v>` wins, `<f>` ignored.
+  - Cells are decoded by `_cursor_cell_contents`, as in the cache fill, with the same rules: an
+    inline string's first `<is>` only, the last `<v>` wins; `<f>` is ignored here.
   - A `ValueRow` keeps an absent cell (no `<c>`) apart from a present but empty one
     (`missing`), as the cache does: header labels differ ("#Empty" vs "missing"), and
     `isempty(row)` counts any `<c>` in any column.
@@ -46,6 +45,9 @@ starts a fresh pass over the sheet XML.
 # Marks a column with no `<c>` in the row, as distinct from a present, empty cell.
 struct _AbsentCell end
 const _ABSENT = _AbsentCell()
+
+# The formulas argument of `_cursor_cell_contents` for a read that doesn't load formulas: never written.
+const _NO_FORMULAS = Dict{SheetCellRef,AbstractFormula}()
 
 # Thrown when `<row r>` values aren't ascending; `readtable` then uses the cache path.
 struct _RowsNotAscending <: Exception end
@@ -153,24 +155,9 @@ function Base.iterate(itr::ValueRowIterator, st::_ValueRowState)
     values = isnothing(cols) ? Any[] : Any[_ABSENT for _ in cols]
     has_cells = false
 
-    # The cell being read, completed when the walk leaves it (as in `first_cache_fill!`).
-    in_cell    = false
-    cell_done  = false          # an inline string's `<is>` has been read: ignore the rest
-    cell_col   = 0
-    cell_rstr  = SubString("")
-    cell_t     = SubString("")
-    cell_nstyle = 0
-    cell_type  = CT_EMPTY
-    cell_value = UInt64(0)
-
     while XML.next!(c) !== nothing
         d  = XML.depth(c)
         nt = XML.nodetype(c)
-
-        if in_cell && d <= 3
-            _set_value!(values, firstcol, cell_col, _cell_value(ws, cell_type, cell_value))
-            in_cell = false
-        end
 
         if d <= 2
             if d == 2 && nt == XML.Element
@@ -184,44 +171,19 @@ function Base.iterate(itr::ValueRowIterator, st::_ValueRowState)
             nt == XML.Element || continue
             if localname(c) == "c"
                 has_cells = true
-                ref, rstr, t, _, nstyle, _ = _cell_attributes(XML.LazyNode(c))
-                col = column_number(ref)
+                attrs = _cell_attributes(XML.LazyNode(c))
+                col = column_number(first(attrs))
                 if isnothing(cols) || col in cols
-                    in_cell, cell_done = true, false
-                    cell_col, cell_rstr, cell_t, cell_nstyle = col, rstr, t, nstyle
-                    cell_type, cell_value = CT_EMPTY, UInt64(0)
-                    # a present cell, even if it turns out empty
-                    _set_value!(values, firstcol, col, missing)
+                    # `<f>` is ignored: readtable reads values only
+                    datatype, value, _ = _cursor_cell_contents(c, attrs, ws, wb, itr.sst_pfx, _NO_FORMULAS, false)
+                    _set_value!(values, firstcol, col, _cell_value(ws, datatype, value))
                 else
                     XML.skip_element!(c)
                 end
             else
                 XML.skip_element!(c)
             end
-        elseif d == 4 && in_cell
-            nt == XML.Element || continue
-            tag = localname(c)
-            if cell_done
-                # past an inline string's `<is>`
-            elseif cell_t == "inlineStr"
-                if tag == "is"
-                    r = _inline_string(wb, XML.LazyNode(c), itr.sst_pfx)
-                    isnothing(r) || ((cell_type, cell_value) = r)
-                    cell_done = true
-                end
-            elseif tag == "v"
-                sv = XML.is_simple_value(c)
-                isnothing(sv) && (sv = _v_text_fallback(XML.LazyNode(c), cell_rstr))
-                if !isnothing(sv) && !isempty(sv)
-                    cell_type, cell_value = process_tv(wb, cell_t, sv, cell_nstyle)
-                end
-            end
-            XML.skip_element!(c)
         end
-    end
-
-    if in_cell
-        _set_value!(values, firstcol, cell_col, _cell_value(ws, cell_type, cell_value))
     end
 
     return ValueRow(ws, row, firstcol, values, has_cells), st

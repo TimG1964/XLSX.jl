@@ -55,35 +55,6 @@ The iterator element is a SheetRow.
 end
 
 
-function _read_row_attrs(row::XML.LazyNode, wsname::String)
-    current_row = nothing
-    current_row_ht = nothing
-    for (k, v) in XML.eachattribute(row)
-        if k == "r"
-            current_row = parse(Int, v)
-        elseif k == "ht"
-            current_row_ht = parse(Float64, v)
-        end
-    end
-    current_row === nothing && throw(XLSXError("Row without 'r' attribute in worksheet $wsname."))
-    return current_row, current_row_ht
-end
-
-# Advance `row_iter` from `next` (a raw `iterate` result) until the next
-# `<row>` element. Returns `(rownode, iterator_state)` or `nothing` at EOF.
-# Takes the first `iterate` result as an argument rather than a sentinel so
-# it works even if the iterator's own state type is `Nothing`.
-@inline function _find_next_row(row_iter, next)
-    while next !== nothing
-        child, st = next
-        if XML.nodetype(child) == XML.Element && localname(child) == "row"
-            return child, st
-        end
-        next = iterate(row_iter, st)
-    end
-    return nothing
-end
-
 # Open the sheet's XML stream and return its <sheetData> node.
 # Shared by the stream iterator and its tests so both navigate identically.
 function _open_sheetdata(ws::Worksheet)
@@ -93,68 +64,106 @@ function _open_sheetdata(ws::Worksheet)
     return _find_sheetdata(doc, ws.name)
 end
 
-# Creates an iterator for row elements in the Worksheet's XML.
-# Creates an iterator for row elements in the Worksheet's XML.
-function Base.iterate(itr::SheetRowStreamIterator)
-    ws = get_worksheet(itr)
-    xf = get_xlsxfile(ws)
-    sst_pfx = get_sst_prefix(ws)
-    sheetdata = _open_sheetdata(ws)
-    row_iter = XML.eachchildnode(sheetdata)
-
-    found = _find_next_row(row_iter, iterate(row_iter))
-    isnothing(found) && return nothing
-    rownode, row_state = found
-
-    rowcells = Dict{Int,Cell}()
-    local_formulas = Dict{SheetCellRef,AbstractFormula}()
-    load_formulas = xf.load_formulas
-    current_row, current_row_ht = _read_row_attrs(rownode, ws.name)
-    _, sst_count = get_rowcells!(rowcells, rownode, ws, sst_pfx, local_formulas, load_formulas)
-    itr.sheet.sst_count += sst_count
-    _merge_local_formulas!(get_workbook(ws), local_formulas)
-    state = SheetRowStreamIteratorState(row_iter, row_state, rowcells, local_formulas, 1,
-                                        isnothing(ws.dimension), typemax(Int), 0, typemax(Int), 0)
-    state.track && _track_row_bounds!(state, current_row, rowcells)
-    return SheetRow(ws, current_row, current_row_ht, rowcells), state
+# Moves a cursor in `<sheetData>` to its next `<row>`; `false` at the end of the sheet.
+function _next_row!(c::XML.Cursor)::Bool
+    while XML.next!(c) !== nothing
+        (XML.depth(c) == 2 && XML.nodetype(c) == XML.Element) || continue
+        localname(c) == "row" && return true
+        XML.skip_element!(c)
+    end
+    return false
 end
 
-@inline function _track_row_bounds!(state::SheetRowStreamIteratorState, row::Int, rowcells::Dict{Int,Cell})
+# The `r` of the `<row>` the cursor is on.
+function _row_number(c::XML.Cursor, wsname::String)::Int
+    r = XML.get(c, "r", nothing)
+    r === nothing && throw(XLSXError("Row without 'r' attribute in worksheet $wsname."))
+    return parse(Int, r)
+end
+
+# The `ht` of the `<row>` the cursor is on.
+function _row_height(c::XML.Cursor)::Union{Nothing,Float64}
+    ht = XML.get(c, "ht", nothing)
+    return isnothing(ht) ? nothing : parse(Float64, ht)
+end
+
+# Decodes the `<c>`s in `cols` (`nothing` = all) of the `<row>` the cursor is on into
+# `rowcells`, by column (a repeated column: the last one), each tokenised once; the
+# others are skipped after reading only their `r`. Leaves the cursor holding the node
+# after the row. Returns the number of shared-string cells decoded and the first and
+# last column of any `<c>` in the row (`typemax(Int)`, 0 for none).
+function _cursor_rowcells!(rowcells::Dict{Int,Cell}, c::XML.Cursor, ws::Worksheet, wb::Workbook, sst_pfx::String,
+                           local_formulas::Dict{SheetCellRef,AbstractFormula}, load_formulas::Bool,
+                           cols::Union{Nothing,UnitRange{Int}} = nothing)::Tuple{Int,Int,Int}
+    sst_count = 0
+    col_min, col_max = typemax(Int), 0
+    XML.@for_each_child c child begin
+        if XML.nodetype(child) == XML.Element && localname(child) == "c"
+            col = isnothing(cols) ? 0 : _cell_column(child)
+            if isnothing(cols) || col in cols
+                cell = _cursor_cell(child, ws, wb, sst_pfx, local_formulas, load_formulas)
+                col = column_number(cell)
+                sst_count += cell.datatype == CT_STRING ? 1 : 0
+                rowcells[col] = cell
+            else
+                XML.skip_element!(child)
+            end
+            col_min, col_max = min(col_min, col), max(col_max, col)
+        else
+            XML.skip_element!(child)
+        end
+    end
+    return sst_count, col_min, col_max
+end
+
+# The column of the `<c>` the cursor is on, from its `r` attribute alone.
+function _cell_column(c::XML.Cursor)::Int
+    for (k, v) in XML.eachattribute(XML.LazyNode(c))
+        k == "r" && return _ref_column_number(v)
+    end
+    throw(XLSXError("Invalid cell reference ``."))
+end
+
+# Creates an iterator for row elements in the Worksheet's XML: one cursor walks
+# `<sheetData>`, decoding each row's cells as it passes them.
+function Base.iterate(itr::SheetRowStreamIterator)
+    ws = get_worksheet(itr)
+    state = SheetRowStreamIteratorState(XML.Cursor(_open_sheetdata(ws)), Dict{Int,Cell}(),
+                                        Dict{SheetCellRef,AbstractFormula}(),
+                                        isnothing(ws.dimension), typemax(Int), 0, typemax(Int), 0)
+    return iterate(itr, state)
+end
+
+@inline function _track_row_bounds!(state::SheetRowStreamIteratorState, row::Int, col_min::Int, col_max::Int)
     state.row_min = min(state.row_min, row)
     state.row_max = max(state.row_max, row)
-    for col in keys(rowcells)
-        state.col_min = min(state.col_min, col)
-        state.col_max = max(state.col_max, col)
-    end
+    state.col_min = min(state.col_min, col_min)
+    state.col_max = max(state.col_max, col_max)
     nothing
 end
 
 function Base.iterate(itr::SheetRowStreamIterator, state::SheetRowStreamIteratorState)
     ws = get_worksheet(itr)
-    sst_pfx = get_sst_prefix(ws)
+    wb = get_workbook(ws)
+    c = state.cursor
     empty!(state.rowcells)
 
-    found = _find_next_row(state.row_iter, iterate(state.row_iter, state.row_state))
-    if isnothing(found)
+    if !_next_row!(c)
         # A completed pass has seen every row: record the bounds if still unknown.
         if state.track && state.col_max > 0 && isnothing(ws.dimension)
             set_dimension!(ws, CellRange(CellRef(state.row_min, state.col_min), CellRef(state.row_max, state.col_max)))
         end
         return nothing
     end
-    rownode, state.row_state = found
 
+    current_row, current_row_ht = _row_number(c, ws.name), _row_height(c)
     load_formulas = get_xlsxfile(ws).load_formulas
-    current_row, current_row_ht = _read_row_attrs(rownode, ws.name)
-    _, sst_count = get_rowcells!(state.rowcells, rownode, ws, sst_pfx, state.local_formulas, load_formulas)
+    sst_count, col_min, col_max = _cursor_rowcells!(state.rowcells, c, ws, wb, get_sst_prefix(ws), state.local_formulas,
+                                                    load_formulas, itr.cols)
     itr.sheet.sst_count += sst_count
-    state.track && _track_row_bounds!(state, current_row, state.rowcells)
-
-    state.rows_since_merge += 1
-    if state.rows_since_merge >= 500
-        _merge_local_formulas!(get_workbook(ws), state.local_formulas)
-        state.rows_since_merge = 0
-    end
+    state.track && _track_row_bounds!(state, current_row, col_min, col_max)
+    # Each row's formulas, so a pass that stops early (a `break`) loses none.
+    _merge_local_formulas!(wb, state.local_formulas)
 
     return SheetRow(ws, current_row, current_row_ht, state.rowcells), state
 end
@@ -252,12 +261,9 @@ function find_row(itr::SheetRowIterator, row::Int) :: SheetRow
 
     # If can't use cache then lazily iterate sheetrows
     else
-        r = first(match_rows(ws, [row]))
-        if isnothing(r)
-            throw(XLSXError("Row $row not found in worksheet $(ws.name)."))
-        else
-            return r
-        end
+        matched = match_rows(ws, [row])
+        isempty(matched) && throw(XLSXError("Row $row not found in worksheet $(ws.name)."))
+        return only(matched)
     end
 end
 
@@ -410,58 +416,12 @@ function first_cache_fill!(ws::Worksheet, lznode::XML.LazyNode)
     expected_cols = isnothing(dim) ? 16 :
         XLSX.column_number(dim.stop) - XLSX.column_number(dim.start) + 1
 
-    # The cell being read. A `<c>` is read in the same cursor walk as its children
-    # (rather than skipped and re-read through `Cell(::LazyNode, …)`), so its bytes are
-    # tokenized once (#462). It is completed when the walk leaves it (depth ≤ 3), using
-    # the same helpers as `Cell(::LazyNode, …)`.
-    in_cell    = false
-    cell_done  = false          # an inline string's `<is>` has been read: ignore the rest
-    cell_ref   = CellRef(1, 1)
-    cell_rstr  = SubString("")
-    cell_t     = SubString("")
-    cell_style = UInt32(0)
-    cell_nstyle = 0
-    cell_meta  = UInt32(0)
-    cell_type  = CT_EMPTY
-    cell_value = UInt64(0)
-    cell_formula = false
-
     c2 = XML.Cursor(sheetdata_lazy)
     while XML.next!(c2) !== nothing
         d  = XML.depth(c2)
         nt = XML.nodetype(c2)
 
-        if in_cell && d <= 3
-            cell = Cell(cell_ref, cell_value, cell_style, cell_meta, cell_type, cell_formula)
-            sst_total += cell_type == CT_STRING ? 1 : 0
-            rowcells[column_number(cell)] = cell
-            in_cell = false
-        end
-
-        if d == 4 && in_cell
-            nt == XML.Element || continue
-            tag = localname(c2)
-            if cell_done
-                # past an inline string's `<is>`
-            elseif cell_t == "inlineStr"
-                if tag == "is"
-                    r = _inline_string(wb, XML.LazyNode(c2), sst_pfx)
-                    isnothing(r) || ((cell_type, cell_value) = r)
-                    cell_done = true
-                end
-            elseif tag == "v"
-                sv = XML.is_simple_value(c2)
-                isnothing(sv) && (sv = _v_text_fallback(XML.LazyNode(c2), cell_rstr))
-                if !isnothing(sv) && !isempty(sv)
-                    cell_type, cell_value = process_tv(wb, cell_t, sv, cell_nstyle)
-                end
-            elseif tag == "f"
-                load_formulas && _record_formula!(wb, ws, cell_ref, XML.LazyNode(c2), local_formulas)
-                cell_formula = true
-            end
-            XML.skip_element!(c2)
-
-        elseif d == 2 && nt == XML.Element && localname(c2) == "row"
+        if d == 2 && nt == XML.Element && localname(c2) == "row"
             if !isnothing(row_num)
                 sr = SheetRow(ws, row_num, row_ht, rowcells)
                 !isempty(unhandled) && (unhandled_attributes[row_num] = unhandled)
@@ -494,10 +454,10 @@ function first_cache_fill!(ws::Worksheet, lznode::XML.LazyNode)
             end
 
         elseif d == 3 && nt == XML.Element && localname(c2) == "c"
-            cell_ref, cell_rstr, cell_t, cell_style, cell_nstyle, cell_meta =
-                _cell_attributes(XML.LazyNode(c2))
-            cell_type, cell_value, cell_formula = CT_EMPTY, UInt64(0), false
-            in_cell, cell_done = true, false
+            # Read in the same walk as its children, so its bytes are tokenized once (#462).
+            cell = _cursor_cell(c2, ws, wb, sst_pfx, local_formulas, load_formulas)
+            sst_total += cell.datatype == CT_STRING ? 1 : 0
+            rowcells[column_number(cell)] = cell
 
         elseif d == 2 && nt == XML.Element
             XML.skip_element!(c2)
@@ -506,12 +466,6 @@ function first_cache_fill!(ws::Worksheet, lznode::XML.LazyNode)
             XML.skip_element!(c2)
 
         end
-    end
-
-    if in_cell
-        cell = Cell(cell_ref, cell_value, cell_style, cell_meta, cell_type, cell_formula)
-        sst_total += cell_type == CT_STRING ? 1 : 0
-        rowcells[column_number(cell)] = cell
     end
 
     if !isnothing(row_num)
@@ -559,48 +513,36 @@ function first_cache_fill!(ws::Worksheet, lznode::XML.LazyNode)
 end
 
 # Materialise specific rows from a worksheet.xml file into SheetRows
-# (faster than using eachrow which materialises every row).
+# (faster than using eachrow which materialises every row). Rows are in ascending
+# order, so the pass stops after the last one wanted; a duplicated row: the first.
 function match_rows(ws::Worksheet, rows_to_match::Vector{Int})::Vector{SheetRow}
     matched_rows = Vector{SheetRow}()
+    wanted = sort(unique(rows_to_match))
+    isempty(wanted) && return matched_rows
+    wb = get_workbook(ws)
     sst_pfx = get_sst_prefix(ws)
     local_formulas = Dict{SheetCellRef,AbstractFormula}()
     load_formulas = get_xlsxfile(ws).load_formulas
-    sort!(rows_to_match)
-
-    target_file = get_relationship_target_by_id("xl", get_workbook(ws), ws.relationship_id)
-    xf = get_xlsxfile(ws)
-    doc = open_internal_file_stream(xf, target_file)
-    sheetdata = _find_sheetdata(doc, ws.name)
 
     i = 1
-    c = XML.Cursor(sheetdata)
-    while XML.next!(c) !== nothing && i <= length(rows_to_match)
-        XML.depth(c) == 1 && continue
-        XML.depth(c) != 2 && (XML.skip_element!(c); continue)
-        XML.nodetype(c) == XML.Element && localname(c) == "row" || (XML.skip_element!(c); continue)
-
-        row_num_str = XML.get(c, "r", nothing)
-        row_num_str === nothing && throw(XLSXError("Row without 'r' attribute encountered in worksheet $(ws.name)."))
-        row_num = parse(Int, row_num_str)
-
-        row_num < rows_to_match[i] && (XML.skip_element!(c); continue)
-        row_num != rows_to_match[i] && (XML.skip_element!(c); continue)
-
-        ht_str = XML.get(c, "ht", nothing)
-        row_node = XML.LazyNode(c)
-        rowcells = Dict{Int,Cell}()
-        get_rowcells!(rowcells, row_node, ws, sst_pfx, local_formulas, load_formulas)
-        push!(matched_rows, SheetRow(ws, row_num, isnothing(ht_str) ? nothing : parse(Float64, ht_str), rowcells))
-        i += 1
-    end
-
-    if !isempty(local_formulas)
-        wb = get_workbook(ws)
-        lock(wb.formulas_lock) do
-            merge!(wb.formulas, local_formulas)
+    c = XML.Cursor(_open_sheetdata(ws))
+    while i <= length(wanted) && _next_row!(c)
+        row_num = _row_number(c, ws.name)
+        while i <= length(wanted) && wanted[i] < row_num   # wanted rows absent from the file
+            i += 1
+        end
+        if i <= length(wanted) && wanted[i] == row_num
+            rowcells = Dict{Int,Cell}()
+            ht = _row_height(c)
+            _cursor_rowcells!(rowcells, c, ws, wb, sst_pfx, local_formulas, load_formulas)
+            push!(matched_rows, SheetRow(ws, row_num, ht, rowcells))
+            i += 1
+        else
+            XML.skip_element!(c)
         end
     end
 
+    _merge_local_formulas!(wb, local_formulas)
     return matched_rows
 end
 
@@ -615,49 +557,82 @@ end
     return n
 end
 
-# Bounds of the cells in a worksheet.xml file, read from the `r` attributes of
-# `<row>` and `<c>` alone (no cells are materialised). Like the row iterator,
-# rows without cells count towards the row bounds. Returns `nothing` for a sheet
-# with no cells.
-function _scan_dimension(ws::Worksheet)::Union{Nothing,CellRange}
-    row_min = col_min = typemax(Int)
-    row_max = col_max = 0
-    c = XML.Cursor(_open_sheetdata(ws))
-    while XML.next!(c) !== nothing
-        d = XML.depth(c)
-        d == 1 && continue
-        if d == 2 && XML.nodetype(c) == XML.Element && localname(c) == "row"
-            r_val = XML.get(c, "r", nothing)
-            r_val === nothing && throw(XLSXError("Row without 'r' attribute in worksheet $(ws.name)."))
-            row = parse(Int, r_val)
-            row_min = min(row_min, row); row_max = max(row_max, row)
-        elseif d == 3 && XML.nodetype(c) == XML.Element && localname(c) == "c"
-            col = _ref_column_number(XML.get(c, "r", ""))
-            col_min = min(col_min, col); col_max = max(col_max, col)
-            XML.skip_element!(c)
-        else
-            XML.skip_element!(c)
-        end
-    end
-    col_max == 0 && return nothing
-    return CellRange(CellRef(row_min, col_min), CellRef(row_max, col_max))
+# Decodes the `<c>` the cursor is on, reading its children in the same walk, so its
+# bytes are tokenised once. Reads cells as `Cell(::LazyNode, …)` does: an inline
+# string's first `<is>` only, the last `<v>` wins, and an `<f>` is recorded (in
+# `local_formulas`) when `load_formulas` is set. Leaves the cursor holding the node
+# after the cell, so the caller's next `next!` yields it.
+function _cursor_cell(c::XML.Cursor, ws::Worksheet, wb::Workbook, sst_pfx::String,
+                      local_formulas::Dict{SheetCellRef,AbstractFormula}, load_formulas::Bool)::Cell
+    attrs = _cell_attributes(XML.LazyNode(c))
+    datatype, value, formula = _cursor_cell_contents(c, attrs, ws, wb, sst_pfx, local_formulas, load_formulas)
+    ref, _, _, style, _, meta = attrs
+    return Cell(ref, value, style, meta, datatype, formula)
 end
 
-# Single streaming pass over an uncached worksheet whose dimension is unknown.
-# Materialises the cells in `rows` × `cols` (`nothing` = unrestricted) and reads
-# only the `r` attribute of the rest, so the sheet bounds come from the same pass.
-# Records the dimension, then returns the target range (unrestricted sides taken
-# from the dimension) and the materialised cells. Returns `nothing` when the
-# dimension is already known or the cache is in use, so callers keep their usual path.
-function _read_unknown_dimension(ws::Worksheet,
-                                 rows::Union{Nothing,AbstractUnitRange{<:Integer}},
-                                 cols::Union{Nothing,AbstractUnitRange{<:Integer}})
-    (isnothing(ws.dimension) && !is_cache_enabled(ws)) || return nothing
-    is_chartsheet(get_workbook(ws), ws.name) && return nothing
+# The `(datatype, value, formula)` of the `<c>` the cursor is on, as `_cursor_cell`
+# reads them, given its `_cell_attributes`; for a caller that needs no `Cell` (which
+# is mutable, so would be allocated).
+function _cursor_cell_contents(c::XML.Cursor, attrs::Tuple, ws::Worksheet, wb::Workbook, sst_pfx::String,
+                               local_formulas::Dict{SheetCellRef,AbstractFormula}, load_formulas::Bool)
+    ref, ref_str, t, _, num_style, _ = attrs
+    datatype = CT_EMPTY
+    value    = UInt64(0)
+    formula  = false
+    done     = false            # an inline string's `<is>` has been read: ignore the rest
+    XML.@for_each_child c child begin
+        if XML.nodetype(child) == XML.Element
+            tag = localname(child)
+            if done
+                # past an inline string's `<is>`
+            elseif t == "inlineStr"
+                if tag == "is"
+                    r = _inline_string(wb, XML.LazyNode(child), sst_pfx)
+                    isnothing(r) || ((datatype, value) = r)
+                    done = true
+                end
+            elseif tag == "v"
+                sv = XML.is_simple_value(child)
+                isnothing(sv) && (sv = _v_text_fallback(XML.LazyNode(child), ref_str))
+                if !isnothing(sv) && !isempty(sv)
+                    datatype, value = process_tv(wb, t, sv, num_style)
+                end
+            elseif tag == "f"
+                load_formulas && _record_formula!(wb, ws, ref, XML.LazyNode(child), local_formulas)
+                formula = true
+            end
+            XML.skip_element!(child)
+        end
+    end
+    return datatype, value, formula
+end
 
+# Whether `x` is in `sel`: `nothing` selects everything; ranges test in O(1), and a
+# sorted vector by binary search, so the test doesn't depend on the order rows arrive in.
+@inline _selects(::Nothing, ::Int) = true
+@inline _selects(sel::AbstractRange{<:Integer}, x::Int) = x in sel
+@inline _selects(sel::AbstractVector{<:Integer}, x::Int) = insorted(x, sel)
+
+# The last element `sel` selects, or `nothing` when it is unbounded.
+@inline _last_selected(::Nothing) = nothing
+@inline _last_selected(sel::AbstractVector{<:Integer}) = isempty(sel) ? 0 : last(sel)
+
+# One streaming pass over a worksheet.xml file. Decodes the cells in `rows` × `cols`
+# (`nothing` = unrestricted; otherwise a range or a sorted vector) and skims the rest,
+# reading only the `r` attribute of each `<row>` and `<c>`. Returns the decoded cells
+# and, when `track_bounds` is set, the bounds of every cell in the sheet (`nothing` for
+# a sheet with no cells; like the row iterator, rows without cells count towards the
+# row bounds). Without `track_bounds`, the pass stops at the first row after the last
+# selected one, as rows are in ascending order.
+function _read_cells(ws::Worksheet,
+                     rows::Union{Nothing,AbstractVector{<:Integer}},
+                     cols::Union{Nothing,AbstractVector{<:Integer}};
+                     track_bounds::Bool)::Tuple{Vector{Cell},Union{Nothing,CellRange}}
+    wb = get_workbook(ws)
     sst_pfx = get_sst_prefix(ws)
     local_formulas = Dict{SheetCellRef,AbstractFormula}()
     load_formulas = get_xlsxfile(ws).load_formulas
+    stop_after = track_bounds ? nothing : _last_selected(rows)
     cells = Cell[]
     row_min = col_min = typemax(Int)
     row_max = col_max = 0
@@ -671,23 +646,51 @@ function _read_unknown_dimension(ws::Worksheet,
             r_val = XML.get(c, "r", nothing)
             r_val === nothing && throw(XLSXError("Row without 'r' attribute in worksheet $(ws.name)."))
             row = parse(Int, r_val)
+            !isnothing(stop_after) && row > stop_after && break
             row_min = min(row_min, row); row_max = max(row_max, row)
-            in_rows = isnothing(rows) || row in rows
+            in_rows = _selects(rows, row)
+            # Nothing to decode or measure in this row's cells.
+            !in_rows && !track_bounds && XML.skip_element!(c)
         elseif d == 3 && XML.nodetype(c) == XML.Element && localname(c) == "c"
             col = _ref_column_number(XML.get(c, "r", ""))
             col_min = min(col_min, col); col_max = max(col_max, col)
-            if in_rows && (isnothing(cols) || col in cols)
-                cell = Cell(XML.LazyNode(c), ws, sst_pfx, local_formulas, load_formulas)
-                cell isa Cell && push!(cells, cell)
+            if in_rows && _selects(cols, col)
+                push!(cells, _cursor_cell(c, ws, wb, sst_pfx, local_formulas, load_formulas))
+            else
+                XML.skip_element!(c)
             end
-            XML.skip_element!(c)
         else
             XML.skip_element!(c)
         end
     end
 
-    _merge_local_formulas!(get_workbook(ws), local_formulas)
-    col_max > 0 && set_dimension!(ws, CellRange(CellRef(row_min, col_min), CellRef(row_max, col_max)))
+    _merge_local_formulas!(wb, local_formulas)
+    bounds = (track_bounds && col_max > 0) ?
+        CellRange(CellRef(row_min, col_min), CellRef(row_max, col_max)) : nothing
+    return cells, bounds
+end
+
+# Bounds of the cells in a worksheet.xml file, read from the `r` attributes of
+# `<row>` and `<c>` alone (no cells are materialised). Like the row iterator,
+# rows without cells count towards the row bounds. Returns `nothing` for a sheet
+# with no cells.
+_scan_dimension(ws::Worksheet)::Union{Nothing,CellRange} =
+    last(_read_cells(ws, 1:0, nothing; track_bounds = true))
+
+# Single streaming pass over an uncached worksheet whose dimension is unknown.
+# Materialises the cells in `rows` × `cols` (`nothing` = unrestricted) and reads
+# only the `r` attribute of the rest, so the sheet bounds come from the same pass.
+# Records the dimension, then returns the target range (unrestricted sides taken
+# from the dimension) and the materialised cells. Returns `nothing` when the
+# dimension is already known or the cache is in use, so callers keep their usual path.
+function _read_unknown_dimension(ws::Worksheet,
+                                 rows::Union{Nothing,AbstractUnitRange{<:Integer}},
+                                 cols::Union{Nothing,AbstractUnitRange{<:Integer}})
+    (isnothing(ws.dimension) && !is_cache_enabled(ws)) || return nothing
+    is_chartsheet(get_workbook(ws), ws.name) && return nothing
+
+    cells, bounds = _read_cells(ws, rows, cols; track_bounds = true)
+    isnothing(bounds) || set_dimension!(ws, bounds)
 
     dim = something(ws.dimension, CellRange(CellRef(1, 1), CellRef(1, 1)))  # empty sheet: A1:A1, not recorded
     top    = isnothing(rows) ? dim.start.row_number    : first(rows)
