@@ -762,6 +762,15 @@ setSeriesName(c::ChartEx, i::Integer, name::AbstractString; pareto::Bool = false
 
 # ---- layout properties (write) ----------------------------------------------
 
+# Excel refuses a file with some layout properties on the wrong kind of series
+# (e.g. subtotals on a funnel), so their setters check the series' layoutId first.
+function _cx_require_layout(c::ChartEx, i::Integer, layout::Symbol, what::AbstractString)
+    l = getSeriesLayout(c, i)
+    l === layout ||
+        throw(XLSXError("$what applies only to a `$layout` series; series $i of chart `$(c.name)` is `$l`."))
+    return nothing
+end
+
 # Apply `f(layoutPr, pfx)` to series `i`'s cx:layoutPr, creating it if absent.
 _cx_set_layoutpr!(c::ChartEx, i::Integer, f) =
     _cx_edit_series!(c, i, (ser, pfx) ->
@@ -775,7 +784,9 @@ Mark the given points of a waterfall series as totals, replacing whatever was
 marked before. `points` counts from 1, in any order; an empty collection writes
 `<cx:subtotals/>`, which is what Excel writes for a waterfall with no totals.
 
-Pass `:inherit` to remove `cx:subtotals` entirely.
+Pass `:inherit` to remove `cx:subtotals` entirely. Any other value is an error
+unless series `i` is a waterfall series (Excel refuses a file with subtotals on
+other layouts).
 
 Returns `c`, which remains valid.
 """
@@ -783,6 +794,7 @@ function setSeriesSubtotals(c::ChartEx, i::Integer, points)
     if points === :inherit
         return _cx_set_layoutpr!(c, i, (lp, _) -> remove_child(lp, "subtotals"))
     end
+    _cx_require_layout(c, i, :waterfall, "Subtotals")
     idx = sort(unique(Int[p for p in points]))
     isempty(idx) || first(idx) >= 1 ||
         throw(XLSXError("Data point positions start at 1; asked for $(first(idx))."))
@@ -815,12 +827,15 @@ const _CX_QUARTILE_METHODS = (:inclusive, :exclusive)
     setSeriesQuartileMethod(c::ChartEx, i, method) -> ChartEx
 
 Set the quartile calculation of a box & whisker series to `:inclusive` or
-`:exclusive`, or `:inherit` to remove `cx:statistics`.
+`:exclusive`, or `:inherit` to remove `cx:statistics`. Setting a method is an error
+unless series `i` is a box & whisker series (Excel refuses a file with one on
+other layouts).
 """
 function setSeriesQuartileMethod(c::ChartEx, i::Integer, method::Symbol)
     method === :inherit || method in _CX_QUARTILE_METHODS ||
         throw(XLSXError("`$method` is not a quartile method. Use " *
                         join(_CX_QUARTILE_METHODS, " or ") * "."))
+    method === :inherit || _cx_require_layout(c, i, :boxWhisker, "A quartile method")
     return _cx_set_layout_attr!(c, i, "statistics", "quartileMethod",
                                 method === :inherit ? :inherit : String(method))
 end

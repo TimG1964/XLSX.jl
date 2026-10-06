@@ -1453,7 +1453,6 @@ function setCfCellIs(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::
     pfx = get_prefix(ws)
     pfx = pfx == "" ? pfx : pfx * ":"
 
-    allcfs    = allCfs(ws)
 
     !isnothing(value) && !is_valid_cellname(value) && !is_valid_fixed_cellname(value) && isnothing(tryparse(Float64, value)) && throw(XLSXError("Invalid `value`: $value. Must be a number or a CellRef."))
     !isnothing(value2) && !is_valid_cellname(value2) && !is_valid_fixed_cellname(value2) && isnothing(tryparse(Float64, value2)) && throw(XLSXError("Invalid `value2`: $value2. Must be a number or a CellRef."))
@@ -1482,7 +1481,7 @@ function setCfCellIs(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::
         push!(cfx, XML.Element("$(pfx)formula", XML.Text(value2)))
     end
 
-    update_worksheet_cfx!(allcfs, cfx, ws, rng)
+    update_worksheet_cfx!(cfx, ws, rng)
 
     return 0
 end
@@ -1543,7 +1542,6 @@ function setCfContainsText(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}
     pfx = get_prefix(ws)
     pfx = pfx == "" ? pfx : pfx * ":"
 
-    allcfs    = allCfs(ws)
 
     isnothing(value) && throw(XLSXError("Invalid `value`: $value. Must contain text or a CellRef."))
 
@@ -1578,7 +1576,7 @@ function setCfContainsText(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}
     cfx["text"] = value
     push!(cfx, XML.Element("$(pfx)formula", XML.Text(formula)))
 
-    update_worksheet_cfx!(allcfs, cfx, ws, rng)
+    update_worksheet_cfx!(cfx, ws, rng)
 
     return 0
 end
@@ -1639,7 +1637,6 @@ function setCfTop10(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::I
     pfx = get_prefix(ws)
     pfx = pfx == "" ? pfx : pfx * ":"
 
-    allcfs    = allCfs(ws)
 
     !isnothing(value) && !is_valid_cellname(value) && !is_valid_fixed_cellname(value) && isnothing(tryparse(Float64, value)) && throw(XLSXError("Invalid `value`: $value. Must be a number or a CellRef."))
 
@@ -1675,7 +1672,7 @@ function setCfTop10(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::I
     end
     cfx["rank"] = value
 
-    update_worksheet_cfx!(allcfs, cfx, ws, rng)
+    update_worksheet_cfx!(cfx, ws, rng)
 
     return 0
 end
@@ -1733,7 +1730,6 @@ function setCfAboveAverage(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}
     pfx = get_prefix(ws)
     pfx = pfx == "" ? pfx : pfx * ":"
 
-    allcfs    = allCfs(ws)
 
     wb = get_workbook(ws)
     dx = get_dx(dxStyle, format, font, border, fill)
@@ -1769,7 +1765,7 @@ function setCfAboveAverage(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}
         cfx["stopIfTrue"] = "1"
     end
 
-    update_worksheet_cfx!(allcfs, cfx, ws, rng)
+    update_worksheet_cfx!(cfx, ws, rng)
 
     return 0
 end
@@ -1827,7 +1823,6 @@ function setCfTimePeriod(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=(
     pfx = get_prefix(ws)
     pfx = pfx == "" ? pfx : pfx * ":"
 
-    allcfs    = allCfs(ws)
 
     if haskey(timeperiods, operator)
         formula = timeperiods[operator]
@@ -1851,7 +1846,7 @@ function setCfTimePeriod(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=(
 
     push!(cfx, XML.Element("$(pfx)formula", XML.Text(formula)))
 
-    update_worksheet_cfx!(allcfs, cfx, ws, rng)
+    update_worksheet_cfx!(cfx, ws, rng)
 
     return 0
 end
@@ -1909,7 +1904,6 @@ function setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::CfRange; allkws::Dic
     pfx = get_prefix(ws)
     pfx = pfx == "" ? pfx : pfx * ":"
 
-    allcfs    = allCfs(ws)
 
     if operator == "containsBlanks"
         formula = "LEN(TRIM(__CR__))=0"
@@ -1938,7 +1932,7 @@ function setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::CfRange; allkws::Dic
     end
     formula != "" && push!(cfx, XML.Element("$(pfx)formula", XML.Text(formula)))
 
-    update_worksheet_cfx!(allcfs, cfx, ws, rng)
+    update_worksheet_cfx!(cfx, ws, rng)
 
     return 0
 end
@@ -1997,7 +1991,6 @@ function setCfFormula(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
     pfx = get_prefix(ws)
     pfx = pfx == "" ? pfx : pfx * ":"
 
-    allcfs    = allCfs(ws)
 
     wb = get_workbook(ws)
     dx = get_dx(dxStyle, format, font, border, fill)
@@ -2012,7 +2005,7 @@ function setCfFormula(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
 
     push!(cfx, XML.Element("$(pfx)formula", XML.Text("(" * uppercase_unquoted(formula) * ")")))
 
-    update_worksheet_cfx!(allcfs, cfx, ws, rng)
+    update_worksheet_cfx!(cfx, ws, rng)
 
     return 0
 end
@@ -2079,7 +2072,6 @@ function setCfColorScale(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=(
     pfx = get_prefix(ws)
     pfx = pfx == "" ? pfx : pfx * ":"
 
-    allcfs    = allCfs(ws)
 
     let new_pr, new_cf
 
@@ -2134,7 +2126,7 @@ function setCfColorScale(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=(
             cfx["priority"] = new_pr
         end
 
-        update_worksheet_cfx!(allcfs, cfx, ws, rng)
+        update_worksheet_cfx!(cfx, ws, rng)
 
     end
 
@@ -2222,8 +2214,6 @@ function setCfIconSet(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
     pfx = get_prefix(ws)
     pfx = pfx == "" ? pfx : pfx * ":"
 
-    allcfs    = allCfs(ws)
-    allextcfs = allExtCfs(ws)
 
     let new_pr, new_cf
 
@@ -2278,7 +2268,7 @@ function setCfIconSet(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
             list = [(min_type, min_val, min_gte), (max_type, max_val, max_gte)]
         end
         if iconset in ["3Triangles", "3Stars", "5Boxes", "Custom"]
-            cfx["id"] = "{" * uppercase(string(UUIDs.uuid4(ws.package.uuid_rng))) * "}"
+            cfx["id"] = _unique_guid(ws.package.uuid_rng, _x14_cf_ids(ws))
             cfx["priority"] = new_pr
             if !isnothing(showVal) && showVal == "false"
                 cfx[1]["showValue"] = "0"
@@ -2328,7 +2318,7 @@ function setCfIconSet(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
                     end
                 end
             end
-            update_worksheet_ext_cfx!(allextcfs, cfx, ws, rng)
+            update_worksheet_ext_cfx!(cfx, ws, rng)
         else
             cfx["priority"] = new_pr
             if !isnothing(showVal) && showVal == "false"
@@ -2352,7 +2342,7 @@ function setCfIconSet(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
                     cfx[1][i+1]["gte"] = "0"
                 end
             end
-            update_worksheet_cfx!(allcfs, cfx, ws, rng)
+            update_worksheet_cfx!(cfx, ws, rng)
         end
 
     end
@@ -2447,8 +2437,6 @@ function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
     pfx = get_prefix(ws)
     pfx = pfx == "" ? pfx : pfx * ":"
 
-    allcfs    = allCfs(ws)
-    allextcfs = allExtCfs(ws)
 
     let new_pr, new_cf
 
@@ -2512,7 +2500,7 @@ function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
         haskey(allkws, "axis_pos") && isValidKw("axis_pos", allkws["axis_pos"], ["middle", "none"])
 
         # Define basic elements of dataBar definition
-        id = "{" * uppercase(string(UUIDs.uuid4(ws.package.uuid_rng))) * "}"
+        id = _unique_guid(ws.package.uuid_rng, _x14_cf_ids(ws))
         mnt = allkws["min_type"] ∈ ["automatic", "least"] ? "min" : allkws["min_type"]
         mxt = allkws["max_type"] ∈ ["automatic", "highest"] ? "max" : allkws["max_type"]
 
@@ -2605,8 +2593,8 @@ function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
         haskey(allkws, "axis_col") && push!(ext_db, XML.Element("x14:axisColor", rgb=get_color(allkws["axis_col"])))
         push!(ext_cfx, ext_db)
 
-        update_worksheet_cfx!(allcfs, cfx, ws, rng)            # Add basic elements to worksheet xml file
-        update_worksheet_ext_cfx!(allextcfs, ext_cfx, ws, rng) # Add extension elements to worksheet xml file
+        update_worksheet_cfx!(cfx, ws, rng)         # Add basic elements to worksheet xml file
+        update_worksheet_ext_cfx!(ext_cfx, ws, rng) # Add extension elements to worksheet xml file
     end
     return 0
 end
@@ -2817,7 +2805,7 @@ function clearConditionalFormats(ws::Worksheet, rng::CfRange)
     n = 0
 
     # 2007 blocks: direct children of <worksheet>
-    ws_el = sheetdoc[end]
+    ws_el = sheetdoc[find_child_index(XML.children(sheetdoc), "worksheet")]
     for i in reverse(eachindex(XML.children(ws_el)))
         c = ws_el[i]
         localname(c) == "conditionalFormatting" || continue
@@ -2829,23 +2817,22 @@ function clearConditionalFormats(ws::Worksheet, rng::CfRange)
     end
 
     # x14 counterparts under <extLst>
-    i, j = get_idces(sheetdoc, "worksheet", "extLst")
-    if !isnothing(j)
-        m, k = get_idces(sheetdoc[i], "extLst", "ext")
-        if !isnothing(k)
-            o, p = get_idces(sheetdoc[i][j], "ext", "x14:conditionalFormattings")
-            if !isnothing(p)
-                blk = sheetdoc[i][j][k][p]
-                for q in reverse(eachindex(XML.children(blk)))
-                    b = blk[q]
-                    els = xml_elements(b)
-                    s = findlast(e -> localname(e) == "sqref", els)
-                    isnothing(s) && continue
-                    if _cf_within(ws, XML.simple_value(els[s]), rng)
-                        deleteat!(blk.children, q)
-                    end
-                end
+    blk = _x14_cf_block(sheetdoc)
+    if !isnothing(blk)
+        for q in reverse(eachindex(XML.children(blk)))
+            b = blk[q]
+            els = xml_elements(b)
+            s = findlast(e -> localname(e) == "sqref", els)
+            isnothing(s) && continue
+            if _cf_within(ws, XML.simple_value(els[s]), rng)
+                deleteat!(blk.children, q)
             end
+        end
+        # Excel refuses to open a file with an empty `<x14:conditionalFormattings/>`.
+        if isempty(xml_elements(blk))
+            i, j = get_idces(sheetdoc, "worksheet", "extLst")
+            ext = _x14_cf_ext(sheetdoc[i][j])
+            filter!(c -> c !== blk, ext.children)
         end
     end
 

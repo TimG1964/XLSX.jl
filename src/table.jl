@@ -1487,7 +1487,9 @@ Excel does not support header-only tables (a single-row `ref` is rejected).
 
 If `name` is not given, a unique name is generated (`"Table1"`, `"Table2"`,
 ...). Table names are workbook-scoped and must not collide with another
-table's name or with a defined name anywhere in the workbook.
+table's name or with a defined name anywhere in the workbook. Nor may a name
+be a cell address, in either reference style and in any case (`T1`, `xfd1`,
+`R1C1`, `RC`, or just `R` or `C`): Excel refuses a file with such a table.
 
 `style` sets the table's visual style and should be one of Excel's built-in
 table style names, matching the "Table Styles" gallery in Excel's Table
@@ -1509,10 +1511,9 @@ a totals row; it does not populate any totals formula or label into the cells
 themselves — write whatever content you want into that row's cells yourself
 (or leave them blank) before or after calling `addtable!`, or use
 [`XLSX.settotals!`](@ref) afterward to set per-column totals functions or
-labels. If the last row of `ref` already has content when `has_totals_row=true`
-is given, a warning is issued (not an error) — that row is still marked as
-the totals row regardless, since pre-existing content there may be
-intentional (e.g. a pre-authored totals formula or label).
+labels. With `has_totals_row=true` the last row of `ref` must be empty: if it
+already has content, an error is thrown and no table is added. (Excel refuses
+a file whose totals row holds plain values.)
 
 # Examples
 ```julia
@@ -1561,7 +1562,9 @@ function addtable!(sheet::Worksheet, ref::CellRange;
     display_name = name
     !_is_valid_table_display_name(display_name) &&
         throw(XLSXError("Table displayName `$display_name` is not a valid identifier (must start with a letter or underscore, contain only letters, digits, underscores, or periods thereafter, and no spaces)."))
-        
+    _is_cell_address_like(display_name) &&
+        throw(XLSXError("Table name `$display_name` is a cell address (such as `T1` or `R1C1`), which Excel does not allow."))
+
     ref.stop.row_number == ref.start.row_number &&
         throw(XLSXError("Table `ref` must span at least two rows (a header row plus at least one data row) — Excel does not support header-only tables. Got `$ref`."))
 
@@ -1577,10 +1580,10 @@ function addtable!(sheet::Worksheet, ref::CellRange;
     length(unique(columns)) != length(columns) &&
         throw(XLSXError("Table header row contains duplicate column names."))
 
-    # --- totals row: last row of `ref`, when requested. Warn (not error) if
-    # it already holds content — could be pre-authored totals, could be a
-    # `writetable!` data row the caller forgot to exclude from `ref`. Either
-    # way, `has_totals_row=true` always wins: that row is the totals row.
+    # --- totals row: last row of `ref`, when requested, which must be empty —
+    # as `settotals!` requires. Excel refuses a file whose totals row holds a
+    # plain value, and content there is most often a data row (e.g. written by
+    # `writetable!`) that the caller forgot to exclude from `ref`.
     if has_totals_row
         totals_row_num = ref.stop.row_number
         nonempty_cols = String[]
@@ -1588,12 +1591,12 @@ function addtable!(sheet::Worksheet, ref::CellRange;
             v = getdata(sheet, CellRef(totals_row_num, c))
             (!ismissing(v) && v != "") && push!(nonempty_cols, columns[c - column_number(ref.start) + 1])
         end
-        if !isempty(nonempty_cols)
-            @warn "Table `$name`: last row of `ref` (row $totals_row_num) is being marked as the " *
-                  "totals row, but it already has content in column(s) $(join(nonempty_cols, ", ")). " *
-                  "If that row was meant to be table data (e.g. written by `writetable!`), exclude " *
-                  "it from `ref` and pass `has_totals_row=false`."
-        end
+        isempty(nonempty_cols) ||
+            throw(XLSXError("Table `$name`: cannot mark the last row of `ref` (row $totals_row_num) as the " *
+                  "totals row, because it already has content in column(s) $(join(nonempty_cols, ", ")). " *
+                  "If that row is table data (e.g. written by `writetable!`), exclude it from `ref` " *
+                  "or pass `has_totals_row=false`; otherwise clear it first, then use `settotals!` " *
+                  "to set totals."))
     end
 
     style_info = isnothing(style) ? nothing : TableStyleInfo(style, false, false, true, false)

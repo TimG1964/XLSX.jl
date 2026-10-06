@@ -27,6 +27,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Assigning an `AnnotatedString` whose colour names a face without its own foreground (e.g. `styled"{(foreground=highlight):x}"`) no longer throws a `MethodError`
 - Faces whose foregrounds name each other in a cycle no longer cause a stack overflow when assigned as an `AnnotatedString`; the text is written without a colour
 - Modest tidy-up of Charts docs
+- Fix `setConditionalFormat` crash on files with a trailing newline or comment after `</worksheet>`
+- Fix adding a dataBar or icon set to a reopened file that already has one
+- Fix the first rule added to an existing range of a reopened file being lost
+- Excel 2010 conditional formats now go in the correct `<ext>`
+- Ids generated after reopening no longer duplicate existing ones
+- Fix files Excel refused after `clearConditionalFormats` removed every dataBar
+- `addtable!` rejects table names that are cell addresses (e.g. `T1`, `R1C1`)
+- `addDefinedName` rejects R1C1-style names (e.g. `RC`, `R`)
+- `writetable(...; as_table=true)` auto-names a table whose sheet name is a cell address
+- `addtable!` with `has_totals_row=true` now errors if the last row has content
+- `setSeriesSubtotals` and `setSeriesQuartileMethod` reject series of the wrong layout
 
 ## [v0.13.0](https://github.com/JuliaData/XLSX.jl/tree/v0.13.0) - 2026-09-02
 

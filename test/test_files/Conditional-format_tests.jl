@@ -2727,4 +2727,115 @@
         @test isempty(XLSX.getConditionalFormats(ws))
         SAVE_FILES && save_outfile(xf)
     end
+    @testset "x14 block with whitespace after xm:sqref" begin
+        # Written files are indented, so a reopened x14 block has a text node after `xm:sqref`.
+        xf = XLSX.newxlsx()
+        xf[1]["A1:A3"] = 1
+        XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
+        XLSX.writexlsx("x14_ws.xlsx", xf; overwrite=true)
+        xf = XLSX.openxlsx("x14_ws.xlsx"; mode="rw")
+        XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
+        XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
+        @test length(XLSX.getConditionalFormats(xf[1])) == 3
+        XLSX.writexlsx("x14_ws.xlsx", xf; overwrite=true)
+        SAVE_FILES && save_outfile("x14_ws.xlsx")
+        sheet = String(XLSX.ZipArchives.zip_readentry(XLSX.ZipArchives.ZipReader(read("x14_ws.xlsx")), "xl/worksheets/sheet1.xml"))
+        @test count("<xm:sqref>A1:A3</xm:sqref>", sheet) == 1
+        @test count("<x14:cfRule ", sheet) == 3
+        rm("x14_ws.xlsx")
+    end
+    @testset "x14 rules go in the conditional-format ext, not the first ext" begin
+        # One sparkline in C1 plotting A1:A3, as Excel writes it.
+        spark() = XML.Element("ext",
+            XML.Element("x14:sparklineGroups",
+                XML.Element("x14:sparklineGroup",
+                    XML.Element("x14:colorSeries"; rgb="FF376092"),
+                    XML.Element("x14:sparklines",
+                        XML.Element("x14:sparkline", XML.Element("xm:f", XML.Text("Sheet1!A1:A3")), XML.Element("xm:sqref", XML.Text("C1")))));
+                var"xmlns:xm"="http://schemas.microsoft.com/office/excel/2006/main");
+            uri="{05C60535-1F16-4fd2-B633-F4F36F0B64E0}", var"xmlns:x14"="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main")
+        wsroot(xf) = XLSX.xml_root_element(XLSX.xmlroot(XLSX.get_workbook(xf), xf[1].relationship_id))
+        extlst(xf) = only(c for c in XLSX.xml_elements(wsroot(xf)) if XLSX.localname(c) == "extLst")
+        exts(xf) = XLSX.xml_elements(extlst(xf))
+        sqrefs(e) = [XML.simple_value(s) for b in XLSX.xml_elements(e) for c in XLSX.xml_elements(b) for s in XLSX.xml_elements(c) if XLSX.localname(s) == "sqref"]
+
+        # No conditional-format ext yet: one is added after the sparkline ext.
+        xf = XLSX.newxlsx()
+        xf[1]["A1:B3"] = 1
+        push!(wsroot(xf), XML.Element("extLst", spark()))
+        XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
+        e = exts(xf)
+        @test length(e) == 2
+        @test isempty(sqrefs(e[1]))
+        @test e[2]["uri"] == XLSX.X14_CF_EXT_URI && sqrefs(e[2]) == ["A1:A3"]
+
+        # Sparkline ext ahead of an existing conditional-format ext.
+        xf = XLSX.newxlsx()
+        xf[1]["A1:B3"] = 1
+        XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
+        pushfirst!(extlst(xf), spark())
+        XLSX.setConditionalFormat(xf[1], "B1:B3", :dataBar)
+        XLSX.setConditionalFormat(xf[1], "A1:A3", :iconSet; iconset="3Stars")
+        e = exts(xf)
+        @test length(e) == 2 && isempty(sqrefs(e[1]))
+        @test sqrefs(e[2]) == ["A1:A3", "B1:B3"]
+        ids = [r["id"] for b in XLSX._extcfs_in(XLSX.xmlroot(XLSX.get_workbook(xf), xf[1].relationship_id)) for r in XLSX.xml_elements(b) if XLSX.localname(r) == "cfRule"]
+        @test length(ids) == 3 && allunique(ids)
+        @test XLSX._x14_cf_ids(xf[1]) == Set(ids)
+        XLSX.clearConditionalFormats(xf[1], "A1:B3")
+        @test isempty(XLSX.getConditionalFormats(xf[1]))
+        @test isnothing(XLSX._x14_cf_block(XLSX.xmlroot(XLSX.get_workbook(xf), xf[1].relationship_id)))   # no empty block left
+        @test length(exts(xf)) == 2   # the sparkline ext is untouched
+        SAVE_FILES && save_outfile(xf)
+    end
+    @testset "clearing every x14 rule leaves no empty conditionalFormattings" begin
+        # Excel refuses to open a file with an empty `<x14:conditionalFormattings/>`.
+        xf = XLSX.newxlsx()
+        xf[1]["A1:B3"] = 1
+        XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
+        XLSX.setConditionalFormat(xf[1], "B1:B3", :dataBar)
+        XLSX.clearConditionalFormats(xf[1], "A1:A3")
+        @test !isnothing(XLSX._x14_cf_block(XLSX.xmlroot(XLSX.get_workbook(xf), xf[1].relationship_id)))   # B1:B3 remains
+        XLSX.clearConditionalFormats(xf[1], "B1:B3")
+        XLSX.writexlsx("cleared.xlsx", xf; overwrite=true)
+        SAVE_FILES && save_outfile("cleared.xlsx")
+        sheet = String(XLSX.ZipArchives.zip_readentry(XLSX.ZipArchives.ZipReader(read("cleared.xlsx")), "xl/worksheets/sheet1.xml"))
+        @test !occursin("conditionalFormattings", sheet)
+        @test isempty(XLSX.getConditionalFormats(XLSX.readxlsx("cleared.xlsx")[1]))
+        rm("cleared.xlsx")
+    end
+    @testset "x14 rule ids stay unique, and deterministic, after reopening" begin
+        cfids(f) = [m[1] for m in eachmatch(r"<x14:cfRule [^>]*id=\"(\{[^\"]+\})\"",
+                    String(XLSX.ZipArchives.zip_readentry(XLSX.ZipArchives.ZipReader(read(f)), "xl/worksheets/sheet1.xml")))]
+        xf = XLSX.newxlsx()
+        xf[1]["A1:B3"] = 1
+        XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
+        XLSX.setConditionalFormat(xf[1], "A1:A3", :iconSet; iconset="3Stars")
+        XLSX.writexlsx("ids.xlsx", xf; overwrite=true)
+        for out in ("ids2.xlsx", "ids3.xlsx")
+            xf = XLSX.openxlsx("ids.xlsx"; mode="rw")
+            XLSX.setConditionalFormat(xf[1], "B1:B3", :dataBar)
+            XLSX.setConditionalFormat(xf[1], "B1:B3", :iconSet; iconset="3Stars")
+            XLSX.writexlsx(out, xf; overwrite=true)
+        end
+        SAVE_FILES && save_outfile("ids2.xlsx")
+        @test length(cfids("ids2.xlsx")) == 4 && allunique(cfids("ids2.xlsx"))
+        @test cfids("ids2.xlsx") == cfids("ids3.xlsx")   # same steps, same ids
+        foreach(rm, ("ids.xlsx", "ids2.xlsx", "ids3.xlsx"))
+    end
+    @testset "first rule added to an existing range of a reopened file is kept" begin
+        # The sheet is still a raw string on reopening, so `allCfs` parses a throwaway copy;
+        # the new rule must go into the live tree.
+        xf = XLSX.newxlsx()
+        xf[1]["A1:A3"] = 1
+        XLSX.setConditionalFormat(xf[1], "A1:A3", :cellIs)
+        XLSX.writexlsx("reopen_cf.xlsx", xf; overwrite=true)
+        xf = XLSX.openxlsx("reopen_cf.xlsx"; mode="rw")
+        XLSX.setConditionalFormat(xf[1], "A1:A3", :cellIs)
+        @test length(XLSX.getConditionalFormats(xf[1])) == 2
+        XLSX.writexlsx("reopen_cf.xlsx", xf; overwrite=true)
+        SAVE_FILES && save_outfile("reopen_cf.xlsx")
+        @test length(XLSX.getConditionalFormats(XLSX.readxlsx("reopen_cf.xlsx")[1])) == 2
+        rm("reopen_cf.xlsx")
+    end
 end

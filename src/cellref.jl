@@ -175,6 +175,18 @@ const RGX_CELLNAME_RIGHT = r"[0-9]+$"
     throw(XLSXError("Couldn't split (column_name, row) for cellname $n."))
 end
 
+# Whether Excel would read `name` as a cell address, in A1 or R1C1 style and in any case
+# (`t1`, `XFD1`, `R1C1`, `RC`, `R`, `C`). Excel refuses a file with a table so named.
+_is_cell_address_like(name::AbstractString)::Bool =
+    _is_r1c1_address_like(name) || is_valid_cellname(uppercase(name))
+
+# Whether `name` is an R1C1-style address (`R1C1`, `rc`), or just `R` or `C`, in any case.
+# Excel refuses a file with a defined name or a table so named.
+function _is_r1c1_address_like(name::AbstractString)::Bool
+    u = uppercase(name)
+    return u in ("R", "C") || occursin(r"^R[0-9]*C[0-9]*$", u)
+end
+
 # Checks whether `n` is a valid name for a cell.
 function is_valid_cellname(n::AbstractString) :: Bool
 

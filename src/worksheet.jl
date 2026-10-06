@@ -51,7 +51,7 @@ function insert_index(root::XML.Node, target::String, order::Vector{String})
     # scan backwards through the order list
     for i in target_idx:-1:1
         name = order[i]
-        # find the last child with this tag
+        # find the first child with this tag
         for (j, child) in enumerate(chn)
             if localname(child) == name
                 return j   # insert *after* this child
@@ -59,7 +59,7 @@ function insert_index(root::XML.Node, target::String, order::Vector{String})
         end
     end
 
-    return 1   # nothing precedes the target → insert at top
+    return 0   # nothing precedes the target → callers insert at `0 + 1`, the top
 end
 
 function Worksheet(xf::XLSXFile, sheet_element::XML.Node)

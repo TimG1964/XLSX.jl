@@ -432,12 +432,15 @@
         @test isnothing(XLSX.Charts.getSeriesSubtotals(w, 1))
         @test_throws XLSX.XLSXError XLSX.Charts.setSeriesSubtotals(w, 1, [0, 2])
 
-        # a series with no cx:layoutPr at all: the funnel
+        # Excel refuses a file with subtotals or a quartile method on a funnel series.
         fn = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "funnel", XLSX.Charts.getCharts(xf)))
         @test isnothing(XLSX.Charts._cx_layoutpr(fn, 1))
-        XLSX.Charts.setSeriesSubtotals(fn, 1, [2])
-        @test XLSX.Charts.getSeriesSubtotals(fn, 1) == [2]
-        @test XLSX.XML.tag(XLSX.Charts._cx_layoutpr(fn, 1)) == "cx:layoutPr"
+        err = try XLSX.Charts.setSeriesSubtotals(fn, 1, [2]); nothing catch e; e end
+        @test err isa XLSX.XLSXError && occursin("only to a `waterfall` series", err.msg)
+        @test_throws XLSX.XLSXError XLSX.Charts.setSeriesQuartileMethod(fn, 1, :inclusive)
+        XLSX.Charts.setSeriesSubtotals(fn, 1, :inherit)          # removing is always allowed
+        XLSX.Charts.setSeriesQuartileMethod(fn, 1, :inherit)
+        @test isnothing(XLSX.Charts.getSeriesSubtotals(fn, 1))
 
         out = "cx_subtotals_out.xlsx"
         XLSX.writexlsx(out, xf, overwrite=true)

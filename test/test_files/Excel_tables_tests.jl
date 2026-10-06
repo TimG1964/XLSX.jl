@@ -180,8 +180,8 @@ function _two_sheet_file()
         s[2, :] = ["north", 10]
         s[3, :] = ["south", 20]
     end
-    t1 = XLSX.addtable!(s1, "A1:B3"; name = "T1")
-    t2 = XLSX.addtable!(s2, "A1:B3"; name = "T2")
+    t1 = XLSX.addtable!(s1, "A1:B3"; name = "TblA")
+    t2 = XLSX.addtable!(s2, "A1:B3"; name = "TblB")
     return f, s1, s2, t1, t2
 end
 
@@ -446,26 +446,31 @@ end
         SAVE_FILES && save_outfile(f)
     end
 
-    @testset "addtable! - has_totals_row with nonempty last row warns, still creates table" begin
+    @testset "addtable! - has_totals_row with nonempty last row errors" begin
         f = XLSX.newxlsx()
         sh = f[1]
         sh["A1"] = "qty";   sh["B1"] = "price"
         sh["A2"] = 3;       sh["B2"] = 9.99
         sh["A3"] = 5;       sh["B3"] = 4.50
-        # last row already has real content — e.g. left over from writetable!,
-        # or intentionally pre-authored totals content. Either way, `addtable!`
-        # must NOT throw and must NOT alter these cells; it only warns.
+        # Excel refuses a file whose totals row holds a plain value such as 14.49.
         sh["A4"] = "Total"; sh["B4"] = 14.49
 
-        t = @test_logs (:warn, r"already has content") match_mode=:any XLSX.addtable!(
-            sh, "A1:B4"; name="Sales", has_totals_row=true)
-
-        @test t.has_totals_row == true
-        @test t.ref == XLSX.CellRange("A1:B4")
+        err = try
+            XLSX.addtable!(sh, "A1:B4"; name="Sales", has_totals_row=true); nothing
+        catch e
+            e
+        end
+        @test err isa XLSX.XLSXError
+        @test occursin("already has content in column(s) qty, price", err.msg)
+        @test isempty(XLSX.tables(sh))
 
         # cell contents must be completely untouched by addtable!
         @test sh["A4"] == "Total"
         @test sh["B4"] == 14.49
+
+        # The usual fix: the content was data, so it stays out of the totals row.
+        t = XLSX.addtable!(sh, "A1:B4"; name="Sales")
+        @test !t.has_totals_row
         SAVE_FILES && save_outfile(f)
     end
 
@@ -521,6 +526,39 @@ end
         sh["A2"] = 1;   sh["B2"] = 2
         @test_throws XLSX.XLSXError XLSX.addtable!(sh, "A1:B2"; name="has space")
         SAVE_FILES && save_outfile(f)
+    end
+
+    @testset "addtable! - a cell address is not a table name" begin
+        # Excel refuses a file with any of the first group, and opens one with the second.
+        for n in ("T1", "t1", "XFD1", "R5", "R1C1", "rc", "R", "c")
+            @test XLSX._is_cell_address_like(n)
+        end
+        for n in ("XFE1", "A0", "A1B", "Tbl_1", "Table1", "RCX", "R1C1X")
+            @test !XLSX._is_cell_address_like(n)
+        end
+        f = XLSX.newxlsx()
+        sh = f[1]
+        sh["A1"] = "a"; sh["B1"] = "b"
+        sh["A2"] = 1;   sh["B2"] = 2
+        for n in ("T1", "t1", "R1C1", "R")
+            err = try XLSX.addtable!(sh, "A1:B2"; name=n); nothing catch e; e end
+            @test err isa XLSX.XLSXError && occursin("cell address", err.msg)
+        end
+        @test isempty(XLSX.tables(sh))
+        @test XLSX.addtable!(sh, "A1:B2"; name="XFE1").name == "XFE1"
+        SAVE_FILES && save_outfile(f)
+    end
+
+    @testset "writetable - a sheet name that is a cell address falls back to an auto-generated table name" begin
+        outfile = "writetable_astable_celladdress.xlsx"
+        @test_logs (:warn, r"is a cell address") match_mode=:any begin
+            XLSX.writetable(outfile, [("Q1", [[1, 2], [3, 4]], ["x", "y"])]; as_table=true, overwrite=true)
+        end
+        SAVE_FILES && save_outfile(outfile)
+        XLSX.openxlsx(outfile) do xf
+            @test startswith(only(XLSX.tables(xf["Q1"])).name, "Table")
+        end
+        rm(outfile)
     end
 
     @testset "addtable! - round trip (create -> save -> reopen)" begin
@@ -975,23 +1013,23 @@ end
         sh = f[1]
         sh["A1"] = "a"; sh["B1"] = "b"
         sh["A2"] = 1;   sh["B2"] = 2
-        XLSX.addtable!(sh, "A1:B2"; name="T1")
+        XLSX.addtable!(sh, "A1:B2"; name="TblA")
 
         sh["D1"] = "c"; sh["E1"] = "d"
         sh["D2"] = 3;   sh["E2"] = 4
-        XLSX.addtable!(sh, "D1:E2"; name="T2")
+        XLSX.addtable!(sh, "D1:E2"; name="TblB")
 
         tbls = XLSX.tables(sh)
 
         # plain `show` — no array summary header, just each element's compact form
         s = sprint(show, tbls)
-        @test occursin("T1", s)
-        @test occursin("T2", s)
+        @test occursin("TblA", s)
+        @test occursin("TblB", s)
 
         # MIME"text/plain" — this is the form that adds the "2-element" summary
         s_repl = sprint(show, MIME("text/plain"), tbls)
-        @test occursin("T1", s_repl)
-        @test occursin("T2", s_repl)
+        @test occursin("TblA", s_repl)
+        @test occursin("TblB", s_repl)
         @test occursin("2-element", s_repl)
         SAVE_FILES && save_outfile(f)
     end
@@ -3170,7 +3208,6 @@ end
         sh.tables_cache = nothing
 
         @test_throws XLSX.XLSXError XLSX.parse_totals_settings(sh, XLSX.table(sh, "T"))
-        SAVE_FILES && save_outfile(f)
     end
 
     @testset "parse_totals_settings - custom function with no formula errors" begin
@@ -3775,11 +3812,11 @@ end
         # actually exercised rather than accidentally passing on a one-sheet file.
         @testset "all three forms agree" begin
             f, s1, _, t1, _ = _two_sheet_file()
-            XLSX.settotals!(s1, "T1", "revenue" => :sum)   # mutate by name...
-            t1 = XLSX.table(s1, "T1")                      # ...then take a fresh handle
+            XLSX.settotals!(s1, "TblA", "revenue" => :sum)   # mutate by name...
+            t1 = XLSX.table(s1, "TblA")                      # ...then take a fresh handle
 
             by_table = XLSX.gettotals(t1)
-            by_name  = XLSX.gettotals(s1, "T1")
+            by_name  = XLSX.gettotals(s1, "TblA")
             by_id    = XLSX.gettotals(s1, t1.id)
 
             @test isequal(by_table, by_name)
@@ -3793,7 +3830,7 @@ end
             XLSX.settotals!(t1, "revenue" => :sum)         # t1 now predates the totals row
             @test XLSX.gettotals(t1).revenue.setting == :sum
 
-            XLSX.appendtable!(s1, "T1", (region = ["east"], revenue = [30]))
+            XLSX.appendtable!(s1, "TblA", (region = ["east"], revenue = [30]))
             @test XLSX.gettotals(t1).revenue.setting == :sum   # stale ref, still correct
             SAVE_FILES && save_outfile(f)
         end
@@ -3801,25 +3838,25 @@ end
             f, s1, s2, t1, t2 = _two_sheet_file()
             XLSX.settotals!(t2, "revenue" => :sum)
 
-            @test XLSX.gettotals(s2, "T2").revenue.setting == :sum
-            @test isempty(XLSX.gettotals(s1, "T1"))          # S1 untouched
+            @test XLSX.gettotals(s2, "TblB").revenue.setting == :sum
+            @test isempty(XLSX.gettotals(s1, "TblA"))          # S1 untouched
             @test length(XLSX.tables(s1)) == 1
 
             XLSX.deletetable!(t2)
             @test isempty(XLSX.tables(s2))
-            @test [t.name for t in XLSX.tables(s1)] == ["T1"]
+            @test [t.name for t in XLSX.tables(s1)] == ["TblA"]
             SAVE_FILES && save_outfile(f)
         end
 
         @testset "stale Table re-resolves its ref" begin
             f, s1, _, t1, _ = _two_sheet_file()
-            XLSX.appendtable!(s1, "T1", (region = ["east"], revenue = [30]))
+            XLSX.appendtable!(s1, "TblA", (region = ["east"], revenue = [30]))
 
             # `t1` still holds the pre-append ref (A1:B3). Appending through it
             # must resolve the table afresh and land on row 5, not overwrite row 4.
             XLSX.appendtable!(t1, (region = ["west"], revenue = [40]))
 
-            @test string(XLSX.table(s1, "T1").ref) == "A1:B5"
+            @test string(XLSX.table(s1, "TblA").ref) == "A1:B5"
             @test s1["A4"] == "east"
             @test s1["A5"] == "west"
             SAVE_FILES && save_outfile(f)

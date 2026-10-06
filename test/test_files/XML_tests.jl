@@ -242,3 +242,44 @@ end
         @test xml[prevind(xml, stop, 12):prevind(xml, stop)] == "</sheetData>"
     end
 end
+
+# A newline or comment after the root element's end tag must not be mistaken for the root.
+@testset "trailing nodes after root element" begin
+    src = "trailing_base.xlsx"
+    xf = XLSX.newxlsx()
+    xf[1]["A1:B3"] = 1
+    XLSX.writexlsx(src, xf; overwrite=true)
+    for tail in ("\n", "<!-- x -->")
+        f = patch_xlsx_entry(src, "xl/worksheets/sheet1.xml", s -> s * tail)
+        xf = XLSX.openxlsx(f; mode="rw")
+        s = xf[1]
+        XLSX.setConditionalFormat(s, "A1:B3", :cellIs)
+        @test length(XLSX.getConditionalFormats(s)) == 1
+        XLSX.writexlsx("trailing_out.xlsx", xf; overwrite=true)
+        SAVE_FILES && save_outfile("trailing_out.xlsx")
+        xf = XLSX.openxlsx("trailing_out.xlsx"; mode="rw")
+        @test length(XLSX.getConditionalFormats(xf[1])) == 1
+        XLSX.clearConditionalFormats(xf[1], "A1:B3")
+        @test isempty(XLSX.getConditionalFormats(xf[1]))
+        xf = XLSX.openxlsx(f; mode="rw")   # cleared on a sheet whose XML still has the tail
+        XLSX.setConditionalFormat(xf[1], "A1:B3", :cellIs)
+        XLSX.clearConditionalFormats(xf[1], "A1:B3")
+        @test isempty(XLSX.getConditionalFormats(xf[1]))
+        rm(f)
+
+        f = patch_xlsx_entry(src, "xl/workbook.xml", s -> s * tail)
+        xf = XLSX.openxlsx(f; mode="rw")
+        XLSX.addDefinedName(xf, "trailingName", "Sheet1!A1:B2")
+        XLSX.writexlsx("trailing_out.xlsx", xf; overwrite=true)
+        SAVE_FILES && save_outfile("trailing_out.xlsx")
+        @test haskey(XLSX.get_workbook(XLSX.readxlsx("trailing_out.xlsx")).workbook_names, "trailingName")
+        rm(f)
+    end
+    rm(src)
+    rm("trailing_out.xlsx")
+
+    # Nothing in the order list precedes the target: insert at the top, not after the first child.
+    root = XML.Element("worksheet", XML.Element("pageMargins"))
+    @test XLSX.insert_index(root, "sheetPr", XLSX.WORKSHEET_ORDER) == 0
+    @test XLSX.insert_index(XML.Element("worksheet"), "sheetPr", XLSX.WORKSHEET_ORDER) == 0
+end

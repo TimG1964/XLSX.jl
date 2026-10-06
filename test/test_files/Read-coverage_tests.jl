@@ -223,7 +223,6 @@ end
         ovr["ContentType"] = "application/vnd.example.not-a-workbook+xml"
 
         @test_throws XLSX.XLSXError XLSX.ensure_workbook_is_xlsx!(xf)
-        SAVE_FILES && save_outfile(xf)
     end
 
     @testset "ensure_workbook_is_xlsx! - no content type at all errors" begin
@@ -236,14 +235,12 @@ end
         isnothing(j) || deleteat!(root.children, j)
 
         @test_throws XLSX.XLSXError XLSX.ensure_workbook_is_xlsx!(xf)
-        SAVE_FILES && save_outfile(xf)
     end
 
     @testset "check_minimum_requirements - missing mandatory part errors" begin
         xf = XLSX.newxlsx()
         delete!(xf.files, "xl/_rels/workbook.xml.rels")
         @test_throws XLSX.XLSXError XLSX.check_minimum_requirements(xf)
-        SAVE_FILES && save_outfile(xf)
     end
 
     @testset "parse_workbook! - root element is not <workbook>" begin

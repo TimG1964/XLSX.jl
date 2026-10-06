@@ -334,7 +334,8 @@ For the multi-sheet forms of [`XLSX.writetable`](@ref), `as_table` and `table_st
 to every sheet. Each Table's name is taken from its sheet's name, normalized into a
 valid Table name if necessary (so a sheet named `"Q1 Report"` gives a Table named
 `Q1_Report`); if the normalized name would collide with an existing Table or defined
-name, an auto-generated name is used instead and a warning is issued.
+name, or is a cell address such as `Q1` (which Excel does not allow as a Table name),
+an auto-generated name is used instead and a warning is issued.
 
 In contrast, `totals` is only supported on the single-sheet forms. For multiple sheets,
 build the workbook first with [`XLSX.openxlsx`](@ref) and apply
