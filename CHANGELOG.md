@@ -6,9 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-- `addtable!` and `writetable!(...; as_table=true)` now raise an error if the table would overlap a merged range or another table, and `mergeCells` if the range would overlap a table. Excel used to discard such tables when it repaired the file on opening. `writetable!` checks before writing, so a refused table leaves the sheet unchanged
-
-## [v0.13.1](https://github.com/JuliaData/XLSX.jl/tree/v0.13.1) - 2026-09-06
+## [v0.13.1](https://github.com/JuliaData/XLSX.jl/tree/v0.13.1) - 2026-10-07
 
 - Fix [#462](https://github.com/JuliaData/XLSX.jl/issues/462) (Read-performance regression vs v0.10.4 on large worksheets)
 - Fix [#472](https://github.com/JuliaData/XLSX.jl/issues/472) (Worksheets with CRLF line endings were corrupted when split, and precompilation failed, with XML.jl versions that normalise line endings)
@@ -40,6 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `writetable(...; as_table=true)` auto-names a table whose sheet name is a cell address
 - `addtable!` with `has_totals_row=true` now errors if the last row has content
 - `setSeriesSubtotals` and `setSeriesQuartileMethod` reject series of the wrong layout
+- `addtable!` and `writetable!(...; as_table=true)` now raise an error if the table would overlap a merged range or another table, and `mergeCells` if the range would overlap a table. Excel used to discard such tables when it repaired the file on opening. `writetable!` checks before writing, so a refused table leaves the sheet unchanged
 
 ## [v0.13.0](https://github.com/JuliaData/XLSX.jl/tree/v0.13.0) - 2026-09-02
 
