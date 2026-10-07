@@ -409,26 +409,12 @@ end
 
 # Issue 446
     f = XLSX.openxlsx(joinpath(data_directory, "general.xlsx"), enable_cache=false)
-    ws = f[1]
-    sheetdata = XLSX._open_sheetdata(ws)
 
-    # A Vector restarts on every `for` — the semantics XML.jl#119 shipped,
-    # and what the old `for … break` silently depended on not happening.
-    nodes = collect(XML.eachchildnode(sheetdata))
-
-    seen = Int[]
-    st = iterate(nodes)
-    while true
-        found = XLSX._find_next_row(nodes, st)
-        found === nothing && break
-        node, st = found
-        push!(seen, XLSX._read_row_attrs(node, ws.name)[1])
-        st = iterate(nodes, st)
-    end
-
-    # Same rows the ordinary streaming path yields.
-    expected = [XLSX.row_number(r) for r in XLSX.eachrow(f[1])]
+    # The stream iterator moves on from row to row (the failure mode was row 1
+    # forever), and yields the rows the file holds, in order.
+    seen = [XLSX.row_number(r) for r in XLSX.eachrow(f[1])]
+    expected = [XLSX.row_number(r) for r in XLSX.eachrow(XLSX.readxlsx(joinpath(data_directory, "general.xlsx"))[1])]
     @test seen == expected
-    @test length(seen) > 1   # guards against the row-1-forever failure mode
+    @test length(seen) > 1
     
 end

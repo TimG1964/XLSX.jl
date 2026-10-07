@@ -344,9 +344,26 @@ end
 
 # Cell values are parsed as Float64 millions of times per sheet. `Base.parse(Float64, s)`
 # goes through C `strtod` (often copying the text first), which costs ~300-400 ns a
-# value (#462). Parsers.jl (≥ 3) gives the same correctly rounded result, and the same
+# value (#462). Parsers.jl 3 gives the same correctly rounded result, and the same
 # `ArgumentError` on bad input, in ~5-20 ns, including 16- and 17-digit values.
-@inline _parse_cell_float(s::AbstractString)::Float64 = Parsers.parse(Float64, s)
+# Parsers.jl 2 (still allowed, for packages capped at it) agrees with Base on every value
+# Excel writes, but not on overflow/underflow (Inf/0 rather than an error), hex, surrounding
+# whitespace or the error type, so it falls back to Base wherever the answers could differ.
+const _PARSERS_V2 = pkgversion(Parsers) < v"3"
+
+@static if _PARSERS_V2
+    @inline function _parse_cell_float(s::AbstractString)::Float64
+        x = Parsers.tryparse(Float64, s)
+        return x === nothing || !isfinite(x) || iszero(x) ? parse(Float64, s) : x
+    end
+    @inline function _parse_cell_int(s::AbstractString)
+        x = Parsers.tryparse(Int64, s)
+        return x === nothing ? tryparse(Int64, s) : x
+    end
+else
+    @inline _parse_cell_float(s::AbstractString)::Float64 = Parsers.parse(Float64, s)
+    @inline _parse_cell_int(s::AbstractString) = Parsers.tryparse(Int64, s)
+end
 
 # Returns (raw_value::UInt64, datatype::CellValueType) for datetime strings,
 # keeping the value in its Excel numeric form for storage in Cell.
@@ -376,7 +393,7 @@ function process_tv(wb::Workbook, t::AbstractString, v::AbstractString, num_styl
             datatype = CT_FLOAT
             value = reinterpret(UInt64, _parse_cell_float(v))
         else
-            parsed_int = Parsers.tryparse(Int64, v)
+            parsed_int = _parse_cell_int(v)
             if parsed_int !== nothing
                 datatype = CT_INT
                 value = reinterpret(UInt64, parsed_int)
@@ -387,7 +404,7 @@ function process_tv(wb::Workbook, t::AbstractString, v::AbstractString, num_styl
         end
 
     elseif t == "s"
-        parsed = Parsers.tryparse(Int64, v)
+        parsed = _parse_cell_int(v)
         parsed === nothing && throw(XLSXError("Expected SST index in cell value, got: $v"))
         datatype = CT_STRING
         value = reinterpret(UInt64, parsed::Int64)
@@ -531,20 +548,5 @@ function _cell_value(ws::Worksheet, dt::CellValueType, v::UInt64, cell=nothing)
     dt == CT_TIME     && return excel_value_to_time(reinterpret(Float64, v))
 
     throw(XLSXError(isnothing(cell) ? "Couldn't parse data of type $dt." : "Couldn't parse data for $cell."))
-end
-
-# Extract cells from a <row> LazyNode and push them (in place) into a Dict(column -> Cell)
-# Extract cells from a <row> LazyNode and push them (in place) into a Dict(column -> Cell)
-function get_rowcells!(rowcells::Dict{Int,Cell}, row::XML.LazyNode, ws::Worksheet, sst_pfx::String,
-                        local_formulas::Dict{SheetCellRef,AbstractFormula}, load_formulas::Bool=true)
-    sst_count = 0
-    for child in XML.eachchildnode(row)
-        XML.nodetype(child) == XML.Element || continue
-        localname(child) == "c" || continue
-        cell = Cell(child, ws, sst_pfx, local_formulas, load_formulas)
-        sst_count += cell.datatype == CT_STRING ? 1 : 0
-        rowcells[column_number(cell)] = cell
-    end
-    return nothing, sst_count
 end
 

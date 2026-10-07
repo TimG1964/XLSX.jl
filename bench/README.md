@@ -43,6 +43,7 @@ released versions v0.10–v0.13, upstream `master` on GitHub, and the working tr
         bench/quick.jl
         bench/report.jl
         bench/run_benchmarks.jl
+        bench/worksheet_read.jl
 
    These scripts load XLSX.jl **from the active environment**, i.e. the installed version.
 
@@ -102,6 +103,14 @@ The baselines are run once and reused; delete `results/quick/` to redo them.
 `bench_worker.jl` takes three optional environment variables, which `quick.jl` uses:
 `BENCH_FIXTURES` and `BENCH_BENCHMARKS` (comma-separated names to run) and
 `BENCH_SECONDS` (time budget per benchmark, default 30).
+
+### Fixture-free smoke check
+
+`worksheet_read.jl` builds a 20,000 × 8 numeric worksheet in memory, checks a few
+values, then times `readxlsx` and `readtable` (median of five warmed `@timed` samples).
+It needs no fixtures and no BenchmarkTools, so it is a quick repro for read-path changes:
+
+    julia --project=envs/dev --check-bounds=yes worksheet_read.jl
 
 ### Fixture descriptions
 

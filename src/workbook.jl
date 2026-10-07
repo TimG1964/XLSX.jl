@@ -394,6 +394,7 @@ function is_valid_defined_name(name::AbstractString)::Bool
     if is_valid_cellname(name) || is_valid_cellrange(name) || is_valid_non_contiguous_cellrange(name)
         return false
     end
+    _is_r1c1_address_like(name) && return false   # Excel refuses a file with such a name
     if is_valid_sheet_cellname(name) || is_valid_sheet_cellrange(name) || is_valid_non_contiguous_sheetcellrange(name)
         return false
     end
@@ -414,7 +415,7 @@ function addDefName(xf::XLSXFile, name::AbstractString, value::DefinedNameValueT
                         "(charts, print areas, filters) and cannot be created."))
     end
     if !is_valid_defined_name(name)
-        throw(XLSXError("Invalid defined name: `$name`. May only contain letters, numbers, `_` or `\\` and must start with a letter or `_`."))
+        throw(XLSXError("Invalid defined name: `$name`. May only contain letters, numbers, `_` or `\\`, must start with a letter or `_`, and must not be a cell address such as `A1`, `R1C1` or `R`."))
     end
     if is_workbook_defined_name(xf, name)
         throw(XLSXError("Workbook already has a defined name called `$name`."))
@@ -431,7 +432,7 @@ addDefName(xf::XLSXFile, name::AbstractString, value::Integer; absolute=true, hi
 function addDefName(ws::Worksheet, name::AbstractString, value::DefinedNameValueTypes; absolute=true, hidden::Bool=false)
     wb = get_workbook(ws)
     if !is_valid_defined_name(name)
-        throw(XLSXError("Invalid defined name: `$name`. May only contain letters, numbers, `_` or `\\` and must start with a letter or `_`."))
+        throw(XLSXError("Invalid defined name: `$name`. May only contain letters, numbers, `_` or `\\`, must start with a letter or `_`, and must not be a cell address such as `A1`, `R1C1` or `R`."))
     end
     if is_worksheet_defined_name(ws, name)
         throw(XLSXError("Worksheet `$(ws.name)` already has a defined name called `$name`."))
@@ -627,6 +628,9 @@ end
 
 Add a defined name to the Workbook or Worksheet. If an `XLSXFile` is passed, the defined name 
 is added to the Workbook. If a `Worksheet` is passed, the defined name is added to the Worksheet.
+
+`name` may contain only letters, numbers, `_` or `\\` and must start with a letter or `_`. It
+must not be a cell address, such as `A1` or, in R1C1 style, `R1C1`, `RC`, `R` or `C`.
 
 When adding defined name referring to a cell or range to a workbook, `value` must include the sheet 
 name (e.g. `Sheet1!A1:B2`). 

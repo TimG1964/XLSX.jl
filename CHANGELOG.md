@@ -6,18 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [v0.13.1](https://github.com/JuliaData/XLSX.jl/tree/v0.13.1) - 2026-09-06
+## [v0.13.1](https://github.com/JuliaData/XLSX.jl/tree/v0.13.1) - 2026-10-07
 
 - Fix [#462](https://github.com/JuliaData/XLSX.jl/issues/462) (Read-performance regression vs v0.10.4 on large worksheets)
 - Fix [#472](https://github.com/JuliaData/XLSX.jl/issues/472) (Worksheets with CRLF line endings were corrupted when split, and precompilation failed, with XML.jl versions that normalise line endings)
 - Faster reads of worksheets that have no `<dimension>` element. [#470](https://github.com/JuliaData/XLSX.jl/pull/470) found the missing dimension with an extra pass that built every cell; it is now recorded during the sheet's first read, so uncached `ws[:]` on a 20,000-row sheet takes 99 ms instead of 266 ms. Sheets with a dimension are unaffected
-- Numeric cell values are now parsed with [Parsers.jl](https://github.com/JuliaData/Parsers.jl) (new dependency, v3), giving results identical to `Base.parse`
+- Faster uncached reads (`enable_cache=false`). Each read now makes one pass over the worksheet and decodes only the cells it returns. Measured on a 50,000 × 70 sheet:
+  - Ranges: `ws["A25000:C25010"]` takes 0.4 s instead of 2.4 s.
+  - Non-contiguous selections: `ws[1:10000:50001, 1:10:70]` takes 0.9 s instead of 20 s, because it no longer re-reads the file for every cell.
+  - `eachrow`: about twice as fast.
+  - `eachtablerow` and `gettable`: 1.5× faster, or 2-2.5× faster over a few columns.
+- Fix uncached `getcellrange` and `getcell` with several rows, which returned empty cells for every row after one absent from the file
+- Fix uncached reads that lost formulas recorded in `wb.formulas`: the row iterator merged them only every 500 rows, so those after the last merge were dropped
+- `find_row` on an uncached sheet now raises `XLSXError` for an absent row, rather than `ArgumentError`
+- Uncached range, cell and table reads no longer raise an error for an invalid cell outside the cells they return, as `readtable` already did. Uncached reads assume rows are in ascending order, as the spec requires and Excel writes
+- Numeric cell values are now parsed with [Parsers.jl](https://github.com/JuliaData/Parsers.jl) (new dependency, v2.8 or v3), giving results identical to `Base.parse`
 - Fix `Tables.getcolumn(row, i)` on `eachtablerow` rows, which threw a `MethodError` for every integer index
 - Column numbers and row ranges outside Excel's limits are now rejected (e.g. `CellRef(1, 20000)` no longer gives `]OF1`)
 - An invalid reference passed to `setdata!` with a vector now raises `XLSXError` rather than `UndefVarError`
 - Assigning an `AnnotatedString` whose colour names a face without its own foreground (e.g. `styled"{(foreground=highlight):x}"`) no longer throws a `MethodError`
 - Faces whose foregrounds name each other in a cycle no longer cause a stack overflow when assigned as an `AnnotatedString`; the text is written without a colour
 - Modest tidy-up of Charts docs
+- Fix `setConditionalFormat` crash on files with a trailing newline or comment after `</worksheet>`
+- Fix adding a dataBar or icon set to a reopened file that already has one
+- Fix the first rule added to an existing range of a reopened file being lost
+- Excel 2010 conditional formats now go in the correct `<ext>`
+- Ids generated after reopening no longer duplicate existing ones
+- Fix files Excel refused after `clearConditionalFormats` removed every dataBar
+- `addtable!` rejects table names that are cell addresses (e.g. `T1`, `R1C1`)
+- `addDefinedName` rejects R1C1-style names (e.g. `RC`, `R`)
+- `writetable(...; as_table=true)` auto-names a table whose sheet name is a cell address
+- `addtable!` with `has_totals_row=true` now errors if the last row has content
+- `setSeriesSubtotals` and `setSeriesQuartileMethod` reject series of the wrong layout
+- `addtable!` and `writetable!(...; as_table=true)` now raise an error if the table would overlap a merged range or another table, and `mergeCells` if the range would overlap a table. Excel used to discard such tables when it repaired the file on opening. `writetable!` checks before writing, so a refused table leaves the sheet unchanged
 
 ## [v0.13.0](https://github.com/JuliaData/XLSX.jl/tree/v0.13.0) - 2026-09-02
 

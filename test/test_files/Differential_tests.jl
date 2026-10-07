@@ -622,3 +622,469 @@ end
     XLSX._READTABLE_VALUE_ROWS[] = true
     @test e1 isa XLSX.XLSXError && e2 isa XLSX.XLSXError && e1.msg == e2.msg
 end
+
+# ── Filtered cell kernel vs the node decoder ─────────────────────────────────
+
+# The cells, formulas and bounds of a sheet as read before `_read_cells` (each
+# selected `<c>` decoded with `Cell(::LazyNode, …)` and then skipped), and whether
+# its rows are in ascending order.
+function _node_read_cells(ws, rows, cols)
+    sel(s, x) = isnothing(s) || x in s
+    wb = XLSX.get_workbook(ws)
+    local_formulas = Dict{XLSX.SheetCellRef,XLSX.AbstractFormula}()
+    cells = XLSX.Cell[]
+    row_min = col_min = typemax(Int)
+    row_max = col_max = 0
+    in_rows = false
+    ascending, last_row = true, 0
+    c = XML.Cursor(XLSX._open_sheetdata(ws))
+    while XML.next!(c) !== nothing
+        d = XML.depth(c)
+        d == 1 && continue
+        if d == 2 && XML.nodetype(c) == XML.Element && XLSX.localname(c) == "row"
+            row = parse(Int, XML.get(c, "r", nothing))
+            ascending &= row > last_row; last_row = row
+            row_min = min(row_min, row); row_max = max(row_max, row)
+            in_rows = sel(rows, row)
+        elseif d == 3 && XML.nodetype(c) == XML.Element && XLSX.localname(c) == "c"
+            col = XLSX._ref_column_number(XML.get(c, "r", ""))
+            col_min = min(col_min, col); col_max = max(col_max, col)
+            if in_rows && sel(cols, col)
+                push!(cells, XLSX.Cell(XML.LazyNode(c), ws, XLSX.get_sst_prefix(ws), local_formulas,
+                                       XLSX.get_xlsxfile(ws).load_formulas))
+            end
+            XML.skip_element!(c)
+        else
+            XML.skip_element!(c)
+        end
+    end
+    bounds = col_max > 0 ? XLSX.CellRange(XLSX.CellRef(row_min, col_min), XLSX.CellRef(row_max, col_max)) : nothing
+    return cells, local_formulas, bounds, ascending
+end
+
+_formulas_of(ws) = filter(p -> first(p).sheet == ws.name, XLSX.get_workbook(ws).formulas)
+
+# Cells the node decoder reads unusually: CDATA and repeated `<v>`, a second `<is>`,
+# an `<f>` before `<is>`, comments and unknown children, empty and self-closing cells
+# (also last in a row and last in the sheet), and a shared formula.
+function _kernel_odd_cells_sheet(; pretty::Bool)
+    rows = [
+        "<row r=\"1\"><c r=\"A1\"><v><![CDATA[5]]></v></c><c r=\"B1\"><v>1</v><v>2</v></c>" *
+            "<c r=\"C1\" t=\"inlineStr\"><is><t>a</t></is><is><t>b</t></is></c>" *
+            "<c r=\"D1\" t=\"inlineStr\"><f>1</f><is><t>x</t></is></c>" *
+            "<c r=\"E1\"><!-- note --><v>7</v><extLst><ext uri=\"u\"><y/></ext></extLst></c>" *
+            "<c r=\"F1\" t=\"s\" s=\"1\" cm=\"1\"><v>0</v></c><c r=\"G1\" s=\"2\"/></row>",
+        "<row r=\"2\"/>",
+        "<row r=\"3\"><c r=\"B3\"><f t=\"shared\" ref=\"B3:B4\" si=\"0\">A1*2</f><v>10</v></c><c r=\"C3\"><v></v></c></row>",
+        "<row r=\"4\"><c r=\"B4\"><f t=\"shared\" si=\"0\"/><v>4</v></c><c r=\"AB4\" t=\"str\"><f>\"q\"</f><v>q</v></c></row>",
+        "<row r=\"6\"><c r=\"C6\"/></row>",
+    ]
+    xml = join(rows)
+    # whitespace between rows, cells and a cell's children (never inside a value)
+    pretty && (xml = replace(xml, (t => "\n  " * t for t in ("<row ", "</row>", "<c ", "<v>", "<f", "<is>", "<!--", "<extLst>"))...))
+    return _diff_build_xlsx(xml, ["s0"])
+end
+
+# `(label, workbook bytes, sheet index)` of every sheet the kernel is checked on: the
+# empty-row corpus, special and random sheets, the odd cells and the test/data worksheets.
+function _kernel_sheets()
+    sheets = Tuple{String,Vector{UInt8},Int}[]
+    for len in 0:2, states in Iterators.product(ntuple(_ -> _DIFF_ROW_STATES, len)...)
+        push!(sheets, ("corpus $(collect(states))", _diff_corpus_sheet(collect(states)), 1))
+    end
+    append!(sheets, [("special \"$k\"", v, 1) for (k, v) in _diff_special_sheets()])
+    append!(sheets, [("random seed $s", _diff_random_sheet(Random.MersenneTwister(s)), 1) for s in 1:60])
+    push!(sheets, ("odd cells", _kernel_odd_cells_sheet(pretty = false), 1))
+    push!(sheets, ("odd cells, pretty-printed", _kernel_odd_cells_sheet(pretty = true), 1))
+    for file in sort(readdir(data_directory))
+        any(ext -> endswith(lowercase(file), ext), (".xlsx", ".xlsm", ".xltx", ".xltm")) || continue
+        bytes = read(joinpath(data_directory, file))
+        xf = try XLSX.readxlsx(IOBuffer(bytes)) catch; continue end
+        wb = XLSX.get_workbook(xf)
+        for (i, ws) in enumerate(wb.sheets)
+            XLSX.is_chartsheet(wb, ws.name) || push!(sheets, ("$file sheet $i", bytes, i))
+        end
+    end
+    return sheets
+end
+
+@testset "filtered cell kernel matches the node decoder" begin
+    sheets = _kernel_sheets()
+    selectors = (nothing, 1:0, 2:4, 3:3, 1:2:9, [1, 3, 7], [2, 28])
+    mismatches = String[]
+    n = 0
+    for (label, bytes, sheet) in sheets, load_formulas in (true, false)
+        openws() = XLSX.open_or_read_xlsx(IOBuffer(bytes), true, false, false; load_formulas)[sheet]
+        for rows in selectors, cols in selectors
+            n += 1
+            tag = "$label lf=$load_formulas rows=$rows cols=$cols"
+            ws = openws()
+            expected = _diff_run(() -> _node_read_cells(ws, rows, cols))
+            ws = openws()
+            result = _diff_run(() -> XLSX._read_cells(ws, rows, cols; track_bounds = true))
+            if expected isa Exception || result isa Exception
+                # an invalid cell in the selection: the same error
+                (typeof(expected) == typeof(result) && sprint(showerror, expected) == sprint(showerror, result)) ||
+                    push!(mismatches, "$tag: $expected vs $result")
+                continue
+            end
+            want, want_formulas, want_bounds, ascending = expected
+            got, bounds = result
+            got == want || push!(mismatches, "$tag: cells differ")
+            isequal(bounds, want_bounds) || push!(mismatches, "$tag: bounds $bounds vs $want_bounds")
+            _formulas_of(ws) == want_formulas || push!(mismatches, "$tag: formulas differ")
+
+            # rows in ascending order: the kernel may stop early without tracking bounds
+            ascending || continue
+            ws = openws()
+            got, bounds = XLSX._read_cells(ws, rows, cols; track_bounds = false)
+            got == want || push!(mismatches, "$tag, no bounds: cells differ")
+            bounds === nothing || push!(mismatches, "$tag, no bounds: bounds $bounds")
+        end
+    end
+    foreach(println, first(mismatches, 20))
+    @test isempty(mismatches)
+    @test n > 10_000
+end
+
+@testset "filtered cell kernel: early stop and dimension scan" begin
+    # Without tracking bounds, nothing after the last selected row is read: an invalid
+    # cell there raises no error. With tracking, the pass reaches it.
+    bad = "<row r=\"5\"><c r=\"B5\" t=\"b\"><v>2</v></c></row>"
+    bytes = _diff_build_xlsx("<row r=\"1\"><c r=\"A1\"><v>1</v></c></row>" * bad, String[])
+    ws = XLSX.openxlsx(IOBuffer(bytes); enable_cache = false)[1]
+    cells, bounds = XLSX._read_cells(ws, 1:1, nothing; track_bounds = false)
+    @test length(cells) == 1 && XLSX.getdata(ws, only(cells)) == 1 && bounds === nothing
+    cells, bounds = XLSX._read_cells(ws, 1:1, nothing; track_bounds = true)
+    @test length(cells) == 1 && bounds == XLSX.CellRange("A1:B5")
+    @test isempty(first(XLSX._read_cells(ws, Int[], nothing; track_bounds = false)))
+    @test_throws XLSX.XLSXError XLSX._read_cells(ws, nothing, nothing; track_bounds = false)
+
+    # The odd cells, compact and pretty-printed, decode to the same values.
+    for pretty in (false, true)
+        odd = XLSX.openxlsx(IOBuffer(_kernel_odd_cells_sheet(; pretty)); enable_cache = false)[1]
+        cells, bounds = XLSX._read_cells(odd, nothing, nothing; track_bounds = true)
+        @test bounds == XLSX.CellRange("A1:AB6")
+        values = Dict(string(c.ref) => XLSX.getdata(odd, c) for c in cells)
+        @test isequal(values, Dict("A1" => 5, "B1" => 2, "C1" => "a", "D1" => "x", "E1" => 7, "F1" => "s0",
+                                   "G1" => missing, "B3" => 10, "C3" => missing, "B4" => 4, "AB4" => "q", "C6" => missing))
+        @test [c.formula for c in cells] == [false, false, false, false, false, false, false, true, false, true, true, false]
+        @test sort([string(k.cellref) for k in keys(_formulas_of(odd))]) == ["AB4", "B3", "B4"]
+    end
+
+    # `_scan_dimension` decodes nothing, so it reads past the invalid cell.
+    @test XLSX._scan_dimension(ws) == XLSX.CellRange("A1:B5")
+    @test XLSX._scan_dimension(XLSX.openxlsx(IOBuffer(_diff_build_xlsx("<row r=\"3\"/>", String[]));
+                                             enable_cache = false)[1]) === nothing
+end
+
+# ── Uncached ranged reads vs the row decoders they replaced ──────────────────
+
+# The uncached reads as they were before `_read_cells`: `getcell` matched the row with
+# `match_rows`, `getdata` iterated rows until past the range, and non-contiguous
+# selections read one cell at a time. `getcellrange` matched the range's rows with
+# `match_rows`, which returned no rows after one absent from the file; the oracle
+# iterates rows as `getcellrange` did with an empty cache.
+function _old_getcell(ws, r, c)
+    sheetrows = XLSX.match_rows(ws, [r])
+    length(sheetrows) == 1 && return XLSX.getcell(sheetrows[1], c)
+    return XLSX.EmptyCell(XLSX.CellRef(r, c))
+end
+function _old_getdata(ws, rng::XLSX.CellRange)::Array{Any,2}
+    result = Array{Any,2}(undef, size(rng))
+    fill!(result, missing)
+    top, bottom = XLSX.row_number(rng.start), XLSX.row_number(rng.stop)
+    for sheetrow in XLSX.eachrow(ws)
+        if top <= sheetrow.row <= bottom
+            for column in XLSX.column_number(rng.start):XLSX.column_number(rng.stop)
+                cell = XLSX.getcell(sheetrow, column)
+                if !isempty(cell)
+                    (r, c) = XLSX.relative_cell_position(cell, rng)
+                    result[r, c] = XLSX.getdata(ws, cell)
+                end
+            end
+        end
+        sheetrow.row > bottom && break
+    end
+    return result
+end
+function _old_getcellrange(ws, rng::XLSX.CellRange)::Array{XLSX.AbstractCell,2}
+    result = Array{Any,2}(undef, size(rng))
+    for ref in rng
+        (r, c) = XLSX.relative_cell_position(ref, rng)
+        result[r, c] = XLSX.EmptyCell(ref)
+    end
+    top, bottom = XLSX.row_number(rng.start), XLSX.row_number(rng.stop)
+    for sheetrow in XLSX.eachrow(ws)
+        if top <= sheetrow.row <= bottom
+            for column in XLSX.column_number(rng.start):XLSX.column_number(rng.stop)
+                cell = XLSX.getcell(sheetrow, column)
+                (r, c) = XLSX.relative_cell_position(cell, rng)
+                result[r, c] = cell
+            end
+        end
+        sheetrow.row > bottom && break
+    end
+    return result
+end
+_old_getdata(ws, rows, cols) = [XLSX.getdata(ws, _old_getcell(ws, a, b)) for a in rows, b in cols]
+_old_getcellrange(ws, rows, cols) = [_old_getcell(ws, a, b) for a in rows, b in cols]
+
+# A cell's contents, independent of the order inline strings were added to the
+# workbook's string table (which depends on how many cells a read decoded).
+_cell_contents(ws, c::XLSX.Cell) = (c.ref, c.datatype, c.style, c.meta, c.formula, XLSX.getdata(ws, c))
+_cell_contents(ws, x) = x
+_contents(ws, x) = x isa AbstractArray ? map(c -> _cell_contents(ws, c), x) : _cell_contents(ws, x)
+
+@testset "uncached ranged reads match the row decoders" begin
+    ranges = XLSX.CellRange.(["A1:A1", "B2:D4", "A1:G9", "C3:AB6", "E7:H12", "B1:B30"])
+    singles = XLSX.CellRef.(["A1", "B3", "C1", "AB4", "G7", "Z99"])
+    selections = (([1, 3, 7], [2, 4]), (1:2:9, 2:3), (9:-2:1, [7, 2, 2]), (2, [1, 3]),
+                  ([3, 1, 3], 2:4), (2:5, 1:3:7), (Int[], [1]), (1:1:4, 3))
+    mismatches = String[]
+    n = 0
+    # Same result (contents and type), and formulas recorded for exactly the selected
+    # cells; an error only where the old path raised one. (The old paths lost formulas:
+    # the row iterator never merged those after its last 500-row batch.)
+    # Like the other streaming reads, these assume ascending rows: a sheet with
+    # out-of-order rows (never written by Excel) may read differently.
+    function check(tag, openws, new, old, (rows, cols); malformed = false)
+        n += 1
+        ws_new, ws_old = openws(), openws()
+        got, want = _diff_run(() -> new(ws_new)), _diff_run(() -> old(ws_old))
+        if got isa Exception
+            want isa Exception || push!(mismatches, "$tag: raised $got")
+            return
+        end
+        want isa Exception && return  # the old path decoded an invalid cell outside the selection
+        (malformed || isequal(_contents(ws_new, got), _contents(ws_old, want)) && typeof(got) == typeof(want)) ||
+            push!(mismatches, "$tag: $(typeof(got)) $got vs $(typeof(want)) $want")
+        _formulas_of(ws_new) == _node_read_cells(openws(), rows, cols)[2] ||
+            push!(mismatches, "$tag: formulas differ")
+    end
+    span(rng) = (XLSX.row_number(rng.start):XLSX.row_number(rng.stop), XLSX.column_number(rng.start):XLSX.column_number(rng.stop))
+    for (label, bytes, sheet) in _kernel_sheets(), load_formulas in (true, false)
+        openws() = XLSX.open_or_read_xlsx(IOBuffer(bytes), true, false, false; load_formulas)[sheet]
+        tag = "$label lf=$load_formulas"
+        malformed = label == "special \"out-of-order rows\""
+        for rng in ranges
+            check("$tag getdata $rng", openws, ws -> XLSX.getdata(ws, rng), ws -> _old_getdata(ws, rng), span(rng);
+                  malformed)
+            check("$tag getcellrange $rng", openws, ws -> XLSX.getcellrange(ws, rng), ws -> _old_getcellrange(ws, rng),
+                  span(rng); malformed)
+        end
+        for ref in singles
+            r, c = XLSX.row_number(ref), XLSX.column_number(ref)
+            check("$tag getcell $ref", openws, ws -> XLSX.getcell(ws, ref), ws -> _old_getcell(ws, r, c), (r:r, c:c);
+                  malformed)
+        end
+        for (rows, cols) in selections
+            check("$tag getdata $rows×$cols", openws, ws -> XLSX.getdata(ws, rows, cols),
+                  ws -> _old_getdata(ws, rows, cols), (rows, cols); malformed)
+            check("$tag getcellrange $rows×$cols", openws, ws -> XLSX.getcellrange(ws, rows, cols),
+                  ws -> _old_getcellrange(ws, rows, cols), (rows, cols); malformed)
+        end
+    end
+    foreach(println, first(mismatches, 20))
+    @test isempty(mismatches)
+    @test n > 10_000
+end
+
+@testset "uncached ranged reads: early stop and cached lookups" begin
+    # Only the selected cells are decoded: an invalid cell outside them raises no error.
+    bad = "<row r=\"5\"><c r=\"B5\" t=\"b\"><v>2</v></c></row>"
+    rows = "<row r=\"1\"><c r=\"A1\"><v>1</v></c><c r=\"C1\" t=\"b\"><v>2</v></c></row>" *
+           "<row r=\"2\"><c r=\"A2\"><v>3</v></c></row>"
+    ws = XLSX.openxlsx(IOBuffer(_diff_build_xlsx(rows * bad, String[])); enable_cache = false)[1]
+    @test XLSX.getcell(ws, "A2").ref == XLSX.CellRef("A2") && XLSX.getdata(ws, XLSX.getcell(ws, "A2")) == 3
+    @test XLSX.getcell(ws, "B2") == XLSX.EmptyCell(XLSX.CellRef("B2"))
+    @test XLSX.getcell(ws, "A3") == XLSX.EmptyCell(XLSX.CellRef("A3"))
+    @test XLSX.getcellrange(ws, "A1:A2") == [XLSX.getcell(ws, "A1"); XLSX.getcell(ws, "A2");;]
+    @test isequal(XLSX.getdata(ws, [2, 1], 1:1), Any[3; 1;;])
+    @test isequal(XLSX.getcellrange(ws, [2], [1, 2]), [XLSX.getcell(ws, "A2") XLSX.EmptyCell(XLSX.CellRef("B2"))])
+    @test_throws XLSX.XLSXError XLSX.getcell(ws, "C1")
+    @test_throws XLSX.XLSXError XLSX.getcell(ws, [1, 2], 1:3)
+    # Rows after one absent from the file are read (`match_rows` lost them).
+    gap = XLSX.openxlsx(joinpath(data_directory, "two_tables.xlsx"); enable_cache = false)[2]
+    @test XLSX.getcellrange(gap, "A1:C3")[3, :] == [XLSX.getcell(gap, "A3"), XLSX.getcell(gap, "B3"), XLSX.getcell(gap, "C3")]
+    @test all(c -> c isa XLSX.Cell, XLSX.getcellrange(gap, "A3:C3"))
+
+    # The range read stops after its last row, so it leaves an unknown dimension unknown.
+    @test isnothing(ws.dimension)
+    @test isequal(XLSX.getdata(ws, "A1:A2"), Any[1; 3;;])
+    @test isequal(XLSX.getdata(ws, "A2:B3"), Any[3 missing; missing missing])
+    @test isnothing(ws.dimension)
+
+    # With the cache enabled, non-contiguous selections are looked up cell by cell, as before.
+    for file in ("general.xlsx", "customXml.xlsx")
+        path = joinpath(data_directory, file)
+        cached = XLSX.readxlsx(path)[1]
+        uncached = XLSX.openxlsx(path; enable_cache = false)[1]
+        rows, cols = [3, 1, 2], 1:2:5
+        @test isequal(XLSX.getdata(cached, rows, cols), XLSX.getdata(uncached, rows, cols))
+        @test XLSX.getcellrange(cached, rows, cols) == XLSX.getcellrange(uncached, rows, cols)
+    end
+end
+
+# ── Single-cursor row stream vs the node walk it replaced ────────────────────
+
+# The rows of a sheet as the stream iterator read them before (each `<row>` node's
+# `r`/`ht` attributes and `Cell(::LazyNode, …)` per `<c>`, the last of a repeated column),
+# and the number of shared-string cells.
+function _old_stream_rows(ws)
+    rows = Tuple{Int,Union{Nothing,Float64},Dict{Int,XLSX.Cell}}[]
+    sst = 0
+    for row in XML.eachchildnode(XLSX._open_sheetdata(ws))
+        (XML.nodetype(row) == XML.Element && XLSX.localname(row) == "row") || continue
+        r, ht = nothing, nothing
+        for (k, v) in XML.eachattribute(row)
+            k == "r" && (r = parse(Int, v))
+            k == "ht" && (ht = parse(Float64, v))
+        end
+        isnothing(r) && throw(XLSX.XLSXError("Row without 'r' attribute in worksheet $(ws.name)."))
+        cells = Dict{Int,XLSX.Cell}()
+        for c in XML.eachchildnode(row)
+            (XML.nodetype(c) == XML.Element && XLSX.localname(c) == "c") || continue
+            cell = XLSX.Cell(c, ws, XLSX.get_sst_prefix(ws), Dict{XLSX.SheetCellRef,XLSX.AbstractFormula}(), false)
+            sst += cell.datatype == XLSX.CT_STRING
+            cells[XLSX.column_number(cell)] = cell
+        end
+        push!(rows, (r, ht, cells))
+    end
+    return rows, sst
+end
+
+# Rows by contents (see `_cell_contents`): a targeted read numbers inline strings differently.
+_row_contents(ws, rows) = [(r, ht, Dict(k => _cell_contents(ws, v) for (k, v) in cells)) for (r, ht, cells) in rows]
+
+# The rows the stream iterator yields, copied (it reuses one `Dict` per pass); stops
+# after `limit` rows.
+function _stream_rows(ws; limit = typemax(Int))
+    rows = Tuple{Int,Union{Nothing,Float64},Dict{Int,XLSX.Cell}}[]
+    for r in XLSX.eachrow(ws)
+        push!(rows, (XLSX.row_number(r), r.ht, copy(r.rowcells)))
+        length(rows) >= limit && break
+    end
+    return rows
+end
+
+@testset "row stream matches the node walk" begin
+    mismatches = String[]
+    n = 0
+    for (label, bytes, sheet) in _kernel_sheets(), load_formulas in (true, false)
+        openws() = XLSX.open_or_read_xlsx(IOBuffer(bytes), true, false, false; load_formulas)[sheet]
+        tag = "$label lf=$load_formulas"
+        malformed = label in ("special \"out-of-order rows\"", "special \"duplicated row\"")
+        n += 1
+        oldws = openws()
+        expected = _diff_run(() -> _old_stream_rows(oldws))
+        ws = openws()
+        sst0, dim0 = ws.sst_count, ws.dimension
+        got = _diff_run(() -> _stream_rows(ws))
+        if expected isa Exception || got isa Exception
+            (typeof(expected) == typeof(got) && sprint(showerror, expected) == sprint(showerror, got)) ||
+                push!(mismatches, "$tag: $expected vs $got")
+            continue
+        end
+        want, sst = expected
+        got == want || push!(mismatches, "$tag: rows differ")
+        ws.sst_count == sst0 + sst || push!(mismatches, "$tag: sst_count $(ws.sst_count) vs $(sst0 + sst)")
+        _, node_formulas, bounds, _ = _node_read_cells(openws(), nothing, nothing)
+        isequal(ws.dimension, something(dim0, bounds, Some(nothing))) ||
+            push!(mismatches, "$tag: dimension $(ws.dimension) vs $(something(dim0, bounds, Some(nothing)))")
+        # every formula, which the old iterator lost after its last 500-row batch
+        _formulas_of(ws) == node_formulas || push!(mismatches, "$tag: formulas differ")
+
+        # a pass that stops early records the formulas of the rows it read
+        if !malformed && length(want) > 1
+            ws = openws()
+            partial = _stream_rows(ws; limit = 2)
+            partial == want[1:2] || push!(mismatches, "$tag, 2 rows: rows differ")
+            _formulas_of(ws) == _node_read_cells(openws(), first.(partial), nothing)[2] ||
+                push!(mismatches, "$tag, 2 rows: formulas differ")
+        end
+
+        # match_rows: the wanted rows present in the file, in ascending order
+        malformed && continue
+        present = first.(want)
+        for wanted in ([1], [3, 1, 3], [2, 4, 5, 9], collect(1:12), [10_000], isempty(present) ? Int[] : [last(present)])
+            n += 1
+            ws = openws()
+            matched = [(XLSX.row_number(r), r.ht, r.rowcells) for r in XLSX.match_rows(ws, wanted)]
+            isequal(_row_contents(ws, matched), _row_contents(oldws, filter(r -> first(r) in wanted, want))) ||
+                push!(mismatches, "$tag match_rows $wanted: rows differ")
+            _formulas_of(ws) == _node_read_cells(openws(), first.(matched), nothing)[2] ||
+                push!(mismatches, "$tag match_rows $wanted: formulas differ")
+        end
+    end
+    foreach(println, first(mismatches, 20))
+    @test isempty(mismatches)
+    @test n > 4_000
+end
+
+@testset "row stream: find_row and row heights" begin
+    rows = "<row r=\"1\" ht=\"20.5\"><c r=\"A1\"><v>1</v></c></row><row r=\"3\" ht=\"x\"><c r=\"A3\"><v>3</v></c></row>" *
+           "<row r=\"4\"><c r=\"A4\"><f>A1*4</f><v>4</v></c></row>"
+    ws = XLSX.openxlsx(IOBuffer(_diff_build_xlsx(rows, String[])); enable_cache = false)[1]
+    itr = XLSX.eachrow(ws)
+    @test XLSX.find_row(itr, 1).ht == 20.5
+    @test XLSX.find_row(itr, 4).ht === nothing && XLSX.getdata(ws, XLSX.getcell(XLSX.find_row(itr, 4), 1)) == 4
+    @test_throws XLSX.XLSXError XLSX.find_row(itr, 2)
+    @test_throws ArgumentError XLSX.find_row(itr, 3)                       # an invalid `ht` on a matched row
+    @test XLSX.row_number.(XLSX.match_rows(ws, [1, 4])) == [1, 4]          # ... and not on a skipped one
+    @test isempty(XLSX.match_rows(ws, Int[]))
+    @test_throws ArgumentError collect(XLSX.eachrow(ws))
+    @test haskey(XLSX.get_workbook(ws).formulas, XLSX.SheetCellRef(ws.name, XLSX.CellRef("A4")))
+end
+
+@testset "row stream: column window" begin
+    mismatches = String[]
+    n = 0
+    for (label, bytes, sheet) in _kernel_sheets(), load_formulas in (true, false)
+        openws() = XLSX.open_or_read_xlsx(IOBuffer(bytes), true, false, false; load_formulas)[sheet]
+        full_ws = openws()
+        full = _diff_run(() -> _stream_rows(full_ws))
+        for cols in (1:1, 2:4, 3:3, 1:7, 28:28, 100:120)
+            n += 1
+            tag = "$label lf=$load_formulas cols=$cols"
+            ws = openws()
+            sst0 = ws.sst_count
+            got = _diff_run(() -> begin
+                rows = Tuple{Int,Union{Nothing,Float64},Dict{Int,XLSX.Cell}}[]
+                for r in XLSX.SheetRowStreamIterator(ws, cols)
+                    push!(rows, (XLSX.row_number(r), r.ht, copy(r.rowcells)))
+                end
+                rows
+            end)
+            if got isa Exception
+                # an invalid cell inside the window raises as in the full pass
+                full isa Exception || push!(mismatches, "$tag: raised $got")
+                continue
+            end
+            full isa Exception && continue  # the full pass decoded an invalid cell outside the window
+            want = [(r, ht, filter(p -> first(p) in cols, cells)) for (r, ht, cells) in full]
+            isequal(_row_contents(ws, got), _row_contents(full_ws, want)) || push!(mismatches, "$tag: rows differ")
+            ws.sst_count == sst0 + count(c -> c.datatype == XLSX.CT_STRING, (c for (_, _, cells) in want for c in values(cells))) ||
+                push!(mismatches, "$tag: sst_count")
+            isequal(ws.dimension, full_ws.dimension) || push!(mismatches, "$tag: dimension $(ws.dimension) vs $(full_ws.dimension)")
+            _formulas_of(ws) == _node_read_cells(openws(), nothing, cols)[2] || push!(mismatches, "$tag: formulas differ")
+        end
+    end
+    foreach(println, first(mismatches, 20))
+    @test isempty(mismatches)
+    @test n > 3_000
+
+    # Uncached table reads decode only the table's columns: an invalid cell elsewhere
+    # raises no error, one inside does.
+    bad = "<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>h</t></is></c></row>" *
+          "<row r=\"2\"><c r=\"A2\"><v>1</v></c><c r=\"C2\" t=\"b\"><v>2</v></c></row>" *
+          "<row r=\"3\"><c r=\"A3\"><v>2</v></c></row>"
+    open_bad() = XLSX.openxlsx(IOBuffer(_diff_build_xlsx(bad, String[])); enable_cache = false)[1]
+    @test [r[:h] for r in XLSX.eachtablerow(open_bad(), "A:A")] == [1, 2]
+    @test XLSX.gettable(open_bad(), "A"; first_row = 1).data == [[1, 2]]
+    @test_throws XLSX.XLSXError XLSX.gettable(open_bad(), "A:C")
+
+    # A `<c>` without `r` can't be placed in or out of the window.
+    nor = XLSX.openxlsx(IOBuffer(_diff_build_xlsx("<row r=\"1\"><c><v>1</v></c></row>", String[])); enable_cache = false)[1]
+    @test_throws XLSX.XLSXError collect(XLSX.SheetRowStreamIterator(nor, 2:3))
+end

@@ -127,6 +127,17 @@
         @test !XLSX.is_valid_defined_name("")
         @test !XLSX.is_valid_defined_name("1abc")
         @test !XLSX.is_valid_defined_name("a-b")
+        # Excel refuses a file with an R1C1-style defined name, or one that is just R or C,
+        # in any case. (A1-style names such as R5 were already rejected.)
+        for n in ("R1C1", "RC", "rc", "R12C", "RC3", "R", "C", "r", "c")
+            @test !XLSX.is_valid_defined_name(n)
+        end
+        for n in ("XFE1", "A0", "A1B", "RCX", "Rate", "Col")
+            @test XLSX.is_valid_defined_name(n)
+        end
+        err = try XLSX.addDefinedName(xf, "R1C1", 1); nothing catch e; e end
+        @test err isa XLSX.XLSXError && occursin("cell address", err.msg)
+        @test_throws XLSX.XLSXError XLSX.addDefinedName(sh, "rc", 1)
         @test_throws XLSX.XLSXError XLSX.addDefName(xf, "", 1)
 
         XLSX.addDefinedName(xf, "dup", 1)

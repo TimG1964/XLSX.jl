@@ -694,13 +694,14 @@ function update_workbook_xml!(xl::XLSXFile) # Need to update <sheets> and <defin
     else
         if isnothing(j)
             # there is no <definedNames> block in the workbook's xml file, so we'll need to create one
-            l = insert_index(wbdoc[end], "definedNames", WORKBOOK_ORDER)
+            # `wbdoc[i]`, not `wbdoc[end]`: text or comments may follow `</workbook>`.
+            l = insert_index(wbdoc[i], "definedNames", WORKBOOK_ORDER)
             definedNames = XML.Element("$(pfx)definedNames")
-            len = length(wbdoc[end])
+            len = length(wbdoc[i])
             if l != len
-                insert!(wbdoc[end].children, l + 1, definedNames)
+                insert!(wbdoc[i].children, l + 1, definedNames)
             else
-                push!(wbdoc[end], definedNames)
+                push!(wbdoc[i], definedNames)
             end
             j = l + 1
         else
@@ -1266,6 +1267,11 @@ function writetable!(
     anchor_col = column_number(anchor_cell)
     start_from_anchor = 1
 
+    # check before writing, so a refused table leaves the sheet untouched
+    as_table && _check_table_overlap(sheet,
+        CellRange(CellRef(anchor_row, anchor_col), CellRef(anchor_row + row_count, anchor_col + col_count - 1)),
+        table_name)
+
     if write_columnnames
         for c in 1:col_count
             target_cell_ref = CellRef(anchor_row, c + anchor_col - 1)
@@ -1621,6 +1627,30 @@ function check_valid_sheetname(n::AbstractString)
     end
 end
 
+# The next GUID from the file's seeded `rng` (see `uuid_rng`) not already in `used`.
+# The seed is fixed, so a reopened file replays the ids it was first written with;
+# skipping those keeps output deterministic without duplicating an id.
+function _unique_guid(rng::Random.AbstractRNG, used)::String
+    while true
+        id = "{" * uppercase(string(UUIDs.uuid4(rng))) * "}"
+        id in used || return id
+    end
+end
+
+# `xr:uid`s of the workbook's sheets, read from each root start tag only.
+function _sheet_uids(wb::Workbook)::Set{String}
+    xf = get_xlsxfile(wb)
+    uids = Set{String}()
+    for s in wb.sheets
+        v = get(xf.data, get_relationship_target_by_id("xl", wb, s.relationship_id), nothing)
+        isnothing(v) && continue
+        root = v isa String ? xml_root_element(parse(v, XML.LazyNode)) : xml_root_element(v)
+        uid = get(XML.attributes(root), "xr:uid", nothing)
+        isnothing(uid) || push!(uids, uppercase(uid))
+    end
+    return uids
+end
+
 # Register `xdoc` as a new sheet: unique name, next sheetId, a free file in `dir`,
 # the workbook relationship, the content-type override (for the file actually
 # written), and <sheets>. Returns the Worksheet entry; the caller adds a cache
@@ -1645,7 +1675,7 @@ function _register_sheet!(wb::Workbook, xdoc::XML.Node, name::AbstractString;
 
     let root = xml_root_element(xdoc)
         haskey(root, "xmlns:xr") || (root["xmlns:xr"] = "http://schemas.microsoft.com/office/spreadsheetml/2014/revision")
-        root["xr:uid"] = "{" * uppercase(string(UUIDs.uuid4(wb.package.uuid_rng))) * "}"
+        root["xr:uid"] = _unique_guid(wb.package.uuid_rng, _sheet_uids(wb))
     end
 
     j = 1
@@ -1961,6 +1991,10 @@ function _table_name_from_sheet(wb::Workbook, sheet::Worksheet, sheetname::Abstr
     if candidate ∈ existing_names ||
        is_workbook_defined_name(wb, candidate) || is_worksheet_defined_name(sheet, candidate)
         @warn "Normalized table name `$candidate` (from sheet name `$sheetname`) collides with an existing table name or defined name; using an auto-generated table name instead."
+        return ""
+    end
+    if _is_cell_address_like(candidate)
+        @warn "Table name `$candidate` (from sheet name `$sheetname`) is a cell address, which Excel does not allow; using an auto-generated table name instead."
         return ""
     end
 

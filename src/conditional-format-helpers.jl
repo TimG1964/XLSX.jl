@@ -64,17 +64,21 @@ function allCfs(ws::Worksheet)::Vector{XML.Node}
     target_file = get_relationship_target_by_id("xl", wb, ws.relationship_id)
     v = xf.data[target_file]
     sheetdoc = v isa String ? parse(v, XML.Node) : xmlroot(wb, ws.relationship_id)
-    return find_all_nodes("/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":worksheet/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":conditionalFormatting", sheetdoc)
+    return _cfs_in(sheetdoc)
 end
+_cfs_in(sheetdoc::XML.Node)::Vector{XML.Node} =
+    find_all_nodes("/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":worksheet/" * SPREADSHEET_NAMESPACE_XPATH_ARG * ":conditionalFormatting", sheetdoc)
 function add_cf_to_XML(ws, new_cf)
     wb = get_workbook(ws)
     sheetdoc = xmlroot(get_workbook(ws), ws.relationship_id)
-    l = insert_index(sheetdoc[end], "conditionalFormatting", WORKSHEET_ORDER)
-    len = length(sheetdoc[end])
+    # Not `sheetdoc[end]`: text or comments may follow `</worksheet>`.
+    root = sheetdoc[find_child_index(XML.children(sheetdoc), "worksheet")]
+    l = insert_index(root, "conditionalFormatting", WORKSHEET_ORDER)
+    len = length(root)
     if l != len
-        insert!(sheetdoc[end].children, l+1, new_cf)
+        insert!(root.children, l+1, new_cf)
     else
-        push!(sheetdoc[end], new_cf)
+        push!(root, new_cf)
     end
 end
 function next_cf_priority!(ws::Worksheet)::Int
@@ -91,12 +95,14 @@ function next_cf_priority!(ws::Worksheet)::Int
     ws.next_cf_priority += 1
     return pr
 end
-function update_worksheet_cfx!(allcfs, cfx, ws, rng)
+function update_worksheet_cfx!(cfx, ws, rng)
     pfx = get_prefix(ws)
     pfx = pfx == "" ? pfx : pfx * ":"
 
     sq = _cf_sqref(rng)
 
+    # Match against the live tree, not `allCfs`, which may return a throwaway parse.
+    allcfs = _cfs_in(xmlroot(get_workbook(ws), ws.relationship_id))
     matchcfs = filter(x -> x["sqref"] == sq, allcfs)
     l = length(matchcfs)
     if l == 0
@@ -119,62 +125,86 @@ function allExtCfs(ws::Worksheet)::Vector{XML.Node}
     target_file = get_relationship_target_by_id("xl", wb, ws.relationship_id)
     v = xf.data[target_file]
     sheetdoc = v isa String ? parse(v, XML.Node) : xmlroot(wb, ws.relationship_id)
-    i, j = get_idces(sheetdoc, "worksheet", "extLst")
-    if isnothing(j)
-        return Vector{XML.Node}()
-    end
-    extlst = sheetdoc[i][j]
-    exts = XML.children(extlst)
-    let cfs = nothing
-        for ext in exts
-            for c in XML.children(ext)
-                if localname(c) == "conditionalFormattings"
-                    cfs = c
-                    break
-                end
-            end
-        end
-        return isnothing(cfs) ? Vector{XML.Node}() : xml_elements(cfs)
-    end
+    return _extcfs_in(sheetdoc)
+end
+function _extcfs_in(sheetdoc::XML.Node)::Vector{XML.Node}
+    blk = _x14_cf_block(sheetdoc)
+    return isnothing(blk) ? Vector{XML.Node}() : xml_elements(blk)
 end
 
-function make_extLst!(s)
-    ext_list = XML.Element("extLst")
-    ext_element = XML.Element("ext")
-    ext_element["xmlns:x14"] = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
-    ext_element["uri"] = "{78C0D931-6437-407d-A8EE-F0AAD7539E65}"
-    push!(ext_list, ext_element)
-    push!(s, ext_list)
+# `<extLst>` may hold other extensions (sparklines, data validations, ...), in any order.
+# Excel reads x14 conditional formats only from the `<ext>` with this uri.
+const X14_CF_EXT_URI = "{78C0D931-6437-407d-A8EE-F0AAD7539E65}"
+
+function _x14_cf_ext(extlst::XML.Node)
+    i = findfirst(e -> localname(e) == "ext" && uppercase(get(e, "uri", "")) == uppercase(X14_CF_EXT_URI), xml_elements(extlst))
+    return isnothing(i) ? nothing : xml_elements(extlst)[i]
+end
+
+# The worksheet's `<x14:conditionalFormattings>` block, or `nothing`.
+function _x14_cf_block(sheetdoc::XML.Node)
+    i, j = get_idces(sheetdoc, "worksheet", "extLst")
+    isnothing(j) && return nothing
+    ext = _x14_cf_ext(sheetdoc[i][j])
+    isnothing(ext) && return nothing
+    k = findfirst(c -> localname(c) == "conditionalFormattings", xml_elements(ext))
+    return isnothing(k) ? nothing : xml_elements(ext)[k]
+end
+
+# Ids of the worksheet's x14 rules, which pair each with its `<cfRule>` (via `x14:id`).
+function _x14_cf_ids(ws::Worksheet)::Set{String}
+    ids = Set{String}()
+    for b in _extcfs_in(xmlroot(get_workbook(ws), ws.relationship_id)), r in xml_elements(b)
+        localname(r) == "cfRule" && haskey(r, "id") && push!(ids, uppercase(r["id"]))
+    end
+    return ids
+end
+
+# As `_x14_cf_block`, creating `<extLst>`, the `<ext>` and the block as needed.
+function _x14_cf_block!(sheetdoc::XML.Node)
+    blk = _x14_cf_block(sheetdoc)
+    isnothing(blk) || return blk
+    i, j = get_idces(sheetdoc, "worksheet", "extLst")
+    if isnothing(j)
+        push!(sheetdoc[i], XML.Element("extLst"))   # `extLst` is last in `WORKSHEET_ORDER`
+        j = length(XML.children(sheetdoc[i]))
+    end
+    extlst = sheetdoc[i][j]
+    ext = _x14_cf_ext(extlst)
+    if isnothing(ext)
+        ext = XML.Element("ext")
+        ext["xmlns:x14"] = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+        ext["uri"] = X14_CF_EXT_URI
+        push!(extlst, ext)
+    end
+    blk = XML.Element("x14:conditionalFormattings")
+    push!(ext, blk)
+    return blk
 end
 function make_extCfsBlock()
     extCf = XML.Element("x14:conditionalFormatting")
     extCf["xmlns:xm"] = "http://schemas.microsoft.com/office/excel/2006/main"
     return extCf
 end
-function update_worksheet_ext_cfx!(allcfs, cfx, ws, rng)
+function update_worksheet_ext_cfx!(cfx, ws, rng)
     wb = get_workbook(ws)
     sq = _cf_sqref(rng)
     sheetdoc = xmlroot(get_workbook(ws), ws.relationship_id)
-    i, j = get_idces(sheetdoc, "worksheet", "extLst")
-    if isnothing(j)
-        make_extLst!(sheetdoc[i])
-        j = length(XML.children(sheetdoc[i]))
+    allcfs = _extcfs_in(sheetdoc)   # live tree, not `allExtCfs`, which may return a throwaway parse
+    blk = _x14_cf_block!(sheetdoc)
+    # Match range with existing conditional formatting blocks. Find `xm:sqref` by name: it
+    # need not be the last child, as indentation may leave whitespace text nodes after it.
+    matchcfs = filter(allcfs) do x
+        els = xml_elements(x)
+        s = findlast(e -> localname(e) == "sqref", els)
+        !isnothing(s) && XML.simple_value(els[s]) == sq
     end
-    m, n = get_idces(sheetdoc[i], "extLst", "ext")
-    @assert m==j
-    o, p = get_idces(sheetdoc[i][j], "ext", "x14:conditionalFormattings")
-    if isnothing(p)
-        push!(sheetdoc[i][j][n], XML.Element("x14:conditionalFormattings"))
-        o, p = get_idces(sheetdoc[i][j], "ext", "x14:conditionalFormattings")
-    end
-    matchcfs = filter(x -> XML.simple_value(x[end]) == sq, allcfs)   # Match range with existing conditional formatting blocks.
-    @assert o==n
     l = length(matchcfs)
     if l == 0                                                   # No existing conditional formatting blocks for this range so create a new one.
         new_cf = make_extCfsBlock()
         push!(new_cf, cfx)
         push!(new_cf, XML.Element("xm:sqref", XML.Text(sq)))
-        push!(sheetdoc[i][j][n][p], new_cf)                        # Add the new conditional formatting block to the worksheet XML.
+        push!(blk, new_cf)                                      # Add the new conditional formatting block to the worksheet XML.
     elseif l == 1                                               # Existing conditional formatting block found for this range so add new rule to that block.
         pushfirst!(matchcfs[1], cfx)
     else

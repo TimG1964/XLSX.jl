@@ -687,4 +687,22 @@
         @test XLSX._repoint_ref_string("'My Sheet'!\$B\$2", "'My Sheet'!", "Sales!") == "Sales!\$B\$2"
         @test XLSX._repoint_ref_string("[1]Data!\$A\$1", "Data!", "Sales!") == "[1]Data!\$A\$1"
     end
+    @testset "addsheet! after reopening gives a fresh xr:uid" begin
+        # `uuid_rng` has a fixed seed, so a reopened file replays the ids it was first written with.
+        uid(f, e) = match(r"xr:uid=\"(\{[^\"]+\})\"", String(XLSX.ZipArchives.zip_readentry(XLSX.ZipArchives.ZipReader(read(f)), e)))[1]
+        xf = XLSX.newxlsx()
+        XLSX.addsheet!(xf, "S2")
+        XLSX.writexlsx("uid.xlsx", xf; overwrite=true)
+        for out in ("uid2.xlsx", "uid3.xlsx")
+            xf = XLSX.openxlsx("uid.xlsx"; mode="rw")
+            XLSX.addsheet!(xf, "S3")
+            XLSX.writexlsx(out, xf; overwrite=true)
+        end
+        SAVE_FILES && save_outfile("uid2.xlsx")
+        uids = [uid("uid2.xlsx", "xl/worksheets/sheet$k.xml") for k in 1:3]
+        @test allunique(uids)
+        @test uids[3] == uid("uid3.xlsx", "xl/worksheets/sheet3.xml")   # still deterministic
+        @test XLSX._unique_guid(XLSX.Random.Xoshiro(1), Set{String}()) != XLSX._unique_guid(XLSX.Random.Xoshiro(1), Set([XLSX._unique_guid(XLSX.Random.Xoshiro(1), Set{String}())]))
+        foreach(rm, ("uid.xlsx", "uid2.xlsx", "uid3.xlsx"))
+    end
 end

@@ -378,12 +378,10 @@ Implementations: SheetRowStreamIterator, WorksheetCache.
 =#
 abstract type SheetRowIterator end
 
-mutable struct SheetRowStreamIteratorState{I,S}
-    row_iter::I
-    row_state::S
+mutable struct SheetRowStreamIteratorState{C}
+    cursor::C          # in `<sheetData>`, after the last row read (single pass: advance a state once)
     rowcells::Dict{Int,Cell}
     local_formulas::Dict{SheetCellRef,AbstractFormula}
-    rows_since_merge::Int
     # Sheet bounds seen so far, tracked only when the worksheet had no dimension
     # at the start of iteration. Set as the dimension when iteration completes.
     track::Bool
@@ -502,7 +500,11 @@ end
 
 struct SheetRowStreamIterator <: SheetRowIterator
     sheet::Worksheet
+    # Columns to decode; `nothing` = every column. A table read decodes only its own,
+    # so its rows' `rowcells` hold no cell outside them.
+    cols::Union{Nothing,UnitRange{Int}}
 end
+SheetRowStreamIterator(ws::Worksheet) = SheetRowStreamIterator(ws, nothing)
 
 #------------------------------------------------------------------------------ sharedStrings
 mutable struct SharedStringTable

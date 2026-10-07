@@ -51,7 +51,7 @@ function insert_index(root::XML.Node, target::String, order::Vector{String})
     # scan backwards through the order list
     for i in target_idx:-1:1
         name = order[i]
-        # find the last child with this tag
+        # find the first child with this tag
         for (j, child) in enumerate(chn)
             if localname(child) == name
                 return j   # insert *after* this child
@@ -59,7 +59,7 @@ function insert_index(root::XML.Node, target::String, order::Vector{String})
         end
     end
 
-    return 1   # nothing precedes the target → insert at top
+    return 0   # nothing precedes the target → callers insert at `0 + 1`, the top
 end
 
 function Worksheet(xf::XLSXFile, sheet_element::XML.Node)
@@ -365,9 +365,9 @@ function getdata(ws::Worksheet, ref::AbstractString)
 end
 getdata(ws::Worksheet, single::CellRef) = getdata(ws, getcell(ws, single))
 getdata(ws::Worksheet, row::Integer, col::Integer) = getdata(ws, CellRef(row, col))
-getdata(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}) = [getdata(ws, a, b) for a in row, b in col]
-getdata(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}) = [getdata(ws, a, b) for a in row, b in col]
-getdata(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}) = [getdata(ws, a, b) for a in row, b in col]
+getdata(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}) = _getdata_each(ws, row, col)
+getdata(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}) = _getdata_each(ws, row, col)
+getdata(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}) = _getdata_each(ws, row, col)
 getdata(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}) = getdata(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))))
 function getdata(ws::Worksheet)
     found = _read_unknown_dimension(ws, nothing, nothing)
@@ -389,7 +389,7 @@ function getdata(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}
     getdata(ws, CellRange(CellRef(dim.start.row_number, first(col)), CellRef(dim.stop.row_number, last(col))))
 end
 
-# Data matrix for `rng` from the cells returned by `_read_unknown_dimension`.
+# Data matrix for `rng` from the cells returned by `_read_unknown_dimension` or `_read_cells`.
 function _data_from_cells(ws::Worksheet, rng::CellRange, cells::Vector{Cell})::Array{Any,2}
     result = Array{Any,2}(undef, size(rng))
     fill!(result, missing)
@@ -399,6 +399,40 @@ function _data_from_cells(ws::Worksheet, rng::CellRange, cells::Vector{Cell})::A
         result[r, c] = getdata(ws, cell)
     end
     return result
+end
+
+# The cells at `rows` × `cols` of an uncached worksheet, read in one pass over the
+# file and keyed by `(row, column)`; `nothing` when the cache is enabled, so callers
+# look cells up one at a time as before.
+function _uncached_cells(ws::Worksheet, rows, cols)::Union{Nothing,Dict{Tuple{Int,Int},Cell}}
+    is_cache_enabled(ws) && return nothing
+    cells, _ = _read_cells(ws, _sorted_selection(rows), _sorted_selection(cols); track_bounds = false)
+    found = Dict{Tuple{Int,Int},Cell}()
+    for cell in cells   # a duplicated row: the first one, as `getcell` reads it
+        get!(found, (row_number(cell), column_number(cell)), cell)
+    end
+    return found
+end
+
+# `sel` as `_read_cells` takes it: a unit range or a sorted vector without duplicates.
+_sorted_selection(sel::Integer) = sel:sel
+_sorted_selection(sel::AbstractUnitRange{<:Integer}) = sel
+_sorted_selection(sel::AbstractVector{<:Integer}) = sort(unique(sel))
+
+@inline _cell_at(found::Dict{Tuple{Int,Int},Cell}, row::Integer, col::Integer)::AbstractCell =
+    get(() -> EmptyCell(CellRef(row, col)), found, (row, col))
+
+# `getdata` / `getcell` element by element over non-contiguous rows or columns. Uncached,
+# the cells come from a single pass instead of one pass over the file per element.
+function _getdata_each(ws::Worksheet, row, col)
+    found = _uncached_cells(ws, row, col)
+    isnothing(found) && return [getdata(ws, a, b) for a in row, b in col]
+    return [getdata(ws, _cell_at(found, a, b)) for a in row, b in col]
+end
+function _getcell_each(ws::Worksheet, row, col)
+    found = _uncached_cells(ws, row, col)
+    isnothing(found) && return [getcell(ws, a, b) for a in row, b in col]
+    return [_cell_at(found, a, b) for a in row, b in col]
 end
 
 # Cell matrix for `rng` from the cells returned by `_read_unknown_dimension`.
@@ -474,7 +508,12 @@ function getdata(ws::Worksheet, rng::CellRange)::Array{Any,2}
         return result
     end
 
-    # Fallback: cache isn't fully populated (or is disabled) — unchanged.
+    # Uncached: decode only the cells in the range, stopping after its last row.
+    if !is_cache_enabled(ws)
+        return _data_from_cells(ws, rng, first(_read_cells(ws, top:bottom, left:right; track_bounds = false)))
+    end
+
+    # Cache enabled but not yet full: iterate the rows, which fills it.
     for sheetrow in eachrow(ws)
         if top <= sheetrow.row && sheetrow.row <= bottom
             for column in left:right
@@ -634,10 +673,9 @@ function getcell(ws::Worksheet, single::CellRef)::AbstractCell
         end
     
     else
-        sheetrow=match_rows(ws, [row_number(single)])
-        if length(sheetrow)==1
-            return getcell(sheetrow[1], column_number(single))
-        end
+        r, c = row_number(single), column_number(single)
+        cells, _ = _read_cells(ws, r:r, c:c; track_bounds = false)
+        isempty(cells) || return first(cells)
     end
         return EmptyCell(single)
 end
@@ -748,14 +786,12 @@ function getcellrange(ws::Worksheet, rng::CellRange)::Array{AbstractCell,2}
             end
         end
     else
-        # no cache to fill - just look in file
-        sheetrows = match_rows(ws, collect(top:bottom))
-        for sheetrow in sheetrows
-            for column in left:right
-                cell = getcell(sheetrow, column)
-                (r, c) = relative_cell_position(cell, rng)
-                result[r, c] = cell
-            end
+        # no cache to fill - decode only the cells in the range
+        cells, _ = _read_cells(ws, top:bottom, left:right; track_bounds = false)
+        for cell in cells
+            cell.ref ∈ rng || continue
+            (r, c) = relative_cell_position(cell, rng)
+            result[r, c] = cell
         end
     end
 
@@ -766,9 +802,9 @@ getcellrange(ws::Worksheet, s::SheetCellRange) = do_sheet_names_match(ws, s) && 
 getcellrange(ws::Worksheet, s::SheetColumnRange) = do_sheet_names_match(ws, s) && getcellrange(ws, s.colrng)
 getcellrange(ws::Worksheet, s::SheetRowRange) = do_sheet_names_match(ws, s) && getcellrange(ws, s.rowrng)
 
-getcellrange(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}) = [getcell(ws, a, b) for a in row, b in col]
-getcellrange(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}) = [getcell(ws, a, b) for a in row, b in col]
-getcellrange(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}) = [getcell(ws, a, b) for a in row, b in col]
+getcellrange(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}) = _getcell_each(ws, row, col)
+getcellrange(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}) = _getcell_each(ws, row, col)
+getcellrange(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}) = _getcell_each(ws, row, col)
 getcellrange(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}) = getcell(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))))
 getcellrange(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon) = getcell(ws, row, :)
 getcellrange(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}) = getcell(ws, :, col)

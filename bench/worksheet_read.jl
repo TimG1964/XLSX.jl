@@ -1,4 +1,4 @@
-# Run with `julia --project=. --check-bounds=yes benchmark/worksheet-read.jl` after Pkg.instantiate().
+# Run from bench/ with `julia --project=envs/dev --check-bounds=yes worksheet_read.jl` after instantiating envs/dev.
 # The compressed numeric worksheet has 20,000 rows and eight columns. Fixture
 # construction and value checks are outside the warmed, five-sample measurements.
 using XLSX, Test
