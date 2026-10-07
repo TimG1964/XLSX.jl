@@ -2389,7 +2389,8 @@ reflecting the behaviour of Excel itself.
 
 Merging is limited to the extent of the worksheet dimension.
 
-The specified range must not overlap with any previously merged cells.
+The specified range must not overlap with any previously merged cells, nor
+with an Excel Table (Excel discards a table that overlaps a merged range).
 
 It is not possible to merge a single cell!
 
@@ -2438,6 +2439,12 @@ function mergeCells(ws::Worksheet, cr::CellRange)
 
     if !get_xlsxfile(ws).use_cache_for_sheet_data
         throw(XLSXError("Cannot get merged cells because cache is not enabled."))
+    end
+
+    for t in tables(ws) # Excel drops a table that overlaps a merged range
+        if intersects(cr, t.ref)
+            throw(XLSXError("Merged range (`$cr`) cannot overlap table `$(t.name)` (`$(t.ref)`)."))
+        end
     end
 
     sheetdoc = xmlroot(get_workbook(ws), ws.relationship_id) # find the <mergeCells> block in the worksheet's xml file

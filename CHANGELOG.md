@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- `addtable!` and `writetable!(...; as_table=true)` now raise an error if the table would overlap a merged range or another table, and `mergeCells` if the range would overlap a table. Excel used to discard such tables when it repaired the file on opening. `writetable!` checks before writing, so a refused table leaves the sheet unchanged
+
 ## [v0.13.1](https://github.com/JuliaData/XLSX.jl/tree/v0.13.1) - 2026-09-06
 
 - Fix [#462](https://github.com/JuliaData/XLSX.jl/issues/462) (Read-performance regression vs v0.10.4 on large worksheets)

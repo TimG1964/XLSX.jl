@@ -549,6 +549,62 @@ end
         SAVE_FILES && save_outfile(f)
     end
 
+    @testset "addtable! - may not overlap a merged range or another table" begin
+        # Excel drops ("repairs") a table that overlaps either.
+        f = XLSX.newxlsx()
+        sh = f[1]
+        sh["A1:E8"] = "x"
+        sh["B3:E3"] = ["Region" "N1" "N2" "N3"]
+        XLSX.mergeCells(sh, "A3:C3") # leaves B3 and C3 missing
+        sh["B3"] = "Region"; sh["C3"] = "N1"
+        err = try XLSX.addtable!(sh, "B3:E7"; name="Overlaps"); nothing catch e; e end
+        @test err isa XLSX.XLSXError && occursin("merged range `A3:C3`", err.msg)
+        @test isempty(XLSX.tables(sh))
+
+        sh["D4:G4"] = ["h1" "h2" "h3" "h4"]
+        t = XLSX.addtable!(sh, "D4:G8"; name="Clear") # below and beside the merge
+        @test t.ref == XLSX.CellRange("D4:G8")
+
+        sh["H4:I4"] = ["h5" "h6"]
+        err = try XLSX.addtable!(sh, "G4:I8"; name="Clash"); nothing catch e; e end
+        @test err isa XLSX.XLSXError && occursin("table `Clear`", err.msg)
+        @test XLSX.addtable!(sh, "H4:I8"; name="Beside").ref == XLSX.CellRange("H4:I8")
+        @test length(XLSX.tables(sh)) == 2
+        SAVE_FILES && save_outfile(f)
+    end
+
+    @testset "writetable!(as_table=true) - refuses to overlap a merged range, writing nothing" begin
+        # The OW27 layout: a legend merged in A1:C3, then a table anchored at B3.
+        f = XLSX.newxlsx()
+        sh = f[1]
+        sh["A1:C3"] = "legend"
+        XLSX.mergeCells(sh, "A1:C1"); XLSX.mergeCells(sh, "A2:C2"); XLSX.mergeCells(sh, "A3:C3")
+        data = Any[["Wales", "Scotland"], [1, 2], [3, 4], [5, 6]]
+        cols = ["Region", "No. Offers", "No. Submitted", "No. Enabled"]
+        err = try XLSX.writetable!(sh, data, cols; anchor_cell=XLSX.CellRef("B3"), as_table=true, table_name="Unk_Regions"); nothing catch e; e end
+        @test err isa XLSX.XLSXError && occursin("merged range `A3:C3`", err.msg)
+        @test isempty(XLSX.tables(sh))
+        @test XLSX.get_dimension(sh) == XLSX.CellRange("A1:C3") # nothing was written
+
+        XLSX.writetable!(sh, data, cols; anchor_cell=XLSX.CellRef("B4"), as_table=true, table_name="Unk_Regions")
+        @test only(XLSX.tables(sh)).ref == XLSX.CellRange("B4:E6")
+        SAVE_FILES && save_outfile(f)
+    end
+
+    @testset "mergeCells - may not overlap a table" begin
+        f = XLSX.newxlsx()
+        sh = f[1]
+        sh["A1:D6"] = "x"
+        sh["B2:C2"] = ["a" "b"]
+        XLSX.addtable!(sh, "B2:C4"; name="T_merge")
+        err = try XLSX.mergeCells(sh, "A1:B2"); nothing catch e; e end
+        @test err isa XLSX.XLSXError && occursin("table `T_merge`", err.msg)
+        @test isnothing(XLSX.getMergedCells(sh))
+        @test XLSX.mergeCells(sh, "A5:D6") == 0 # below the table
+        @test XLSX.getMergedCells(sh) == [XLSX.CellRange("A5:D6")]
+        SAVE_FILES && save_outfile(f)
+    end
+
     @testset "writetable - a sheet name that is a cell address falls back to an auto-generated table name" begin
         outfile = "writetable_astable_celladdress.xlsx"
         @test_logs (:warn, r"is a cell address") match_mode=:any begin

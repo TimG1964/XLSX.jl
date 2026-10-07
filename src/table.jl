@@ -1485,6 +1485,9 @@ values into the sheet itself.
 `ref` must span at least two rows — a header row plus at least one data row.
 Excel does not support header-only tables (a single-row `ref` is rejected).
 
+`ref` must not overlap a merged range or another table on the sheet. Excel
+discards such a table when it opens the file, so an error is thrown instead.
+
 If `name` is not given, a unique name is generated (`"Table1"`, `"Table2"`,
 ...). Table names are workbook-scoped and must not collide with another
 table's name or with a defined name anywhere in the workbook. Nor may a name
@@ -1599,6 +1602,8 @@ function addtable!(sheet::Worksheet, ref::CellRange;
                   "to set totals."))
     end
 
+    _check_table_overlap(sheet, ref, name)
+
     style_info = isnothing(style) ? nothing : TableStyleInfo(style, false, false, true, false)
 
     id = next_table_id!(wb)
@@ -1644,6 +1649,20 @@ function addtable!(sheet::Worksheet, ref::CellRange;
 end
 
 addtable!(sheet::Worksheet, ref::AbstractString; kw...) = addtable!(sheet, CellRange(ref); kw...)
+
+# Excel drops ("repairs") a table that overlaps a merged range or another table,
+# so refuse to create one.
+function _check_table_overlap(sheet::Worksheet, ref::CellRange, name::AbstractString)
+    for m in something(getMergedCells(sheet), CellRange[])
+        intersects(ref, m) &&
+            throw(XLSXError("Table `$name` (`$ref`) would overlap merged range `$m`, which Excel does not allow. Unmerge the range or place the table elsewhere."))
+    end
+    for t in tables(sheet)
+        intersects(ref, t.ref) &&
+            throw(XLSXError("Table `$name` (`$ref`) would overlap table `$(t.name)` (`$(t.ref)`), which Excel does not allow."))
+    end
+    return nothing
+end
 
 """
     deletetable!(t::Table)

@@ -1267,6 +1267,11 @@ function writetable!(
     anchor_col = column_number(anchor_cell)
     start_from_anchor = 1
 
+    # check before writing, so a refused table leaves the sheet untouched
+    as_table && _check_table_overlap(sheet,
+        CellRange(CellRef(anchor_row, anchor_col), CellRef(anchor_row + row_count, anchor_col + col_count - 1)),
+        table_name)
+
     if write_columnnames
         for c in 1:col_count
             target_cell_ref = CellRef(anchor_row, c + anchor_col - 1)
