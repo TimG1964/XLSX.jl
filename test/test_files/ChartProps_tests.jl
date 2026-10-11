@@ -1229,6 +1229,42 @@
             @test all(i -> isnothing(XLSX.Charts.getLegendEntryDeleted(c, i)), 1:3)
             c = XLSX.Charts.setLegendEntryDeleted(c, 1, true)
 
+            # legend position and overlay: the five positions, Excel's names as aliases
+            for p in (:b, :t, :l, :r, :tr)
+                c = XLSX.Charts.setLegendPos(c, p)
+                @test XLSX.Charts.getLegendPos(c) === p
+            end
+            for (alias, p) in (:bottom => :b, :top => :t, :left => :l, :right => :r, :topRight => :tr)
+                c = XLSX.Charts.setLegendPos(c, alias)
+                @test XLSX.Charts.getLegendPos(c) === p
+            end
+            before = snapshot(c)
+            @test_throws XLSX.XLSXError XLSX.Charts.setLegendPos(c, :bl)
+            @test_throws XLSX.XLSXError XLSX.Charts.setLegendPos(c, :t; overlay=:yes)
+            @test snapshot(c) == before
+            c = XLSX.Charts.setLegendPos(c, :t; overlay=true)
+            @test XLSX.Charts.getLegendOverlay(c) === true
+            c = XLSX.Charts.setLegendPos(c, :l)                                     # overlay untouched
+            @test XLSX.Charts.getLegendOverlay(c) === true
+            c = XLSX.Charts.setLegendOverlay(c, false)
+            @test XLSX.Charts.getLegendOverlay(c) === false
+            c = XLSX.Charts.setLegendOverlay(c, :inherit)
+            @test isnothing(XLSX.Charts.getLegendOverlay(c))
+            c = XLSX.Charts.setLegendPos(c, :inherit)
+            @test isnothing(XLSX.Charts.getLegendPos(c))
+            # a dragged legend's manual layout gives way to the position
+            lkey = (XLSX.Charts.NS_C, "legend")
+            pfx = XLSX.Charts.ns_prefixes(XLSX.Charts.chart_root(c))
+            c = XLSX.Charts._set_legend(c, (lg, key, _) -> XLSX.Charts.insert_child(lg, key,
+                    XML.Element(XLSX.Charts.prefixed_tag(pfx[XLSX.Charts.NS_C], "layout"))))
+            @test !isnothing(XLSX.first_element_with_tag(XLSX.Charts.getChartLegend(c), "layout"))
+            c = XLSX.Charts.setLegendPos(c, :tr; overlay=true)
+            lg = XLSX.Charts.getChartLegend(c)
+            @test isnothing(XLSX.first_element_with_tag(lg, "layout"))
+            @test issorted([findfirst(==(XLSX.localname(k)), XLSX.Charts.CHILD_ORDER[lkey])
+                            for k in XML.eachelement(lg)])
+            @test XLSX.Charts.getLegendEntryDeleted(c, 1) === true                 # entries kept
+
             # survives a write and reopen
             SAVE_FILES && save_outfile(xf)
             XLSX.writexlsx(tmp, xf; overwrite=true)
@@ -1246,6 +1282,8 @@
             @test XLSX.Charts.getAxisNumberFormatCode(c2, cat2) == escaped
             @test XLSX.Charts.getGroupGapWidth(c2, g2) == 50
             @test XLSX.Charts.getLegendEntryDeleted(c2, 1) === true
+            @test XLSX.Charts.getLegendPos(c2) === :tr
+            @test XLSX.Charts.getLegendOverlay(c2) === true
         finally
             isfile(tmp) && rm(tmp)
         end

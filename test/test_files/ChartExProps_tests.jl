@@ -356,17 +356,68 @@
         @test XLSX.XML.tag(lg) == "cx:legend"
         @test XLSX.Charts.default_run_props(XLSX.Charts.getLegendTextProps(fn)).size ≈ 9.0
 
+        # legend position: cx:legend's pos and align attributes, and overlay
+        @test XLSX.Charts.getLegendPos(w) === :t                          # pos="t" align="ctr"
+        @test XLSX.Charts.getLegendOverlay(w) === false
+        for (p, pa, al) in ((:b, "b", "ctr"), (:t, "t", "ctr"), (:l, "l", "ctr"),
+                            (:r, "r", "ctr"), (:tr, "r", "min"))
+            XLSX.Charts.setLegendPos(w, p)
+            @test XLSX.Charts.getLegendPos(w) === p
+            lg = XLSX.first_element_with_tag(XLSX.Charts._cx_chart(w), "legend")
+            @test XLSX.get_attr(lg, "pos") == pa && XLSX.get_attr(lg, "align") == al
+        end
+        XLSX.Charts.setLegendPos(w, :bottom; overlay=true)
+        @test XLSX.Charts.getLegendPos(w) === :b
+        @test XLSX.Charts.getLegendOverlay(w) === true
+        @test_throws XLSX.XLSXError XLSX.Charts.setLegendPos(w, :br)
+        XLSX.Charts.setLegendOverlay(w, :inherit)
+        @test isnothing(XLSX.Charts.getLegendOverlay(w))
+        XLSX.Charts.setLegendPos(w, :inherit)
+        @test isnothing(XLSX.Charts.getLegendPos(w))
+        XLSX.Charts.setLegendPos(w, :topRight; overlay=true)
+        @test XLSX.Charts.default_run_props(XLSX.Charts.getLegendTextProps(w)).bold === true  # txPr kept
+        XLSX.Charts.setLegendPos(fn, :l)                                   # funnel's created legend
+        @test XLSX.Charts.getLegendPos(fn) === :l
+
         out = "cx_text_out.xlsx"
         XLSX.writexlsx(out, xf, overwrite=true)
         d = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "waterfall",
             XLSX.Charts.getCharts(XLSX.readxlsx(out))))
         @test XLSX.Charts.default_run_props(XLSX.Charts.getChartTitleTextProps(d)).size ≈ 16.0
+        @test XLSX.Charts.getLegendPos(d) === :tr
+        @test XLSX.Charts.getLegendOverlay(d) === true
          
         x = XLSX.getCharts(XLSX.readxlsx(joinpath(data_directory, "chartex_kinds.xlsx")))[1]
         @test_throws XLSX.XLSXError XLSX.Charts.getAxisTitleTextProps(x, 999)     # no such axis id
         SAVE_FILES && save_outfile(xf)
     
         isfile(out) && rm(out)
+        isfile(tmp) && rm(tmp)
+    end
+
+    @testset "legend positions as Excel writes them" begin
+        # Made by Excel 16: a column chart and a treemap for each Legend.Position,
+        # in the order bottom, corner (top-right, overlaid), left, right, top.
+        # Excel writes top-right as c:legendPos="tr" and as cx:legend pos="r" align="min".
+        xf = XLSX.readxlsx(joinpath(data_directory, "legend_positions.xlsx"))
+        cs = XLSX.Charts.getCharts(xf["Sheet1"])
+        @test map(typeof, cs) == repeat([XLSX.Charts.Chart, XLSX.Charts.ChartEx], 5)
+        @test map(XLSX.Charts.getLegendPos, cs) == repeat([:b, :tr, :l, :r, :t]; inner=2)
+        @test map(XLSX.Charts.getLegendOverlay, cs) == repeat([false, true, false, false, false]; inner=2)
+
+        # The setters write the same XML
+        tmp = "legend_positions_set.xlsx"
+        cp(joinpath(data_directory, "legend_positions.xlsx"), tmp; force=true)
+        xf = XLSX.openxlsx(tmp; mode="rw")
+        cs = XLSX.Charts.getCharts(xf["Sheet1"])
+        cx = cs[2]                                                        # bottom treemap
+        XLSX.Charts.setLegendPos(cx, :tr; overlay=true)
+        @test XLSX.Charts._cx_legend(cx).attributes == XLSX.Charts._cx_legend(cs[4]).attributes
+        c = XLSX.Charts.setLegendPos(cs[1], :tr; overlay=true)
+        val(n, t) = XLSX.get_attr(XLSX.first_element_with_tag(XLSX.Charts.getChartLegend(n), t), "val")
+        @test val(c, "legendPos") == val(cs[3], "legendPos") == "tr"
+        @test val(c, "overlay") == val(cs[3], "overlay") == "1"
+        SAVE_FILES && save_outfile(xf)
         isfile(tmp) && rm(tmp)
     end
 

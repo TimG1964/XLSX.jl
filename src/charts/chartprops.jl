@@ -444,10 +444,11 @@ getChartLegend(c::Chart) =
 
 """
     getLegendPos(c::Chart) -> Union{Nothing,Symbol}
+    getLegendPos(c::ChartEx) -> Union{Nothing,Symbol}
 
 `:b` (bottom), `:t` (top), `:l` (left), `:r` (right) or `:tr` (top-right) from
-`c:legendPos`. `nothing` means no legend,
-or a legend with no explicit position.
+`c:legendPos`, or from `cx:legend`'s `pos` and `align`. `nothing` means no legend,
+or a legend with no explicit position. Set with [`setLegendPos`](@ref).
 """
 function getLegendPos(c::Chart)
     v = _attr(first_element_with_tag(getChartLegend(c), "legendPos"), "val")
@@ -456,8 +457,9 @@ end
 
 """
     getLegendOverlay(c::Chart) -> Union{Nothing,Bool}
+    getLegendOverlay(c::ChartEx) -> Union{Nothing,Bool}
 
-`c:overlay` — `true` where the legend is drawn on top of the plot area rather
+`c:overlay`, or `cx:legend`'s `overlay` attribute — `true` where the legend is drawn on top of the plot area rather
 than beside it. `nothing` means the chart has no legend, or the element was not
 written, in which case Excel treats it as `false`.
 """
@@ -2626,6 +2628,71 @@ function setLegendEntryDeleted(c::Chart, positions, deleted::Union{Bool,Symbol})
     end; prefixes = pfx)
     set_chart_root!(c, new)
     return c
+end
+
+# ── Legend position ───────────────────────────────────────────────────────────
+
+const _LEGEND_POS = (:b, :t, :l, :r, :tr)
+const _LEGEND_POS_ALIASES = Dict(:bottom => :b, :top => :t, :left => :l, :right => :r,
+                                 :topRight => :tr)
+
+_legend_pos(p::Symbol) = _check_sym(get(_LEGEND_POS_ALIASES, p, p), _LEGEND_POS, "legend position")
+
+function _legend_overlay(v)
+    v isa Bool && return v ? "1" : "0"
+    v === :inherit && return :inherit
+    throw(XLSXError("`$(repr(v))` is not a legend overlay; use `true`, `false` or `:inherit`."))
+end
+
+# Apply `f(lg, key, pfx)` to `c:legend`, creating it if absent, in one rebuild.
+function _set_legend(c::Chart, f)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    lkey = (NS_C, "legend")
+    new  = rebuild_path(root, [(NS_C, "chart") => "chart", lkey => "legend"],
+                        lg -> f(lg, lkey, pfx); prefixes = pfx)
+    set_chart_root!(c, new)
+    return c
+end
+
+"""
+    setLegendPos(c::Chart, pos; overlay=nothing) -> Chart
+    setLegendPos(c::ChartEx, pos; overlay=nothing) -> ChartEx
+
+Set where the legend is drawn: `:b` (bottom), `:t` (top), `:l` (left), `:r`
+(right) or `:tr` (top-right) — Excel's five legend positions. `:bottom`, `:top`,
+`:left`, `:right` and `:topRight` are accepted too. `:inherit` removes the
+position, which Excel reads as `:r`.
+
+`overlay` also sets [`setLegendOverlay`](@ref): `true` draws the legend over the
+plot area, `false` beside it, shrinking the plot area to make room. `nothing`
+leaves it as it is.
+
+Creates the legend if the chart has none. On a `Chart`, any manual layout on the
+legend (`c:legend/c:layout`, written when a legend is dragged in Excel) is
+removed so that the position takes effect, as picking a position in Excel does.
+"""
+function setLegendPos(c::Chart, pos::Symbol; overlay = nothing)
+    p = _legend_pos(pos)
+    o = isnothing(overlay) ? nothing : _legend_overlay(overlay)
+    return _set_legend(c, (lg, key, pfx) -> begin
+        lg = _with_val(remove_child(lg, "layout"), key, pfx, "legendPos", p)
+        isnothing(o) ? lg : _with_val(lg, key, pfx, "overlay", o)
+    end)
+end
+
+"""
+    setLegendOverlay(c::Chart, overlay) -> Chart
+    setLegendOverlay(c::ChartEx, overlay) -> ChartEx
+
+`true` draws the legend over the plot area; `false` draws it beside the plot
+area, which shrinks to make room — Excel's "Show the legend without overlapping
+the chart". `:inherit` removes the setting, which Excel reads as `false`.
+Creates the legend if the chart has none.
+"""
+function setLegendOverlay(c::Chart, overlay::Union{Bool,Symbol})
+    o = _legend_overlay(overlay)
+    return _set_legend(c, (lg, key, pfx) -> _with_val(lg, key, pfx, "overlay", o))
 end
 
 const _TICK_MARKS = (:cross, :in, :out, :none)

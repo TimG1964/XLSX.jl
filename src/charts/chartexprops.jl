@@ -653,6 +653,43 @@ setLegendTextProp(c::ChartEx, field::Symbol, value) =
                      (NS_CX, "legend") => "legend"],
                  (lg, pfx) -> _txpr_with_run_prop(lg, (NS_CX, "legend"), field, value, pfx; ns = NS_CX))
 
+# cx:legend positions by `pos` and `align`. Top-right is the right side,
+# aligned to its start, as Excel writes it.
+const _CX_LEGEND_POS = Dict("b" => ("b", "ctr"), "t" => ("t", "ctr"), "l" => ("l", "ctr"),
+                            "r" => ("r", "ctr"), "tr" => ("r", "min"))
+
+_cx_legend(c::ChartEx) = first_element_with_tag(_cx_chart(c), "legend")
+
+function getLegendPos(c::ChartEx)
+    lg  = _cx_legend(c)
+    pos = _cx_attr(lg, "pos")
+    isnothing(pos) && return nothing
+    return pos == "r" && _cx_attr(lg, "align") == "min" ? :tr : Symbol(pos)
+end
+
+getLegendOverlay(c::ChartEx) = _cx_bool(_cx_legend(c), "overlay")
+
+_cx_with_overlay(lg, o) = with_attribute(lg, "overlay", o === :inherit ? nothing : o)
+
+function setLegendPos(c::ChartEx, pos::Symbol; overlay = nothing)
+    p = _legend_pos(pos)
+    o = isnothing(overlay) ? nothing : _legend_overlay(overlay)
+    pa, al = p === :inherit ? (nothing, nothing) : _CX_LEGEND_POS[p]
+    return _cx_edit_at!(c, [(NS_CX, "chart")  => "chart",
+                            (NS_CX, "legend") => "legend"],
+                        (lg, pfx) -> begin
+        lg = with_attribute(with_attribute(lg, "pos", pa), "align", al)
+        isnothing(o) ? lg : _cx_with_overlay(lg, o)
+    end)
+end
+
+function setLegendOverlay(c::ChartEx, overlay::Union{Bool,Symbol})
+    o = _legend_overlay(overlay)
+    return _cx_edit_at!(c, [(NS_CX, "chart")  => "chart",
+                            (NS_CX, "legend") => "legend"],
+                        (lg, pfx) -> _cx_with_overlay(lg, o))
+end
+
 """
     getChartAxisIds(c::ChartEx) -> Vector{Int}
 

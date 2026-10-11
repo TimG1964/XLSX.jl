@@ -111,7 +111,8 @@ export
     getPlotAreaShapeProps, getChartSpaceShapeProps, getChartSpaceTextProps,
     getChartLegend, getLegendPos, getLegendOverlay, getLegendShapeProps, getLegendTextProps,
     setChartTitleText, setChartTitleTextProp, setChartSpaceTextProp, setLegendTextProp,
-    setLegendEntryDeleted, getLegendEntryDeleted, setPlotAreaLine,
+    setLegendEntryDeleted, getLegendEntryDeleted, setLegendPos, setLegendOverlay,
+    setPlotAreaLine,
     # Series
     getSeriesName, getSeriesNameRange, getSeriesData, getSeriesHidden,
     getSeriesGroup, getSeriesAxes, getSeriesAxisIds, getSeriesLayout,

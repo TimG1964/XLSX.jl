@@ -37,7 +37,9 @@ getChartTypes
 getChartGroups
 getChartLegend
 getLegendPos
+setLegendPos
 getLegendOverlay
+setLegendOverlay
 getLegendShapeProps
 getLegendTextProps
 setLegendTextProp

@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `SheetCellRef` is now exported
 - `addChart` no longer writes `lang="en-US"` on a typed title's run
 - Removed a duplicate `setAxisTitleText` from the `XLSX.Charts` export list
+- New `setLegendPos` and `setLegendOverlay` for `Chart` and `ChartEx`: place the legend at Excel's five positions (`:b`, `:t`, `:l`, `:r`, `:tr`, or `:bottom`, `:top`, `:left`, `:right`, `:topRight`), drawn over the plot area or beside it. Both create the legend if the chart has none. On a `Chart`, setting a position removes any manual legend layout, as Excel does. `getLegendPos` and `getLegendOverlay` now have `ChartEx` methods, reading `cx:legend`'s `pos`, `align` and `overlay`
 
 ## [v0.13.1](https://github.com/JuliaData/XLSX.jl/tree/v0.13.1) - 2026-10-07
 

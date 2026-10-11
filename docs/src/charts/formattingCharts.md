@@ -393,6 +393,21 @@ Legends are read through [`getChartLegend`](@ref) and its companions —
 [`getLegendShapeProps`](@ref), [`getLegendTextProps`](@ref) — and their text is
 set with [`setLegendTextProp`](@ref).
 
+[`setLegendPos`](@ref) moves the legend to one of Excel's five positions: `:b`
+(bottom), `:t` (top), `:l` (left), `:r` (right) or `:tr` (top-right). Excel's
+names `:bottom`, `:top`, `:left`, `:right` and `:topRight` work too. Its
+`overlay` keyword, or [`setLegendOverlay`](@ref), chooses whether the legend is
+drawn over the plot area (`true`) or beside it, with the plot area shrunk to make
+room (`false`). Both work on a `Chart` and a [`ChartEx`](@ref), and add a legend
+if the chart has none:
+
+```julia
+julia> setLegendPos(c, :tr; overlay=true);
+
+julia> getLegendPos(c), getLegendOverlay(c)
+(:tr, true)
+```
+
 A legend shows an entry for every series, in series order. Entries can be
 hidden, but not reordered. [`setLegendEntryDeleted`](@ref) hides or shows the
 entries of the series at the given positions, in one rebuild:
