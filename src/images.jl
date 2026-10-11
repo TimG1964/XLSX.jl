@@ -82,7 +82,7 @@ If a cell range is given, the `size` keyword argument is ignored.
 
 `image::Union{AbstractString, IOBuffer}`: Specifies the image to be inserted. Either:  
   - a file path (`String`)  
-  - an `IOBuffer` containing raw image bytes  
+  - an `IOBuffer` containing raw image bytes. The buffer is left unchanged (its contents and position are not consumed).
 
 Supported formats (auto-detected): PNG, JPEG, GIF.
 
@@ -176,7 +176,7 @@ end
 # ===========================================================================
 
 add_media!(xf::XLSXFile, path::AbstractString) = _add_media_bytes!(xf, read(path))
-add_media!(xf::XLSXFile, io::IOBuffer)         = _add_media_bytes!(xf, take!(io))
+add_media!(xf::XLSXFile, io::IOBuffer)         = _add_media_bytes!(xf, take!(copy(io)))
 
 function _add_media_bytes!(xf::XLSXFile, bytes::Vector{UInt8})::String
     ext      = detect_image_ext(bytes)

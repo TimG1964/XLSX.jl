@@ -30,6 +30,13 @@
         @test startswith(info.media_name, "image")
         @test xf.binary_data["xl/media/" * info.media_name] == bytes
         @test haskey(xf.data, "xl/drawings/drawing1.xml")
+
+        # A writable buffer is left unchanged
+        buf = IOBuffer(); write(buf, bytes); pos = position(buf)
+        info2 = XLSX.addImage(s, "H2", buf)
+        @test xf.binary_data["xl/media/" * info2.media_name] == bytes
+        @test position(buf) == pos
+        @test take!(buf) == bytes
         SAVE_FILES && save_outfile(xf)
     end
 
