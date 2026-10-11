@@ -769,6 +769,22 @@
         SAVE_FILES && save_outfile(xf)
         isfile(path) && rm(path)
     end
+    @testset "addSeries: name_ref to a number cell" begin
+        # ser/tx allows a strRef or literal text, never a numRef: Excel refuses such a file.
+        xf = XLSX.newxlsx("data")
+        ws = xf["data"]
+        ws["A1"] = 2026
+        ws["A2"] = 10
+        ws["A3"] = 20
+        c = XLSX.Charts.addChart(ws, :column; anchor="D2:K16")
+        XLSX.Charts.addSeries(c, "A2:A3"; name_ref="A1")
+        plot = XLSX.first_element_with_tag(XLSX.first_element_with_tag(XLSX.Charts.chart_root(c), "chart"), "plotArea")
+        ser = only(XLSX.elements_with_tag(XLSX.first_element_with_tag(plot, "barChart"), "ser"))
+        tx = XLSX.first_element_with_tag(ser, "tx")
+        @test [XLSX.localname(n) for n in XML.eachelement(tx)] == ["strRef"]
+        @test only(XLSX.Charts.getChartSeries(c)).name == "2026"
+        SAVE_FILES && save_outfile(xf)
+    end
     @testset "addSeries for every kind" begin
         path = "chart_addseries_kinds.xlsx"
         xf = XLSX.newxlsx("data")
@@ -1076,6 +1092,8 @@
         # A title bound to a cell: a reference and its cached string, no rich text.
         c = chart("boundtitle")
         @test XLSX.Charts.getChartTitleRef(c) == "boundtitle!\$F\$1"
+        r = XLSX.Charts.getChartTitleRange(c)                         # Excel's own bound title
+        @test r isa XLSX.SheetCellRef && r.sheet == "boundtitle" && r.cellref == XLSX.CellRef("F1")
         @test XLSX.Charts.getChartTitle(c) == "My Bound Title"
         @test isnothing(XLSX.Charts.getChartTitleText(c))
 

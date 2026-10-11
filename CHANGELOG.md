@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- Chart titles, axis titles and data labels set from a `RichTextString` keep each run's formatting (bold, italic, underline, strikethrough, superscript/subscript, size, font and colour), with newlines handled as for plain strings. Previously this threw an `ArgumentError`. `addChart(...; title = rt)` keeps the run formatting on top of the new title's own
+- On Julia 1.11+, the same chart text setters and `addChart`'s `title` keyword accept a StyledStrings `styled"…"` string, converted to a `RichTextString` as for cells (in the StyledStrings extension)
+- `setChartTitleText` and `setAxisTitleText` accept a `CellRef` or `SheetCellRef`, binding the title to that cell (`c:tx/c:strRef`, with the cell's text cached). `addChart`'s `title` keyword accepts the same. A bound title has one style, so a typed title's formatting is moved into `c:txPr` and a rich-text cell lends the formatting its runs share; per-run formatting can't be kept, as Excel's file format doesn't allow it
+- `ChartEx` titles: `setChartTitleText(c::ChartEx, …)` accepts a `RichTextString`, a styled string or a cell reference, and the new `setAxisTitleText(c::ChartEx, id, …)` sets an axis title's text the same ways. Run formatting is written to `cx:txPr`, which Excel renders; a newline now starts a new paragraph rather than being written inside one run. `addChartEx`'s `title` keyword accepts the same values
+- `addChart(...; title = "A\nB")` now writes one paragraph per line, as `setChartTitleText` does, rather than a newline inside one run
+- `addChart` and `addChartEx` resolve a cell-reference title before adding anything, so a bad reference leaves the workbook unchanged
+- `getRichTextString` returns `nothing` for an empty cell, as documented, rather than throwing a `FieldError`
+- Cell getters treat a cell outside the sheet's dimension as empty, as `ws[ref]` does, rather than throwing: `getFont`, `getBorder`, `getFill`, `getAlignment`, `getFormat`, `getRichTextString`, `getFormula` and `getMergedBaseCell` return `nothing`, and `isMergedCell` returns `false`. `getColumnWidth` and `getRowHeight` still throw, since a row or column beyond the dimension can have a size
+- Fixed a missing space in `setLabelText`'s error for a deleted label, and a typo in the `RichTextRun` docstring
+- Title getters for both chart schemas: new `getAxisTitle` (plain text) and `getAxisTitleRange` (the resolved cell of a bound axis title) for `Chart` and `ChartEx`; `getAxisTitleRef` and `getChartTitleRef` now have `ChartEx` methods, and `getChartTitleRange` a `Chart` method
+- `addSeries` and cell-bound titles now write elements in the chart part's own namespace prefixes rather than assuming Excel's `c:` and `a:`; a new chart's anchor likewise takes the drawing part's prefixes
+- `addSeries(...; name_ref)` pointing at a number cell now writes the series name as a `c:strRef`; it wrote a `c:numRef`, which the schema doesn't allow there, and Excel refused to open the file
+- Chart setters work on a chart part indented with whitespace between elements, as some tools other than Excel write; they previously threw a `MethodError`
+- An empty `ChartEx` title, axis title or series name reads as `nothing`, as for a `c:` chart, rather than `""`
+- `getAxisTitleTextProps` now has a method for `c:` charts, `getAxisTitleTextProps(c::Chart, ax::ChartAxis)`, reading the axis title's `c:txPr`. It previously existed only for `ChartEx`
+- `SheetCellRef` is now exported
+- `addChart` no longer writes `lang="en-US"` on a typed title's run
+- Removed a duplicate `setAxisTitleText` from the `XLSX.Charts` export list
+
 ## [v0.13.1](https://github.com/JuliaData/XLSX.jl/tree/v0.13.1) - 2026-10-07
 
 - Fix [#462](https://github.com/JuliaData/XLSX.jl/issues/462) (Read-performance regression vs v0.10.4 on large worksheets)

@@ -66,7 +66,7 @@ using ..XLSX:
     XLSXFile, Workbook, Worksheet, XLSXError, DataTable,
     CellRef, CellRange, NonContiguousRange,
     SheetCellRef, SheetCellRange, SheetColumnRange, SheetRowRange,
-    XL_REF, CellErrorType,
+    XL_REF, CellErrorType, RichTextString, RichTextRun,
     # package parts and relationships
     REL_CHART, REL_CHARTEX, REL_CHARTSHEET, MIME_CHART, MIME_CHARTEX, MIME_CHARTSHEET,
     parts_with_content_type, register_content_type!, add_part_rel!,
@@ -75,12 +75,12 @@ using ..XLSX:
     # drawings
     ensure_drawing!, _drawing_path_for_sheet, build_two_cell_anchor, _next_shape_id,
     # XML helpers
-    NS_A, NS_R, _attr, _pct, child_text, child_val, elements_with_tag,
+    NS_A, NS_R, NS_XDR, _attr, _pct, child_text, child_val, elements_with_tag,
     first_element_with_tag, get_attr, get_prefixed_attr, has_localname, localname,
     ns_prefixes, prefixed_tag, with_attribute, xml_root_element, truncate_len,
     # workbook, sheets and cells
     get_workbook, get_xlsxfile, get_xml_data, get_worksheet_internal_file,
-    getsheet, getdata, is_chartsheet, isdate1904, date_to_excel_value, time_to_excel_value,
+    getsheet, getdata, getRichTextString, is_chartsheet, isdate1904, date_to_excel_value, time_to_excel_value,
     # references and defined names
     abscell, mkabs, quoteit, ref_chooser, row_number, column_number, _parse_cell_marker,
     get_defined_name_value, is_defined_name_value_a_reference, is_workbook_defined_name,
@@ -130,7 +130,8 @@ export
     getGroupSeriesLines, getGroupUpDownBars, getUpBarShapeProps, getDownBarShapeProps,
     setGroupLabelTextProp, getGroupGapWidth, setGroupGapWidth, getGroupOverlap, setGroupOverlap,
     # Axes
-    getAxisShapeProps, getAxisTextProps, getAxisTitleText, getAxisTitleRef,
+    getAxisShapeProps, getAxisTextProps, getAxisTitle, getAxisTitleText, getAxisTitleRef,
+    getAxisTitleRange,
     getAxisTitleTextProps, getAxisGridlines, getAxisPartner,
     getAxisNumberFormatCode, getAxisNumberFormatLinked,
     getAxisMajorTickMark, getAxisMinorTickMark, getAxisTickLabelPos, getAxisOrientation,
@@ -140,7 +141,7 @@ export
     setAxisTitleText, setAxisTitleTextProp, setAxisTickLabelPos, 
     setAxisScaling, setAxisMin, setAxisMax, setAxisOrientation, 
     setAxisCrosses, setAxisCrossesAt, setAxisNumberFormatCode, setAxisNumberFormatLinked, 
-    setAxisTitleText, getGapWidth, setGapWidth, getOverlap, setOverlap,
+    getGapWidth, setGapWidth, getOverlap, setOverlap,
     setAxisMajorTickMark, setAxisMinorTickMark, setAxisGridlines, setAxisTextProp, setAxisLine,
     setAxisMajorUnit, setAxisMinorUnit,
     # Data points, markers and labels

@@ -531,7 +531,7 @@ Valid attributes that can be defined in `pairs` are:
 - `:italic` - set `:italic => true` for this run to be italicised. Omit otherwise.
 - `:under` - set `:under => true` to underline this run. Omit otherwise.
 - `:strike` - set `:strike => true` to apply strikethrough to this run. Omit otherwise.
-- `:vertAlign` - whether this run is `subscript` or `superscript` (eg `:vertAling => "superscript"`). Omit otherwise.
+- `:vertAlign` - whether this run is `subscript` or `superscript` (eg `:vertAlign => "superscript"`). Omit otherwise.
 - `:color` - the color of this run (eg `:color => "red"`).
 - `:size` - the size of the font to be used (eg `:size => 12`).
 - `:name` - the name of the font to be used (e.g. `:name => "Arial"`).

@@ -323,6 +323,71 @@ julia> getChartTitle(c)
 
 A `"\n"` inside a single string gives the same two-line title.
 
+A [`RichTextString`](@ref XLSX.RichTextString) keeps each run's formatting, as it
+does in a cell. A run's attributes — bold, italic, underline, strikethrough,
+superscript and subscript, size, font and colour — are written on that run; anything
+a run doesn't set is inherited from the title's own formatting. This works with
+[`setChartTitleText`](@ref), [`setAxisTitleText`](@ref), [`setLabelText`](@ref)
+and the `title` keyword of [`addChart`](@ref):
+
+```julia
+julia> rt = XLSX.RichTextString(XLSX.RichTextRun("CO"),
+                                XLSX.RichTextRun("2", [:vertAlign => "subscript"]),
+                                XLSX.RichTextRun(" emissions", [:bold => true, :color => "red"]));
+
+julia> setChartTitleText(c, rt);
+```
+
+On Julia 1.11 and later, a styled string from
+[StyledStrings.jl](https://github.com/JuliaLang/StyledStrings.jl) can be passed
+instead. It is converted to a `RichTextString` as it is when written to a cell:
+
+```julia
+julia> using StyledStrings
+
+julia> setChartTitleText(c, styled"{bold:Revenue} {(foreground=red):£m}");
+```
+
+A title can instead be bound to a cell, so it shows whatever the cell holds.
+Pass a `CellRef` for a cell on the chart's own sheet, or a `SheetCellRef` to name
+the sheet — which a chart on a chartsheet must, having no cells of its own. A
+string is always typed text and is never read as a reference, so `"Q1"` is a
+title, not cell Q1.
+
+```julia
+julia> setChartTitleText(c, CellRef("A1"));
+
+julia> setAxisTitleText(c, getChartAxes(c, :value)[1], SheetCellRef("Data!B1"));
+
+julia> getChartTitleRef(c)
+"Sheet1!\$A\$1"
+```
+
+A bound title can't carry rich text. This is a limit of Excel's file format,
+not of XLSX.jl: a title holds either a cell reference or typed runs, never both,
+and a bound title has a single style, its `c:txPr`. Binding a typed title moves
+its formatting there — the first paragraph's, overlaid by its first run's. If
+the cell holds a `RichTextString`, formatting that all of its runs share is
+applied to the title too; formatting that differs from run to run is not shown.
+The cell's current text is cached in the chart, as Excel does, so
+[`getChartTitle`](@ref) reads it back without opening the file in Excel. Typing
+text over a bound title replaces the reference.
+
+A [`ChartEx`](@ref) takes the same text: a string, a `RichTextString`, a styled
+string or a cell reference, for its title with `setChartTitleText(c, text)` and
+for an axis title with `setAxisTitleText(c, id, text)`, where `id` is one of
+[`getChartAxisIds`](@ref). Excel keeps a `cx:` title's plain text in
+`cx:txData/cx:v` and renders the runs in its `cx:txPr`, so typed text keeps the
+title's existing run formatting, and a `RichTextString` lays each run's own
+formatting over it. Binding a `cx:` title to a cell folds that formatting into
+the paragraph default, as for a `c:` title, and has the same limit: no rich text.
+
+```julia
+julia> setChartTitleText(cx, rt);
+
+julia> setAxisTitleText(cx, 1, CellRef("B1"));
+```
+
 Legends are read through [`getChartLegend`](@ref) and its companions —
 [`getLegendPos`](@ref), [`getLegendOverlay`](@ref),
 [`getLegendShapeProps`](@ref), [`getLegendTextProps`](@ref) — and their text is

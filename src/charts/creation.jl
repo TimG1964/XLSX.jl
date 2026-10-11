@@ -86,13 +86,27 @@ function _add_chart_part!(ws::Worksheet, xml::Union{AbstractString,XML.Node}, st
     id   = _next_shape_id(root)
     content = _chart_frame(rid, id, "Chart $(id - 1)"; cx_requires, locked = isnothing(anchor))
 
-    push!(root, isnothing(anchor) ?
+    push!(root, _in_drawing_prefixes(isnothing(anchor) ?
         build_absolute_anchor(content) :
         build_two_cell_anchor(
             column_number(anchor.start) - 1, row_number(anchor.start) - 1,   # 0-based inclusive
             column_number(anchor.stop),      row_number(anchor.stop),        # 0-based exclusive
-            content))
+            content), root))
     return path
+end
+
+# The anchor is built with Excel's `xdr` and `a`; a drawing part read from a file
+# may bind those namespaces to other prefixes. Rename into the drawing's own, and
+# where the drawing declares one of them not at all, declare it on the anchor.
+const _DRAWING_NS = Dict("xdr" => NS_XDR, "a" => NS_A)
+
+function _in_drawing_prefixes(anchor::XML.Node, root::XML.Node)
+    pfx    = ns_prefixes(root)
+    anchor = _in_prefixes(anchor, pfx; from = _DRAWING_NS)
+    for (p, ns) in _DRAWING_NS
+        haskey(pfx, ns) || (anchor = with_attribute(anchor, "xmlns:$p", ns))
+    end
+    return anchor
 end
 
 # Rebuild `node` bottom-up, replacing each element `e` with `f(e)` once its
@@ -134,16 +148,33 @@ function _chart_shell(template::AbstractString; title)
 end
 
 # A typed title in the template's formatting: c:txPr's body, with its end-of-
-# paragraph properties replaced by a run.
-function _title_with_text(t::XML.Node, text::AbstractString)
+# paragraph properties replaced by a run. A newline starts a new paragraph, as
+# it does in setChartTitleText.
+_title_with_text(t::XML.Node, text::AbstractString) =
+    _title_from_template(t, [isempty(line) ? XML.Node[] :
+                             XML.Node[XML.Element("a:r", XML.Element("a:t", XML.Text(line)))]
+                             for line in split(text, _NEWLINE)])
+
+# A RichTextString title: one copy of the template's paragraph per line, its runs
+# carrying only their own formatting so the rest still comes from the template.
+function _title_with_text(t::XML.Node, text::RichTextString)
+    pfx = Dict(NS_A => "a")
+    paras = map(_as_paragraphs(text)) do p
+        kids = XML.Node[_run_node(r, pfx) for r in p.runs]
+        isnothing(p.endprops) || push!(kids, _run_props_node(p.endprops, "endParaRPr", pfx))
+        kids
+    end
+    return _title_from_template(t, paras)
+end
+
+# The template's c:txPr turned into the title's c:rich, its paragraph copied once
+# per entry of `paras` with the end-of-paragraph properties replaced by that entry.
+function _title_from_template(t::XML.Node, paras::Vector{Vector{XML.Node}})
     txpr = first_element_with_tag(t, "txPr")
     p    = first_element_with_tag(txpr, "p")
-    run  = XML.Element("a:r", XML.Element("a:rPr"; lang = "en-US"),
-                              XML.Element("a:t", XML.Text(text)))
-    pk   = [k for k in p.children if !_is_el(k, "endParaRPr")]
-    push!(pk, run)
-    newp = _with_children(p, pk)
-    rich = XML.Element("c:rich", [k === p ? newp : k for k in txpr.children]...)
+    keep = XML.Node[k for k in p.children if !_is_el(k, "endParaRPr")]
+    newp = [_with_children(p, vcat(keep, kids)) for kids in paras]
+    rich = XML.Element("c:rich", [n for k in txpr.children for n in (k === p ? newp : (k,))]...)
     return insert_child(t, (NS_C, "title"), XML.Element("c:tx", rich))
 end
 
@@ -160,19 +191,32 @@ The chart starts as Excel's own default for that kind, formatted by the
 workbook's theme.
 
 `title` is `nothing` for Excel's automatic title, a string for typed text, or
-`false` for no title.
+`false` for no title. A `RichTextString` keeps each run's formatting, on top of
+the formatting Excel gives a new title, as does a styled string from
+StyledStrings.jl (Julia 1.11 and later). A `CellRef` or `SheetCellRef` binds the
+title to that cell, as [`setChartTitleText`](@ref) does; a string is always
+typed text, never read as a cell reference.
 """
 function addChart(ws::Worksheet, kind::Symbol;
                   anchor::Union{AbstractString,CellRange},
-                  title::Union{Nothing,Bool,AbstractString} = nothing)::Chart
-    haskey(C_KINDS, kind) || throw(XLSXError(
-        "Unknown chart kind `:$kind`. Use one of " * join((":$k" for k in keys(C_KINDS)), ", ") * "."))
-    title === true && throw(XLSXError("`title` is a string, `nothing` for Excel's automatic title, or `false` for none."))
-    k    = C_KINDS[kind]
-    path = _add_chart_part!(ws, _chart_shell(CHART_KIND_TEMPLATES[k.template]; title), k.style;
-                            anchor = anchor isa CellRange ? anchor : CellRange(anchor))
-    return getChart(ws, path)
+                  title::Union{Nothing,Bool,AbstractString,CellRef,SheetCellRef} = nothing)::Chart
+    title = _chart_title(title)
+    k    = _check_chart_args(kind, title)
+    _check_title_ref(get_xlsxfile(ws), ws.name, title)
+    path = _add_chart_part!(ws, _chart_shell(CHART_KIND_TEMPLATES[k.template]; title = _shell_title(title)),
+                            k.style; anchor = anchor isa CellRange ? anchor : CellRange(anchor))
+    return _bind_title(getChart(ws, path), title)
 end
+
+# The `title` keyword as the chart is built from it. The StyledStrings extension
+# adds a method turning a styled string into a RichTextString; a keyword can't be
+# dispatched on, so addChart calls this rather than the extension overloading it.
+_chart_title(title) = title
+
+# A bound title starts as the template's own title, keeping its formatting, and
+# is bound once the chart exists and the reference can be resolved.
+_shell_title(title) = title isa Union{CellRef,SheetCellRef} ? nothing : title
+_bind_title(c, title) = title isa Union{CellRef,SheetCellRef} ? setChartTitleText(c, title) : c
 
 const CHARTSHEET_TEMPLATE = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <chartsheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="xr" xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision"><sheetPr/><sheetViews><sheetView workbookViewId="0" zoomToFit="1"/></sheetViews><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></chartsheet>"""
@@ -185,11 +229,11 @@ build_absolute_anchor(content::XML.Node)::XML.Node =
         content,
         XML.Element("xdr:clientData"))
 
-        function _check_chart_args(kind::Symbol, title)
+function _check_chart_args(kind::Symbol, title)
     haskey(C_KINDS, kind) || throw(XLSXError(
         "Unknown chart kind `:$kind`. Use one of " * join((":$k" for k in keys(C_KINDS)), ", ") * "."))
     title === true && throw(XLSXError(
-        "`title` is a string, `nothing` for Excel's automatic title, or `false` for none."))
+        "`title` is a string, a cell reference, `nothing` for Excel's automatic title, or `false` for none."))
     return C_KINDS[kind]
 end
 
@@ -198,17 +242,20 @@ end
 
 Add an empty chart of `kind` on a new chartsheet, placed after the existing
 sheets. `sheetname` defaults to `Chart1`, `Chart2`, … as Excel names them. See
-the worksheet method for `kind` and `title`.
+the worksheet method for `kind` and `title`. A title bound to a cell must name
+its sheet — a `SheetCellRef`, not a `CellRef` — since a chartsheet has no cells.
 """
 function addChart(xf::XLSXFile, kind::Symbol; sheetname::AbstractString = "",
-                  title::Union{Nothing,Bool,AbstractString} = nothing)::Chart
+                  title::Union{Nothing,Bool,AbstractString,CellRef,SheetCellRef} = nothing)::Chart
+    title = _chart_title(title)
     k  = _check_chart_args(kind, title)
+    _check_title_ref(xf, nothing, title)                     # before the sheet exists
     ws = _register_sheet!(get_workbook(xf), parse(CHARTSHEET_TEMPLATE, XML.Node), sheetname;
                           dir = "xl/chartsheets", reltype = REL_CHARTSHEET,
                           mime = MIME_CHARTSHEET, default_name = "Chart")
-    path = _add_chart_part!(ws, _chart_shell(CHART_KIND_TEMPLATES[k.template]; title), k.style;
-                            anchor = nothing)
-    return getChart(xf, path)
+    path = _add_chart_part!(ws, _chart_shell(CHART_KIND_TEMPLATES[k.template]; title = _shell_title(title)),
+                            k.style; anchor = nothing)
+    return _bind_title(getChart(xf, path), title)
 end
 
 # The c:f text for a resolved reference: sheet-qualified and absolute, as a chart
@@ -293,24 +340,62 @@ function _cache_kind(vals::Vector, xf::XLSXFile)
     return ("numRef", "numCache", fmt)
 end
 
+# A c: element in the part's own prefix, as _el builds an a: one. Chart parts
+# Excel writes use `c`, but the prefix is the part's choice.
+_c_el(pfx, tag, kids...; attrs...) = XML.Element(prefixed_tag(pfx[NS_C], tag), kids...; attrs...)
+
 # <c:numRef><c:f>…</c:f><c:numCache>…</c:numCache></c:numRef>. Missing values are
-# omitted, as Excel does; ptCount still spans the whole range.
-function _cache_ref(f::AbstractString, vals::Vector, xf::XLSXFile)
-    reftag, cachetag, fmt = _cache_kind(vals, xf)
+# omitted, as Excel does; ptCount still spans the whole range. `str` forces a
+# strRef, for an element such as a title's c:tx that allows no other. `pfx` is
+# the chart part's prefixes.
+function _cache_ref(f::AbstractString, vals::Vector, xf::XLSXFile, pfx; str::Bool = false)
+    reftag, cachetag, fmt = str ? ("strRef", "strCache", string) : _cache_kind(vals, xf)
     cache = XML.Node[]
-    reftag == "numRef" && push!(cache, XML.Element("c:formatCode", XML.Text("General")))
-    push!(cache, XML.Element("c:ptCount"; val = string(length(vals))))
+    reftag == "numRef" && push!(cache, _c_el(pfx, "formatCode", XML.Text("General")))
+    push!(cache, _c_el(pfx, "ptCount"; val = string(length(vals))))
     for (i, v) in enumerate(vals)
         ismissing(v) && continue
-        push!(cache, XML.Element("c:pt", XML.Element("c:v", XML.Text(fmt(v))); idx = string(i - 1)))
+        push!(cache, _c_el(pfx, "pt", _c_el(pfx, "v", XML.Text(fmt(v))); idx = string(i - 1)))
     end
-    return XML.Element("c:$reftag", XML.Element("c:f", XML.Text(f)), XML.Element("c:$cachetag", cache...))
+    return _c_el(pfx, reftag, _c_el(pfx, "f", XML.Text(f)), _c_el(pfx, cachetag, cache...))
+end
+
+_throw_unqualified_title(ref::CellRef) = throw(XLSXError(
+    "`$ref` names no sheet. A chart on a chartsheet has no cells of its own, so a " *
+    "title bound to a cell must name the sheet holding it: pass a `SheetCellRef`, " *
+    "such as `SheetCellRef(\"Data!$ref\")`."))
+
+# Resolve a title's cell reference, if it is one, before a chart is built, so a bad
+# one leaves the workbook untouched. `sheet` is `nothing` for a chartsheet.
+function _check_title_ref(xf::XLSXFile, sheet, title)
+    title isa Union{CellRef,SheetCellRef} || return nothing
+    isnothing(sheet) && title isa CellRef && _throw_unqualified_title(title)
+    _resolve_ref(xf, sheet, title)
+    return nothing
+end
+
+# The cell a title is bound to: its formula, its value (a one-element vector) and
+# its RichTextString if it holds one (`nothing` otherwise).
+function _title_source(c::AbstractChart, ref::Union{CellRef,SheetCellRef})
+    sheet = _data_sheet(c)
+    isnothing(sheet) && ref isa CellRef && _throw_unqualified_title(ref)
+    f, vals = _series_ref(c, ref)
+    ws, cr  = ref isa SheetCellRef ? (getsheet(c.package, ref.sheet), ref.cellref) :
+                                     (getsheet(c.package, sheet), ref)
+    return f, vals, getRichTextString(ws, cr)
+end
+
+# A c: title bound to `ref`: the c:strRef, always a string cache whatever the cell
+# holds, and the cell's RichTextString.
+function _title_ref(c::Chart, ref::Union{CellRef,SheetCellRef})
+    f, vals, cellrich = _title_source(c, ref)
+    return _cache_ref(f, vals, c.package, ns_prefixes(chart_root(c)); str = true), cellrich
 end
 
 # A data child: <c:val><c:numRef>…</c:numRef></c:val>, and its value count.
-function _data_child(c::Chart, tag::AbstractString, ref)
+function _data_child(c::Chart, tag::AbstractString, ref, pfx)
     f, vals = _series_ref(c, ref)
-    return XML.Element("c:$tag", _cache_ref(f, vals, c.package)), length(vals)
+    return _c_el(pfx, tag, _cache_ref(f, vals, c.package, pfx)), length(vals)
 end
 
 """
@@ -352,11 +437,11 @@ _accent(i::Integer) = "accent" * string(mod1(i, 6))
 # A scatter series joined by a line: the template's noFill a:ln replaced with a
 # solid accent1 line, which _with_accent then retargets. 1.5 pt, as Excel's
 # Scatter with Straight Lines writes.
-function _with_scatter_line(sp::XML.Node)
+function _with_scatter_line(sp::XML.Node, pfx)
     ln  = first_element_with_tag(sp, "ln")
-    new = XML.Element("a:ln",
-              XML.Element("a:solidFill", XML.Element("a:schemeClr"; val = "accent1")),
-              XML.Element("a:round"); w = "19050", cap = "rnd")
+    new = _el(pfx, "ln",
+              _el(pfx, "solidFill", _el(pfx, "schemeClr"; val = "accent1")),
+              _el(pfx, "round"); w = "19050", cap = "rnd")
     return isnothing(ln) ? insert_child(sp, (NS_A, "spPr"), new) : replace_child(sp, ln, new)
 end
 
@@ -381,6 +466,22 @@ _with_color(n::XML.Node, color, pfx) =
     _rewrite(n) do e
         localname(e) == "schemeClr" && _attr(e, "val") == "accent1" || return e
         return _series_color_node(color, e, pfx)
+    end
+
+# A fragment built with Excel's usual prefixes — `from` maps each to its namespace
+# — renamed into a part's own prefixes `pfx`. Any other prefix is left alone, as
+# is one whose namespace `pfx` lacks.
+const _TEMPLATE_NS = Dict("c" => NS_C, "a" => NS_A)
+
+_in_prefixes(node::XML.Node, pfx; from = _TEMPLATE_NS) =
+    _rewrite(node) do e
+        tag = XML.tag(e)
+        i   = findfirst(':', tag)
+        isnothing(i) && return e
+        ns  = get(from, tag[1:prevind(tag, i)], nothing)
+        (isnothing(ns) || !haskey(pfx, ns)) && return e
+        new = prefixed_tag(pfx[ns], tag[nextind(tag, i):end])
+        return new == tag ? e : typeof(e)(XML.nodetype(e), new, e.attributes, XML.value(e), e.children)
     end
 
 # The formatting children of a kind's template series: spPr, marker, smooth,
@@ -476,15 +577,16 @@ function addSeries(c::Chart, values;
     idx  = maximum((something(_int_val(s, "idx"),   -1) for s in sers); init = -1) + 1
     ord  = maximum((something(_int_val(s, "order"), -1) for s in sers); init = -1) + 1
 
-    kids = XML.Node[XML.Element("c:idx"; val = string(idx)),
-                    XML.Element("c:order"; val = string(ord))]
-    isnothing(name) || push!(kids, XML.Element("c:tx", XML.Element("c:v", XML.Text(name))))
+    kids = XML.Node[_c_el(pfx, "idx"; val = string(idx)),
+                    _c_el(pfx, "order"; val = string(ord))]
+    isnothing(name) || push!(kids, _c_el(pfx, "tx", _c_el(pfx, "v", XML.Text(name))))
     if !isnothing(name_ref)
         nf, nv = _series_ref(c, name_ref)
-        push!(kids, XML.Element("c:tx", _cache_ref(nf, nv, c.package)))
+        # A series name is text: ser/tx allows a strRef, never a numRef, even for a number cell.
+        push!(kids, _c_el(pfx, "tx", _cache_ref(nf, nv, c.package, pfx; str = true)))
     end
 
-    pattern = _series_pattern(kind)
+    pattern = [_in_prefixes(k, pfx) for k in _series_pattern(kind)]
     col     = something(color, _accent(n + 1))
     for k in pattern
         t = localname(k)
@@ -494,26 +596,26 @@ function addSeries(c::Chart, values;
         elseif t == "smooth" && !isnothing(smooth)
             k = with_attribute(k, "val", smooth ? "1" : "0")
         elseif t == "spPr" && line === true
-            k = _with_scatter_line(k)
+            k = _with_scatter_line(k, pfx)
         end
         push!(kids, _varies_by_point(kind) ? k : _with_color(k, col, pfx))
     end
 
-    val, npts = _data_child(c, isxy ? "yVal" : "val", values)
+    val, npts = _data_child(c, isxy ? "yVal" : "val", values, pfx)
     if !isnothing(categories)
-        cat, ncat = _data_child(c, isxy ? "xVal" : "cat", categories)
+        cat, ncat = _data_child(c, isxy ? "xVal" : "cat", categories, pfx)
         push!(kids, cat)
         npts = max(npts, ncat)
     end
     push!(kids, val)
-    isnothing(bubble_sizes) || push!(kids, first(_data_child(c, "bubbleSize", bubble_sizes)))
+    isnothing(bubble_sizes) || push!(kids, first(_data_child(c, "bubbleSize", bubble_sizes, pfx)))
 
     if _varies_by_point(kind)
         proto = pattern[findfirst(k -> localname(k) == "dPt", pattern)]
         append!(kids, _vary_color_points(proto, npts, pfx))
     end
 
-    ser  = XML.Element("c:ser", kids...)
+    ser  = _c_el(pfx, "ser", kids...)
     gtag = String(localname(g))
     new  = rebuild_path(root,
                [(NS_C, "chart")    => "chart",
@@ -654,15 +756,19 @@ layout.
 """
 function addChartEx(ws::Worksheet, kind::Symbol, values; anchor::Union{AbstractString,CellRange},
                     categories = nothing, name = nothing, name_ref = nothing,
-                    title::Union{Nothing,Bool,AbstractString} = nothing)::ChartEx
+                    title::Union{Nothing,Bool,AbstractString,CellRef,SheetCellRef} = nothing)::ChartEx
+    title = _chart_title(title)
+    _check_title_ref(get_xlsxfile(ws), ws.name, title)
     doc = _chartex_doc(get_xlsxfile(ws), ws.name, kind, values; categories, name, name_ref, title)
     return _place_chartex!(ws, doc, kind, anchor isa CellRange ? anchor : CellRange(anchor), title)
 end
 
 function addChartEx(xf::XLSXFile, kind::Symbol, values; sheetname::AbstractString = "",
                     categories = nothing, name = nothing, name_ref = nothing,
-                    title::Union{Nothing,Bool,AbstractString} = nothing)::ChartEx
+                    title::Union{Nothing,Bool,AbstractString,CellRef,SheetCellRef} = nothing)::ChartEx
+    title = _chart_title(title)
     _require_qualified(values, categories, name_ref)        # a chartsheet holds no cells
+    _check_title_ref(xf, nothing, title)
     doc = _chartex_doc(xf, nothing, kind, values; categories, name, name_ref, title)
     ws  = _register_sheet!(get_workbook(xf), parse(CHARTSHEET_TEMPLATE, XML.Node), sheetname;
                            dir = "xl/chartsheets", reltype = REL_CHARTSHEET,
@@ -677,7 +783,8 @@ function _chartex_doc(xf::XLSXFile, sheet, kind::Symbol, values;
                       categories, name, name_ref, title)
     haskey(CX_KINDS, kind) || throw(XLSXError(
         "Unknown chartEx kind `:$kind`. Use one of " * join((":$k" for k in keys(CX_KINDS)), ", ") * "."))
-    title === true && throw(XLSXError("`title` is a string, `nothing` for the default, or `false` for none."))
+    title === true && throw(XLSXError(
+        "`title` is a string, a cell reference, `nothing` for the default, or `false` for none."))
     doc  = _chartex_shell(kind; title)
     root = xml_root_element(doc)
     return replace_child(doc, root,
@@ -688,7 +795,7 @@ function _place_chartex!(ws::Worksheet, doc::XML.Node, kind::Symbol, anchor, tit
     k    = CX_KINDS[kind]
     path = _add_chart_part!(ws, doc, k.style; anchor, cx_requires = k.requires)
     c    = getChart(ws, path)
-    title isa AbstractString && setChartTitleText(c, title)
+    title isa Union{AbstractString,CellRef,SheetCellRef} && setChartTitleText(c, title)
     return c
 end
 

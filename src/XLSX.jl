@@ -62,7 +62,7 @@ export
     addsheet!, renamesheet!, copysheet!, deletesheet!,
     addImage,
     # Cells & data
-    CellRef, row_number, column_number, eachtablerow,
+    CellRef, SheetCellRef, row_number, column_number, eachtablerow,
     readdata, getdata, gettable, readtable, readto,
     iserror, geterror,
     gettransposedtable, readtransposedtable,

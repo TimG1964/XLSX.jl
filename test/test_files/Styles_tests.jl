@@ -490,7 +490,7 @@ end
         @test XLSX.getBorder(s, "A1").border == Dict("left" => Dict("rgb" => "FF111111", "style" => "hair"), "bottom" => Dict("rgb" => "FF111111", "style" => "hair"), "right" => Dict("rgb" => "FF111111", "style" => "hair"), "top" => Dict("rgb" => "FF111111", "style" => "hair"), "diagonal" => Dict("rgb" => "FF111111", "style" => "hair", "direction" => "both"))
         @test XLSX.getBorder(s, "D10").border == Dict("left" => Dict("rgb" => "FF111111", "style" => "hair"), "bottom" => Dict("rgb" => "FF111111", "style" => "hair"), "right" => Dict("rgb" => "FF111111", "style" => "hair"), "top" => Dict("rgb" => "FF111111", "style" => "hair"), "diagonal" => Dict("rgb" => "FF111111", "style" => "hair", "direction" => "both"))
         @test XLSX.getcell(s, "D11") isa XLSX.EmptyCell
-        @test_throws XLSX.XLSXError XLSX.getBorder(s, "D11") # Cannot get a border outside sheet dimension.
+        @test isnothing(XLSX.getBorder(s, "D11"))  # outside the sheet dimension, so empty
         SAVE_FILES && save_outfile(f)
 
         f = XLSX.newxlsx()
@@ -1595,9 +1595,9 @@ end
         @test XLSX.setFont(s, 2:3, 1:3; color="grey42") == -1
 
         # Outside sheet dimension
-        @test_throws XLSX.XLSXError XLSX.getFont(s, 2, 4)
-        @test_throws XLSX.XLSXError XLSX.getFont(s, 4, 2)
-        @test_throws XLSX.XLSXError XLSX.getFont(s, 4, 4)
+        @test isnothing(XLSX.getFont(s, 2, 4))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getFont(s, 4, 2))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getFont(s, 4, 4))          # outside the dimension: an empty cell
 
         s[1:3, 1:3] = ""
         default_font = XLSX.getDefaultFont(s).font
@@ -1626,9 +1626,9 @@ end
         @test_throws XLSX.XLSXError XLSX.setBorder(s, :; allsides=["color" => "grey42", "style" => "thick"])
         @test_throws XLSX.XLSXError XLSX.setBorder(s, :, :; allsides=["color" => "grey42", "style" => "thick"])
         @test_throws XLSX.XLSXError XLSX.setBorder(s, [2, 3], 1:3; allsides=["color" => "grey42", "style" => "thick"]) == -1
-        @test_throws XLSX.XLSXError XLSX.getBorder(s, 2, 1)
-        @test_throws XLSX.XLSXError XLSX.getBorder(s, 3, 2)
-        @test_throws XLSX.XLSXError XLSX.getBorder(s, 2, 3)
+        @test isnothing(XLSX.getBorder(s, 2, 1))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getBorder(s, 3, 2))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getBorder(s, 2, 3))          # outside the dimension: an empty cell
         s[1:3, 1:3] = ""
         XLSX.setBorder(s, "A1"; allsides=["color" => "grey42", "style" => "thick"])
         @test XLSX.getBorder(s, "A1").border == Dict("left" => Dict("rgb" => "FF6B6B6B", "style" => "thick"), "bottom" => Dict("rgb" => "FF6B6B6B", "style" => "thick"), "right" => Dict("rgb" => "FF6B6B6B", "style" => "thick"), "top" => Dict("rgb" => "FF6B6B6B", "style" => "thick"), "diagonal" => nothing)
@@ -1653,9 +1653,9 @@ end
         @test_throws XLSX.XLSXError XLSX.setFill(s, :, :; pattern="lightVertical", fgColor="Red", bgColor="blue")
         @test_throws XLSX.XLSXError XLSX.setFill(s, :; pattern="lightVertical", fgColor="Red", bgColor="blue")
         @test_throws XLSX.XLSXError XLSX.setFill(s, [2, 3], 1:3; pattern="lightVertical", fgColor="Red", bgColor="blue") == -1
-        @test_throws XLSX.XLSXError XLSX.getFill(s, 2, 1)
-        @test_throws XLSX.XLSXError XLSX.getFill(s, 3, 2)
-        @test_throws XLSX.XLSXError XLSX.getFill(s, 2, 3)
+        @test isnothing(XLSX.getFill(s, 2, 1))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getFill(s, 3, 2))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getFill(s, 2, 3))          # outside the dimension: an empty cell
         s[1:3, 1:3] = ""
         XLSX.setFill(s, "A1"; pattern="lightVertical", fgColor="Red", bgColor="blue")
         @test XLSX.getFill(s, "A1").fill == Dict("patternFill" => Dict("bgrgb" => "FF0000FF", "patternType" => "lightVertical", "fgrgb" => "FFFF0000"))
@@ -1680,9 +1680,9 @@ end
         @test_throws XLSX.XLSXError XLSX.setAlignment(s, :, :; horizontal="right", vertical="justify", wrapText=true)
         @test_throws XLSX.XLSXError XLSX.setAlignment(s, :; horizontal="right", vertical="justify", wrapText=true)
         @test_throws XLSX.XLSXError XLSX.setAlignment(s, [2, 3], 1:3; horizontal="right", vertical="justify", wrapText=true) == -1
-        @test_throws XLSX.XLSXError XLSX.getAlignment(s, 2, 1)
-        @test_throws XLSX.XLSXError XLSX.getAlignment(s, 3, 2)
-        @test_throws XLSX.XLSXError XLSX.getAlignment(s, 2, 3)
+        @test isnothing(XLSX.getAlignment(s, 2, 1))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getAlignment(s, 3, 2))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getAlignment(s, 2, 3))          # outside the dimension: an empty cell
         s[1:3, 1:3] = ""
         XLSX.setAlignment(s, "A1"; horizontal="right", vertical="justify", wrapText=true)
         @test XLSX.getAlignment(s, "A1").alignment == Dict("alignment" => Dict("horizontal" => "right", "vertical" => "justify", "wrapText" => "1"))
@@ -1707,9 +1707,9 @@ end
         @test_throws XLSX.XLSXError XLSX.setFormat(s, :, :; format="Percentage")
         @test_throws XLSX.XLSXError XLSX.setFormat(s, :; format="Percentage")
         @test_throws XLSX.XLSXError XLSX.setFormat(s, [2, 3], 1:3; format="Percentage") == -1
-        @test_throws XLSX.XLSXError XLSX.getFormat(s, 2, 1)
-        @test_throws XLSX.XLSXError XLSX.getFormat(s, 3, 2)
-        @test_throws XLSX.XLSXError XLSX.getFormat(s, 2, 3)
+        @test isnothing(XLSX.getFormat(s, 2, 1))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getFormat(s, 3, 2))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getFormat(s, 2, 3))          # outside the dimension: an empty cell
         s[1:3, 1:3] = ""
         XLSX.setFormat(s, "A1"; format="#,##0.000;(#,##0.000)")
         @test XLSX.getFormat(s, "A1").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000;(#,##0.000)"))

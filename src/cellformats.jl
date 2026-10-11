@@ -272,7 +272,7 @@ setUniformFont(ws::Worksheet, rng::CellRange; kw...)::Int = process_uniform_attr
     getFont(sh::Worksheet, row::Int, col::Int) -> ::Union{Nothing, CellFont}
 
 Get the font used by a single cell reference in a worksheet `sh` or XLSXFile `xf`.
-The specified cell must be within the sheet dimension.
+A cell outside the sheet dimension is empty, so this returns `nothing`, as for any empty cell.
 
 Return a `CellFont` object containing:
 - `fontId`    : a 0-based index of the font in the workbook
@@ -358,7 +358,7 @@ end
     getBorder(sh::Worksheet, row::Int, col::Int) -> ::Union{Nothing, CellBorder}
    
 Get the borders used by a single cell at reference in a worksheet or XLSXFile.
-The specified cell must be within the sheet dimension.
+A cell outside the sheet dimension is empty, so this returns `nothing`, as for any empty cell.
 
 Return a `CellBorder` object containing:
 - `borderId`    : a 0-based index of the border in the workbook
@@ -843,7 +843,7 @@ end
     getFill(sh::Worksheet, row::Int, col::Int) -> ::Union{Nothing, CellFill}
    
 Get the fill used by a single cell at reference `cr` in a worksheet or XLSXFile.
-The specified cell must be within the sheet dimension.
+A cell outside the sheet dimension is empty, so this returns `nothing`, as for any empty cell.
 
 Return a `CellFill` object containing:
 - `fillId`    : a 0-based index of the fill in the workbook
@@ -1169,7 +1169,7 @@ setUniformFill(ws::Worksheet, rng::CellRange; kw...)::Int = process_uniform_attr
     getAlignment(sh::Worksheet, row::Int, col::Int) -> ::Union{Nothing, CellAlignment}
    
 Get the alignment used by a single cell at reference `cr` in a worksheet or XLSXFile.
-The specified cell must be within the sheet dimension.
+A cell outside the sheet dimension is empty, so this returns `nothing`, as for any empty cell.
 
 Return a `CellAlignment` object containing:
 - `alignment`      : a dictionary of alignment attributes: alignmentAttribute -> (attribute -> value)
@@ -1454,7 +1454,7 @@ setUniformAlignment(ws::Worksheet, rng::CellRange; kw...)::Int = process_uniform
     getFormat(sh::Worksheet, row::Int, col::int) -> ::Union{Nothing, CellFormat}
    
 Get the format (numFmt) used by a single cell at reference `cr` in a worksheet or XLSXFile.
-The specified cell must be within the sheet dimension.
+A cell outside the sheet dimension is empty, so this returns `nothing`, as for any empty cell.
 
 Return a `CellFormat` object containing:
 - `numFmtId`          : a 0-based index of the formats in the workbook. Values below 164 are 
@@ -2242,7 +2242,6 @@ end
     isMergedCell(ws::Worksheet,  row::Int, col::Int) -> Bool
 
 Return `true` if a cell is part of a merged cell range and `false` if not.
-The specified cell must be within the sheet dimension.
 
 Alternatively, if you have already obtained the merged cells for the worksheet,
 you can avoid repeated determinations and pass them as a keyword argument to 
@@ -2283,11 +2282,6 @@ function isMergedCell(ws::Worksheet, cellref::CellRef; mergedCells::Union{Vector
         throw(XLSXError("Cannot get merged cells because cache is not enabled."))
     end
 
-    d = get_dimension(ws)
-    if cellref ∉ d
-        throw(XLSXError("Cell specified is outside sheet dimension `$d`"))
-    end
-
     if ismissing(mergedCells) # Get mergedCells if missing
         mergedCells = getMergedCells(ws)
     end
@@ -2310,7 +2304,6 @@ end
     getMergedBaseCell(ws::Worksheet, row::Int, col::Int) -> Union{Nothing, NamedTuple{CellRef, Any}}
 
 Return the cell reference and cell value of the base cell of a merged cell range in a worksheet as a named tuple.
-The specified cell must be within the sheet dimension.
 If the specified cell is not part of a merged cell range, return `nothing`.
 
 The base cell is the top-left cell of the merged cell range and is the reference cell for the range.
@@ -2355,11 +2348,6 @@ function getMergedBaseCell(ws::Worksheet, cellref::CellRef; mergedCells::Union{V
 
     if !get_xlsxfile(ws).use_cache_for_sheet_data
         throw(XLSXError("Cannot get merged cells because cache is not enabled."))
-    end
-
-    d = get_dimension(ws)
-    if cellref ∉ d
-        throw(XLSXError("Cell specified is outside sheet dimension `$d`"))
     end
 
     if ismissing(mergedCells) # Get mergedCells if missing

@@ -138,7 +138,11 @@ end
         @test r.runs[4].atts == Dict(:bold => true, :color => "FF000000", :size => 11)
         @test r.runs[6].text == "ty"
         @test r.runs[6].atts == Dict(:color => "FFFF0000", :size => 11)
-        @test XLSX.getFont(sh, "A1").font == Dict("name" => Dict("val" => "Palatino"), "sz" => Dict("val" => "11"), "color" => Dict("theme" => "1"))
+        # An empty cell holds no rich text, so nothing rather than an error.
+        @test isnothing(XLSX.getRichTextString(sh, "Z99"))
+        @test isnothing(XLSX.getRichTextString(sh, 99, 26))
+        @test isnothing(XLSX.getRichTextString(xf, "Sheet1!Z99"))     # outside the dimension too
+        @test XLSX.getFont(sh, "A1").font ==Dict("name" => Dict("val" => "Palatino"), "sz" => Dict("val" => "11"), "color" => Dict("theme" => "1"))
         XLSX.setFont(sh, "A1:F2"; name="Palatino")
         r = XLSX.getRichTextString(sh, "B2")
         @test r.runs[4].text == "k"

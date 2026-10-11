@@ -647,6 +647,72 @@ function _as_runs(s::AbstractString)
     return out
 end
 
+# A RichTextString keeps its runs' formatting: each RichTextRun becomes runs
+# carrying its props, split at newlines as a plain string is. In a paragraph a
+# newline is an a:br, itself carrying the props, so the line keeps its height.
+function _as_runs(rts::RichTextString)
+    out = DrawingRun[]
+    for r in rts.runs
+        props = _rich_run_props(r.atts)
+        for (i, piece) in enumerate(split(r.text, _NEWLINE))
+            i > 1 && push!(out, DrawingRun("\n"; kind = :br, props))
+            isempty(piece) || push!(out, DrawingRun(piece; props))
+        end
+    end
+    return out
+end
+
+# In a text body a newline starts a new paragraph. A paragraph left with no text
+# takes the props of the run its newline fell in as its end-of-paragraph props.
+function _as_paragraphs(rts::RichTextString)
+    paras = DrawingParagraph[]
+    runs  = DrawingRun[]
+    props = nothing
+    for r in rts.runs
+        props = _rich_run_props(r.atts)
+        for (i, piece) in enumerate(split(r.text, _NEWLINE))
+            if i > 1
+                push!(paras, DrawingParagraph(nothing, runs, isempty(runs) ? props : nothing, nothing))
+                runs = DrawingRun[]
+            end
+            isempty(piece) || push!(runs, DrawingRun(piece; props))
+        end
+    end
+    push!(paras, DrawingParagraph(nothing, runs, isempty(runs) ? props : nothing, nothing))
+    return paras
+end
+
+_rich_flag(v, name) = v in (true, 1) ? true : v in (false, 0) ? false :
+    throw(XLSXError("Rich text attribute `:$name` is `true` or `false`, not `$(repr(v))`."))
+
+const _VERTALIGN_BASELINE = Dict("superscript" => 0.30, "subscript" => -0.25, "baseline" => 0.0)
+
+"""
+    _rich_run_props(atts) -> Union{Nothing,DrawingRunProps}
+
+The DrawingML run properties for a `RichTextRun`'s attributes. A run with none
+gets `nothing`, so it inherits. `false` is written as an explicit "off", so a
+run reads as written even where the element's default is, say, bold.
+"""
+function _rich_run_props(atts)
+    (isnothing(atts) || isempty(atts)) && return nothing
+    kw = Dict{Symbol,Any}()
+    haskey(atts, :bold)   && (kw[:bold]   = _rich_flag(atts[:bold], :bold))
+    haskey(atts, :italic) && (kw[:italic] = _rich_flag(atts[:italic], :italic))
+    haskey(atts, :under)  && (kw[:under]  = _rich_flag(atts[:under], :under) ? "sng" : "none")
+    haskey(atts, :strike) && (kw[:strike] = _rich_flag(atts[:strike], :strike) ? "sngStrike" : "noStrike")
+    if haskey(atts, :vertAlign)
+        va = string(atts[:vertAlign])
+        haskey(_VERTALIGN_BASELINE, va) || throw(XLSXError(
+            "Rich text attribute `:vertAlign` is \"superscript\", \"subscript\" or \"baseline\", not `$(repr(atts[:vertAlign]))`."))
+        kw[:baseline] = _VERTALIGN_BASELINE[va]
+    end
+    haskey(atts, :size)  && (kw[:size]  = convert(Float64, atts[:size]))
+    haskey(atts, :name)  && (kw[:latin] = string(atts[:name]))
+    haskey(atts, :color) && (kw[:fill]  = DrawingFill(:solid; fgcolor = get_color(atts[:color])))
+    return DrawingRunProps(; kw...)
+end
+
 """
     DrawingBodyProps
 

@@ -570,4 +570,175 @@
         SAVE_FILES && save_outfile(xf)
     end
 
+    @testset "rich text and cell-bound titles" begin
+        tmp = "cx_rich_titles.xlsx"
+        cp(joinpath(data_directory, "chartex_layouts.xlsx"), tmp; force=true)
+        xf = XLSX.openxlsx(tmp; mode="rw")
+        cx(sheet) = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == sheet, XLSX.Charts.getCharts(xf)))
+        cx_title(c) = XLSX.first_element_with_tag(XLSX.Charts._cx_chart(c), "title")
+        cx_axis_title(c, id) = XLSX.first_element_with_tag(XLSX.Charts._cx_axis_node(c, id), "title")
+        cx_f(t) = XLSX.child_text(XLSX.first_element_with_tag(XLSX.first_element_with_tag(t, "tx"), "txData"), "f")
+        runs(t) = [r for p in t.paragraphs for r in p.runs]
+        rts = XLSX.RichTextString(XLSX.RichTextRun("Bold", [:bold => true]),
+                                  XLSX.RichTextRun(" red\nline 2", [:color => "red"]))
+        try
+            # A typed title (Excel's own): each run starts from the old first run's
+            # rPr — which carries Excel's Aptos Narrow — with its own attributes on top.
+            h = cx("histogram")
+            XLSX.Charts.setChartTitleText(h, rts)
+            @test XLSX.Charts.getChartTitle(h) == "Bold red\nline 2"          # cx:v, plain
+            body = XLSX.Charts.getChartTitleTextProps(h)
+            @test length(body.paragraphs) == 2
+            r = runs(body)
+            @test [x.text for x in r] == ["Bold", " red", "line 2"]
+            @test r[1].props.bold === true && r[2].props.bold === false       # the old run's b="0"
+            @test r[2].props.fill.fgcolor.val == "FF0000" && r[3].props.fill.fgcolor.val == "FF0000"
+            @test all(x -> x.props.latin == "Aptos Narrow", r)
+            @test all(x -> x.props.size ≈ 14.0, r)
+            @test body.paragraphs[2].props.align == "ctr"                     # pPr copied
+
+            # A plain string with a newline gives two paragraphs too.
+            XLSX.Charts.setChartTitleText(h, "One\nTwo")
+            @test [x.text for x in runs(XLSX.Charts.getChartTitleTextProps(h))] == ["One", "Two"]
+            @test XLSX.Charts.getChartTitle(h) == "One\nTwo"
+
+            # A title with no cx:txPr: rich text creates one, runs carrying only their own.
+            w = cx("waterfall")
+            @test isnothing(XLSX.Charts.getChartTitleTextProps(w))
+            XLSX.Charts.setChartTitleText(w, "Plain")                         # plain: still none
+            @test isnothing(XLSX.Charts.getChartTitleTextProps(w))
+            XLSX.Charts.setChartTitleText(w, rts)
+            r = runs(XLSX.Charts.getChartTitleTextProps(w))
+            @test r[1].props.bold === true && isnothing(r[1].props.size)
+            @test isnothing(r[2].props.bold)
+
+            # Binding: cx:f and the cached text, the runs folded into the paragraph default.
+            XLSX.Charts.setChartTitleText(h, rts)
+            XLSX.Charts.setChartTitleText(h, XLSX.CellRef("A1"))
+            @test cx_f(cx_title(h)) == "histogram!\$A\$1"
+            @test !isnothing(XLSX.Charts.getChartTitleRange(h))
+            @test XLSX.Charts.getChartTitle(h) == string(xf["histogram"]["A1"])
+            body = XLSX.Charts.getChartTitleTextProps(h)
+            @test isempty(runs(body))                                         # no stale text
+            d = XLSX.Charts.default_run_props(body)
+            @test d.bold === true && d.latin == "Aptos Narrow" && d.size ≈ 14.0
+
+            # A numeric cell is cached as text; a rich-text cell lends what its runs share.
+            ws = xf["histogram"]
+            ws["Z1"] = 2026
+            ws["Z2"] = XLSX.RichTextString(XLSX.RichTextRun("Big", [:italic => true, :color => "blue"]),
+                                           XLSX.RichTextRun(" blue", [:italic => true, :color => "blue", :bold => false]))
+            XLSX.Charts.setChartTitleText(h, XLSX.SheetCellRef("histogram!Z1"))
+            @test XLSX.Charts.getChartTitle(h) == "2026"
+            XLSX.Charts.setChartTitleText(h, XLSX.CellRef("Z2"))
+            d = XLSX.Charts.default_run_props(XLSX.Charts.getChartTitleTextProps(h))
+            @test d.italic === true && d.fill.fgcolor.val == "0000FF"
+            @test d.bold === true                                             # not shared, so kept
+            @test XLSX.Charts.getChartTitle(h) == "Big blue"
+
+            # Typing again unbinds it; the new runs inherit the folded formatting.
+            XLSX.Charts.setChartTitleText(h, "Typed")
+            @test isnothing(XLSX.Charts.getChartTitleRange(h))
+            @test isnothing(only(runs(XLSX.Charts.getChartTitleTextProps(h))).props)
+
+            # Excel's own bound title: the formula is a hidden _xlchart name, which the
+            # Range getter resolves. It can be rebound, and typed over with rich text.
+            b = cx("bound")
+            @test XLSX.Charts.getChartTitleRef(b) == "_xlchart.v1.31"
+            r = XLSX.Charts.getChartTitleRange(b)
+            @test r isa XLSX.SheetCellRef && r.sheet == "bound" && r.cellref == XLSX.CellRef("D1")
+            XLSX.Charts.setChartTitleText(b, XLSX.CellRef("A1"))
+            @test XLSX.Charts.getChartTitleRef(b) == "bound!\$A\$1"
+            @test cx_f(cx_title(b)) == "bound!\$A\$1"
+            XLSX.Charts.setChartTitleText(b, rts)
+            @test isnothing(XLSX.Charts.getChartTitleRange(b))
+            @test runs(XLSX.Charts.getChartTitleTextProps(b))[1].props.bold === true
+
+            # Axis titles, by axis id, created where there are none.
+            XLSX.Charts.setAxisTitleText(w, 1, rts)
+            at = XLSX.Charts.getAxisTitleTextProps(w, 1)
+            @test XLSX.Charts.text_content(at) == "Bold red\nline 2"
+            @test runs(at)[1].props.bold === true
+            @test XLSX.Charts.getAxisTitle(w, 1) == "Bold red\nline 2"
+            @test isnothing(XLSX.Charts.getAxisTitleRef(w, 1))
+            @test isnothing(XLSX.Charts.getAxisTitle(w, 0))                   # no title at all
+            xf["waterfall"]["Z1"] = "Movement"
+            xf["waterfall"]["Z2"] = "Stage"
+            XLSX.Charts.setAxisTitleText(w, 0, XLSX.SheetCellRef("waterfall!Z1"))
+            @test cx_f(cx_axis_title(w, 0)) == "waterfall!\$Z\$1"
+            @test XLSX.Charts.getAxisTitleRef(w, 0) == "waterfall!\$Z\$1"
+            r = XLSX.Charts.getAxisTitleRange(w, 0)
+            @test r isa XLSX.SheetCellRef && r.sheet == "waterfall" && r.cellref == XLSX.CellRef("Z1")
+            @test XLSX.Charts.getAxisTitle(w, 0) == "Movement"
+            XLSX.Charts.setAxisTitleText(w, 1, XLSX.CellRef("Z3"))          # empty: cx:v is ""
+            @test isnothing(XLSX.Charts.getAxisTitle(w, 1))                   # as for a c: title
+            XLSX.Charts.setAxisTitleText(w, 1, XLSX.CellRef("Z2"))
+            @test cx_f(cx_axis_title(w, 1)) == "waterfall!\$Z\$2"
+            @test isempty(runs(XLSX.Charts.getAxisTitleTextProps(w, 1)))
+            @test_throws XLSX.XLSXError XLSX.Charts.setAxisTitleText(w, 7, "No such axis")
+
+            # Survives a write and reopen.
+            SAVE_FILES && save_outfile(xf)
+            out = "cx_rich_titles_out.xlsx"
+            XLSX.writexlsx(out, xf; overwrite=true)
+            try
+                yf = XLSX.readxlsx(out)
+                cy(sheet) = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == sheet, XLSX.Charts.getCharts(yf)))
+                @test XLSX.Charts.getChartTitle(cy("histogram")) == "Typed"
+                w2 = cy("waterfall")
+                @test runs(XLSX.Charts.getChartTitleTextProps(w2))[1].props.bold === true
+                @test XLSX.Charts.getAxisTitleRef(w2, 0) == "waterfall!\$Z\$1"
+                @test XLSX.Charts.getAxisTitle(w2, 1) == "Stage"
+                @test XLSX.Charts.getChartTitleRange(cy("bound")) === nothing
+            finally
+                isfile(out) && rm(out)
+            end
+        finally
+            isfile(tmp) && rm(tmp)
+        end
+    end
+
+    @testset "addChartEx titles" begin
+        xf = XLSX.newxlsx()
+        ws = xf[1]
+        ws["A1"] = "Flow"; ws["A2"] = "a"; ws["A3"] = "b"; ws["B2"] = 3; ws["B3"] = -1
+        rts = XLSX.RichTextString(XLSX.RichTextRun("Cash", [:bold => true]), XLSX.RichTextRun(" flow"))
+        c = XLSX.Charts.addChartEx(ws, :waterfall, "B2:B3"; anchor = "D2:K16", categories = "A2:A3", title = rts)
+        @test XLSX.Charts.getChartTitle(c) == "Cash flow"
+        r = only(XLSX.Charts.getChartTitleTextProps(c).paragraphs).runs
+        @test r[1].props.bold === true
+        b = XLSX.Charts.addChartEx(ws, :waterfall, "B2:B3"; anchor = "D20:K34", title = XLSX.CellRef("A1"))
+        @test XLSX.Charts.getChartTitle(b) == "Flow"
+        @test !isnothing(XLSX.Charts.getChartTitleRange(b))
+        s = XLSX.Charts.addChartEx(ws, :waterfall, "B2:B3"; anchor = "D40:K54", title = "A1")
+        @test isnothing(XLSX.Charts.getChartTitleRange(s))                   # a string is literal
+
+        # A bad reference fails before anything is added.
+        n = length(XLSX.Charts.getCharts(ws))
+        @test_throws XLSX.XLSXError XLSX.Charts.addChartEx(ws, :waterfall, "B2:B3"; anchor = "D60:K74",
+                                                           title = XLSX.SheetCellRef("Nope!A1"))
+        @test length(XLSX.Charts.getCharts(ws)) == n
+        @test_throws XLSX.XLSXError XLSX.Charts.addChartEx(xf, :waterfall, "Sheet1!B2:B3"; title = XLSX.CellRef("A1"))
+        @test XLSX.sheetnames(xf) == ["Sheet1"]
+        cs = XLSX.Charts.addChartEx(xf, :waterfall, "Sheet1!B2:B3"; title = XLSX.SheetCellRef("Sheet1!A1"))
+        @test XLSX.Charts.getChartTitle(cs) == "Flow"
+        @test_throws XLSX.XLSXError XLSX.Charts.setChartTitleText(cs, XLSX.CellRef("A1"))
+
+        @static if VERSION >= v"1.11-"
+            ss = styled"{bold:Styled} {(foreground=#ff0000):title}"
+            check(t) = begin
+                r = only(t.paragraphs).runs
+                @test [x.text for x in r] == ["Styled", " ", "title"]
+                @test r[1].props.bold === true && r[3].props.fill.fgcolor.val == "FF0000"
+            end
+            t = XLSX.Charts.addChartEx(ws, :waterfall, "B2:B3"; anchor = "D80:K94", title = ss)
+            check(XLSX.Charts.getChartTitleTextProps(t))
+            XLSX.Charts.setChartTitleText(c, ss)
+            check(XLSX.Charts.getChartTitleTextProps(c))
+            XLSX.Charts.setAxisTitleText(c, first(XLSX.Charts.getChartAxisIds(c)), ss)
+            check(XLSX.Charts.getAxisTitleTextProps(c, first(XLSX.Charts.getChartAxisIds(c))))
+        end
+        SAVE_FILES && save_outfile(xf)
+    end
+
 end

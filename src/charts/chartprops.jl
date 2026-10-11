@@ -170,15 +170,41 @@ getAxisTextProps(c::Chart, ax::ChartAxis)  = parse_drawing_text(_wb(c), _axnode(
 
 """
     getAxisTitleRef(c::Chart, ax::ChartAxis) -> Union{Nothing,String}
+    getAxisTitleRef(c::ChartEx, id::Integer) -> Union{Nothing,String}
 
-The formula behind an axis title that references a cell
-(`c:title/c:tx/c:strRef/c:f`). `nothing` for a literal or absent title.
+The formula behind an axis title that references a cell, as written
+(`c:title/c:tx/c:strRef/c:f`, or `cx:txData/cx:f`). `nothing` for a literal or
+absent title. Excel writes a `cx:` formula as a hidden `_xlchart.*` defined
+name; [`getAxisTitleRange`](@ref) resolves it.
 """
 function getAxisTitleRef(c::Chart, ax::ChartAxis)
     tx = first_element_with_tag(first_element_with_tag(_axnode(c, ax), "title"), "tx")
     sr = first_element_with_tag(tx, "strRef")
     return isnothing(sr) ? nothing : child_text(sr, "f")
 end
+
+"""
+    getAxisTitleRange(c::Chart, ax::ChartAxis) -> ChartRange
+    getAxisTitleRange(c::ChartEx, id::Integer) -> ChartRange
+
+The cell an axis title is bound to, resolved — through a defined name where the
+formula is one. `nothing` for a typed or absent title. See
+[`getAxisTitleRef`](@ref) for the formula as written.
+"""
+getAxisTitleRange(c::Chart, ax::ChartAxis) = _title_range(c.package, getAxisTitleRef(c, ax))
+
+# The resolved range of a title's formula, as getChartTitleRange(::ChartEx) does.
+_title_range(xf::XLSXFile, f) = isnothing(f) ? nothing : resolve_chartex_ref(xf, f)
+
+"""
+    getAxisTitle(c::Chart, ax::ChartAxis) -> Union{Nothing,String}
+    getAxisTitle(c::ChartEx, id::Integer) -> Union{Nothing,String}
+
+An axis title's text as plain text, as [`getChartTitle`](@ref) gives the chart
+title's: the typed text, or for a title bound to a cell, the text cached when
+the file was saved. `nothing` where the axis has no title text.
+"""
+getAxisTitle(c::Chart, ax::ChartAxis) = parse_chart_title(_axnode(c, ax))
 
 """
     getAxisTitleText(c::Chart, ax::ChartAxis) -> Union{Nothing,DrawingText}
@@ -191,6 +217,18 @@ function getAxisTitleText(c::Chart, ax::ChartAxis)
     tx = first_element_with_tag(first_element_with_tag(_axnode(c, ax), "title"), "tx")
     return parse_drawing_text(_wb(c), tx; tag="rich")
 end
+
+"""
+    getAxisTitleTextProps(c::Chart, ax::ChartAxis) -> Union{Nothing,DrawingText}
+
+Text body for the axis title (`c:title/c:txPr`) — its formatting, which applies
+whether the title is typed or bound to a cell, and is the only formatting a
+bound title has. `nothing` means the axis has no title, or the title has no
+`c:txPr`. Contrast [`getAxisTitleText`](@ref), the literal text in
+`c:tx/c:rich`, and [`getAxisTextProps`](@ref), the tick labels' formatting.
+"""
+getAxisTitleTextProps(c::Chart, ax::ChartAxis) =
+    parse_drawing_text(_wb(c), first_element_with_tag(_axnode(c, ax), "title"))
 
 # An element whose presence turns a feature on, carrying an optional `c:spPr`.
 #
@@ -460,15 +498,20 @@ getChartTitleText(c::Chart) =
 
 """
     getChartTitleRef(c::Chart) -> Union{Nothing,String}
+    getChartTitleRef(c::ChartEx) -> Union{Nothing,String}
 
-The formula behind a title that references a cell (`c:title/c:tx/c:strRef/c:f`).
-`nothing` for a literal or absent title.
+The formula behind a title that references a cell, as written
+(`c:title/c:tx/c:strRef/c:f`, or `cx:txData/cx:f`). `nothing` for a literal or
+absent title. Excel writes a `cx:` formula as a hidden `_xlchart.*` defined
+name; [`getChartTitleRange`](@ref) resolves it.
 """
 function getChartTitleRef(c::Chart)
     tx = first_element_with_tag(getChartTitleNode(c), "tx")
     sr = first_element_with_tag(tx, "strRef")
     return isnothing(sr) ? nothing : child_text(sr, "f")
 end
+
+getChartTitleRange(c::Chart) = _title_range(c.package, getChartTitleRef(c))
 
 """
     getChartTitleShapeProps(c::Chart) -> Union{Nothing,DrawingShapeProps}
@@ -1860,17 +1903,33 @@ end
 
 """
     setChartTitleText(c, text) -> Chart
+    setChartTitleText(c, ref::Union{CellRef,SheetCellRef}) -> Chart
 
 Replace the chart title's text and all its formatting. `text` may be a
-`DrawingText` or a string, which becomes a one-run title inheriting its
-formatting from the chart style.
+`DrawingText`, a string, which becomes a one-run title inheriting its formatting
+from the chart style, or a `RichTextString`, whose runs keep their own
+formatting and inherit the rest. A newline starts a new paragraph. A styled
+string from StyledStrings.jl (`styled"…"`, Julia 1.11 and later) is converted to
+a `RichTextString` as it is when written to a cell.
 
 This replaces rather than merges, like writing a `RichTextString` to a cell —
 use [`setChartTitleTextProp`](@ref) to change one property and leave the rest.
 
-A title bound to a cell (`c:tx/c:strRef`) is replaced by literal text; the
-reference is lost. `c:autoTitleDeleted` is not touched, so a chart with the
-title switched off stays that way.
+Given a `CellRef` or `SheetCellRef`, the title is bound to that cell
+(`c:tx/c:strRef`) and shows its text, with the cell's current value cached as
+Excel does. A bare `CellRef` means the chart's own sheet; a chart on a
+chartsheet needs a `SheetCellRef`. A string is always typed text, never read as
+a reference — `"Q1"` is a valid title.
+
+A bound title can't carry rich text: this is a limit of Excel's file format,
+in which `c:tx` holds either a reference or typed runs, never both. Its one
+style is `c:title/c:txPr`. Binding a typed title moves its formatting there —
+the first paragraph's, overlaid by its first run's — and, where the cell holds a
+`RichTextString`, the formatting all of its runs share is laid over that.
+Formatting that varies between the cell's runs is not shown.
+
+Typing text over a bound title replaces the reference. `c:autoTitleDeleted` is
+not touched, so a chart with the title switched off stays that way.
 
 A title created here gets `c:overlay val="0"`, as Excel writes on every title
 it creates, so it sits beside the plot area rather than over it.
@@ -1890,24 +1949,101 @@ end
 setChartTitleText(c::Chart, text::AbstractString) =
     setChartTitleText(c, DrawingText(text))
 
-    # A title with no c:overlay is drawn over the plot area; Excel writes
+function setChartTitleText(c::Chart, ref::Union{CellRef,SheetCellRef})
+    strref, cellrich = _title_ref(c, ref)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    new  = rebuild_path(root,
+               [(NS_C, "chart") => "chart",
+                (NS_C, "title") => "title"],
+               t -> _title_with_ref(t, strref, cellrich, _wb(c), pfx);
+               prefixes = pfx)
+    set_chart_root!(c, new)
+    return c
+end
+
+_title_with_text(t::XML.Node, text::DrawingText, pfx) =
+    _title_with_tx(t, _text_from(text, "rich", pfx), pfx)
+
+# Put `content` — a c:rich or a c:strRef — in the title's c:tx, replacing either.
+# A title with no c:overlay is drawn over the plot area; Excel writes
 # overlay=0 on every title it creates, so a new title gets the same.
-function _title_with_text(t::XML.Node, text::DrawingText, pfx)
+function _title_with_tx(t::XML.Node, content::XML.Node, pfx)
     tkey = (NS_C, "title")
     tx = something(first_element_with_tag(t, "tx"), XML.Element(prefixed_tag(pfx[NS_C], "tx")))
-    tx = insert_child(remove_choice(tx, (NS_C, "tx"), TX_GROUP), (NS_C, "tx"),
-                      _text_from(text, "rich", pfx))
+    tx = insert_child(remove_choice(tx, (NS_C, "tx"), TX_GROUP), (NS_C, "tx"), content)
     t = insert_child(t, tkey, tx)
     return isnothing(first_element_with_tag(t, "overlay")) ?
            insert_child(t, tkey, _val_el(pfx, "overlay", "0")) : t
 end
 
+# A title bound to a cell has one style, c:txPr: c:tx holds c:strRef or c:rich,
+# never both. Typed formatting is kept by moving it into c:txPr; then whatever
+# formatting every run of a rich-text cell shares is laid over it.
+function _title_with_ref(t::XML.Node, strref::XML.Node, cellrich, wb::Workbook, pfx)
+    tkey = (NS_C, "title")
+    rich = first_element_with_tag(first_element_with_tag(t, "tx"), "rich")
+    isnothing(rich) ||
+        (t = insert_child(t, tkey, _txpr_from_rich(rich, first_element_with_tag(t, "txPr"), wb, pfx)))
+    for (field, value) in _common_run_props(cellrich)
+        t = _txpr_with_run_prop(t, tkey, field, value, pfx)
+    end
+    return _title_with_tx(t, strref, pfx)
+end
+
+# A c:txPr carrying a typed body's formatting, laid over the title's existing
+# c:txPr where it has one: one paragraph whose default run props are the old
+# c:txPr's, overlaid by the typed first paragraph's, then by its first run's. A
+# bound title has a single style, so later runs cannot be kept.
+function _txpr_from_rich(rich::XML.Node, txpr::Union{Nothing,XML.Node}, wb::Workbook, pfx;
+                         ns::AbstractString = NS_C)
+    text = parse_drawing_text(wb, rich; tag = String(localname(rich)))
+    old  = parse_drawing_text(wb, txpr)
+    base = something(old, text)
+    p1   = first(text.paragraphs)
+    run1 = findfirst(r -> r.kind === :run, p1.runs)
+    oldp = isnothing(old) || isempty(old.paragraphs) ? nothing : first(old.paragraphs).props
+    pp   = something(oldp, p1.props, DrawingParaProps())
+    def  = _overlay_run_props(isnothing(oldp) ? nothing : oldp.defprops,
+                              isnothing(p1.props) ? nothing : p1.props.defprops)
+    def  = _overlay_run_props(def, isnothing(run1) ? nothing : p1.runs[run1].props)
+    pp   = DrawingParaProps(pp.align, pp.level, pp.marginleft, pp.marginright, pp.indent,
+                            pp.rtl, pp.linespacing, pp.spacebefore, pp.spaceafter, def, nothing)
+    para = DrawingParagraph(pp, DrawingRun[], nothing, nothing)
+    return _text_from(DrawingText(base.body, base.liststyle, [para], nothing), "txPr", pfx, ns)
+end
+
+# Field by field, `top` where it sets a value and `base` elsewhere.
+function _overlay_run_props(base, top)
+    isnothing(top)  && return base
+    isnothing(base) && return top
+    return DrawingRunProps((f === :raw ? nothing :
+                            something(getfield(top, f), Some(getfield(base, f)))
+                            for f in fieldnames(DrawingRunProps))...)
+end
+
+# The (field, value) pairs every run of a RichTextString agrees on, as run-prop
+# setters take them. A run with no attributes agrees on nothing.
+function _common_run_props(rts)
+    isnothing(rts) && return Pair{Symbol,Any}[]
+    ps = [Dict(_run_prop_pairs(_rich_run_props(r.atts))) for r in rts.runs]
+    return Pair{Symbol,Any}[f => v for (f, v) in first(ps) if all(p -> get(p, f, nothing) == v, ps)]
+end
+
+# The fields a RichTextRun's props set, as `field => value` pairs in the form
+# the run-prop setters take: a solid fill is its colour.
+_run_prop_pairs(::Nothing) = Pair{Symbol,Any}[]
+_run_prop_pairs(p::DrawingRunProps) =
+    Pair{Symbol,Any}[f => (f === :fill ? p.fill.fgcolor : getfield(p, f))
+                     for f in fieldnames(DrawingRunProps) if f !== :raw && !isnothing(getfield(p, f))]
+
 """
     setAxisTitleText(c, ax::ChartAxis, text) -> Chart
+    setAxisTitleText(c, ax::ChartAxis, ref::Union{CellRef,SheetCellRef}) -> Chart
 
-Replace an axis title's text and all its formatting. As
-[`setChartTitleText`](@ref), including that a cell reference is replaced by
-literal text.
+Replace an axis title's text and all its formatting, or bind it to a cell. As
+[`setChartTitleText`](@ref): a `RichTextString` or styled string keeps its run
+formatting, a reference binds the title, and a bound title can't carry rich text.
 
 A title created here gets `c:overlay val="0"`, as Excel writes on every title
 it creates, so it sits beside the plot area rather than over it.
@@ -1925,11 +2061,23 @@ end
 setAxisTitleText(c::Chart, ax::ChartAxis, text::AbstractString) =
     setAxisTitleText(c, ax, DrawingText(text))
 
+function setAxisTitleText(c::Chart, ax::ChartAxis, ref::Union{CellRef,SheetCellRef})
+    strref, cellrich = _title_ref(c, ref)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    steps, _, _ = _axis_path(c, root, ax)
+    new = rebuild_path(root, [steps...; (NS_C, "title") => "title"],
+                       t -> _title_with_ref(t, strref, cellrich, _wb(c), pfx); prefixes = pfx)
+    set_chart_root!(c, new)
+    return c
+end
+
 """
     setLabelText(c, i, point, text) -> Chart
 
 Replace one data label's typed-over text and all its formatting, so the label
-shows `text` instead of its value.
+shows `text` instead of its value. `text` is a `DrawingText`, a string, or a
+`RichTextString` or styled string, whose runs keep their own formatting.
 
 If the point has no `c:dLbl`, one is created with the same `show*` flags as its
 `c:dLbls`. Typed text is displayed whatever those flags say, so this shows the
@@ -1941,7 +2089,7 @@ function setLabelText(c::Chart, i::Integer, point::Integer, text::DrawingText)
     steps, _, ser = _series_path(c, root, i)
     dl = _dlbl_node(ser, point)
     !isnothing(dl) && _bool_val(dl, "delete") === true && throw(XLSXError(
-        "Label $point of series $i is deleted, so it has no text to set." *
+        "Label $point of series $i is deleted, so it has no text to set. " *
         "Undelete it first with `setLabelDeleted(c, $i, $point, false)`."))
     settx(lbl) = rebuild_path(lbl, [(NS_C, "tx") => "tx"],
                      tx -> insert_child(remove_choice(tx, (NS_C, "tx"), TX_GROUP),

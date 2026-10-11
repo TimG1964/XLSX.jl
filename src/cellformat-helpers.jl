@@ -659,19 +659,14 @@ function process_get_sheetcell(f::Function, xl::XLSXFile, sheetcell::String; kw.
     ref = SheetCellRef(sheetcell)
     !hassheet(xl, ref.sheet) && throw(XLSXError("Sheet $(ref.sheet) not found."))
     ws = getsheet(xl, ref.sheet)
-    d = get_dimension(ws)
-    if ref.cellref ∉ d
-        throw(XLSXError("Cell specified is outside sheet dimension \"$d\""))
-    end
     return f(ws, ref.cellref; kw...)
 end
+# A cell outside the sheet's dimension is empty, as `ws[ref]` treats it, so it has
+# no format to get. (getColumnWidth and getRowHeight keep their own check: a row or
+# column beyond the dimension can still have a size.)
 function process_get_cellref(f::Function, ws::Worksheet, cellref::CellRef; kw...)
     wb = get_workbook(ws)
     cell = getcell(ws, cellref)
-    d = get_dimension(ws)
-    if cellref ∉ d
-        throw(XLSXError("Cell specified is outside sheet dimension \"$d\""))
-    end
     if cell isa EmptyCell || cell.style == UInt64(0)
         return nothing
     end

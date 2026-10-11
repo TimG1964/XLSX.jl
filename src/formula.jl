@@ -965,7 +965,7 @@ end
     getFormula(sh::Worksheet, row::Int, col::Int; get_external_refs::Bool=false) -> Union{String,Nothing}
 
 Get the formula for a single cell reference in a worksheet `sh` or XLSXFile `xf`.
-The specified cell must be within the sheet dimension.
+A cell outside the sheet dimension is an `EmptyCell`.
 
 If the cell does not contain any formula (but is not an `EmptyCell`), return an empty string ("").
 If the cell is an EmptyCell, return `nothing`.
@@ -1010,7 +1010,6 @@ getFormula(ws::Worksheet, cr::String; kw...) = process_get_cellname(getFormula, 
 getFormula(xl::XLSXFile, sheetcell::String; kw...) = process_get_sheetcell(getFormula, xl, sheetcell; kw...)
 getFormula(ws::Worksheet, row::Integer, col::Integer; kw...) = getFormula(ws, CellRef(row, col); kw...)
 function getFormula(ws::Worksheet, cellref::CellRef; get_external_refs::Bool=false)
-    cellref ∉ get_dimension(ws) && throw(XLSXError("Cell $cellref is out of range for worksheet '$(ws.name)'"))
     xf = get_xlsxfile(ws)
     if !xf.use_cache_for_sheet_data
         throw(XLSXError("Cannot get formula because cache is not enabled."))

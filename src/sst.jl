@@ -572,6 +572,7 @@ getRichTextString(xl::XLSXFile, sheetcell::String) = process_get_sheetcell(getRi
 getRichTextString(ws::Worksheet, row::Integer, col::Integer) = getRichTextString(ws, CellRef(row, col))
 function getRichTextString(s::Worksheet, c::CellRef)::Union{RichTextString, Nothing}
     cell = getcell(s, c)
+    cell isa EmptyCell && return nothing
     cell.datatype == CT_STRING || return nothing
     sst_load!(get_workbook(s))
     uss = get_sst(get_workbook(s)).shared_strings[reinterpret(Int64, cell.value)+1]

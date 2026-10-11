@@ -487,8 +487,11 @@ function _slot(order, tag::AbstractString)
     return nothing
 end
 
+# Where a child in slot `pos` goes among `kids`. Only elements have a slot: the
+# whitespace text an indented part carries between them is passed over.
 function _schema_position(order, kids, pos::Integer)
     for (i, k) in enumerate(kids)
+        XML.nodetype(k) == XML.Element || continue
         p = _slot(order, localname(k))
         isnothing(p) && continue
         p > pos && return i

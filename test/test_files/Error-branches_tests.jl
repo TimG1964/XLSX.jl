@@ -84,8 +84,8 @@
         xf = XLSX.newxlsx()
         sh = xf[1]
         sh[1:2, 1:2] = [1 2; 3 4]
-        @test_throws XLSX.XLSXError XLSX.isMergedCell(sh, "Z99")
-        @test_throws XLSX.XLSXError XLSX.getMergedBaseCell(sh, "Z99")
+        @test XLSX.isMergedCell(sh, "Z99") === false                # outside the dimension: empty, not merged
+        @test isnothing(XLSX.getMergedBaseCell(sh, "Z99"))
         @test isnothing(XLSX.getMergedBaseCell(sh, "A1"))            # no merged cells at all
 
         @test_throws XLSX.XLSXError XLSX.setRowHeight(sh, "A1"; height=-1)
@@ -191,7 +191,9 @@
         @test_throws XLSX.XLSXError XLSX.setFont(sh, "wb_const"; bold=true)
         @test_throws XLSX.XLSXError XLSX.getFont(sh, "wb_const")
         @test_throws XLSX.XLSXError XLSX.getFont(sh, "A1:B2")       # a getter takes one cell
-        @test_throws XLSX.XLSXError XLSX.getFont(xf, "Sheet1!Z99")  # outside the dimension
+        @test isnothing(XLSX.getFont(xf, "Sheet1!Z99"))          # outside the dimension: empty
+        @test isnothing(XLSX.getFormula(xf, "Sheet1!Z99"))
+        @test isnothing(XLSX.getFormula(sh, "Z99"))
 
         # non-contiguous ranges, with and without the sheet name
         XLSX.setFont(sh, "A1,C1"; bold=true)
