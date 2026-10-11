@@ -467,11 +467,9 @@ _cx_datapt_in(ser, point) =
 """
     setSeriesFill(c::ChartEx, i, color; point=nothing, pareto=false) -> ChartEx
 
-Set the fill of series `i`, or of one data point of it. `color` may be a colour
-string or Symbol, a `Colors.Colorant`, a [`SchemeColor`](@ref), `:none` for an
-explicit `<a:noFill/>`, or `:inherit` to remove the fill so the chart style
-applies. With `pareto = true`, series `i`'s Pareto line instead; an error if it
-has none.
+Set the fill of series `i`, or of data point `point` of it, counting from 1.
+$(_DOC_COLOR_ARG) With `pareto = true`, series `i`'s Pareto line instead; an
+error if it has none.
 
 Setting a point's fill creates its `cx:dataPt` if Excel never formatted that
 point. `:inherit` never creates anything.
@@ -505,10 +503,10 @@ _cx_set_line!(c::ChartEx, i::Integer, point, f; create::Bool = true, pareto::Boo
     setSeriesLine(c::ChartEx, i, :none; point=nothing, pareto=false)
     setSeriesLine(c::ChartEx, i, :inherit; point=nothing, pareto=false)
 
-Set several outline properties of series `i`, or of one data point of it, in one
-rebuild of the chart part. A keyword left unspecified is left alone; pass
-`:inherit` to remove one that is set. With `pareto = true`, series `i`'s Pareto
-line instead; an error if it has none.
+Set several outline properties of series `i`, or of data point `point` of it,
+in one rebuild of the chart part. $(_DOC_LINE_KWS) A keyword left unspecified
+is left alone; pass `:inherit` to remove one that is set. With `pareto = true`,
+series `i`'s Pareto line instead; an error if it has none.
 
 The symbol form acts on the whole outline: `:none` writes an `a:ln` whose fill is
 `<a:noFill/>`, and `:inherit` removes the `a:ln` so the chart style supplies it.
@@ -536,35 +534,78 @@ end
 """
     setSeriesLineColor(c::ChartEx, i, color; point=nothing, pareto=false) -> ChartEx
 
-Set the colour of series `i`'s outline, or of one data point of it. `color` takes
-the same values as [`setSeriesFill`](@ref): `:none` writes an outline with
-`<a:noFill/>`, `:inherit` removes the colour and leaves the rest of the `a:ln`.
-With `pareto = true`, series `i`'s Pareto line instead; an error if it has none.
+Set the color of series `i`'s outline, or of data point `point` of it.
+$(_DOC_COLOR_ARG) `:none` writes an outline with `<a:noFill/>`; `:inherit`
+removes the color and leaves the rest of the `a:ln`. With `pareto = true`,
+series `i`'s Pareto line instead; an error if it has none.
 """
 setSeriesLineColor(c::ChartEx, i::Integer, color; point::Union{Nothing,Integer} = nothing,
                    pareto::Bool = false) =
     _cx_set_line!(c, i, point, (ln, pfx) -> _ln_with_color(ln, color, pfx); pareto)
 
+"""
+    setSeriesLineWidth(c::ChartEx, i, points; point=nothing, pareto=false) -> ChartEx
+
+Set the width of series `i`'s outline, or of data point `point`'s, in points —
+a `Real` from 0 to 1584 — or `:inherit` to remove it. With `pareto = true`,
+series `i`'s Pareto line instead.
+"""
 setSeriesLineWidth(c::ChartEx, i::Integer, pts; point::Union{Nothing,Integer} = nothing,
                    pareto::Bool = false) =
     _cx_set_line!(c, i, point, (ln, _) -> _ln_with_width(ln, pts); pareto)
 
+"""
+    setSeriesLineDash(c::ChartEx, i, dash; point=nothing, pareto=false) -> ChartEx
+
+Set the dash pattern of series `i`'s outline, or of data point `point`'s:
+$(_doc_syms(DASH_VALUES)), or Excel's names $(_doc_aliases(DASH_ALIASES)); or
+`:inherit` to remove it. With `pareto = true`, series `i`'s Pareto line instead.
+"""
 setSeriesLineDash(c::ChartEx, i::Integer, dash; point::Union{Nothing,Integer} = nothing,
                   pareto::Bool = false) =
     _cx_set_line!(c, i, point, (ln, pfx) -> _ln_with_dash(ln, dash, pfx); pareto)
 
+"""
+    setSeriesLineCap(c::ChartEx, i, cap; point=nothing, pareto=false) -> ChartEx
+
+Set how series `i`'s outline ends, or data point `point`'s:
+$(_doc_syms(CAP_VALUES)), or Excel's names $(_doc_aliases(CAP_ALIASES)); or
+`:inherit` to remove it. With `pareto = true`, series `i`'s Pareto line instead.
+"""
 setSeriesLineCap(c::ChartEx, i::Integer, cap; point::Union{Nothing,Integer} = nothing,
                  pareto::Bool = false) =
     _cx_set_line!(c, i, point, (ln, _) -> _ln_with_cap(ln, cap); pareto)
 
+"""
+    setSeriesLineCompound(c::ChartEx, i, cmpd; point=nothing, pareto=false) -> ChartEx
+
+Set the compound line type of series `i`'s outline, or data point `point`'s:
+$(_doc_syms(CMPD_VALUES)), or Excel's names $(_doc_aliases(CMPD_ALIASES)); or
+`:inherit` to remove it. With `pareto = true`, series `i`'s Pareto line instead.
+"""
 setSeriesLineCompound(c::ChartEx, i::Integer, cmpd; point::Union{Nothing,Integer} = nothing,
                       pareto::Bool = false) =
     _cx_set_line!(c, i, point, (ln, _) -> _ln_with_compound(ln, cmpd); pareto)
 
+"""
+    setSeriesLineJoin(c::ChartEx, i, join; point=nothing, pareto=false) -> ChartEx
+
+Set how the segments of series `i`'s outline meet, or data point `point`'s:
+$(_doc_syms(JOIN_VALUES)); or `:inherit` to remove it. Changing the join discards
+any miter limit. With `pareto = true`, series `i`'s Pareto line instead.
+"""
 setSeriesLineJoin(c::ChartEx, i::Integer, join; point::Union{Nothing,Integer} = nothing,
                   pareto::Bool = false) =
     _cx_set_line!(c, i, point, (ln, pfx) -> _ln_with_join(ln, join, pfx); pareto)
 
+"""
+    setSeriesLineMiterLimit(c::ChartEx, i, limit; point=nothing, pareto=false) -> ChartEx
+
+Set the miter limit of series `i`'s outline, or data point `point`'s, as a
+`Real` multiple of the line width; or `:inherit` to remove it. The outline must
+already have a miter join ([`setSeriesLineJoin`](@ref)). With `pareto = true`,
+series `i`'s Pareto line instead.
+"""
 setSeriesLineMiterLimit(c::ChartEx, i::Integer, lim; point::Union{Nothing,Integer} = nothing,
                         pareto::Bool = false) =
     _cx_set_line!(c, i, point, (ln, _) -> _ln_with_miter_limit(ln, lim); pareto)
@@ -585,10 +626,10 @@ end
     setLabelTextProp(c::ChartEx, i, field, value; pareto=false) -> ChartEx
 
 Set one field of the data-label text formatting for series `i`, writing it on the
-series' `cx:dataLabels/cx:txPr`. `field` is a field of `DrawingRunProps`; `:fill`
-and `:line` are composite and take a colour or a named tuple of line properties.
-Pass `:inherit` to remove a field so the cascade resolves it. With
-`pareto = true`, series `i`'s Pareto line instead; an error if it has none.
+series' `cx:dataLabels/cx:txPr`. With `pareto = true`, series `i`'s Pareto line
+instead; an error if it has none.
+
+$(_DOC_TEXT_FIELD_ARG)
 
 Creating a `cx:dataLabels` to hold formatting writes `cx:visibility` with all
 three flags off, since one that names no flags shows labels with Excel's
@@ -597,9 +638,10 @@ defaults rather than none.
 Returns `c`, which remains valid.
 """
 function setLabelTextProp(c::ChartEx, i::Integer, field::Symbol, value; pareto::Bool = false)
-    field in _RUN_PROP_FIELDS || throw(XLSXError(
-        "`$field` is not a resolvable text property. Valid fields: " *
-        join(_RUN_PROP_FIELDS, ", ") * "."))
+    get(_RUN_PROP_ALIASES, field, field) in _RUN_PROP_FIELDS || throw(XLSXError(
+        "`$field` is not a text property. Valid fields: " *
+        join(_RUN_PROP_FIELDS, ", ") * "; or Excel's names " *
+        join(("$k (= $v)" for (k, v) in _RUN_PROP_ALIASES), ", ") * "."))
     return _cx_edit_series!(c, i, (ser, pfx) ->
         rebuild_path(ser, [(NS_CX, "dataLabels") => "dataLabels"],
                      lbl -> _cx_label_transform(lbl, field, value, pfx);
@@ -636,6 +678,8 @@ end
 
 Set one field of the chart title's text formatting, on `cx:title/cx:txPr`.
 Creates the title if the chart has none. Returns `c`, which remains valid.
+
+$(_DOC_TEXT_FIELD_ARG)
 """
 setChartTitleTextProp(c::ChartEx, field::Symbol, value) =
     _cx_edit_at!(c, [(NS_CX, "chart") => "chart",
@@ -647,6 +691,8 @@ setChartTitleTextProp(c::ChartEx, field::Symbol, value) =
 
 Set one field of the legend's text formatting, on `cx:legend/cx:txPr`.
 Creates the legend if the chart has none. Returns `c`, which remains valid.
+
+$(_DOC_TEXT_FIELD_ARG)
 """
 setLegendTextProp(c::ChartEx, field::Symbol, value) =
     _cx_edit_at!(c, [(NS_CX, "chart")  => "chart",
@@ -717,6 +763,8 @@ Set one field of an axis title's text formatting, on `cx:axis/cx:title/cx:txPr`.
 `id` is the axis' `id` attribute, as [`getChartAxisIds`](@ref) reports it, not a
 position. Creates the title if the axis has none. Returns `c`, which remains
 valid.
+
+$(_DOC_TEXT_FIELD_ARG)
 """
 setAxisTitleTextProp(c::ChartEx, id::Integer, field::Symbol, value) =
     _cx_edit_at!(c, [_cx_axis_path(c, id)...; (NS_CX, "title") => "title"],
@@ -1039,9 +1087,14 @@ setSeriesAggregation(c::ChartEx, i::Integer, on::Bool) =
 Set histogram binning for series `i` in one rebuild. A keyword left unspecified
 is left alone; pass `:inherit` to remove one that is set.
 
-`intervalClosed` is `:r` (right-closed) or `:l` (left-closed). `underflow` and `overflow` take a number or
-`:auto`. `binSize` and `binCount` are alternatives: setting one removes the
-other. `cx:binning` excludes `cx:aggregation`, which is removed if present.
+- `intervalClosed` — `:r` (right-closed, Excel's default) or `:l` (left-closed).
+- `underflow`, `overflow` — a `Real`: values below or above it are gathered in
+  one end bin. `:auto` lets Excel choose.
+- `binSize` — the width of each bin, a positive `Real`; or `:auto`.
+- `binCount` — the number of bins, a positive `Integer`; or `:auto`.
+
+`binSize` and `binCount` are alternatives: setting one removes the other.
+`cx:binning` excludes `cx:aggregation`, which is removed if present.
 """
 function setSeriesBinning(c::ChartEx, i::Integer;
                           intervalClosed = nothing, underflow = nothing, overflow = nothing,

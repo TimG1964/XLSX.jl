@@ -2556,7 +2556,7 @@ function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
             if haskey(allkws, "border_col") && !isnothing(allkws["border_col"])
                 push!(ext_db, XML.Element("x14:borderColor", rgb=get_color(allkws["border_col"])))
             else
-                push!(ext_db, XML.Element("x14:borderColor", rgb=get_color("FF638EC6"))) # Default colour
+                push!(ext_db, XML.Element("x14:borderColor", rgb=get_color("FF638EC6"))) # Default color
             end
         end
         if haskey(allkws, "direction")
@@ -2572,7 +2572,7 @@ function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
             if haskey(allkws, "neg_fill_col") && !isnothing(allkws["neg_fill_col"])
                 push!(ext_db, XML.Element("x14:negativeFillColor", rgb=get_color(allkws["neg_fill_col"])))
             else
-                push!(ext_db, XML.Element("x14:negativeFillColor", rgb=get_color("FFFF0000"))) # Default colour
+                push!(ext_db, XML.Element("x14:negativeFillColor", rgb=get_color("FFFF0000"))) # Default color
             end
         end
         if do_borders && haskey(allkws, "sameNegBorders") && allkws["sameNegBorders"] == "false"
@@ -2580,7 +2580,7 @@ function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
             if haskey(allkws, "neg_border_col") && !isnothing(allkws["neg_border_col"])
                 push!(ext_db, XML.Element("x14:negativeBorderColor", rgb=get_color(allkws["neg_border_col"])))
             else
-                push!(ext_db, XML.Element("x14:negativeBorderColor", rgb=get_color("FFFF0000"))) # Default colour
+                push!(ext_db, XML.Element("x14:negativeBorderColor", rgb=get_color("FFFF0000"))) # Default color
             end
         end
         if haskey(allkws, "axis_pos")
@@ -2613,9 +2613,9 @@ end
                        [direction], [min_type], [min_val], [max_type], [max_val],
                        [clear]) -> Vector{Pair}
 
-Apply data bars to `rng` whose colour changes with value as well as their length.
+Apply data bars to `rng` whose color changes with value as well as their length.
 
-Excel has no such conditional format: a `dataBar` rule carries a single colour and
+Excel has no such conditional format: a `dataBar` rule carries a single color and
 applies to every cell in its range. `setColoredDataBars` splits `rng` into value-based
 bands and writes one data bar rule per band, each over the non-contiguous range of
 cells falling in that band. The result is a valid workbook that Excel reads without
@@ -2629,10 +2629,10 @@ overrides `bands`. By default a cell whose value equals a break falls in the ban
 it; set `gte=false` to place it in the band below, or give a vector of `Bool` with one
 entry per break.
 
-`colors` accepts either one colour per band, or exactly two colours to interpolate
-between (in LCHab, so intermediate hues stay clean). Colours may be names or 8-digit
+`colors` accepts either one color per band, or exactly two colors to interpolate
+between (in LCHab, so intermediate hues stay clean). Colors may be names or 8-digit
 `AARRGGBB` strings, as elsewhere in XLSX.jl. Note that Colors.jl's named colormaps are
-not accepted; for a red-amber-green ramp give the three colours explicitly.
+not accepted; for a red-amber-green ramp give the three colors explicitly.
 
 `showVal` and `direction` are passed through to each band's rule unchanged. Bars are
 drawn with a solid fill rather than a gradient.
@@ -2652,7 +2652,7 @@ clear=false to add the bands alongside whatever is already there.
 Returns the band label => range pairs written. Bands containing no cells are dropped, so
 the result may be shorter than bands. Labels keep their position on the scale rather
 than being renumbered: banding data with only two distinct values across bands=5 may
-return labels 1 and 5, using the first and last colours of the ramp.
+return labels 1 and 5, using the first and last colors of the ramp.
 
 !!! note
     `setColoredDataBars` is a static formatting function. The bands reflect cell values 
@@ -2729,7 +2729,7 @@ function setColoredDataBars(ws::Worksheet, rng::CellRange;
 
     for (t, name) in ((min_type, "min_type"), (max_type, "max_type"))
         isnothing(t) || t in ["num", "formula"] || throw(XLSXError(
-            "`$name` must be `num` or `formula` for coloured data bars; `$t` is evaluated " *
+            "`$name` must be `num` or `formula` for colored data bars; `$t` is evaluated " *
             "separately for each band, which makes bar lengths incomparable between bands."))
     end
     mnt = something(min_type, "num")

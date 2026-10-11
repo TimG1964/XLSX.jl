@@ -16,7 +16,7 @@ julia> using XLSX, XLSX.Charts
 
 Copying, renaming and deleting sheets are core operations, but a sheet holding a
 chart carries more than cells: a drawing part, one chart part per chart, and the
-style and colour parts beside it. This page is what happens to those.
+style and color parts beside it. This page is what happens to those.
 
 ## Copying a sheet
 
@@ -60,7 +60,7 @@ Cached values are untouched, since the data hasn't changed.
 ## Deleting a sheet
 
 [`XLSX.deletesheet!`](@ref) removes the charts anchored to the sheet, along with
-their drawing, style and colour parts and the content-type entries for all of
+their drawing, style and color parts and the content-type entries for all of
 them:
 
 ```julia

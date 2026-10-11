@@ -58,7 +58,7 @@ end
 """
     _add_chart_part!(ws, xml, style_id; anchor, cx_requires=nothing) -> String
 
-Add `xml` as a new chart part on `ws`, with its style and colour parts, and place
+Add `xml` as a new chart part on `ws`, with its style and color parts, and place
 it in the sheet's drawing. `anchor` is a cell range for a worksheet, or `nothing`
 for a chartsheet, whose chart is absolutely anchored and fills the sheet.
 `cx_requires` is `nothing` for a `c:` chart, or the `Requires` prefix (`"cx1"`,
@@ -445,23 +445,17 @@ function _with_scatter_line(sp::XML.Node, pfx)
     return isnothing(ln) ? insert_child(sp, (NS_A, "spPr"), new) : replace_child(sp, ln, new)
 end
 
-const _SCHEME_NAMES = r"^(accent[1-6]|tx[12]|bg[12]|dk[12]|lt[12]|hlink|folHlink)$"
-
-# The colour element for `color`, built as the series setters build it, with the
-# template's child transforms (a bubble's a:alpha) carried across. A scheme name
-# string becomes an a:schemeClr; anything else goes through the package's colour
-# resolver, so it accepts exactly what setSeriesFill does.
+# The color element for `color`, built as the series setters build it, with the
+# template's child transforms (a bubble's a:alpha) carried across. Built by
+# _color_node, so it accepts exactly what setSeriesFill does.
 function _series_color_node(color, template_clr::XML.Node, pfx)
-    node = color isa SchemeColor ? _scheme_color_node(color, pfx) :
-           color isa AbstractString && occursin(_SCHEME_NAMES, color) ?
-               XML.Element(prefixed_tag(pfx[NS_A], "schemeClr"); val = color) :
-               _srgb_color_node(color isa Symbol ? String(color) : color, pfx)
+    node  = _color_node(color, pfx)
     extra = XML.children(template_clr)
     (isnothing(extra) || isempty(extra)) && return node
     return _with_children(node, vcat(something(XML.children(node), XML.Node[]), extra))
 end
 
-# Every accent1 in a template fragment, recoloured.
+# Every accent1 in a template fragment, recolored.
 _with_color(n::XML.Node, color, pfx) =
     _rewrite(n) do e
         localname(e) == "schemeClr" && _attr(e, "val") == "accent1" || return e
@@ -523,19 +517,22 @@ neither.
 
 To plot a table column, pass gettablerange(t, column) for either `values` or `categories`
 
-`markers` (line, lineMarkers, radar and scatter) is a symbol such as `:circle`,
-or `false` for none. `smooth` (line, lineMarkers and scatter) curves the line.
-`line` (scatter) joins the points. 
+`markers` (line, lineMarkers, radar and scatter) is a marker Symbol such as
+`:circle`, `:square` or `:triangle` — any that [`setMarkerSymbol`](@ref)
+takes — or `true` for `:circle`, or `false` for none. Markers on a `:line`
+chart make it `:lineMarkers`. `smooth` (line, lineMarkers and scatter) is a `Bool`:
+`true` curves the line. `line` (scatter) is a `Bool`: `true` joins the points.
 
-`color` overrides the series' automatic colour, and takes the same values as
-[`setSeriesFill`](@ref): a colour name (`"red"` or `:red`), a hex colour
-(`"FF0000"`, `"#FF0000"` or `"FFFF0000"`), a `Colors.Colorant`, a
-[`SchemeColor`](@ref), or a scheme name such as `"accent4"`. It does not apply
-to pie and doughnut charts, whose points are coloured individually.
+`color` overrides the series' automatic color. It is a color name (`"red"` or
+`:red`), a hex string (`"FF0000"`, `"#FF0000"` or `"80FF0000"` with alpha), a
+`Colors.Colorant`, a theme color named as a String or Symbol (`"accent2"`,
+`:tx1`) or a [`SchemeColor`](@ref) — the color values of
+[`setSeriesFill`](@ref) other than `:none` and `:inherit`. It does not apply to
+pie and doughnut charts, whose points are colored individually.
 
 The cells' current values are cached in the chart, as Excel does, so the series
 reads back without opening the file in Excel. Series take the theme's accent
-colours in turn; on a pie or doughnut chart each point does instead.
+colors in turn; on a pie or doughnut chart each point does instead.
 """
 function addSeries(c::Chart, values;
                    categories = nothing, name = nothing, name_ref = nothing,
@@ -799,6 +796,21 @@ function _place_chartex!(ws::Worksheet, doc::XML.Node, kind::Symbol, anchor, tit
     return c
 end
 
+"""
+    addSeries(c::ChartEx, values; categories=nothing, name=nothing, name_ref=nothing) -> ChartEx
+
+Add a series to a box & whisker chart, plotting `values`. Every other `chartEx`
+layout holds one series, given to [`addChartEx`](@ref).
+
+References, `categories`, `name` and `name_ref` are as for the `Chart` method: a
+range string (`"B2:B9"`), a defined name or a reference object, with an
+unqualified range meaning the chart's own sheet and a chart on a chartsheet
+needing a qualified one (`"Data!B2:B9"`). `name` is literal text for the series
+name, `name_ref` a cell to take it from.
+
+Format the new series afterwards with [`setSeriesFill`](@ref) and
+[`setSeriesLine`](@ref).
+"""
 function addSeries(c::ChartEx, values; categories = nothing, name = nothing, name_ref = nothing)::ChartEx
     sheet = _data_sheet(c)                                  # nothing on a chartsheet
     isnothing(sheet) && _require_qualified(values, categories, name_ref)

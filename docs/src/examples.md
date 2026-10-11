@@ -440,7 +440,7 @@ XLSX.writexlsx("Example_add_native_chart_out.xlsx", f, overwrite=true)
 
 ![image|320x500](./images/Add_native_chart.png)
 
-## A diverging stacked bar chart for Likert-scale survey data
+## A diverging stacked bar chart
 
 Survey questions answered on a five-point Likert scale, from *strongly disagree* to
 *strongly agree*, are often shown as a diverging stacked bar chart. Each question gets
@@ -545,7 +545,7 @@ hi =  ceil(maximum(right) * 5) / 5
 
 The chart is a horizontal stacked bar chart, `:stackedBar`, placed below the data. Each
 series takes its values from one column of proportions and its category labels from
-the question texts in column A. The two neutral halves get the same colour, so the
+the question texts in column A. The two neutral halves get the same color, so the
 split can't be seen.
 
 ```julia

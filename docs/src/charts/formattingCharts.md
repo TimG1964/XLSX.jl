@@ -97,7 +97,7 @@ difference survives a round trip:
 | --- | --- | --- |
 | nothing at all | `nothing` | whatever the chart style says |
 | `<a:noFill/>` | a fill with `kind === :none` | nothing |
-| `<a:solidFill>` | a fill with `kind === :solid` | that colour |
+| `<a:solidFill>` | a fill with `kind === :solid` | that color |
 
 So `setSeriesFill(c, 1, :none)` makes a series deliberately invisible, while
 `setSeriesFill(c, 1, :inherit)` removes the setting and lets the style decide.
@@ -119,24 +119,24 @@ They take a `DrawingShapeProps`, a fill or line on its own, or the
 a property written at no rung comes from the chart style, which this layer does
 not read.
 
-## Colours
+## Colors
 
-Anywhere a colour is set, these forms are accepted:
+Anywhere a color is set, these forms are accepted:
 
 ```julia
 julia> setSeriesFill(c, 1, "FF0000");                  # hex RGB, "#RRGGBB" or AARRGGBB
 
-julia> setSeriesFill(c, 1, "coral");                   # any Colors.jl named colour
+julia> setSeriesFill(c, 1, "coral");                   # any Colors.jl named color
 
 julia> setSeriesFill(c, 1, :coral);                    # the same name as a symbol
 
 julia> setSeriesFill(c, 1, colorant"seagreen");        # a Colors.jl value
 
-julia> setSeriesFill(c, 1, SchemeColor(:accent2));     # a theme colour
+julia> setSeriesFill(c, 1, SchemeColor(:accent2));     # a theme color
 ```
 
 A [`SchemeColor`](@ref) names a slot in the workbook's theme rather than a fixed
-colour, so it follows the theme the way Excel's own formatting does. Transforms
+color, so it follows the theme the way Excel's own formatting does. Transforms
 are percentages, applied in the order given:
 
 ```julia
@@ -144,7 +144,7 @@ julia> SchemeColor(:tx1; lumMod = 65, lumOff = 35)
 SchemeColor(:tx1, [:lumMod => 65.0, :lumOff => 35.0])
 ```
 
-A colour read back from a file is a [`DrawingColor`](@ref), which records the
+A color read back from a file is a [`DrawingColor`](@ref), which records the
 reference as authored *and* the RGB it resolves to:
 
 ```julia
@@ -154,7 +154,7 @@ julia> col.kind, col.val, col.rgb
 (:scheme, "accent2", "E97132")
 ```
 
-So a theme colour stays a theme colour in the file, while `rgb` tells you what
+So a theme color stays a theme color in the file, while `rgb` tells you what
 it looks like.
 
 ## The cascade
@@ -168,7 +168,7 @@ julia> setSeriesFill(c, 1, "FF0000");
 
 julia> e = getSeriesFill(c, 1);
 
-julia> e.value.fgcolor.rgb      # the colour now in force
+julia> e.value.fgcolor.rgb      # the color now in force
 "FF0000"
 
 julia> e.site.level             # which rung supplied it
@@ -201,7 +201,7 @@ Excel wrote, counting from 0 — so a point read back at `idx == 1` is `point = 
 here.
 
 !!! note
-    The cascade stops at the chart XML. Excel's style and colour parts
+    The cascade stops at the chart XML. Excel's style and color parts
     (`style1.xml`, `colors1.xml`) are not read, so a property written at no rung
     resolves to `nothing` rather than to the style's value. See
     [Limitations](chartLimitations.md).
@@ -268,7 +268,7 @@ rather than once on the chart space.
 
 The fields are those of [`DrawingRunProps`](@ref): `:size`, `:bold`, `:italic`,
 `:under`, `:strike`, `:caps`, `:baseline`, `:kern`, `:spacing`, `:latin`, `:ea`,
-`:cs`, `:lang`, plus `:fill` and `:line` for the text's own colour and outline.
+`:cs`, `:lang`, plus `:fill` and `:line` for the text's own color and outline.
 Excel's names are accepted as well: `:font` for `:latin`, `:color` for `:fill`, 
 `:underline` for `:under` and `:strikethrough` for `:strike`. Getters report the DrawingML names.
 
@@ -325,7 +325,7 @@ A `"\n"` inside a single string gives the same two-line title.
 
 A [`RichTextString`](@ref XLSX.RichTextString) keeps each run's formatting, as it
 does in a cell. A run's attributes — bold, italic, underline, strikethrough,
-superscript and subscript, size, font and colour — are written on that run; anything
+superscript and subscript, size, font and color — are written on that run; anything
 a run doesn't set is inherited from the title's own formatting. This works with
 [`setChartTitleText`](@ref), [`setAxisTitleText`](@ref), [`setLabelText`](@ref)
 and the `title` keyword of [`addChart`](@ref):

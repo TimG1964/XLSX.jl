@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-- Chart titles, axis titles and data labels set from a `RichTextString` keep each run's formatting (bold, italic, underline, strikethrough, superscript/subscript, size, font and colour), with newlines handled as for plain strings. Previously this threw an `ArgumentError`. `addChart(...; title = rt)` keeps the run formatting on top of the new title's own
+- Chart titles, axis titles and data labels set from a `RichTextString` keep each run's formatting (bold, italic, underline, strikethrough, superscript/subscript, size, font and color), with newlines handled as for plain strings. Previously this threw an `ArgumentError`. `addChart(...; title = rt)` keeps the run formatting on top of the new title's own
 - On Julia 1.11+, the same chart text setters and `addChart`'s `title` keyword accept a StyledStrings `styled"…"` string, converted to a `RichTextString` as for cells (in the StyledStrings extension)
 - `setChartTitleText` and `setAxisTitleText` accept a `CellRef` or `SheetCellRef`, binding the title to that cell (`c:tx/c:strRef`, with the cell's text cached). `addChart`'s `title` keyword accepts the same. A bound title has one style, so a typed title's formatting is moved into `c:txPr` and a rich-text cell lends the formatting its runs share; per-run formatting can't be kept, as Excel's file format doesn't allow it
 - `ChartEx` titles: `setChartTitleText(c::ChartEx, …)` accepts a `RichTextString`, a styled string or a cell reference, and the new `setAxisTitleText(c::ChartEx, id, …)` sets an axis title's text the same ways. Run formatting is written to `cx:txPr`, which Excel renders; a newline now starts a new paragraph rather than being written inside one run. `addChartEx`'s `title` keyword accepts the same values
@@ -25,6 +25,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `addChart` no longer writes `lang="en-US"` on a typed title's run
 - Removed a duplicate `setAxisTitleText` from the `XLSX.Charts` export list
 - New `setLegendPos` and `setLegendOverlay` for `Chart` and `ChartEx`: place the legend at Excel's five positions (`:b`, `:t`, `:l`, `:r`, `:tr`, or `:bottom`, `:top`, `:left`, `:right`, `:topRight`), drawn over the plot area or beside it. Both create the legend if the chart has none. On a `Chart`, setting a position removes any manual legend layout, as Excel does. `getLegendPos` and `getLegendOverlay` now have `ChartEx` methods, reading `cx:legend`'s `pos`, `align` and `overlay`
+- Every chart color setter — `setSeriesFill`, the line and marker setters, and the text `:fill` and `:line` fields — accepts a theme color named as a String or Symbol (`"accent2"`, `:tx1`), as `addSeries(...; color)` already did. It is written as `a:schemeClr`, as `SchemeColor(:accent2)` is
+- `setLabelTextProp(c::ChartEx, …)` accepts Excel's field names `:font`, `:color`, `:underline` and `:strikethrough`, as the other text-property setters do; it threw an error
+- The text-property setters check `:under`, `:strike` and `:caps` values against the DrawingML vocabularies, and throw on any other word rather than writing a file Excel refuses to open. `:under` and `:strike` also take a `Bool`, and Excel's names `:single`/`:double` (and `:none` for `:strike`)
+- Chart setter docstrings state the values each argument and keyword accepts. The color values, line keywords and text-property fields are each listed in full once — at `setSeriesFill`, `setSeriesLine` and `setChartTitleTextProp` — and the `ChartEx` single-property line setters and `addSeries(c::ChartEx, …)` have docstrings. The Charts API page gains a Conventions section
+- The documentation and docstrings spell "color" throughout
 
 ## [v0.13.1](https://github.com/JuliaData/XLSX.jl/tree/v0.13.1) - 2026-10-07
 

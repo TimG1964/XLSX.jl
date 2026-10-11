@@ -216,8 +216,8 @@ One data dimension of a chartEx data block: a `cx:numDim` or `cx:strDim`.
 # Fields
 - `kind` - `:num` or `:str`.
 - `type` - the dimension's role as written, e.g. `:val` (values), `:cat`
-  (categories), `:size`, `:x`, `:y`, `:colorVal` (numeric-colour), `:colorStr`
-  (text-colour), `:entityId` (region).
+  (categories), `:size`, `:x`, `:y`, `:colorVal` (numeric-color), `:colorStr`
+  (text-color), `:entityId` (region).
 - `formula` - the text of `cx:f`, usually a hidden `_xlchart.*` defined name;
   `nothing` if the dimension has no formula.
 - `range` - the resolved source range; `nothing` if unresolved.
@@ -346,10 +346,10 @@ Base.isequal(a::SchemeColor, b::SchemeColor) = a == b
 """
     DrawingColor
 
-A DrawingML colour: the element as written, plus the RGB it resolves to.
+A DrawingML color: the element as written, plus the RGB it resolves to.
 
-`kind` and `val` record the reference as authored - a theme colour stays a
-theme colour - and `transforms` the modifications applied to it, in document
+`kind` and `val` record the reference as authored - a theme color stays a
+theme color - and `transforms` the modifications applied to it, in document
 order. `rgb` and `alpha` give the resolved result for anyone who just wants to
 know what it looks like.
 
@@ -361,7 +361,7 @@ know what it looks like.
   in thousandths of a percent, in the order DrawingML applies them. A
   [`SchemeColor`](@ref) built in code holds the same transforms as percentages,
   so `60000` here is `lumMod = 60` there.
-- `rgb::String` - the resolved colour as `"RRGGBB"`.
+- `rgb::String` - the resolved color as `"RRGGBB"`.
 - `alpha::Float64` - `1.0` unless an `alpha` transform applies.
 
 `rgb` and `alpha` are resolved values, not source, and are not written — the
@@ -393,7 +393,7 @@ const ColorSpec = Union{DrawingColor, SchemeColor, String}
 A DrawingML fill: `<a:solidFill>`, `<a:noFill>`, `<a:gradFill>`, `<a:pattFill>`
 or `<a:blipFill>`.
 
-A solid fill resolves to one colour in `fgcolor`. A pattern fill resolves to
+A solid fill resolves to one color in `fgcolor`. A pattern fill resolves to
 two, `fgcolor` and `bgcolor`, with the pattern itself in `preset` - matching
 how cell fills are exposed. Gradient and picture fills are identified by `kind`
 but not modelled further: `raw` holds the element as read, so nothing is lost
@@ -402,7 +402,7 @@ on write.
 # Fields
 - `kind::Symbol` - `:none`, `:solid`, `:gradient`, `:pattern`, `:blip` (picture)
   or `:group`.
-- `fgcolor` - the colour of a solid fill, or a pattern's foreground.
+- `fgcolor` - the color of a solid fill, or a pattern's foreground.
 - `bgcolor` - a pattern's background; `nothing` otherwise.
 - `preset::Union{Nothing,String}` - a pattern's `prst` attribute, e.g. `"pct25"`,
   `"ltUpDiag"`.
@@ -437,7 +437,7 @@ DrawingFill(kind::Symbol; fgcolor = nothing, bgcolor = nothing, preset = nothing
 
 A DrawingML outline: `<a:ln>`.
 
-The stroke colour lives in `fill`, since a line is filled the same way a shape
+The stroke color lives in `fill`, since a line is filled the same way a shape
 is - solid, gradient, pattern or none.
 
 # Fields
@@ -482,7 +482,7 @@ series, data points, the plot area, the chart area, axis lines, legend, gridline
 |---------------------------------|------------------------|------------------------|
 | no fill element                 | `nothing`              | inherit from the style |
 | `<a:noFill/>`                   | `kind == :none`        | deliberately invisible |
-| `<a:solidFill>…`                | `kind == :solid`       | this colour            |
+| `<a:solidFill>…`                | `kind == :solid`       | this color            |
 
 The same applies to `line.fill`: `<a:ln><a:noFill/></a:ln>` is how Excel writes
 "no border", which is not the same as omitting `a:ln` entirely.
@@ -511,12 +511,27 @@ end
 """
     DrawingRunProps
 
-Character-level properties: `a:rPr`, `a:defRPr` or `a:endParaRPr`.
+Character-level properties: `a:rPr`, `a:defRPr` or `a:endParaRPr`. A field that
+is `nothing` was not written, and is inherited.
 
-Sizes are points (the file stores 1/100 pt), `baseline` is a fraction of the font
-size, and `under` / `strike` / `caps` keep the DrawingML vocabulary as written
-(`"sng"`, `"noStrike"`, `"small"`). Typefaces may be theme references —
-`"+mn-lt"` for the minor latin font, `"+mj-lt"` for major.
+- `lang::String` — language tag, `"en-US"`.
+- `size::Float64` — font size in points (the file stores 1/100 pt).
+- `bold`, `italic::Bool`.
+- `under`, `strike`, `caps::String` — the DrawingML vocabulary as written:
+  `"sng"`, `"noStrike"`, `"small"` and so on.
+- `baseline::Float64` — vertical offset as a fraction of the font size;
+  positive is superscript.
+- `kern::Float64` — smallest font size, in points, at which to kern.
+- `spacing::Float64` — extra space between characters, in points.
+- `fill::DrawingFill` — the text color.
+- `line::DrawingLine` — the text outline.
+- `latin`, `ea`, `cs::String` — typefaces for Latin, East Asian and complex
+  scripts. They may be theme references — `"+mn-lt"` for the minor (body) Latin
+  font, `"+mj-lt"` for major (headings).
+- `raw` — the element this was parsed from.
+
+To set these on a chart, see the table of fields at
+[`setChartTitleTextProp`](@ref), which every text-property setter shares.
 """
 struct DrawingRunProps
     lang::Union{Nothing,String}

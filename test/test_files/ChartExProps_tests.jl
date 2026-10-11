@@ -308,6 +308,14 @@
         @test isnothing(XLSX.Charts.getLabelTextProp(c, 1, :size).value)
         @test_throws XLSX.XLSXError XLSX.Charts.setLabelTextProp(c, 1, :nonsense, 1)
 
+        # Excel's names for fields work here as they do on a Chart
+        XLSX.Charts.setLabelTextProp(c, 1, :font, "Arial")
+        XLSX.Charts.setLabelTextProp(c, 1, :color, "accent3")
+        XLSX.Charts.setLabelTextProp(c, 1, :underline, :dbl)
+        @test XLSX.Charts.getLabelTextProp(c, 1, :latin).value == "Arial"
+        @test XLSX.Charts.getLabelTextProp(c, 1, :fill).value.fgcolor.val == "accent3"
+        @test XLSX.Charts.getLabelTextProp(c, 1, :under).value == "dbl"
+
         # an existing cx:dataLabels keeps the flags Excel wrote
         w = only(filter(x -> x isa XLSX.Charts.ChartEx && x.sheet == "waterfall", XLSX.Charts.getCharts(xf)))
         XLSX.Charts.setLabelTextProp(w, 1, :size, 9)

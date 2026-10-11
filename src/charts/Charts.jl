@@ -7,6 +7,18 @@ Reading, formatting and creating Excel charts, in both chart schemas: the `c:` s
 
 `using XLSX.Charts` brings the chart functions into scope. The handle and value types are
 public but not exported; refer to them as `XLSX.Charts.ChartSeries` and so on.
+
+Conventions shared by the functions:
+
+- `i` is a series' position, counting from 1 in [`getChartSeries`](@ref) order, and
+  `point` a data point's position in the series, also from 1.
+- `ax` is a `ChartAxis` from [`getChartAxes`](@ref) or [`getChartAxis`](@ref), and `g` a
+  `ChartGroup` from [`getChartGroups`](@ref). On a `ChartEx`, an axis is named by its `id`
+  from [`getChartAxisIds`](@ref).
+- Setters return the chart. Most take `:inherit` to remove a setting so it is inherited
+  from the chart style; each docstring says where it does.
+- Color values are listed at [`setSeriesFill`](@ref), line keywords at
+  [`setSeriesLine`](@ref), and text-property fields at [`setChartTitleTextProp`](@ref).
 """
 module Charts
 
@@ -49,9 +61,9 @@ module Charts
 # the exported API.
 #
 # Two senses of "resolve" are kept apart. `resolve_color_base` and
-# `apply_drawingml_transforms` resolve a colour to RGB. The `get<Subject>`
+# `apply_drawingml_transforms` resolve a color to RGB. The `get<Subject>`
 # accessors that return an `Effective` resolve a property up the inheritance
-# cascade. A cascade-resolved fill may still hold a scheme colour, which is then
+# cascade. A cascade-resolved fill may still hold a scheme color, which is then
 # a separate step.
 # ---------------------------------------------------------------------------
 
@@ -93,7 +105,7 @@ using ..XLSX:
     is_valid_fixed_sheet_column_range, is_valid_fixed_sheet_row_range,
     # cell errors
     ERROR_STRING_TO_CODE, get_error_string,
-    # theme and colours (xlsx-colors.jl)
+    # theme and colors (xlsx-colors.jl)
     get_color, get_colorant, _linear_to_srgb,
     get_theme_color_map, get_theme_fonts, resolve_theme_font, apply_drawingml_transforms
 

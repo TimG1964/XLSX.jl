@@ -169,7 +169,7 @@ const CHILD_ORDER = Dict{Tuple{String,String},Vector{Union{String,Vector{String}
     # above: the four cx element names shared by two complex types (title,
     # visibility, lvl, pt) have identical child orders in both. cx:spPr, cx:txPr
     # and cx:rich are DrawingML types and use the NS_A entries.
-    # Omitted: region-map geography, value colours and print settings.
+    # Omitted: region-map geography, value colors and print settings.
     (NS_CX, "chartSpace")     => ["chartData","chart","spPr","txPr","clrMapOvr","fmtOvrs",
                                   "printSettings","extLst"],
     (NS_CX, "chartData")      => ["externalData","data","extLst"],

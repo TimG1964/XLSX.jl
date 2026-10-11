@@ -407,7 +407,7 @@ function _check_cf_range(ws::Worksheet, ncr::NonContiguousRange)
 end
 
 # ---------------------------------------------------------------------------
-# Colour bands
+# Color bands
 # ---------------------------------------------------------------------------
 
 # "FFRRGGBB" -> Colorant, for interpolation. `get_color` guarantees 8 hex digits,

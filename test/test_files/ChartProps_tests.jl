@@ -594,6 +594,18 @@
         c = XLSX.Charts.setSeriesFill(c, 3, :red)
         @test XLSX.Charts.getSeriesFill(c, 3).value.fgcolor.rgb == "FF0000"
 
+        # a theme slot named as a string or Symbol is a scheme color, as in addSeries
+        for name in ("accent4", :accent4)
+            c = XLSX.Charts.setSeriesFill(c, 3, name)
+            fg = XLSX.Charts.getSeriesFill(c, 3).value.fgcolor
+            @test fg.kind === :scheme && fg.val == "accent4"
+        end
+        c = XLSX.Charts.setSeriesLineColor(c, 3, :tx1)
+        fg = XLSX.Charts.getSeriesLine(c, 3).value.fill.fgcolor
+        @test fg.kind === :scheme && fg.val == "tx1"
+        c = XLSX.Charts.setSeriesLineColor(c, 3, "dk2")      # an alias, kept as written
+        @test XLSX.Charts.getSeriesLine(c, 3).value.fill.fgcolor.val == "dk2"
+
         # series 1 is in the bar group — the other branch of SER_TYPE
         c = XLSX.Charts.setSeriesFill(c, 1, "green")
         @test XLSX.Charts.getSeriesFill(c, 1).value.fgcolor.rgb == "008000"
@@ -803,6 +815,30 @@
         @test l.fill.fgcolor.rgb == "0000FF" && l.width ≈ 1.5
 
         @test_throws XLSX.XLSXError XLSX.Charts.setLabelTextProp(c, 1, :nonsense, 1)
+
+        # a scheme name works for a text fill too
+        c = XLSX.Charts.setLabelTextProp(c, 1, :color, "accent2")
+        @test XLSX.Charts.getLabelTextProp(c, 1, :fill).value.fgcolor.val == "accent2"
+
+        # underline, strike and caps take their DrawingML vocabularies — as Symbol
+        # or String — plus Excel's names and, for the first two, a Bool. Anything
+        # else would make a part Excel refuses, so it throws.
+        for (field, v, want) in ((:under, :dbl, "dbl"), (:underline, "wavy", "wavy"),
+                                 (:under, :single, "sng"), (:under, true, "sng"),
+                                 (:under, false, "none"),
+                                 (:strike, "dblStrike", "dblStrike"), (:strikethrough, true, "sngStrike"),
+                                 (:strike, :none, "noStrike"),
+                                 (:caps, :small, "small"), (:caps, "all", "all"))
+            c = XLSX.Charts.setLabelTextProp(c, 1, field, v)
+            f = get(XLSX.Charts._RUN_PROP_ALIASES, field, field)
+            @test XLSX.Charts.getLabelTextProp(c, 1, f).value == want
+        end
+        @test_throws XLSX.XLSXError XLSX.Charts.setLabelTextProp(c, 1, :under, "single-ish")
+        @test_throws XLSX.XLSXError XLSX.Charts.setLabelTextProp(c, 1, :strike, :sng)
+        @test_throws XLSX.XLSXError XLSX.Charts.setLabelTextProp(c, 1, :caps, true)
+        @test_throws XLSX.XLSXError XLSX.Charts.setLabelTextProp(c, 1, :under, 1)
+        c = XLSX.Charts.setLabelTextProp(c, 1, :under, :inherit)
+        @test isnothing(XLSX.Charts.getLabelTextProp(c, 1, :under).value)
 
         # Series 3 has no c:dLbls at all — creating one writes formatting only.
         @test isnothing(XLSX.Charts.getLabelTextProp(c, 3, :size).value)

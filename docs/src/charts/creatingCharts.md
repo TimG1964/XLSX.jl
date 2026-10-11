@@ -57,7 +57,7 @@ schema, where the data block is required.
 
 Each comes from a chart part Excel itself wrote, kept verbatim in the package,
 so a created chart is what Excel would have produced for that kind — including
-its style and colour parts. Kinds with no template yet throw rather than
+its style and color parts. Kinds with no template yet throw rather than
 approximate; see [Limitations](chartLimitations.md).
 
 ## A chart on its own sheet
@@ -145,17 +145,17 @@ julia> addSeries(c, "C2:C5"; categories = "A2:A5", name = "2025", color = "FF000
 
 | Keyword | Applies to | Takes |
 | --- | --- | --- |
-| `color` | everything but pie and doughnut | a colour name, hex, a `Colorant`, a [`SchemeColor`](@ref), or a scheme name such as `"accent4"` |
+| `color` | everything but pie and doughnut | a color name, hex, a `Colorant`, a [`SchemeColor`](@ref), or a scheme name such as `"accent4"` |
 | `markers` | line, lineMarkers, radar, scatter | a symbol such as `:circle`, or `false` for none |
 | `smooth` | line, lineMarkers, scatter | `true` or `false` — whether the line is curved |
 | `line` | scatter | `true` to join the points |
 
 An option that doesn't apply to the chart's kind throws rather than being
 ignored, so a mistake is caught rather than silently dropped. Pie and doughnut
-charts colour their points individually rather than by series, which is why
+charts color their points individually rather than by series, which is why
 `color` has no meaning there.
 
-Without `color`, series take the theme's accent colours in turn, as Excel does.
+Without `color`, series take the theme's accent colors in turn, as Excel does.
 Anything not covered here is set afterwards with the functions in
 [Formatting charts](formattingCharts.md).
 
@@ -192,7 +192,7 @@ XLSX.Charts.Chart "chart1" on sheet "Data" at G9:N23
     [3] 2026 - Data!$D$2:$D$5 (4 pts)
 ```
 
-The new series takes the next accent colour and the chart's own style, so it
+The new series takes the next accent color and the chart's own style, so it
 looks like the ones already there.
 
 ```julia
@@ -208,10 +208,10 @@ to, so `addSeries` throws on one.
 
 ## Themes
 
-A created chart's colours are theme references, not fixed values, so the chart
+A created chart's colors are theme references, not fixed values, so the chart
 follows the workbook's theme the way Excel's own charts do.
 
 One consequence worth knowing: a workbook from [`XLSX.newxlsx()`](@ref) carries an older
 Office theme than current Excel, so charts created in a new workbook show that
-theme's colours rather than the ones Excel 365 would use. A chart added to a
+theme's colors rather than the ones Excel 365 would use. A chart added to a
 workbook Excel created uses that workbook's theme and matches.

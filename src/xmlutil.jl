@@ -65,7 +65,7 @@ _attr(node::XML.Node, key::AbstractString) = (v = get_attr(node, key); isempty(v
 _attr(::Nothing, ::AbstractString) = nothing
 
 # DrawingML percentage attributes are in thousandths of a percent. Returns a
-# fraction, not a percentage: 60000 -> 0.6. Used for colour transforms
+# fraction, not a percentage: 60000 -> 0.6. Used for color transforms
 # (lumMod, satMod, shade, tint), text baseline, normAutofit scaling and line
 # spacing — anything reading `_attr_pct` or `_attr_pct_opt` lands here.
 @inline _pct(v::Int) = v / 100_000

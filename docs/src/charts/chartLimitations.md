@@ -31,7 +31,7 @@ for the `c:` kinds, their cached data. The restriction is on creating them.
 A combo chart is also the one case [`addSeries`](@ref) cannot extend, since
 there is no single group to add the series to.
 
-## Style and colour parts are not read
+## Style and color parts are not read
 
 Excel keeps much of a chart's appearance in two parts beside the chart itself,
 `style1.xml` and `colors1.xml`. Neither is read into the formatting cascade, so
@@ -100,7 +100,7 @@ A marker is a property of a line, scatter or radar series. Setting one on a bar
 or pie series throws, because the schema gives `c:barSer` no `c:marker` child.
 The same applies to the options [`addSeries`](@ref) takes: `smooth` is for line
 and scatter series, `line` for scatter, and `color` has no meaning on a pie or
-doughnut chart, whose points are coloured individually.
+doughnut chart, whose points are colored individually.
 
 ## Resolving text properties
 

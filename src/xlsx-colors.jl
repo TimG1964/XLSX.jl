@@ -64,7 +64,7 @@ end
     _themeelements_element(wb::Workbook) -> XML.Node
 
 The theme's `<a:themeElements>`. Throws if the workbook's theme is malformed.
-Shared by the colour and font scheme lookups.
+Shared by the color and font scheme lookups.
 """
 function _themeelements_element(wb::Workbook)::XML.Node
     xroot = xml_root_element(theme_xmlroot(wb))
@@ -334,7 +334,7 @@ resolve_theme_font(wb::Workbook, typeface::AbstractString) =
     startswith(typeface, '+') ? get(get_theme_fonts(wb), typeface, nothing) : typeface
 
 """
-Apply the DrawingML colour transforms to an "RRGGBB" hex string, in document
+Apply the DrawingML color transforms to an "RRGGBB" hex string, in document
 order, returning the transformed hex and the resulting alpha.
 
 `lumMod`, `lumOff` and `satMod` operate in HSL, which is why they are applied

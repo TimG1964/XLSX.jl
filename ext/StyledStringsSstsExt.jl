@@ -16,7 +16,7 @@ module StyledStringsSstsExt
 const _AnnStr = Union{AnnotatedString, SubString{<:AnnotatedString}}
 
 # Bounds chains of faces whose foreground names another face (as StyledStrings'
-# MAX_COLOR_FORWARDS does), so a cycle gives no colour rather than a stack overflow.
+# MAX_COLOR_FORWARDS does), so a cycle gives no color rather than a stack overflow.
 const _SS_MAX_COLOR_FORWARDS = 12
 
 function setdata!(sheet::Worksheet, ref::CellRef, ss::_AnnStr)
