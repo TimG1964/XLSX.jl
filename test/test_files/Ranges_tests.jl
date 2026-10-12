@@ -122,4 +122,20 @@
         rng = XLSX.CellRange("A2:C4")
         @test collect(rng) == [XLSX.CellRef("A2"), XLSX.CellRef("B2"), XLSX.CellRef("C2"), XLSX.CellRef("A3"), XLSX.CellRef("B3"), XLSX.CellRef("C3"), XLSX.CellRef("A4"), XLSX.CellRef("B4"), XLSX.CellRef("C4")]
     end
+
+    @testset "Base methods on references and ranges" begin
+        xf = XLSX.newxlsx()
+        sh = xf[1]
+        sh[1:3, 1:4] = reshape(collect(1:12), 3, 4)
+
+        # cell ranges and Base methods on references
+        @test XLSX.getcellrange(sh, :) == XLSX.getcellrange(sh, XLSX.get_dimension(sh))
+        @test isless(XLSX.CellRef("A2"), XLSX.CellRef("B1"))
+        @test 2 in XLSX.ColumnRange("A:C") && 2 in XLSX.RowRange("1:3")
+        @test convert(XLSX.RowRange, "2:4") == XLSX.RowRange("2:4")
+        @test convert(XLSX.RowRange, XLSX.RowRange("2:4")) == XLSX.RowRange("2:4")
+        srr = XLSX.SheetRowRange("Sheet1!2:4")
+        @test string(srr) == "Sheet1!2:4"
+        @test hash(srr) == hash(XLSX.SheetRowRange("Sheet1!2:4"))
+    end
 end

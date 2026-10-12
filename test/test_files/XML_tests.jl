@@ -277,9 +277,26 @@ end
     end
     rm(src)
     rm("trailing_out.xlsx")
+end
 
+@testset "insert_index" begin
     # Nothing in the order list precedes the target: insert at the top, not after the first child.
     root = XML.Element("worksheet", XML.Element("pageMargins"))
     @test XLSX.insert_index(root, "sheetPr", XLSX.WORKSHEET_ORDER) == 0
     @test XLSX.insert_index(XML.Element("worksheet"), "sheetPr", XLSX.WORKSHEET_ORDER) == 0
+end
+
+@testset "remove_attr! - node with no attributes, and absent key" begin
+    bare = XLSX.XML.Element("x")
+    @test isnothing(XLSX.remove_attr!(bare, "anything"))
+
+    node = XLSX.XML.Element("x"; a="1", b="2")
+    @test isnothing(XLSX.remove_attr!(node, "notThere"))
+    @test XLSX.get_attr(node, "a") == "1"
+    @test XLSX.get_attr(node, "b") == "2"
+
+    XLSX.remove_attr!(node, "a")
+    @test XLSX.get_attr(node, "a", "") == ""
+    @test !haskey(XML.attributes(node), "a")
+    @test XLSX.get_attr(node, "b") == "2"
 end

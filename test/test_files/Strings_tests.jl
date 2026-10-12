@@ -1,22 +1,3 @@
-# Rewrite a single entry of an xlsx zip into a new file in the working directory. Used to inject XML that
-# Excel itself never produces (inlineStr cells), so the `_rewrite_node` path in
-# cell.jl actually gets exercised.
-function patch_xlsx_entry(src::AbstractString, entry::AbstractString, patch::Function)
-    r = ZipReader(read(src))
-    names = zip_names(r)
-    entry in names || error("no `$entry` in $src")
-    dst = "patched_" * basename(src)
-    ZipWriter(dst) do w
-        for n in names
-            bytes = zip_readentry(r, n)
-            n == entry && (bytes = Vector{UInt8}(patch(String(bytes))))
-            zip_newfile(w, n; compress=true)
-            write(w, bytes)
-        end
-    end
-    return dst
-end
-
 # `xl/sharedStrings.xml` must be well-formed and must decode back to the original text.
 function check_sst(path::AbstractString)
     sst = String(zip_readentry(ZipReader(read(path)), "xl/sharedStrings.xml"))
@@ -87,44 +68,45 @@ end
     @test ismissing(sheet["J2"])
     isfile("mydata.xlsx") && rm("mydata.xlsx")
 
-# (issue #447)
-    src = joinpath(data_directory, "one_and_two_start.xlsx")
-    sheetxml = "xl/worksheets/sheet1.xml"
+    @testset "markup in inline strings is escaped on write (issue #447)" begin
+        src = joinpath(data_directory, "one_and_two_start.xlsx")
+        sheetxml = "xl/worksheets/sheet1.xml"
 
-    # (text written into <is>, expected value after round-trip)
-    cases = [
-        ("<t>one &amp; two</t>",        "one & two"),
-        ("<t>a &lt;b&gt; c</t>",        "a <b> c"),
-        ("<t><![CDATA[x & y]]></t>",    "x & y"),
-        ("<t>quote \" and &apos;</t>",  "quote \" and '"),
-        # Multiple runs: exercises the recursive branch of `_rewrite_node` and the
-        # attribute path (`rFont val`), which the single-<t> cases never reach.
-        ("""<r><rPr><b/><rFont val="A &amp; B"/></rPr><t>one &amp; two</t></r>""" *
-         """<r><t xml:space="preserve"> &lt;then&gt; </t></r>""" *
-         """<r><rPr><i/></rPr><t>three</t></r>""",
-         "one & two <then> three"),
-    ]
+        # (text written into <is>, expected value after round-trip)
+        cases = [
+            ("<t>one &amp; two</t>",        "one & two"),
+            ("<t>a &lt;b&gt; c</t>",        "a <b> c"),
+            ("<t><![CDATA[x & y]]></t>",    "x & y"),
+            ("<t>quote \" and &apos;</t>",  "quote \" and '"),
+            # Multiple runs: exercises the recursive branch of `_rewrite_node` and the
+            # attribute path (`rFont val`), which the single-<t> cases never reach.
+            ("""<r><rPr><b/><rFont val="A &amp; B"/></rPr><t>one &amp; two</t></r>""" *
+             """<r><t xml:space="preserve"> &lt;then&gt; </t></r>""" *
+             """<r><rPr><i/></rPr><t>three</t></r>""",
+             "one & two <then> three"),
+        ]
 
-    for (inner, expected) in cases
-        f = patch_xlsx_entry(src, sheetxml, s -> set_a1_inline(s, inner))
-        xf = XLSX.openxlsx(f, mode="rw")
-        @test xf[1]["A1"] == expected          # read decodes correctly (passes pre-fix)
+        for (inner, expected) in cases
+            f = patch_xlsx_entry(src, sheetxml, s -> set_a1_inline(s, inner))
+            xf = XLSX.openxlsx(f, mode="rw")
+            @test xf[1]["A1"] == expected          # read decodes correctly (passes pre-fix)
 
-        out = "strings_inline_escape_out.xlsx"
-        XLSX.writexlsx(out, xf, overwrite=true)
+            out = "strings_inline_escape_out.xlsx"
+            XLSX.writexlsx(out, xf, overwrite=true)
 
-        sst = check_sst(out)                   # throws pre-fix
-        @test !occursin(r"&(?!amp;|lt;|gt;|apos;|quot;|#)", sst)
-        @test XLSX.readxlsx(out)[1]["A1"] == expected
+            sst = check_sst(out)                   # throws pre-fix
+            @test !occursin(r"&(?!amp;|lt;|gt;|apos;|quot;|#)", sst)
+            @test XLSX.readxlsx(out)[1]["A1"] == expected
 
-        SAVE_FILES && save_outfile(xf)
-        isfile(f) && rm(f)
-        isfile(out) && rm(out)
+            SAVE_FILES && save_outfile(xf)
+            isfile(f) && rm(f)
+            isfile(out) && rm(out)
+        end
     end
 end
 
 @testset "rich text formats" begin
-    @testset "setAttributes" begin
+    @testset "setFont, setUniformFont and setUniformStyle on rich text" begin
         xf = XLSX.readxlsx(joinpath(data_directory, "is.xlsx"))
         sh = xf["Sheet1"]
         @test_throws XLSX.XLSXError XLSX.setFont(sh, "A1"; name="Palatino") # Must be in write mode for rich text formats
@@ -470,5 +452,24 @@ end
         @test String(take!(io1)) == rts_expected_result
         SAVE_FILES && save_outfile(f)
 
+    end
+
+    @testset "RichTextRun and RichTextString as strings" begin
+        run = XLSX.RichTextRun("ab", nothing)
+        @test length(run) == 2
+        @test hash(run) == hash(XLSX.RichTextRun("ab"))
+        rts = XLSX.RichTextString("ab", [run])
+        @test String(rts) == "ab" && ncodeunits(rts) == 2
+        @test codeunit(rts) == UInt8 && codeunit(rts, 1) == UInt8('a')
+        @test isvalid(rts, 1) && rts[1] == XLSX.RichTextString("a", [XLSX.RichTextRun("a")])
+        @test hash(rts) == hash(XLSX.RichTextString("ab", [XLSX.RichTextRun("ab")]))
+
+        xf = XLSX.opentemplate(joinpath(data_directory, "is.xlsx"))
+        sh = xf["Sheet1"]
+        XLSX.setFont(sh, "A1"; name="Palatino")
+        @test XLSX.getRichTextString(sh, 1, 1) == XLSX.getRichTextString(sh, "A1")
+        @test XLSX.getRichTextString(xf, "Sheet1!A1") == XLSX.getRichTextString(sh, "A1")
+        @test XLSX.get_sst(xf) === XLSX.get_sst(XLSX.get_workbook(xf))
+        SAVE_FILES && save_outfile(xf)
     end
 end

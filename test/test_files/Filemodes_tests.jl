@@ -83,121 +83,6 @@
 
     @test_throws XLSX.XLSXError f = XLSX.openxlsx(filename; mode="rw", enable_cache=false) # Cache must be enabled to open in `write` mode.
 
-    @testset "write column" begin
-        col_data = collect(1:50)
-
-        XLSX.openxlsx(filename, mode="w") do xf
-            sheet = xf[1]
-            sheet[:, 2] = col_data
-            sheet[51:100, 3] = col_data
-            sheet[2, 4, dim=1] = col_data
-        end
-        SAVE_FILES && save_outfile(filename)
-
-        XLSX.openxlsx(filename) do xf
-            sheet = xf[1]
-
-            for (row, val) in enumerate(col_data)
-                @test sheet[row, 2] == val
-                @test sheet[50+row, 3] == val
-                @test sheet[row+1, 4] == val
-            end
-        end
-    end
-
-    @testset "write matrix with anchor cell" begin
-        test_data = [1 2 3; 4 5 6; 7 8 9]
-        XLSX.openxlsx(filename, mode="w") do xf
-            sheet = xf[1]
-            sheet["A7"] = test_data
-        end
-        SAVE_FILES && save_outfile(filename)
-
-        XLSX.openxlsx(filename) do xf
-            sheet = xf[1]
-            rows, cols = size(test_data)
-            for c in 1:cols, r in 1:rows
-                @test sheet[r+6, c] == test_data[r, c]
-            end
-        end
-
-        xf = XLSX.newxlsx()
-        sheet = xf[1]
-        sheet[7, 1] = test_data
-        XLSX.writexlsx(filename, xf, overwrite=true)
-        SAVE_FILES && save_outfile(filename)
-
-        XLSX.openxlsx(filename) do xf
-            sheet = xf[1]
-            rows, cols = size(test_data)
-            for c in 1:cols, r in 1:rows
-                @test sheet[r+6, c] == test_data[r, c]
-            end
-        end
-    end
-
-    @testset "write matrix with range" begin
-        test_data = [1 2 3; 4 5 6; 7 8 9]
-        XLSX.openxlsx(filename, mode="w") do xf
-            sheet = xf[1]
-            sheet["A7:C9"] = test_data
-        end
-        SAVE_FILES && save_outfile(filename)
-
-        XLSX.openxlsx(filename) do xf
-            sheet = xf[1]
-            rows, cols = size(test_data)
-            for c in 1:cols, r in 1:rows
-                @test sheet[r+6, c] == test_data[r, c]
-            end
-        end
-
-        xf = XLSX.newxlsx()
-        sheet = xf[1]
-        sheet[7:9, 1:3] = test_data
-        XLSX.writexlsx(filename, xf, overwrite=true)
-        SAVE_FILES && save_outfile(filename)
-
-        XLSX.openxlsx(filename) do xf
-            sheet = xf[1]
-            rows, cols = size(test_data)
-            for c in 1:cols, r in 1:rows
-                @test sheet[r+6, c] == test_data[r, c]
-            end
-        end
-    end
-
-    @testset "write matrix with range mismatch" begin
-        test_data = [1 2 3; 4 5 6; 7 8 9]
-        XLSX.openxlsx(filename, mode="w") do xf
-            sheet = xf[1]
-            @test_throws XLSX.XLSXError sheet["A7:C10"] = test_data
-        end
-        SAVE_FILES && save_outfile(filename)
-    end
-
-    @testset "write matrix with heterogeneous data types" begin
-        # issue #97
-        test_data = ["A" "B"; 1 2; "a" "b"; 0 "x"]
-        XLSX.openxlsx(filename, mode="w") do xf
-            sheet = xf[1]
-            sheet["B2"] = test_data
-        end
-        SAVE_FILES && save_outfile(filename)
-
-        XLSX.openxlsx(filename, mode="r") do xf
-            sheet = xf[1]
-            @test sheet["B2"] == "A"
-            @test sheet["C2"] == "B"
-            @test sheet["B3"] == 1
-            @test sheet["C3"] == 2
-            @test sheet["B4"] == "a"
-            @test sheet["C4"] == "b"
-            @test sheet["B5"] == 0
-            @test sheet["C5"] == "x"
-        end
-    end
-
     @testset "doctest for writetable!" begin
         columns = Vector()
         push!(columns, [1, 2, 3])
@@ -248,4 +133,63 @@
     end
 
     isfile(filename) && rm(filename)
+
+    @testset "openxlsx / parse_file_mode - argument errors" begin
+        missing_file = "definitely_not_a_file_12345.xlsx"
+
+        @test_throws XLSX.XLSXError XLSX.openxlsx(missing_file)
+        @test_throws XLSX.XLSXError XLSX.openxlsx(identity, missing_file)
+        @test_throws XLSX.XLSXError XLSX.openxlsx(missing_file; mode="q")
+        @test XLSX.parse_file_mode("wr") == (true, true)
+        @test XLSX.parse_file_mode("RW") == (true, true)
+    end
+
+    @testset "missing file or bad `mode`" begin
+        @test_throws XLSX.XLSXError XLSX.openxlsx("noSuchFile.xlsx")
+        @test_throws XLSX.XLSXError XLSX.openxlsx(joinpath(data_directory, "Book1.xlsx"); mode="tg")
+    end
+
+    @testset "write-only mode" begin
+        XLSX.openxlsx("mytest.xlsx", mode="w") do f
+            f[1]["A1"] = 1
+            @test f.source == "mytest.xlsx"
+        end
+        SAVE_FILES && save_outfile("mytest.xlsx")
+        ef = XLSX.readxlsx("mytest.xlsx")
+        @test ef["Sheet1"]["A1"] == 1
+        f = XLSX.openxlsx("mytest2.xlsx", mode="w")
+        @test f.source == "mytest2.xlsx"
+        f[1]["A1"] = 1
+        XLSX.writexlsx("mytest3.xlsx", f, overwrite=true)
+        SAVE_FILES && save_outfile("mytest3.xlsx")
+        ef = XLSX.readxlsx("mytest3.xlsx")
+        @test ef["Sheet1"]["A1"] == 1
+        f = XLSX.newxlsx()
+        @test f.source == "blank.xlsx"
+        f[1]["A1"] = 1
+        XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
+        SAVE_FILES && save_outfile("mytest.xlsx")
+        ef = XLSX.readxlsx("mytest.xlsx")
+        @test ef["Sheet1"]["A1"] == 1
+        for f in ["mytest.xlsx", "mytest2.xlsx", "mytest3.xlsx"]
+            isfile(f) && rm(f)
+        end
+    end
+
+    @testset "read-only and no-cache files reject formula and merge calls" begin
+        general = joinpath(data_directory, "general.xlsx")
+        
+        ro = XLSX.readxlsx(general)
+        s = ro[1]
+        @test_throws XLSX.XLSXError XLSX.setFormula(s, "A1", "=1+1")
+        @test_throws XLSX.XLSXError XLSX.setFormula(s, "A1:A2", "=1+1")
+        @test_throws XLSX.XLSXError XLSX.isMergedCell(s, "A1")
+        @test_throws XLSX.XLSXError XLSX.getMergedBaseCell(s, "A1")
+        @test_throws XLSX.XLSXError XLSX.mergeCells(s, "A1:B2")
+
+        XLSX.openxlsx(general; enable_cache=false) do nc
+            s = nc[1]
+            @test_throws XLSX.XLSXError XLSX.getMergedCells(s)
+        end
+    end
 end

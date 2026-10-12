@@ -370,7 +370,7 @@
         src = joinpath(data_directory, "No-Default_NameSpace.xlsx")
         @test isfile(src)
 
-        tmp = joinpath(data_directory, "mytest.xlsx")
+        tmp = "panes_namespaced.xlsx"
 
         try
             # -- Round 1: open the pristine fixture, apply panes to both
@@ -431,4 +431,18 @@
         end
     end
 
+
+    @testset "splitFreeze from an anchor cell" begin
+        xf = XLSX.newxlsx()
+        sh = xf[1]
+        sh[1:3, 1:4] = reshape(collect(1:12), 3, 4)
+
+        XLSX.splitFreeze(sh, "B3")
+        doc = XLSX.get_worksheet_xml_document(sh)
+        i, j = XLSX.get_idces(doc, "worksheet", "sheetViews")
+        k, l = XLSX.get_idces(doc[i][j], "sheetView", "pane")
+        pane = doc[i][j][k][l]
+        @test pane["topLeftCell"] == "B3" && pane["xSplit"] == "1" && pane["ySplit"] == "2"
+        SAVE_FILES && save_outfile(xf)
+    end
 end

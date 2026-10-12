@@ -187,11 +187,5 @@
         @test imgs2[1].sheet == "Sheet1"
         isfile(tmp) && rm(tmp)
     end
-    @testset "prefixed attribute lookup" begin
-        blip = parse("""<a:blip xmlns:rel="$(XLSX.NS_R)" rel:embed="rId7" cstate="print"/>""", XML.Node)[end]
-        @test XLSX.get_prefixed_attr(blip, "embed") == "rId7"
-        @test XLSX.get_prefixed_attr(blip, "cstate") === nothing   # unprefixed: skipped by design
-        @test XLSX.get_prefixed_attr(blip, "id") === nothing
-    end
     
 end

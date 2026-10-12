@@ -70,39 +70,39 @@
         @test XLSX.resolveColor(wb, Dict("fgtheme" => "1"); prefix="fg") == "FF000000"
 
         # theme colors are consistent with what getRichTextString resolved in the actual file
-        # is.xlsx has theme="1" runs (dk1, black) and theme="9" runs (accent6, green)
+        # is.xlsx B2 has theme="1" runs, which resolve to dk1 (black)
         rts = XLSX.getRichTextString(sh, "B2")
         dk1_run = findfirst(r -> r.atts !== nothing && get(r.atts, :color, nothing) == "FF000000", rts.runs)
         @test dk1_run !== nothing
     end
 
     @testset "resolveColor (Borders.xlsx)" begin
-        f = XLSX.readxlsx(joinpath(data_directory, "Borders.xlsx"))
-        s = f["Sheet1"]
-        wb = XLSX.get_workbook(f)
+        bf = XLSX.readxlsx(joinpath(data_directory, "Borders.xlsx"))
+        bs = bf["Sheet1"]
+        bwb = XLSX.get_workbook(bf)
 
         # theme_xmlroot works on a different fixture - same theme, independent cache
-        theme_root = XLSX.theme_xmlroot(wb)
+        theme_root = XLSX.theme_xmlroot(bwb)
         @test theme_root !== nothing
-        colors = XLSX.get_theme_colors(wb)
+        colors = XLSX.get_theme_colors(bwb)
         @test colors[4] == "0E2841"   # dk2, index 3
 
         # D4: theme="3" tint="0.24994659260841701" - the motivating example
-        d4_top = XLSX.getBorder(s, "D4").border["top"]
-        @test XLSX.resolveColor(s, d4_top) == "FF4A5E70"
+        d4_top = XLSX.getBorder(bs, "D4").border["top"]
+        @test XLSX.resolveColor(bs, d4_top) == "FF4A5E70"
 
         # all four sides of D4 have the same color
         for side in ("left", "right", "top", "bottom")
-            @test XLSX.resolveColor(wb, XLSX.getBorder(s, "D4").border[side]) == "FF4A5E70"
+            @test XLSX.resolveColor(bwb, XLSX.getBorder(bs, "D4").border[side]) == "FF4A5E70"
         end
 
         # B4: explicit rgb - resolveColor passes it through unchanged
-        b4_top = XLSX.getBorder(s, "B4").border["top"]
-        @test XLSX.resolveColor(s, b4_top) == "FFFF0000"
+        b4_top = XLSX.getBorder(bs, "B4").border["top"]
+        @test XLSX.resolveColor(bs, b4_top) == "FFFF0000"
 
         # B2: auto color on border
-        b2_top = XLSX.getBorder(s, "B2").border["top"]
-        @test XLSX.resolveColor(s, b2_top) == "FF000000"
+        b2_top = XLSX.getBorder(bs, "B2").border["top"]
+        @test XLSX.resolveColor(bs, b2_top) == "FF000000"
     end
 
     @testset "rgb normalization" begin
@@ -111,14 +111,14 @@
         @test XLSX.resolveColor(wb, Dict("rgb" => "00ff00")) == "FF00FF00"
         @test XLSX.resolveColor(wb, Dict("rgb" => "80AABBCC")) == "80AABBCC"
         @test XLSX.resolveColor(wb, Dict("rgb" => "80aabbcc")) == "80AABBCC"
-        @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("rgb" => "ABC"))   # if you choose to throw on bad format
+        @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("rgb" => "ABC"))
     end
 
     @testset "indexed bounds" begin
         maxidx = length(XLSX.INDEXED_PALETTE) - 1
         @test XLSX.resolveColor(wb, Dict("indexed" => "0")) == "FF" * XLSX.INDEXED_PALETTE[1]
         @test XLSX.resolveColor(wb, Dict("indexed" => string(maxidx))) == "FF" * XLSX.INDEXED_PALETTE[maxidx+1]
-        # If you choose to throw on out-of-range:
+        # out-of-range indices throw
         @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("indexed" => string(maxidx+1)))
         @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("indexed" => "-1"))
     end
@@ -136,35 +136,6 @@
         @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("theme" => "-1"))
         @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("theme" => "12"))
         @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("theme" => "notanumber"))
-    end
-
-    @testset "theme colour transforms match Excel" begin
-        f = XLSX.opentemplate(joinpath(data_directory, "chart_theme_colors.xlsx"))
-        wb = XLSX.get_workbook(f)
-        ch = XLSX.xml_root_element(f.data["xl/charts/chart1.xml"])
-
-        cols = XLSX.Charts.DrawingColor[]
-        walk(n) = for c in XML.eachelement(n)
-            XLSX.localname(c) == "solidFill" ?
-                (col = XLSX.Charts.parse_drawing_color(wb, c); isnothing(col) || push!(cols, col)) :
-                walk(c)
-        end
-        walk(ch)
-
-        # Values confirmed against what Excel reports in More Fill Colors.
-        function byval(v, t)
-            hits = filter(c -> c.val == v && c.transforms == t, cols)
-            @test !isempty(hits)
-            @test allequal(c.rgb for c in hits)     # same input, same output everywhere
-            return first(hits).rgb
-        end
-
-        @test byval("accent1", Pair{Symbol,Int}[])                              == "156082"
-        @test byval("accent1", [:lumMod => 60000, :lumOff => 40000])            == "46B1E1"
-        @test byval("accent1", [:lumMod => 75000])                              == "104862"
-        @test byval("tx1",     [:lumMod => 65000, :lumOff => 35000])            == "595959"
-        @test byval("tx1",     [:lumMod => 15000, :lumOff => 85000])            == "D9D9D9"
-        SAVE_FILES && save_outfile(f)
     end
 
     @testset "every colour argument takes every colour form" begin
@@ -189,7 +160,7 @@
         tmp = "colour_forms.xlsx"
         cp(joinpath(data_directory, "chart_kinds.xlsx"), tmp; force = true)
         try
-            xf = XLSX.openxlsx(tmp; mode = "rw")
+            local xf = XLSX.openxlsx(tmp; mode = "rw")
             c  = first(XLSX.Charts.getCharts(xf["stackedbar"]))
             lc = first(XLSX.Charts.getCharts(xf["linemarkers"]))
             catax = only(XLSX.Charts.getChartAxes(c, :category))

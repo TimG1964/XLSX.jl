@@ -70,42 +70,42 @@
     @test in(XLSX.SheetCellRef("Sheet1!B2"), ncrng_mixed) == false # matches neither piece
     @test in(XLSX.SheetCellRef("Sheet2!D4"), ncrng_mixed) == false # right position, wrong sheet
 
-    cn = XLSX.CellRef("A1")
-    @test string(cn) == "A1"
-    @test XLSX.column_name(cn) == "A"
-    @test XLSX.row_number(cn) == 1
-    @test XLSX.column_number(cn) == 1
+    @testset "CellRef and column names" begin
+        cn = XLSX.CellRef("A1")
+        @test string(cn) == "A1"
+        @test XLSX.column_name(cn) == "A"
+        @test XLSX.row_number(cn) == 1
+        @test XLSX.column_number(cn) == 1
 
-    cn = XLSX.CellRef("AB1")
-    @test string(cn) == "AB1"
-    @test XLSX.column_name(cn) == "AB"
-    @test XLSX.row_number(cn) == 1
-    @test XLSX.column_number(cn) == 28
+        cn = XLSX.CellRef("AB1")
+        @test string(cn) == "AB1"
+        @test XLSX.column_name(cn) == "AB"
+        @test XLSX.row_number(cn) == 1
+        @test XLSX.column_number(cn) == 28
 
-    cn = XLSX.CellRef("AMI1")
-    @test string(cn) == "AMI1"
-    @test XLSX.column_name(cn) == "AMI"
-    @test XLSX.row_number(cn) == 1
-    @test XLSX.column_number(cn) == 1023
+        cn = XLSX.CellRef("AMI1")
+        @test string(cn) == "AMI1"
+        @test XLSX.column_name(cn) == "AMI"
+        @test XLSX.row_number(cn) == 1
+        @test XLSX.column_number(cn) == 1023
 
-    cn = XLSX.CellRef("XFD1048576")
-    @test string(cn) == "XFD1048576"
-    @test XLSX.column_name(cn) == "XFD"
-    @test XLSX.row_number(cn) == XLSX.EXCEL_MAX_ROWS
-    @test XLSX.column_number(cn) == XLSX.EXCEL_MAX_COLS
+        cn = XLSX.CellRef("XFD1048576")
+        @test string(cn) == "XFD1048576"
+        @test XLSX.column_name(cn) == "XFD"
+        @test XLSX.row_number(cn) == XLSX.EXCEL_MAX_ROWS
+        @test XLSX.column_number(cn) == XLSX.EXCEL_MAX_COLS
 
-    v_column_numbers = [1, 15, 22, 23, 24, 25, 26, 27, 28, 29, 30, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 284, 285, 286, 287, 288, 289, 296, 297, 299, 300, 301, 700, 701, 702, 703, 704, 705, 706, 727, 728, 729, 730, 731, 1008, 1013, 1014, 1015, 1016, 1017, 1018, 1023, 1024, 1376, 1377, 1378, 1379, 1380, 1381, 3379, 3380, 3381, 3382, 3383, 3403, 3404, 3405, 3406, 3407, 16250, 16251, 16354, 16355, 16384]
+        v_column_numbers = [1, 15, 22, 23, 24, 25, 26, 27, 28, 29, 30, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 284, 285, 286, 287, 288, 289, 296, 297, 299, 300, 301, 700, 701, 702, 703, 704, 705, 706, 727, 728, 729, 730, 731, 1008, 1013, 1014, 1015, 1016, 1017, 1018, 1023, 1024, 1376, 1377, 1378, 1379, 1380, 1381, 3379, 3380, 3381, 3382, 3383, 3403, 3404, 3405, 3406, 3407, 16250, 16251, 16354, 16355, 16384]
 
-    v_column_names = ["A", "O", "V", "W", "X", "Y", "Z", "AA", "AB", "AC", "AD", "AL", "AM", "AN", "AO", "AP", "AQ", "AR", "AS", "AT", "AU", "AV", "AW", "AX", "AY", "AZ", "BA", "BB", "BC", "BD", "BE", "BF", "BG", "BH", "BI", "BV", "BW", "BX", "BY", "BZ", "CA", "CB", "CC", "CD", "CE", "CF", "CG", "CH", "JX", "JY", "JZ", "KA", "KB", "KC", "KJ", "KK", "KM", "KN", "KO", "ZX", "ZY", "ZZ", "AAA", "AAB", "AAC", "AAD", "AAY", "AAZ", "ABA", "ABB", "ABC", "ALT", "ALY", "ALZ", "AMA", "AMB", "AMC", "AMD", "AMI", "AMJ", "AZX", "AZY", "AZZ", "BAA", "BAB", "BAC", "DYY", "DYZ", "DZA", "DZB", "DZC", "DZW", "DZX", "DZY", "DZZ", "EAA", "WZZ", "XAA", "XDZ", "XEA", "XFD"]
+        v_column_names = ["A", "O", "V", "W", "X", "Y", "Z", "AA", "AB", "AC", "AD", "AL", "AM", "AN", "AO", "AP", "AQ", "AR", "AS", "AT", "AU", "AV", "AW", "AX", "AY", "AZ", "BA", "BB", "BC", "BD", "BE", "BF", "BG", "BH", "BI", "BV", "BW", "BX", "BY", "BZ", "CA", "CB", "CC", "CD", "CE", "CF", "CG", "CH", "JX", "JY", "JZ", "KA", "KB", "KC", "KJ", "KK", "KM", "KN", "KO", "ZX", "ZY", "ZZ", "AAA", "AAB", "AAC", "AAD", "AAY", "AAZ", "ABA", "ABB", "ABC", "ALT", "ALY", "ALZ", "AMA", "AMB", "AMC", "AMD", "AMI", "AMJ", "AZX", "AZY", "AZZ", "BAA", "BAB", "BAC", "DYY", "DYZ", "DZA", "DZB", "DZC", "DZW", "DZX", "DZY", "DZZ", "EAA", "WZZ", "XAA", "XDZ", "XEA", "XFD"]
 
-    @assert length(v_column_names) == length(v_column_numbers) "Test script is wrong."
+        @assert length(v_column_names) == length(v_column_numbers) "Test script is wrong."
 
-    for i in axes(v_column_names, 1)
-        @test XLSX.encode_column_number(v_column_numbers[i]) == v_column_names[i]
-        @test XLSX.decode_column_number(v_column_names[i]) == v_column_numbers[i]
-    end
+        for i in axes(v_column_names, 1)
+            @test XLSX.encode_column_number(v_column_numbers[i]) == v_column_names[i]
+            @test XLSX.decode_column_number(v_column_names[i]) == v_column_numbers[i]
+        end
 
-    @testset "CellRef" begin
         ref = XLSX.CellRef(12, 2)
         @test XLSX.cellname(ref) == "B12"
         show(IOBuffer(), ref)
@@ -202,4 +202,28 @@
     @test !XLSX.is_valid_fixed_sheet_cellrange("named_ranges!B4:C5")
     @test XLSX.SheetCellRef("named_ranges!\$A\$2") == XLSX.SheetCellRef("named_ranges!A2")
     @test XLSX.SheetCellRange("named_ranges!\$B\$4:\$C\$5") == XLSX.SheetCellRange("named_ranges!B4:C5")
+
+    @testset "out-of-range and malformed references are rejected" begin
+        # out-of-range column and row numbers are rejected
+        @test_throws XLSX.XLSXError XLSX.encode_column_number(0)
+        @test_throws XLSX.XLSXError XLSX.encode_column_number(XLSX.EXCEL_MAX_COLS + 1)
+        @test XLSX.encode_column_number(XLSX.EXCEL_MAX_COLS) == "XFD"
+        @test_throws XLSX.XLSXError XLSX.is_valid_row_range(string(XLSX.EXCEL_MAX_ROWS + 1))
+        @test XLSX.is_valid_row_range(string(XLSX.EXCEL_MAX_ROWS))
+        @test_throws XLSX.XLSXError XLSX.split_cellname("A")
+
+        @test !XLSX.is_valid_row_name("0")
+        @test !XLSX.is_valid_cellrange("A0:B2") && !XLSX.is_valid_cellrange("A1:B0")
+        @test !XLSX.is_valid_column_range("A:ZZZZ")
+        @test !XLSX.is_valid_row_range("0:2")
+        @test !XLSX.is_valid_sheet_cellrange("Sheet1!A0:B2")
+        @test !XLSX.is_valid_sheet_column_range("Sheet1!A:ZZZZ")
+        @test !XLSX.is_valid_sheet_row_range("Sheet1!0:2")
+
+        @test sprint(show, XLSX.SheetRowRange("Sheet1!2:4")) == "Sheet1!2:4"
+        @test_throws XLSX.XLSXError XLSX.NonContiguousRange("Sheet1!A1,Sheet2!B2")
+        @test_throws XLSX.XLSXError XLSX.nCR("Sheet1", ["not a ref"])
+        nc = XLSX.nCR("Sheet1", ["\$A\$1", "\$B\$1:\$C\$2"])
+        @test nc.rng == [XLSX.CellRef("A1"), XLSX.CellRange("B1:C2")]
+    end
 end

@@ -6,7 +6,7 @@
     ef_book_sparse = XLSX.readxlsx(joinpath(data_directory, "book_sparse.xlsx"))
     ef_book_sparse_2 = XLSX.readxlsx(joinpath(data_directory, "book_sparse_2.xlsx"))
 
-    XLSX.readxlsx(joinpath(data_directory, "missing_numFmtId.xlsx"))["Koldioxid (CO2)"][7, 5]
+    @test XLSX.readxlsx(joinpath(data_directory, "missing_numFmtId.xlsx"))["Koldioxid (CO2)"][7, 5] ≈ 208634.871365389
 
     @test open(joinpath(data_directory, "blank_ptbr_1904.xlsx")) do io
         XLSX.readxlsx(io)
@@ -68,31 +68,33 @@
 
     # Issue #293
     @testset "read .xltx file" begin
-        xf = XLSX.openxlsx(joinpath(data_directory, "Template File.xltx"); mode="RW")
+        # saving a template writes the .xlsx beside it, so work on a copy
+        cp(joinpath(data_directory, "Template File.xltx"), "Template File.xltx"; force=true)
+        xf = XLSX.openxlsx("Template File.xltx"; mode="RW")
         s=xf[1]
         @test s["P5"] == 5
         @test XLSX.getFormula(s, "B5") == "=RANDBETWEEN(0,100)"
         @test xf.template_type == XLSX.XLTXTemplate
 
         XLSX.savexlsx(xf)
-        SAVE_FILES && save_outfile(joinpath(data_directory, "Template File.xlsx"))
-        @test isfile(joinpath(data_directory, "Template File.xlsx"))
-        xf = XLSX.readxlsx(joinpath(data_directory, "Template File.xlsx"))
+        SAVE_FILES && save_outfile("Template File.xlsx")
+        @test isfile("Template File.xlsx")
+        xf = XLSX.readxlsx("Template File.xlsx")
         s=xf[1]
         @test s["P5"] == 5
         @test XLSX.getFormula(s, "B5") == "=RANDBETWEEN(0,100)"
         @test xf.template_type == XLSX.NotATemplate
-        isfile(joinpath(data_directory, "Template File.xlsx")) && rm(joinpath(data_directory, "Template File.xlsx"))
+        isfile("Template File.xlsx") && rm("Template File.xlsx")
 
-        XLSX.openxlsx(joinpath(data_directory, "Template File.xltx"); mode="RW") do xf
+        XLSX.openxlsx("Template File.xltx"; mode="RW") do xf
             s=xf[1]
             @test s["P5"] == 5
             @test XLSX.getFormula(s, "B5") == "=RANDBETWEEN(0,100)"
             @test xf.template_type == XLSX.XLTXTemplate
         end
-        @test isfile(joinpath(data_directory, "Template File.xlsx"))
-        SAVE_FILES && save_outfile(joinpath(data_directory, "Template File.xlsx"))
-        isfile(joinpath(data_directory, "Template File.xlsx")) && rm(joinpath(data_directory, "Template File.xlsx"))
+        @test isfile("Template File.xlsx")
+        SAVE_FILES && save_outfile("Template File.xlsx")
+        isfile("Template File.xlsx") && rm("Template File.xlsx")
     end
 
     # Issue #401
@@ -106,45 +108,41 @@
         isfile("mytest.xlsm") && rm("mytest.xlsm")
 
         SAVE_FILES && save_outfile(mf)
-        mf = XLSX.openxlsx(joinpath(data_directory, "macro-enabled2.xltm"); mode="rW")
+        cp(joinpath(data_directory, "macro-enabled2.xltm"), "macro-enabled2.xltm"; force=true)
+        mf = XLSX.openxlsx("macro-enabled2.xltm"; mode="rW")
         @test mf[1]["A1"] == "hello"
         @test mf.template_type == XLSX.XLTMTemplate
         XLSX.savexlsx(mf)
-        SAVE_FILES && save_outfile(joinpath(data_directory, "macro-enabled2.xlsm"))
-        @test isfile(joinpath(data_directory, "macro-enabled2.xlsm"))
-        mf = XLSX.readxlsx(joinpath(data_directory, "macro-enabled2.xlsm"))
+        SAVE_FILES && save_outfile("macro-enabled2.xlsm")
+        @test isfile("macro-enabled2.xlsm")
+        mf = XLSX.readxlsx("macro-enabled2.xlsm")
         s=mf[1]
         @test mf[1]["A1"] == "hello"
         @test mf.template_type == XLSX.NotATemplate
-        isfile(joinpath(data_directory, "macro-enabled2.xlsm")) && rm(joinpath(data_directory, "macro-enabled2.xlsm"))
+        isfile("macro-enabled2.xlsm") && rm("macro-enabled2.xlsm")
         
-        XLSX.openxlsx(joinpath(data_directory, "macro-enabled2.xltm"); mode="wr") do mf
+        XLSX.openxlsx("macro-enabled2.xltm"; mode="wr") do mf
             @test mf[1]["A1"] == "hello"
             @test mf.template_type == XLSX.XLTMTemplate
         end
-        SAVE_FILES && save_outfile(joinpath(data_directory, "macro-enabled2.xltm"))
-        @test isfile(joinpath(data_directory, "macro-enabled2.xlsm"))
-        SAVE_FILES && save_outfile(joinpath(data_directory, "macro-enabled2.xlsm"))
-        mf = XLSX.openxlsx(joinpath(data_directory, "macro-enabled2.xlsm"); mode="WR")
+        @test isfile("macro-enabled2.xlsm")
+        SAVE_FILES && save_outfile("macro-enabled2.xlsm")
+        mf = XLSX.openxlsx("macro-enabled2.xlsm"; mode="WR")
         @test mf[1]["A1"] == "hello"
         @test mf.template_type == XLSX.NotATemplate
-        isfile(joinpath(data_directory, "macro-enabled2.xlsm")) && rm(joinpath(data_directory, "macro-enabled2.xlsm"))
+        isfile("macro-enabled2.xlsm") && rm("macro-enabled2.xlsm")
 
     end
 
     # Issue #403
     @testset "UTF-16 customXml" begin
-        try
-            xf1 = XLSX.openxlsx(joinpath(data_directory, "UTF-16.xlsx"); mode="rw")
-            XLSX.writexlsx("UTF-16_test.xlsx", xf1; overwrite=true)
-            SAVE_FILES && save_outfile("UTF-16_test.xlsx")
-            xf2 = XLSX.openxlsx("UTF-16_test.xlsx"; mode="rw")
-            @test xf1[1]["E3"] == xf2[1]["E3"]
-            @test xf1[1]["R99"] == xf2[1]["R99"]
-            SAVE_FILES && save_outfile(xf2)
-        catch e
-            @test false
-        end
+        xf1 = XLSX.openxlsx(joinpath(data_directory, "UTF-16.xlsx"); mode="rw")
+        XLSX.writexlsx("UTF-16_test.xlsx", xf1; overwrite=true)
+        SAVE_FILES && save_outfile("UTF-16_test.xlsx")
+        xf2 = XLSX.openxlsx("UTF-16_test.xlsx"; mode="rw")
+        @test xf1[1]["E3"] == xf2[1]["E3"]
+        @test xf1[1]["R99"] == xf2[1]["R99"]
+        SAVE_FILES && save_outfile(xf2)
 
         isfile("UTF-16_test.xlsx") && rm("UTF-16_test.xlsx")
 
@@ -168,57 +166,6 @@
         catch e
             @test occursin("is not a valid XLSX file", "$e")
         end
-    end
-
-    @testset "missing file or bad `mode`" begin
-        @test_throws XLSX.XLSXError XLSX.openxlsx("noSuchFile.xlsx")
-        @test_throws XLSX.XLSXError XLSX.openxlsx(joinpath(data_directory, "Book1.xlsx"); mode="tg")
-    end
-
-    @testset "write-only mode" begin
-        XLSX.openxlsx("mytest.xlsx", mode="w") do f
-            f[1]["A1"] = 1
-            @test f.source == "mytest.xlsx"
-        end
-        SAVE_FILES && save_outfile("mytest.xlsx")
-        ef = XLSX.readxlsx("mytest.xlsx")
-        @test ef["Sheet1"]["A1"] == 1
-        f = XLSX.openxlsx("mytest2.xlsx", mode="w")
-        @test f.source == "mytest2.xlsx"
-        f[1]["A1"] = 1
-        XLSX.writexlsx("mytest3.xlsx", f, overwrite=true)
-        SAVE_FILES && save_outfile("mytest3.xlsx")
-        ef = XLSX.readxlsx("mytest3.xlsx")
-        @test ef["Sheet1"]["A1"] == 1
-        f = XLSX.newxlsx()
-        @test f.source == "blank.xlsx"
-        f[1]["A1"] = 1
-        XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
-        SAVE_FILES && save_outfile("mytest.xlsx")
-        ef = XLSX.readxlsx("mytest.xlsx")
-        @test ef["Sheet1"]["A1"] == 1
-        for f in ["mytest.xlsx", "mytest2.xlsx", "mytest3.xlsx"]
-            isfile(f) && rm(f)
-        end
-    end
-
-    @testset "Fix timestamp" begin
-        t = Dates.now(Dates.UTC) - Dates.Second(1)
-        xf = XLSX.newxlsx()
-        f = "docProps/core.xml"
-        date_format = Dates.dateformat"yyyy-mm-ddTHH:MM:SSZ"
-        i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:created") # i, j should always be found unless the `blank.xlsx` file is updated
-        @test t < DateTime(XML.value(xf.data[f][i][j][1]), date_format)
-        i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:modified")
-        @test t < DateTime(XML.value(xf.data[f][i][j][1]), date_format)
-        SAVE_FILES && save_outfile(xf)
-
-        xf = XLSX.newxlsx(; update_timestamp=false) # do not update timestamp
-        i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:created") # i, j should always be found unless the `blank.xlsx` file is updated
-        @test XML.value(xf.data[f][i][j][1]) == "2018-05-22T02:41:32Z"
-        i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:modified")
-        @test XML.value(xf.data[f][i][j][1]) == "2018-05-22T02:42:04Z"
-        SAVE_FILES && save_outfile(xf)
     end
 
     @testset "Book1.xlsx" begin
@@ -251,7 +198,6 @@
         @test sheet2[:, 2] == permutedims(Any[2 5 8])
         @test sheet2[:, 2:3] == Any[2 3; 5 6; 8 9]
         @test sheet2[1:2, 2:3] == Any[2 3; 5 6]
-
 
         @test XLSX.getdata(f, XLSX.SheetCellRef("Sheet1!B2")) == "B2"
         @test XLSX.getdata(f, XLSX.SheetCellRange("Sheet1!B2:B3"))[1] == "B2"
@@ -311,6 +257,29 @@
         @test XLSX.column_number(emptycell) == 2
     end
 
+
+    @testset "typed values in general.xlsx" begin
+        XLSX.openxlsx(joinpath(data_directory, "general.xlsx")) do f
+            show(IOBuffer(), f)
+            sheet = f["general"]
+            @test sheet["A1"] == "text"
+            @test sheet["B1"] == "regular text"
+            @test sheet["A2"] == "integer"
+            @test sheet["B2"] == 102
+            @test sheet["A3"] == "float"
+            @test isapprox(sheet["B3"], 102.2)
+            @test sheet["A4"] == "date"
+            @test sheet["B4"] == Date(1983, 4, 16)
+            @test sheet["A5"] == "hour"
+            @test sheet["B5"] == Dates.Time(Dates.Hour(19), Dates.Minute(45))
+            @test sheet["A6"] == "datetime"
+            @test sheet["B6"] == Date(2018, 4, 16) + Dates.Time(Dates.Hour(19), Dates.Minute(19), Dates.Second(51))
+            @test f["general!B7"] == -220.0
+            @test f["general!B8"] == -2000
+            @test f["general!B9"] == 100000000000000
+            @test f["general!B10"] == -100000000000000
+        end
+    end
 end
 
 @testset "CustomXml" begin
@@ -330,96 +299,75 @@ end
     f_copy = XLSX.readxlsx(filename_copy)
     test_Xmlread = [["Can't", "write", "this", "template"]]
     for sn in XLSX.sheetnames(f_copy)
-        sheet = template[sn]
+        sheet = f_copy[sn]
         data = [[sheet["Q1"], sheet["Q2"], sheet["Q3"], sheet["Q4"]]]
         check_test_data(data, test_Xmlread)
     end
     isfile(filename_copy) && rm(filename_copy)
 end
 
-@testset "docProps/app.xml" begin # issue #428
+@testset "show xlsx" begin
+    @testset "single sheet" begin
+        xf = XLSX.readxlsx(joinpath(src_data_directory, "blank.xlsx"))
+        io = IOBuffer()
+        show(io, xf)
+        lines = split(String(take!(io)), '\n')
 
-    function parse_heading_pairs(app_xml::String)
-        m = match(r"<HeadingPairs>(.*?)</HeadingPairs>"s, app_xml)
-        m === nothing && return Tuple{String,Int}[]
-        inner = m.captures[1]
-        labels = [c.captures[1] for c in eachmatch(r"<vt:lpstr>([^<]*)</vt:lpstr>", inner)]
-        counts = [parse(Int, c.captures[1]) for c in eachmatch(r"<vt:i4>([^<]*)</vt:i4>", inner)]
-        return collect(zip(labels, counts))
+        expected_tail = "            sheetname size          range        \n-------------------------------------------------\n               Sheet1 1x1           A1:A1        \n"
+
+        @test join(lines[2:end], '\n') == expected_tail
     end
 
-    function parse_titles_of_parts(app_xml::String)
-        m = match(r"<TitlesOfParts>(.*?)</TitlesOfParts>"s, app_xml)
-        m === nothing && return String[]
-        inner = m.captures[1]
-        return [c.captures[1] for c in eachmatch(r"<vt:lpstr>([^<]*)</vt:lpstr>", inner)]
+    @testset "multiple sheets" begin
+        xf = XLSX.readxlsx(joinpath(data_directory, "Book1.xlsx"))
+        io = IOBuffer()
+        show(io, xf)
+        lines = split(String(take!(io)), '\n')
+
+        expected_tail = "            sheetname size          range        \n-------------------------------------------------\n               Sheet1 7x2           B2:C8        \n               Sheet2 3x3           A1:C3        \n"
+
+        @test join(lines[2:end], '\n') == expected_tail
     end
 
-    @testset "plain worksheets: rename + add updates HeadingPairs and TitlesOfParts" begin
-        src = joinpath(data_directory, "Book1.xlsx")
-        p = "testfiles_plain_worksheets_rename_add.xlsx"
-        cp(src, p; force=true)
- 
-        XLSX.openxlsx(p; mode="rw") do xf
-            XLSX.renamesheet!(xf["Sheet1"], "Renamed")
-            XLSX.addsheet!(xf, "Added")
-        end
-        SAVE_FILES && save_outfile(p)
+    @testset "IOBuffer source" begin
+        source = IOBuffer()
+        write(source, read(joinpath(data_directory, "Book1.xlsx")))
+        seekstart(source)
+        xf = XLSX.readxlsx(source)
+        io=IOBuffer()
+        show(io, xf)
+        result = String(take!(io))
+        expected = "XLSXFile(IOBuffer) containing 2 Worksheets\n            sheetname size          range        \n-------------------------------------------------\n               Sheet1 7x2           B2:C8        \n               Sheet2 3x3           A1:C3        \n"
 
-        app = String(zip_readentry(ZipReader(read(p)), "docProps/app.xml"))
+        @test result == expected
+    end
+end
 
-        @test !occursin(">Sheet1<", app)   # stale title gone
-
-        titles = parse_titles_of_parts(app)
-        @test "Renamed" in titles
-        @test "Added" in titles
-        @test length(titles) == 3
-
-        pairs = parse_heading_pairs(app)
-        ws_idx = findfirst(pr -> pr[1] == "Worksheets", pairs)
-        @test ws_idx !== nothing
-        @test pairs[ws_idx][2] == 3
-
-        isfile(p) && rm(p)
+# issues #62, #75
+@testset "relative paths" begin
+    let
+        xf = XLSX.readxlsx(joinpath(data_directory, "openpyxl.xlsx"))
+        @test XLSX.sheetnames(xf) == ["Sheet", "Test1"]
+        @test xf["Test1"]["A1"] == "One"
+        @test xf["Test1"]["A2"] == 1
+        show(IOBuffer(), xf)
+        show(IOBuffer(), xf["Sheet"])
+        show(IOBuffer(), xf["Test1"])
     end
 
-    @testset "chartsheet workbook: Worksheets/Charts categories stay separate and correctly counted" begin
-        src = joinpath(data_directory, "Chartsheet.xlsx")
-        p = "testfiles_chartsheet_workbook_worksheets.xlsx"
-        cp(src, p; force=true)
-
-        XLSX.openxlsx(p; mode="rw") do xf
-            XLSX.renamesheet!(xf["Sheet1"], "RenamedData")
-            XLSX.addsheet!(xf, "ExtraData")
-        end
-        SAVE_FILES && save_outfile(p)
-
-        app = String(zip_readentry(ZipReader(read(p)), "docProps/app.xml"))
-        pairs  = parse_heading_pairs(app)
-        titles = parse_titles_of_parts(app)
-
-        ws_idx = findfirst(pr -> pr[1] == "Worksheets", pairs)
-        ch_idx = findfirst(pr -> pr[1] == "Charts", pairs)
-        @test ws_idx !== nothing
-        @test ch_idx !== nothing
-        @test pairs[ws_idx][2] == 2   # RenamedData, ExtraData
-        @test pairs[ch_idx][2] == 1   # Chart1 untouched by a worksheet-only operation
-
-        @test "RenamedData" in titles
-        @test "ExtraData" in titles
-        @test "Chart1" in titles
-        @test !occursin(">Sheet1<", app)
-        @test length(titles) == 3
-
-        # Worksheets titles are grouped before Charts titles regardless of tab
-        # order — with only one chart, it must be the last title.
-        @test titles[end] == "Chart1"
-
-        XLSX.openxlsx(p) do xf2
-            @test issetequal(XLSX.sheetnames(xf2), ["RenamedData", "ExtraData", "Chart1"])
-        end
-
-        isfile(p) && rm(p)
+    let
+        dtable = XLSX.readtable(joinpath(data_directory, "openpyxl.xlsx"), "Test1")
+        data, col_names = dtable.data, dtable.column_labels
+        @test data == [[1, 3], [2, 4]]
+        @test col_names == [:One, :Two]
     end
+end
 
+# issues #62, #71
+@testset "windows compatibility" begin
+    xf = XLSX.open_xlsx_template(joinpath(data_directory, "issue62_71.xlsx"))
+    @test xf["Sheet1"]["A1"] == "One"
+    @test xf["Sheet1"]["A2"] == 1
+
+    @test collect(keys(xf.binary_data)) == ["xl/printerSettings/printerSettings1.bin"]
 end

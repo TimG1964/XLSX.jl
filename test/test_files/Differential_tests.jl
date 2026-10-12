@@ -1,5 +1,15 @@
 #=
-Differential tests for `readtable` (#462).
+Differential tests (#462): new read paths checked against an oracle.
+
+  - `readtable` against `gettable` (described below);
+  - value rows against cache rows;
+  - the filtered cell kernel against the node decoder;
+  - uncached ranged reads (`getdata`/`getcellrange`/`getcell`) against the row decoders;
+  - the row stream against the node walk.
+
+Each differential is followed by the point tests for the same code path.
+
+## readtable
 
 `readtable(source, …)` builds its own `XLSXFile` and discards it. The oracle is
 `gettable` on a file opened with `readxlsx`, which stays on the worksheet-cache path,
@@ -25,41 +35,7 @@ covering array (slow: tens of minutes).
 const _DIFF_FULL = get(ENV, "XLSX_FULL_DIFF", "0") == "1"
 const _DIFF_CHECKS = Ref(0)        # comparisons run in the current section
 
-# ── Minimal workbook builder ──────────────────────────────────────────────────
-# Compact XML, as Excel writes it. Style 0 = General, 1 = date (numFmt 14),
-# 2 = a fill only (for styled-but-empty cells).
-
-const _DIFF_CT = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>"""
-const _DIFF_RELS = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"""
-const _DIFF_WB = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>"""
-const _DIFF_WBRELS = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>"""
-const _DIFF_STYLES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFFF00"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1"/></cellXfs></styleSheet>"""
-
-function _diff_build_xlsx(rows_xml::AbstractString, sst::Vector{String})::Vector{UInt8}
-    sst_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n" *
-        "<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"$(length(sst))\" uniqueCount=\"$(length(sst))\">" *
-        join(isempty(s) ? "<si><t/></si>" : "<si><t xml:space=\"preserve\">$s</t></si>" for s in sst) * "</sst>"
-    sheet_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n" *
-        "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" " *
-        "xmlns:x14ac=\"http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac\">" *
-        "<sheetData>$rows_xml</sheetData></worksheet>"
-    io = IOBuffer()
-    ZipArchives.ZipWriter(io) do w
-        ZipArchives.zip_writefile(w, "[Content_Types].xml", codeunits(_DIFF_CT))
-        ZipArchives.zip_writefile(w, "_rels/.rels", codeunits(_DIFF_RELS))
-        ZipArchives.zip_writefile(w, "xl/workbook.xml", codeunits(_DIFF_WB))
-        ZipArchives.zip_writefile(w, "xl/_rels/workbook.xml.rels", codeunits(_DIFF_WBRELS))
-        ZipArchives.zip_writefile(w, "xl/styles.xml", codeunits(_DIFF_STYLES))
-        ZipArchives.zip_writefile(w, "xl/sharedStrings.xml", codeunits(sst_xml))
-        ZipArchives.zip_writefile(w, "xl/worksheets/sheet1.xml", codeunits(sheet_xml))
-    end
-    return take!(io)
-end
+# The workbook builder `_diff_build_xlsx` is in helpers.jl (Read-internals uses it too).
 
 # ── Empty-row corpus ──────────────────────────────────────────────────────────
 # The table sits in B:D with its header on `header_row`. Column F is always empty
@@ -139,39 +115,9 @@ function _diff_special_sheets()::Vector{Pair{String,Vector{UInt8}}}
     return out
 end
 
-# ── Pairwise covering array for the secondary keywords ────────────────────────
-
-# Greedy pairwise cover over `levels` (number of values per factor); deterministic.
-function _diff_pairwise(levels::Vector{Int})::Vector{Vector{Int}}
-    nf = length(levels)
-    uncovered = Set{NTuple{4,Int}}()
-    for i in 1:nf, j in (i+1):nf, a in 1:levels[i], b in 1:levels[j]
-        push!(uncovered, (i, a, j, b))
-    end
-    candidates = vec(collect(Iterators.product((1:l for l in levels)...)))
-    rows = Vector{Vector{Int}}()
-    while !isempty(uncovered)
-        best, best_n = candidates[1], -1
-        for c in candidates
-            n = 0
-            for i in 1:nf, j in (i+1):nf
-                (i, c[i], j, c[j]) in uncovered && (n += 1)
-            end
-            n > best_n && ((best, best_n) = (c, n))
-        end
-        for i in 1:nf, j in (i+1):nf
-            delete!(uncovered, (i, best[i], j, best[j]))
-        end
-        push!(rows, collect(best))
-    end
-    return rows
-end
-
-# Secondary factors: enable_cache, infer_eltypes, normalizenames, column_labels,
-# missing_strings, stop_in_row_function.
-const _DIFF_SECONDARY_LEVELS = [2, 2, 2, 3, 4, 5]
+# Columns and missing_strings values the readtable differentials cross.
+const _DIFF_COLUMNS = (nothing, "B:D", "B:C", "B:F", "C:C", "A:D", "H:I")
 const _DIFF_MS_OPTIONS = (nothing, "NA", ["NA", ""], "a")
-const _DIFF_STOP_KINDS = (:none, :at2, :col1missing, :always, :never)
 
 # ── Running one comparison ────────────────────────────────────────────────────
 
@@ -230,6 +176,39 @@ function _diff_compare_calls(a::Vector{_DiffCall}, b::Vector{_DiffCall})::Union{
     end
     return nothing
 end
+
+# ── Pairwise covering array for the secondary keywords ────────────────────────
+
+# Greedy pairwise cover over `levels` (number of values per factor); deterministic.
+function _diff_pairwise(levels::Vector{Int})::Vector{Vector{Int}}
+    nf = length(levels)
+    uncovered = Set{NTuple{4,Int}}()
+    for i in 1:nf, j in (i+1):nf, a in 1:levels[i], b in 1:levels[j]
+        push!(uncovered, (i, a, j, b))
+    end
+    candidates = vec(collect(Iterators.product((1:l for l in levels)...)))
+    rows = Vector{Vector{Int}}()
+    while !isempty(uncovered)
+        best, best_n = candidates[1], -1
+        for c in candidates
+            n = 0
+            for i in 1:nf, j in (i+1):nf
+                (i, c[i], j, c[j]) in uncovered && (n += 1)
+            end
+            n > best_n && ((best, best_n) = (c, n))
+        end
+        for i in 1:nf, j in (i+1):nf
+            delete!(uncovered, (i, best[i], j, best[j]))
+        end
+        push!(rows, collect(best))
+    end
+    return rows
+end
+
+# Secondary factors: enable_cache, infer_eltypes, normalizenames, column_labels,
+# missing_strings, stop_in_row_function.
+const _DIFF_SECONDARY_LEVELS = [2, 2, 2, 3, 4, 5]
+const _DIFF_STOP_KINDS = (:none, :at2, :col1missing, :always, :never)
 
 # `eachtablerow` gives untyped rows; its values must equal the oracle's (`isequal`).
 function _diff_compare_rows(rows, oracle)::Union{Nothing,String}
@@ -310,8 +289,6 @@ function _diff_check(bytes::Vector{UInt8}, xf, sheet, cols, kw::NamedTuple, sec:
     return nothing
 end
 
-const _DIFF_COLUMNS = (nothing, "B:D", "B:C", "B:F", "C:C", "A:D", "H:I")
-
 """
 Run the row-deciding keyword product on one workbook sheet. Secondary keywords come
 from the covering array, rotated by `offset` so different sheets see different
@@ -342,11 +319,11 @@ function _diff_product(label, bytes, sheet, first_rows, columns, cover, offset;
     return mismatches
 end
 
-# Prints the first mismatches; `XLSX_DIFF_LOG=<file>` appends all of them to a file.
+# Prints a summary and the first mismatches, if any; `XLSX_DIFF_LOG=<file>` appends all of them to a file.
 function _diff_report(mismatches::Vector{String}, what::String, t0::Float64)
+    isempty(mismatches) && return
     println("Differential $what: $(_DIFF_CHECKS[]) checks, $(length(mismatches)) mismatches, ",
             round(time() - t0, digits = 1), " s")
-    isempty(mismatches) && return
     log = get(ENV, "XLSX_DIFF_LOG", "")
     isempty(log) || open(io -> foreach(m -> println(io, what, " | ", m), mismatches), log, "a")
     println("Differential mismatches ($what), first $(min(20, length(mismatches))) of $(length(mismatches)):")
@@ -618,8 +595,11 @@ end
     # inside the read area: the same error on both paths
     e1 = try XLSX.readtable(IOBuffer(inside), 1, "B:C") catch e; e end
     XLSX._READTABLE_VALUE_ROWS[] = false
-    e2 = try XLSX.readtable(IOBuffer(inside), 1, "B:C") catch e; e end
-    XLSX._READTABLE_VALUE_ROWS[] = true
+    e2 = try
+        try XLSX.readtable(IOBuffer(inside), 1, "B:C") catch e; e end
+    finally
+        XLSX._READTABLE_VALUE_ROWS[] = true
+    end
     @test e1 isa XLSX.XLSXError && e2 isa XLSX.XLSXError && e1.msg == e2.msg
 end
 
@@ -1087,4 +1067,256 @@ end
     # A `<c>` without `r` can't be placed in or out of the window.
     nor = XLSX.openxlsx(IOBuffer(_diff_build_xlsx("<row r=\"1\"><c><v>1</v></c></row>", String[])); enable_cache = false)[1]
     @test_throws XLSX.XLSXError collect(XLSX.SheetRowStreamIterator(nor, 2:3))
+end
+
+#=
+#462 Stage 4: `iterate(::TableRowIterator)` and `gettable` now share one row-stepping
+function, and `gettable` writes values straight into columns. The table-row iterator
+and `gettable` as they were before are kept below as the reference: the new code must
+give exactly the same rows, values, types and `stop_in_row_function` calls.
+=#
+
+# The pre-#462 `iterate(::TableRowIterator)`, verbatim apart from qualified names.
+function _old_handle_gap(itr, table_row_index, col_count, expected_row, actual_row, sheet_row, sheet_row_iterator_state)
+    itr.stop_in_empty_row && return nothing
+    itr.keep_empty_rows || return :skip
+    table_row = XLSX.TableRow(table_row_index, itr.index, fill(missing, col_count))
+    XLSX._should_stop(itr, table_row) && return nothing
+    newstate = XLSX.TableRowIteratorState(table_row_index, expected_row, sheet_row_iterator_state,
+                                          actual_row - expected_row - 1, sheet_row)
+    return table_row, newstate
+end
+
+function _old_return_table_row(itr, table_row_index, actual_row, sheet_row, sheet_row_iterator_state)
+    table_row = XLSX.TableRow(table_row_index, itr.index, sheet_row, itr.missing_strings)
+    XLSX._should_stop(itr, table_row) && return nothing
+    newstate = XLSX.TableRowIteratorState(table_row_index, actual_row, sheet_row_iterator_state, 0, nothing)
+    return table_row, newstate
+end
+
+function _old_iterate(itr, state)
+    table_row_index = state.table_row_index + 1
+    col_count = length(XLSX.sheet_column_numbers(itr.index))
+    if state.missing_rows > 0
+        table_row = XLSX.TableRow(table_row_index, itr.index, fill(missing, col_count))
+        XLSX._should_stop(itr, table_row) && return nothing
+        newstate = XLSX.TableRowIteratorState(table_row_index, state.sheet_row_index + 1,
+            state.sheet_row_iterator_state, state.missing_rows - 1, state.row_pending)
+        return table_row, newstate
+    end
+    local sheet_row, sheet_row_iterator_state
+    if !isnothing(state.row_pending)
+        sheet_row = state.row_pending
+        sheet_row_iterator_state = state.sheet_row_iterator_state
+    else
+        next = iterate(itr.itr, state.sheet_row_iterator_state)
+        isnothing(next) && return nothing
+        sheet_row, sheet_row_iterator_state = next
+    end
+    actual_row = XLSX.row_number(sheet_row)
+    expected_row = state.sheet_row_index + 1
+    if actual_row > expected_row
+        result = _old_handle_gap(itr, table_row_index, col_count, expected_row, actual_row, sheet_row, sheet_row_iterator_state)
+        result === :skip || return result
+    end
+    result = XLSX._skip_empty_rows(itr, sheet_row, sheet_row_iterator_state)
+    isnothing(result) && return nothing
+    sheet_row, sheet_row_iterator_state = result
+    return _old_return_table_row(itr, table_row_index, XLSX.row_number(sheet_row), sheet_row, sheet_row_iterator_state)
+end
+
+# All rows the old iterator gives, as (table row, values).
+function _old_tablerows(itr)
+    out = Tuple{Int,Vector{Any}}[]
+    next = isnothing(itr.resume) ? iterate(itr.itr) : itr.resume
+    while !isnothing(next) && XLSX.row_number(next[1]) < itr.first_data_row
+        next = iterate(itr.itr, next[2])
+    end
+    isnothing(next) && return out
+    sheet_row, sheet_row_state = next
+    state = XLSX.TableRowIteratorState(0, itr.first_data_row - 1, sheet_row_state, 0, sheet_row)
+    while true
+        r = _old_iterate(itr, state)
+        isnothing(r) && break
+        row, state = r
+        push!(out, (row.row, Any[row.cell_values...]))
+    end
+    return out
+end
+
+# The pre-#462 `gettable(::TableRowIterator)`, over the old iterator's rows.
+function _old_gettable(itr; infer_eltypes::Bool = true)
+    n = XLSX.table_columns_count(itr)
+    data = Any[Any[] for _ in 1:n]
+    for (_, values) in _old_tablerows(itr), ci in 1:n
+        push!(data[ci], values[ci])
+    end
+    if infer_eltypes
+        for i in eachindex(data)
+            T = XLSX.infer_eltype(data[i])
+            T !== Any && (data[i] = convert(Vector{T}, data[i]))
+        end
+    end
+    return XLSX.DataTable(data, XLSX.get_column_labels(itr))
+end
+
+_same_values(a, b) = length(a) == length(b) &&
+    all(isequal(x, y) && typeof(x) == typeof(y) for (x, y) in zip(a, b))
+
+# Old vs new for one sheet and keyword set: iteration and `gettable`, with the
+# callback calls compared too. Returns a mismatch description or `nothing`.
+function _stage4_check(ws, cols, kw::NamedTuple, stop_kind::Symbol, infer_eltypes::Bool)
+    mk(log) = isnothing(cols) ?
+        XLSX.eachtablerow(ws; kw..., stop_in_row_function = _diff_stop_fn(stop_kind, log)) :
+        XLSX.eachtablerow(ws, cols; kw..., stop_in_row_function = _diff_stop_fn(stop_kind, log))
+    probe = _diff_run(() -> mk(_DiffCall[]))
+    probe isa Exception && return nothing          # construction is unchanged code
+
+    # iteration
+    la, lb = _DiffCall[], _DiffCall[]
+    old_rows = _diff_run(() -> _old_tablerows(mk(la)))
+    new_rows = _diff_run(() -> [(r.row, Any[r.cell_values...]) for r in mk(lb)])
+    if old_rows isa Exception || new_rows isa Exception
+        (old_rows isa Exception && new_rows isa Exception && typeof(old_rows) == typeof(new_rows)) ||
+            return "iteration: $(_diff_describe(old_rows)) vs $(_diff_describe(new_rows))"
+    else
+        length(old_rows) == length(new_rows) || return "iteration: $(length(old_rows)) vs $(length(new_rows)) rows"
+        for (i, (a, b)) in enumerate(zip(old_rows, new_rows))
+            (a[1] == b[1] && _same_values(a[2], b[2])) || return "iteration row $i: $a vs $b"
+        end
+    end
+    m = _diff_compare_calls(la, lb)
+    m === nothing || return "iteration: " * m
+
+    # gettable
+    la, lb = _DiffCall[], _DiffCall[]
+    old_t = _diff_run(() -> _old_gettable(mk(la); infer_eltypes))
+    new_t = _diff_run(() -> XLSX.gettable(mk(lb); infer_eltypes))
+    m = _diff_compare(old_t, new_t)
+    m === nothing || return "gettable: " * m
+    m = _diff_compare_calls(la, lb)
+    m === nothing || return "gettable: " * m
+    return nothing
+end
+
+@testset "table rows and gettable unchanged (#462 Stage 4)" begin
+    stops = (:none, :at2, :col1missing, :always, :never)
+
+    @testset "empty-row corpus" begin
+        mismatches = String[]
+        n = 0
+        sheets = Pair{String,Vector{UInt8}}[]
+        for len in 0:3, states in Iterators.product(ntuple(_ -> _DIFF_ROW_STATES, len)...)
+            push!(sheets, "corpus $(collect(states))" => _diff_corpus_sheet(collect(states)))
+        end
+        append!(sheets, ["special \"$k\"" => v for (k, v) in _diff_special_sheets()])
+        for (label, bytes) in sheets
+            ws = XLSX.readxlsx(IOBuffer(bytes))[1]
+            for header in (true, false), stop_in_empty_row in (true, false), keep_empty_rows in (true, false),
+                first_row in (nothing, 1, 2, 3, 5), cols in _DIFF_COLUMNS
+                n += 1
+                kw = (; header, stop_in_empty_row, keep_empty_rows, first_row,
+                        missing_strings = _DIFF_MS_OPTIONS[mod1(n, 4)])
+                m = _stage4_check(ws, cols, kw, stops[mod1(n, 5)], isodd(n ÷ 5))
+                m === nothing || push!(mismatches, "$label cols=$(repr(cols)) $kw: $m")
+            end
+        end
+        foreach(println, first(mismatches, 20))
+        @test isempty(mismatches)
+        @test n > 100_000
+    end
+
+    @testset "test/data workbooks" begin
+        mismatches = String[]
+        n = 0
+        for file in sort(readdir(data_directory))
+            any(ext -> endswith(lowercase(file), ext), (".xlsx", ".xlsm", ".xltx", ".xltm")) || continue
+            xf = try XLSX.readxlsx(joinpath(data_directory, file)) catch; continue end
+            wb = XLSX.get_workbook(xf)
+            for ws in wb.sheets
+                XLSX.is_chartsheet(wb, ws.name) && continue
+                dim = _diff_run(() -> XLSX.get_dimension(ws))
+                columns, first_rows = Any[nothing], Any[nothing, 1, 2]
+                if dim isa XLSX.CellRange
+                    c1, c2 = XLSX.column_number(dim.start), XLSX.column_number(dim.stop)
+                    col(i) = XLSX.encode_column_number(i)
+                    append!(columns, ["$(col(c1)):$(col(c2))", "$(col(c1)):$(col(c1))", "$(col(c1)):$(col(c2 + 2))"])
+                    push!(first_rows, XLSX.row_number(dim.stop))
+                end
+                for header in (true, false), stop_in_empty_row in (true, false), keep_empty_rows in (true, false),
+                    first_row in first_rows, cols in columns
+                    n += 1
+                    kw = (; header, stop_in_empty_row, keep_empty_rows, first_row,
+                            missing_strings = _DIFF_MS_OPTIONS[mod1(n, 4)])
+                    m = _stage4_check(ws, cols, kw, stops[mod1(n, 5)], isodd(n ÷ 5))
+                    m === nothing || push!(mismatches, "$file $(ws.name) cols=$(repr(cols)) $kw: $m")
+                end
+            end
+        end
+        foreach(println, first(mismatches, 20))
+        @test isempty(mismatches)
+        @test n > 10_000
+    end
+
+    fixtures = get(ENV, "XLSX_DIFF_FIXTURES", "")
+    if !isempty(fixtures)
+        @testset "bench fixtures" begin
+            for file in sort(readdir(fixtures))
+                startswith(file, "xl_") || continue
+                ws = XLSX.readxlsx(joinpath(fixtures, file))["Data"]
+                for stop_in_empty_row in (true, false), keep_empty_rows in (true, false)
+                    kw = (; first_row = 5, stop_in_empty_row, keep_empty_rows)
+                    m = _stage4_check(ws, "A:CF", kw, :none, true)
+                    m === nothing || println("$file $kw: $m")
+                    @test m === nothing
+                end
+            end
+        end
+    end
+
+    @testset "column types" begin
+        # cells for B2:B4, and the column eltype `gettable` should infer
+        cases = [
+            ("<c r=\"B2\"><v>1</v></c>", "<c r=\"B3\"><v>2.5</v></c>", "<c r=\"B4\"><v>3</v></c>") => Float64,
+            ("<c r=\"B2\"><v>1</v></c>", "<c r=\"B3\"><v>2</v></c>", "<c r=\"B4\"><v>3</v></c>") => Int64,
+            ("<c r=\"B2\" s=\"1\"><v>45000</v></c>", "<c r=\"B3\" s=\"1\"><v>45000.5</v></c>", "<c r=\"B4\" s=\"1\"><v>45001</v></c>") => Dates.DateTime,
+            ("<c r=\"B2\" t=\"inlineStr\"><is><t>x</t></is></c>", "<c r=\"B3\"><v>2</v></c>", "<c r=\"B4\"><v>3</v></c>") => Any,
+            ("<c r=\"B2\" t=\"b\"><v>1</v></c>", "<c r=\"B3\" s=\"2\"/>", "<c r=\"B4\" t=\"b\"><v>0</v></c>") => Union{Missing, Bool},
+            ("<c r=\"B2\" s=\"2\"/>", "<c r=\"B3\" s=\"2\"/>", "<c r=\"B4\"><v>1</v></c>") => Union{Missing, Int64},
+        ]
+        for ((b2, b3, b4), T) in cases
+            rows = "<row r=\"1\"><c r=\"B1\" t=\"inlineStr\"><is><t>h</t></is></c><c r=\"C1\" t=\"inlineStr\"><is><t>k</t></is></c></row>" *
+                   "<row r=\"2\">$(b2)<c r=\"C2\"><v>1</v></c></row><row r=\"3\">$(b3)<c r=\"C3\"><v>1</v></c></row>" *
+                   "<row r=\"4\">$(b4)<c r=\"C4\"><v>1</v></c></row>"
+            ws = XLSX.readxlsx(IOBuffer(_diff_build_xlsx(rows, String[])))[1]
+            for infer_eltypes in (true, false)
+                @test _stage4_check(ws, "B:C", (;), :none, infer_eltypes) === nothing
+            end
+            @test eltype(XLSX.gettable(ws, "B:C").data[1]) == T
+            @test eltype(XLSX.gettable(ws, "B:C"; infer_eltypes = false).data[1]) == Any
+        end
+        # all missing, and no data rows at all
+        rows = "<row r=\"1\"><c r=\"B1\" t=\"inlineStr\"><is><t>h</t></is></c></row><row r=\"2\"><c r=\"B2\" s=\"2\"/></row><row r=\"3\"><c r=\"C3\"><v>1</v></c></row>"
+        ws = XLSX.readxlsx(IOBuffer(_diff_build_xlsx(rows, String[])))[1]
+        kw = (; stop_in_empty_row = false, keep_empty_rows = true)
+        @test _stage4_check(ws, "B:B", kw, :none, true) === nothing
+        @test eltype(XLSX.gettable(ws, "B:B"; kw...).data[1]) == Any
+        rows = "<row r=\"1\"><c r=\"B1\" t=\"inlineStr\"><is><t>h</t></is></c></row>"
+        ws = XLSX.readxlsx(IOBuffer(_diff_build_xlsx(rows, String[])))[1]
+        @test _stage4_check(ws, "B:B", (;), :none, true) === nothing
+        @test isempty(XLSX.gettable(ws, "B:B").data[1])
+    end
+
+    @testset "TableRow length and collect" begin
+        ws = XLSX.readxlsx(joinpath(data_directory, "general.xlsx"))["table"]
+        nrows = 0
+        for r in XLSX.eachtablerow(ws)
+            nrows += 1
+            n = length(XLSX.get_column_labels(r))
+            @test length(r) == n
+            @test isequal(collect(r), Any[r[i] for i in 1:n])
+            @test eltype(collect(r)) == XLSX.CellConcreteType
+        end
+        @test nrows > 0
+    end
 end

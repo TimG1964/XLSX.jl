@@ -79,3 +79,61 @@ end
         @test_throws XLSX.XLSXError XLSX.savexlsx(xf)
     end
 end
+
+# issue #67
+@testset "row_index" begin
+    filename = "test_pr67.xlsx"
+    XLSX.openxlsx(filename, mode="w") do xf
+        xf[1]["A2"] = 5
+        xf[1]["A1"] = 7
+    end
+    @test isfile(filename)
+    @test XLSX.readxlsx(filename)[1]["A1:A2"] == Any[7; 5;;]   # rows written out of order read back in order
+    SAVE_FILES && save_outfile(filename)
+    isfile(filename) && rm(filename)
+end
+
+@testset "Edit Template" begin
+    new_filename = "new_file_from_empty_template.xlsx"
+    f = XLSX.open_empty_template()
+    f["Sheet1"]["A1"] = "Hello"
+    f["Sheet1"]["A2"] = 10
+    XLSX.writexlsx(new_filename, f, overwrite=true)
+    SAVE_FILES && save_outfile(new_filename)
+
+    f = XLSX.readxlsx(new_filename)
+    @test f["Sheet1"]["A1"] == "Hello"
+    @test f["Sheet1"]["A2"] == 10
+
+    isfile(new_filename) && rm(new_filename)
+end
+
+@testset "Fix timestamp" begin
+    t = Dates.now(Dates.UTC) - Dates.Second(1)
+    xf = XLSX.newxlsx()
+    f = "docProps/core.xml"
+    date_format = Dates.dateformat"yyyy-mm-ddTHH:MM:SSZ"
+    i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:created") # i, j should always be found unless the `blank.xlsx` file is updated
+    @test t < DateTime(XML.value(xf.data[f][i][j][1]), date_format)
+    i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:modified")
+    @test t < DateTime(XML.value(xf.data[f][i][j][1]), date_format)
+    SAVE_FILES && save_outfile(xf)
+
+    xf = XLSX.newxlsx(; update_timestamp=false) # do not update timestamp
+    i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:created") # i, j should always be found unless the `blank.xlsx` file is updated
+    @test XML.value(xf.data[f][i][j][1]) == "2018-05-22T02:41:32Z"
+    i, j = XLSX.get_idces(xf.data[f], "cp:coreProperties", "dcterms:modified")
+    @test XML.value(xf.data[f][i][j][1]) == "2018-05-22T02:42:04Z"
+    SAVE_FILES && save_outfile(xf)
+end
+
+@testset "writetable refuses to overwrite an existing file" begin
+    @test_throws XLSX.XLSXError XLSX.savexlsx(XLSX.newxlsx())   # blank: no file name
+
+    outfile = "errbranch_exists.xlsx"
+    XLSX.writetable(outfile, [[1, 2]], ["a"]; overwrite=true)
+    @test_throws XLSX.XLSXError XLSX.writetable(outfile; Sheet1=([[1]], ["a"]))
+    @test_throws XLSX.XLSXError XLSX.writetable(outfile, [("Sheet1", [[1]], ["a"])])
+    SAVE_FILES && save_outfile(outfile)
+    isfile(outfile) && rm(outfile)
+end

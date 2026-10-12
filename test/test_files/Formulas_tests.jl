@@ -259,7 +259,7 @@
         @test XLSX.getcell(s, "A3") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A3"), "", "", "25", "", true)
         @test XLSX.get_formula_from_cache(s, XLSX.CellRef("A3")) == XLSX.ReferencedFormula("SUM(O3:S3)", 4, "A3:A10", nothing)
 
-        s2 = f[2]
+        s2 = f2[2]
         @test XLSX.getcell(s2, "A2") == XLSX.Cell(XLSX.get_workbook(f), XLSX.CellRef("A2"), "", "", "3", "", false)
         @test (XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3"))).id == 2
         @test XLSX.get_formula_from_cache(s2, XLSX.CellRef("A3")).unhandled == Dict("ca" => "1")
@@ -303,10 +303,39 @@
 #        XLSX.writexlsx("shift_test_out.xlsx", f, overwrite=true)
         SAVE_FILES && save_outfile(f)
     end
+
+    # issue #299 & 301
+    @testset "empty_v" begin
+        xf = XLSX.openxlsx(joinpath(data_directory, "empty_v.xlsx"), mode="rw")
+        sheet1 = xf["Sheet1"]
+        @test XLSX.getcell(sheet1, "A1") == XLSX.Cell(XLSX.get_workbook(xf), XLSX.CellRef("A1"), "str", "", "", "", true)
+        @test XLSX.get_formula_from_cache(sheet1, XLSX.CellRef("A1")) == XLSX.Formula("\"\"")
+        XLSX.writexlsx("mytest.xlsx", xf, overwrite=true)
+        SAVE_FILES && save_outfile("mytest.xlsx")
+        xf2 = XLSX.readxlsx("mytest.xlsx")
+        sheet1 = xf2["Sheet1"]
+        @test XLSX.getcell(xf2[1], "A1") == XLSX.Cell(XLSX.get_workbook(xf2), XLSX.CellRef("A1"), "str", "", "", "", true)
+        @test XLSX.get_formula_from_cache(sheet1, XLSX.CellRef("A1")) == XLSX.Formula("\"\"")
+        isfile("mytest.xlsx") && rm("mytest.xlsx")
+    end
+
+    @testset "Formula types: emptiness, hashing and copying" begin
+        @test XLSX.Formula() isa XLSX.EmptyFormula
+        f  = XLSX.Formula("SUM(A1:A2)")
+        rf = XLSX.ReferencedFormula("A1+1", 0, "B1:B3", Dict("t" => "shared"))
+        fr = XLSX.FormulaReference(0, nothing)
+        @test !isempty(f) && isempty(XLSX.Formula("")) && !isempty(rf) && !isempty(fr)
+        @test hash(f) == hash(XLSX.Formula("SUM(A1:A2)"))
+        @test hash(rf) == hash(copy(rf)) && hash(fr) == hash(copy(fr))
+        c = copy(rf)
+        @test c.unhandled == rf.unhandled && c.unhandled !== rf.unhandled   # Dict copied
+        io = IOBuffer()
+        XLSX.add_node_formula!(io, XLSX.CellFormula(f, XLSX.EmptyCellDataFormat()), "")
+        @test occursin("SUM(A1:A2)", String(take!(io)))
+    end
 end
 
-
-@testset "parallel formulas" begin
+@testset "formulas on several sheets and threaded reads" begin
 
     f = XLSX.newxlsx()
     s = f[1]
@@ -386,28 +415,9 @@ end
 
         for iter in 1:N_ITER
             seekstart(io)
-            try
-                df = XLSX.readtable(io, 1)
-            catch e
-                println("Error in iteration $iter: $e")
-                @test false
-            end
+            dt = XLSX.readtable(io, 1)
+            @test length(dt.data[1]) == N_FORMULAS
         end
-    end
-
-    # issue #299 & 301
-    @testset "empty_v" begin
-        xf = XLSX.openxlsx(joinpath(data_directory, "empty_v.xlsx"), mode="rw")
-        sheet1 = xf["Sheet1"]
-        @test XLSX.getcell(sheet1, "A1") == XLSX.Cell(XLSX.get_workbook(xf), XLSX.CellRef("A1"), "str", "", "", "", true)
-        @test XLSX.get_formula_from_cache(sheet1, XLSX.CellRef("A1")) == XLSX.Formula("\"\"")
-        XLSX.writexlsx("mytest.xlsx", xf, overwrite=true)
-        SAVE_FILES && save_outfile("mytest.xlsx")
-        xf2 = XLSX.readxlsx("mytest.xlsx")
-        sheet1 = xf2["Sheet1"]
-        @test XLSX.getcell(xf2[1], "A1") == XLSX.Cell(XLSX.get_workbook(xf2), XLSX.CellRef("A1"), "str", "", "", "", true)
-        @test XLSX.get_formula_from_cache(sheet1, XLSX.CellRef("A1")) == XLSX.Formula("\"\"")
-        isfile("mytest.xlsx") && rm("mytest.xlsx")
     end
 
 end

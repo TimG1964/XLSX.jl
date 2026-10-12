@@ -1,15 +1,12 @@
-# Additional testsets for read.jl coverage.
+# Reading internals: workbook parsing, the worksheet cache fill and its sheet stubs,
+# cell value parsing, and the sheet dimension.
 #
 # Most of these drive internals directly rather than through a fixture file:
-# the uncovered branches are mostly strict-OOXML and malformed-package paths
-# that would otherwise need a purpose-built .xlsx each.
+# the branches they reach are mostly malformed-package paths that would otherwise
+# need a purpose-built .xlsx each.
 
-const _STRICT_MAIN = "http://purl.oclc.org/ooxml/spreadsheetml/main"
-const _TRANS_MAIN  = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 const _CT_SHEET    = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
 const _CT_TEMPLATE = "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml"
-
-_root_of(s::AbstractString) = XLSX.xml_root_element(parse(s, XLSX.XML.Node))
 
 # Locate a child of `root` by localname and an attribute value.
 function _find_child(root, tag::AbstractString, attr::AbstractString, val::AbstractString)
@@ -20,175 +17,7 @@ function _find_child(root, tag::AbstractString, attr::AbstractString, val::Abstr
     return (nothing, nothing)
 end
 
-@testset "read.jl coverage" begin
-
-    @testset "Worksheet ranges across cache modes" begin
-        for filename in ("simple.xlsx", "strict.xlsx", "NoDim.xlsx")
-            bytes = read(joinpath(data_directory, filename))
-            writable = XLSX.openxlsx(IOBuffer(bytes); mode = "rw")
-            expected = writable[1][:]
-            range = "A1:" * XLSX.encode_column_number(size(expected, 2)) * string(size(expected, 1))
-            for openfile in (XLSX.readxlsx,
-                             io -> XLSX.openxlsx(io; enable_cache = true),
-                             io -> XLSX.openxlsx(io; enable_cache = false))
-                xf = openfile(IOBuffer(bytes))
-                @test XLSX.sheetnames(xf) == XLSX.sheetnames(writable)
-                @test isequal(xf[1][range], expected)
-                @test isequal(xf[1][range], expected)
-            end
-        end
-    end
-
-
-# ===========================================================================
-# Namespace resolution
-# ===========================================================================
-
-    @testset "get_default_namespace - single prefixed namespace" begin
-        r = _root_of("""<x:workbook xmlns:x="$_TRANS_MAIN"/>""")
-        @test XLSX.get_default_namespace(r) == _TRANS_MAIN
-    end
-
-    @testset "get_default_namespace - unprefixed default preferred" begin
-        r = _root_of("""<workbook xmlns="$_TRANS_MAIN" xmlns:r="http://example.com/r"/>""")
-        @test XLSX.get_default_namespace(r) == _TRANS_MAIN
-    end
-
-    @testset "get_default_namespace - prefixed spreadsheet ns as fallback" begin
-        # No unprefixed default (issues #380/#362/#267/#170)
-        r = _root_of("""<x:workbook xmlns:x="$_TRANS_MAIN" xmlns:r="http://example.com/r"/>""")
-        @test XLSX.get_default_namespace(r) == _TRANS_MAIN
-    end
-
-    @testset "get_default_namespace - none found errors" begin
-        r = _root_of("""<thing xmlns:a="http://example.com/a" xmlns:b="http://example.com/b"/>""")
-        @test_throws XLSX.XLSXError XLSX.get_default_namespace(r)
-    end
-
-    @testset "get_default_namespace_prefix - no namespaces at all" begin
-        r = _root_of("<thing/>")
-        @test isnothing(XLSX.get_default_namespace_prefix(r))
-
-        r2 = _root_of("""<thing xmlns:a="http://example.com/a" xmlns:b="http://example.com/b"/>""")
-        @test isnothing(XLSX.get_default_namespace_prefix(r2))
-    end
-
-    @testset "build_ns_dict! - part still held as a raw String" begin
-        # Covers the `val isa String` branch: a read part whose data hasn't been
-        # parsed yet has its prefix sniffed from the raw text instead.
-        xf = XLSX.newxlsx()
-        f = "xl/styles.xml"
-        @test haskey(xf.files, f)
-
-        xf.data[f] = """<x:styleSheet xmlns:x="$_TRANS_MAIN"/>"""
-        delete!(xf.namespace, f)
-
-        XLSX.build_ns_dict!(xf)
-        @test xf.namespace[f] == "x"
-        @test xf.data[f] isa String   # left unparsed by build_ns_dict!
-    end
-
-    @testset "_get_ns_prefix_from_string - default vs prefixed vs absent" begin
-        @test isnothing(XLSX._get_ns_prefix_from_string(nothing))
-        @test isnothing(XLSX._get_ns_prefix_from_string("""<worksheet xmlns="$_TRANS_MAIN"/>"""))
-        @test XLSX._get_ns_prefix_from_string("""<x:worksheet xmlns:x="$_TRANS_MAIN"/>""") == "x"
-        @test isnothing(XLSX._get_ns_prefix_from_string("""<worksheet xmlns="http://example.com/other"/>"""))
-    end
-
-    @testset "get_sst_prefix - prefixed shared strings namespace" begin
-        xf = XLSX.newxlsx()
-        sh = xf[1]
-
-        xf.namespace["xl/sharedStrings.xml"] = "x"
-        @test XLSX.get_sst_prefix(sh) == "x:"
-
-        xf.namespace["xl/sharedStrings.xml"] = nothing
-        @test XLSX.get_sst_prefix(sh) == ""
-        SAVE_FILES && save_outfile(xf)
-    end
-
-
-    # ===========================================================================
-    # Strict OOXML detection and conversion
-    # ===========================================================================
-
-    @testset "is_strict_ooxml - strict namespace without conformance attribute" begin
-        xf = XLSX.newxlsx()
-        xf.data["xl/workbook.xml"] = parse(
-            """<workbook xmlns="$_STRICT_MAIN"/>""", XLSX.XML.Node)
-        @test XLSX.is_strict_ooxml(xf) == true
-    end
-
-    @testset "is_strict_ooxml - conformance attribute" begin
-        xf = XLSX.newxlsx()
-        xf.data["xl/workbook.xml"] = parse(
-            """<workbook xmlns="$_TRANS_MAIN" conformance="strict"/>""", XLSX.XML.Node)
-        @test XLSX.is_strict_ooxml(xf) == true
-    end
-
-    @testset "is_strict_ooxml - falls back to relationship types in _rels/.rels" begin
-        xf = XLSX.newxlsx()
-        # workbook root gives no hint at all
-        xf.data["xl/workbook.xml"] = parse("""<workbook xmlns="$_TRANS_MAIN"/>""", XLSX.XML.Node)
-        xf.data["_rels/.rels"] = parse(
-            """<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-            <Relationship Id="rId1" Target="xl/workbook.xml"
-                Type="http://purl.oclc.org/ooxml/officeDocument/relationships/officeDocument"/>
-            </Relationships>""", XLSX.XML.Node)
-        @test XLSX.is_strict_ooxml(xf) == true
-    end
-
-    @testset "is_strict_ooxml - ordinary transitional file" begin
-        xf = XLSX.newxlsx()
-        @test XLSX.is_strict_ooxml(xf) == false
-        SAVE_FILES && save_outfile(xf)
-    end
-
-    @testset "_strict_to_transitional_node! - remaps and drops conformance" begin
-        node = XLSX.XML.Element("workbook"; xmlns=_STRICT_MAIN, conformance="strict")
-        XLSX._strict_to_transitional_node!(node, "xl/workbook.xml")
-
-        @test XLSX.get_attr(node, "xmlns") == _TRANS_MAIN
-        @test XLSX.get_attr(node, "conformance", "") == ""
-    end
-
-    @testset "_strict_to_transitional_node! - node with no attributes is a no-op" begin
-        node = XLSX.XML.Element("workbook")
-        @test isnothing(XLSX._strict_to_transitional_node!(node, "xl/workbook.xml"))
-    end
-
-    @testset "_strict_to_transitional_node! - unknown purl namespace errors" begin
-        node = XLSX.XML.Element("thing"; xmlns="http://purl.oclc.org/ooxml/notAThing/main")
-        @test_throws XLSX.XLSXError XLSX._strict_to_transitional_node!(node, "xl/thing.xml")
-    end
-
-    @testset "convert_strict_to_transitional! - part held as a raw String is parsed" begin
-        xf = XLSX.newxlsx()
-        f = "xl/styles.xml"
-        xf.data[f] = """<styleSheet xmlns="$_STRICT_MAIN"/>"""
-
-        XLSX.convert_strict_to_transitional!(xf, 1)
-
-        @test xf.data[f] isa XLSX.XML.Node
-        @test XLSX.get_attr(XLSX.xml_root_element(xf.data[f]), "xmlns") == _TRANS_MAIN
-        SAVE_FILES && save_outfile(xf)
-    end
-
-    @testset "convert_strict_to_transitional! - worksheet String substitution (pass 3)" begin
-        xf = XLSX.newxlsx()
-        f = XLSX.get_relationship_target_by_id("xl", XLSX.get_workbook(xf), xf[1].relationship_id)
-        xf.data[f] = """<worksheet xmlns="$_STRICT_MAIN" conformance="strict"><sheetData/></worksheet>"""
-
-        XLSX.convert_strict_to_transitional!(xf, 3)
-
-        data = xf.data[f]
-        @test data isa String
-        @test occursin(_TRANS_MAIN, data)
-        @test !occursin("purl.oclc.org", data)
-        @test !occursin("conformance", data)
-        SAVE_FILES && save_outfile(xf)
-    end
-
+@testset "workbook parsing and file arrays" begin
 
     # ===========================================================================
     # Content types / workbook parsing
@@ -298,48 +127,6 @@ end
         SAVE_FILES && save_outfile(xf)
     end
 
-
-    # ===========================================================================
-    # parse_defined_name_value
-    # ===========================================================================
-
-    @testset "parse_defined_name_value - relative sheet cell reference" begin
-        v, isabs = XLSX.parse_defined_name_value("Sheet1!A1")
-        @test v == XLSX.SheetCellRef("Sheet1!A1")
-        @test isabs == false
-    end
-
-    @testset "parse_defined_name_value - relative sheet cell range" begin
-        v, isabs = XLSX.parse_defined_name_value("Sheet1!A1:B2")
-        @test v == XLSX.SheetCellRange("Sheet1!A1:B2")
-        @test isabs == false
-    end
-
-    @testset "parse_defined_name_value - absolute forms" begin
-        v, isabs = XLSX.parse_defined_name_value("Sheet1!\$A\$1")
-        @test v == XLSX.SheetCellRef("Sheet1!A1")
-        @test isabs == true
-
-        v2, isabs2 = XLSX.parse_defined_name_value("Sheet1!\$A\$1:\$B\$2")
-        @test v2 == XLSX.SheetCellRange("Sheet1!A1:B2")
-        @test isabs2 == true
-    end
-
-    @testset "parse_defined_name_value - empty string" begin
-        v, isabs = XLSX.parse_defined_name_value("")
-        @test ismissing(v)
-        @test isabs == false
-    end
-
-    @testset "parse_defined_name_value - quoted, numeric and fallback strings" begin
-        @test XLSX.parse_defined_name_value("\"hello\"") == ("hello", false)
-        @test ismissing(first(XLSX.parse_defined_name_value("\"\"")))
-        @test XLSX.parse_defined_name_value("42") == (42, false)
-        @test XLSX.parse_defined_name_value("3.5") == (3.5, false)
-        @test XLSX.parse_defined_name_value("SomethingElse") == ("SomethingElse", false)
-    end
-
-
     # ===========================================================================
     # process_file failure path
     # ===========================================================================
@@ -356,47 +143,10 @@ end
         @test_throws XLSX.XLSXError XLSX.process_file(reader, "absent.xml")
     end
 
-
-    # ===========================================================================
-    # Source-not-found and bad-argument paths on the public read entry points
-    # ===========================================================================
-
-    @testset "readtable - file not found, every arity" begin
-        missing_file = "definitely_not_a_file_12345.xlsx"
-        @test !isfile(missing_file)
-
-        @test_throws XLSX.XLSXError XLSX.readtable(missing_file)
-        @test_throws XLSX.XLSXError XLSX.readtable(missing_file, "Sheet1")
-        @test_throws XLSX.XLSXError XLSX.readtable(missing_file, "Sheet1", XLSX.ColumnRange("A:B"))
-    end
-
-    @testset "readtable - columns argument is not a valid column range" begin
-        outfile = "read_badrange.xlsx"
-        XLSX.writetable(outfile, [[1, 2], [3, 4]], ["a", "b"]; overwrite=true)
-        SAVE_FILES && save_outfile(outfile)
-
-        @test_throws XLSX.XLSXError XLSX.readtable(outfile, 1, "not a range")
-        @test_throws XLSX.XLSXError XLSX.readtable(outfile, 1, "A1:B2")  # cell range, not columns
-
-        isfile(outfile) && rm(outfile)
-    end
-
-    @testset "readtransposedtable - file not found, every arity" begin
-        missing_file = "definitely_not_a_file_12345.xlsx"
-
-        @test_throws XLSX.XLSXError XLSX.readtransposedtable(missing_file)
-        @test_throws XLSX.XLSXError XLSX.readtransposedtable(missing_file, "Sheet1")
-        @test_throws XLSX.XLSXError XLSX.readtransposedtable(missing_file, "Sheet1", "1:3")
-    end
-
-    @testset "openxlsx / parse_file_mode - argument errors" begin
-        missing_file = "definitely_not_a_file_12345.xlsx"
-
-        @test_throws XLSX.XLSXError XLSX.openxlsx(missing_file)
-        @test_throws XLSX.XLSXError XLSX.openxlsx(identity, missing_file)
-        @test_throws XLSX.XLSXError XLSX.openxlsx(missing_file; mode="q")
-        @test XLSX.parse_file_mode("wr") == (true, true)
-        @test XLSX.parse_file_mode("RW") == (true, true)
+    @testset "FileArray" begin
+        p = joinpath(data_directory, "general.xlsx")
+        fa = XLSX.FileArray(p)
+        @test fa[1] == read(p)[1]
     end
 end
 
@@ -479,7 +229,6 @@ end
         end
     end
 end
-
 
 # The cache fill reads each `<c>` in the same cursor walk as its children (#462). It
 # must build exactly the cells `Cell(::LazyNode, …)` builds from the same XML.
@@ -595,7 +344,6 @@ end
     end
 end
 
-
 # `_parse_cell_float` must give exactly what `parse(Float64, s)` gives, bit for bit,
 # and throw exactly where it throws (#462: cell floats are parsed with Parsers.jl).
 @testset "cell value float parsing" begin
@@ -693,4 +441,153 @@ end
         isequal(XLSX._parse_cell_int(s), tryparse(Int64, s)) || (nbad += 1)
     end
     @test nbad == 0
+end
+
+@testset "sheet dimensions and ranges across cache modes" begin
+    @testset "Read-only range discovery" begin
+        bytes = read(joinpath(data_directory, "NoDim.xlsx"))
+        expected = XLSX.openxlsx(IOBuffer(bytes); mode = "rw")[1]["A1:K116"]
+        factories = (XLSX.readxlsx,
+                     io -> XLSX.openxlsx(io; enable_cache = true),
+                     io -> XLSX.openxlsx(io; enable_cache = false))
+        cellvalues(ws, cells) = map(c -> XLSX.getdata(ws, c), cells)
+        ranges = (
+            (ws -> ws[:], expected),
+            (ws -> ws[:, :], expected),
+            (ws -> XLSX.getdata(ws), expected),
+            (ws -> ws[1:2, :], expected[1:2, :]),
+            (ws -> ws[:, 1:2], expected[:, 1:2]),
+            (ws -> ws[[1, 2], :], expected[1:2, :]),
+            (ws -> ws[:, [1, 2]], expected[:, 1:2]),
+            (ws -> ws["1:2"], expected[1:2, :]),
+            (ws -> ws["A:B"], expected[:, 1:2]),
+            (ws -> cellvalues(ws, XLSX.getcellrange(ws, :)), expected),
+            (ws -> cellvalues(ws, XLSX.getcell(ws, :)), expected),
+            (ws -> cellvalues(ws, XLSX.getcell(ws, 1:2, :)), expected[1:2, :]),
+            (ws -> cellvalues(ws, XLSX.getcell(ws, :, 1:2)), expected[:, 1:2]),
+            (ws -> cellvalues(ws, XLSX.getcellrange(ws, "1:2")), expected[1:2, :]),
+            (ws -> cellvalues(ws, XLSX.getcellrange(ws, "A:B")), expected[:, 1:2]),
+        )
+        for openfile in factories
+            for (readrange, reference) in ranges
+                ws = openfile(IOBuffer(bytes))[1]
+                @test isequal(readrange(ws), reference)
+                @test ws.dimension == XLSX.CellRange("A1:K116") # recorded by the first read
+                @test isequal(readrange(ws), reference)
+            end
+            ws = openfile(IOBuffer(bytes))[1]
+            @test axes(ws, 1) == 1:116
+            @test axes(ws, 2) == 1:11
+            @test XLSX.get_dimension(ws) == XLSX.CellRange("A1:K116")
+            !XLSX.is_cache_enabled(ws) && @test ws.cache === nothing
+
+            ws = openfile(IOBuffer(bytes))[1]
+            sprint(show, ws)
+            @test ws.cache === nothing
+            @test ws.dimension === nothing
+
+            ws = openfile(IOBuffer(read(joinpath(data_directory, "simple.xlsx"))))[1]
+            @test XLSX.get_dimension(ws) == XLSX.CellRange("A1:B3")
+            @test ws.cache === nothing
+        end
+
+        # An uncached row iterator records the dimension only when it runs to the end.
+        ws = XLSX.openxlsx(IOBuffer(bytes); enable_cache = false)[1]
+        for _ in XLSX.eachrow(ws) end
+        @test ws.dimension == XLSX.CellRange("A1:K116")
+        ws = XLSX.openxlsx(IOBuffer(bytes); enable_cache = false)[1]
+        for _ in XLSX.eachrow(ws)
+            break
+        end
+        @test ws.dimension === nothing
+
+        # A recorded dimension is never recomputed.
+        for enable_cache in (true, false)
+            ws = XLSX.openxlsx(joinpath(data_directory, "simple.xlsx"); enable_cache)[1]
+            dimension = ws.dimension
+            ws[:]; ws[1:2, :]; ws[:, 2]; axes(ws, 2)
+            for _ in XLSX.eachrow(ws) end
+            @test ws.dimension === dimension
+        end
+
+        sparse = Matrix{Any}(missing, 5, 3)
+        sparse[1, 1] = 11
+        sparse[5, 3] = 22
+        styled = Matrix{Any}(missing, 3, 3)
+        styled[1, 1] = 11
+        inline = Matrix{Any}(missing, 2, 2)
+        inline[1, 1] = "hi"
+        inline[2, 2] = 5
+        emptyrow = Matrix{Any}(missing, 4, 1)
+        emptyrow[1, 1] = 1
+        sheets = (
+            ("<sheetData/>", "A1:A1", fill(missing, 1, 1)),
+            ("<sheetData><row r=\"7\" ht=\"18\" customHeight=\"1\"/></sheetData>", "A1:A1", fill(missing, 1, 1)),
+            ("<sheetData><row r=\"3\"><c r=\"C3\"><v>11</v></c></row><row r=\"7\"><c r=\"E7\"><v>22</v></c></row></sheetData>", "C3:E7", sparse),
+            # a formatting-only cell extends the dimension
+            ("<sheetData><row r=\"2\"><c r=\"B2\"><v>11</v></c></row><row r=\"4\"><c r=\"D4\" s=\"0\"/></row></sheetData>", "B2:D4", styled),
+            ("<sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>hi</t></is></c></row><row r=\"2\"><c r=\"B2\"><v>5</v></c></row></sheetData>", "A1:B2", inline),
+            # a row without cells still extends the rows
+            ("<sheetData><row r=\"2\"><c r=\"B2\"><v>1</v></c></row><row r=\"5\" ht=\"18\" customHeight=\"1\"/></sheetData>", "B2:B5", emptyrow),
+        )
+        for (sheetdata, dimension, reference) in sheets
+            path = patch_xlsx_entry(joinpath(src_data_directory, "blank.xlsx"), "xl/worksheets/sheet1.xml",
+                _ -> "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">" * sheetdata * "</worksheet>")
+            try
+                rng = XLSX.CellRange(dimension)
+                top, left = rng.start.row_number, rng.start.column_number
+                for openfile in factories
+                    ws = openfile(IOBuffer(read(path)))[1]
+                    @test isequal(ws[:], reference)
+                    @test isequal(ws[:], reference)
+                    @test XLSX.get_dimension(ws) == rng
+                    !XLSX.is_cache_enabled(ws) && @test ws.cache === nothing
+
+                    # partial reads take the other extent from the sheet
+                    ws = openfile(IOBuffer(read(path)))[1]
+                    @test isequal(ws[top:top, :], reference[1:1, :])
+                    ws = openfile(IOBuffer(read(path)))[1]
+                    @test isequal(ws[:, left], reference[:, 1:1])
+                    ws = openfile(IOBuffer(read(path)))[1]
+                    @test axes(ws, 1) == rng.start.row_number:rng.stop.row_number
+                    @test axes(ws, 2) == rng.start.column_number:rng.stop.column_number
+                end
+            finally
+                rm(path)
+            end
+        end
+    end
+
+    noDim = XLSX.openxlsx(joinpath(data_directory, "NoDim.xlsx"), mode="rw")
+    Dim = XLSX.readxlsx(joinpath(data_directory, "customXml.xlsx"))
+    @test noDim[1].dimension == Dim[1].dimension
+    @test noDim[2].dimension == Dim[2].dimension
+
+    f = XLSX.newxlsx()
+    s = f[1]
+    for i = 10:20, j = 10:20
+        s[i, j] = i + j
+    end
+    XLSX.set_dimension!(s, XLSX.CellRange(XLSX.CellRef("J10"), XLSX.CellRef("T20")))
+    @test XLSX.get_dimension(s) == XLSX.CellRange(XLSX.CellRef("J10"), XLSX.CellRef("T20"))
+    s["A1"] = 2
+    @test XLSX.get_dimension(s) == XLSX.CellRange(XLSX.CellRef("A1"), XLSX.CellRef("T20"))
+    SAVE_FILES && save_outfile(f)
+
+    @testset "Worksheet ranges across cache modes" begin
+        for filename in ("simple.xlsx", "strict.xlsx", "NoDim.xlsx")
+            bytes = read(joinpath(data_directory, filename))
+            writable = XLSX.openxlsx(IOBuffer(bytes); mode = "rw")
+            expected = writable[1][:]
+            range = "A1:" * XLSX.encode_column_number(size(expected, 2)) * string(size(expected, 1))
+            for openfile in (XLSX.readxlsx,
+                             io -> XLSX.openxlsx(io; enable_cache = true),
+                             io -> XLSX.openxlsx(io; enable_cache = false))
+                xf = openfile(IOBuffer(bytes))
+                @test XLSX.sheetnames(xf) == XLSX.sheetnames(writable)
+                @test isequal(xf[1][range], expected)
+                @test isequal(xf[1][range], expected)
+            end
+        end
+    end
 end
