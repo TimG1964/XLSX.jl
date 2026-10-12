@@ -46,4 +46,36 @@ end
     isfile("saveable.xlsx") && rm("saveable.xlsx")
     SAVE_FILES && save_outfile(f2)
     SAVE_FILES && save_outfile(f)
+
+    @testset "save back to an IO" begin
+        src = XLSX.newxlsx(); src[1]["A1"] = "original"
+        XLSX.addsheet!(src, "big")
+        src["big"]["A1:A2000"] = [string(i, "-", i^2) for i in 1:2000, _ in 1:1]
+        bytes = (io = IOBuffer(); XLSX.writexlsx(io, src); take!(io))
+
+        # do-block "rw" replaces the buffer's content, truncating when the result is shorter
+        buf = IOBuffer(copy(bytes); read=true, write=true)
+        XLSX.openxlsx(buf; mode="rw") do xf
+            XLSX.deletesheet!(xf, "big")
+            xf[1]["A1"] = "short"
+            xf[1]["B1"] = 2
+        end
+        @test buf.size < length(bytes)
+        seekstart(buf)
+        f4 = XLSX.readxlsx(buf)
+        @test f4[1]["A1"] == "short"
+        @test f4[1]["B1"] == 2
+
+        # savexlsx does the same
+        buf = IOBuffer(copy(bytes); read=true, write=true)
+        xf = XLSX.openxlsx(buf; mode="rw")
+        xf[1]["C1"] = 3
+        @test XLSX.savexlsx(xf) === nothing
+        seekstart(buf)
+        @test XLSX.readxlsx(buf)[1]["C1"] == 3
+
+        # a read-only buffer can't be overwritten
+        xf = XLSX.openxlsx(IOBuffer(copy(bytes)); mode="rw")
+        @test_throws XLSX.XLSXError XLSX.savexlsx(xf)
+    end
 end

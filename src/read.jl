@@ -489,7 +489,10 @@ The `mode` argument controls how the file is opened. The following modes are all
     that `XLSX.jl` cannot process (such as charts, pivot tables, etc), but that would otherwise be preserved if not 
     overwritten. You may avoid this risk by choosing to open files in "rw" mode without using do-block syntax, in which 
     case it becomes necessary explicitly to write the `XLSXFile` out again, providing the option to write to another file name.
-    
+
+    If `source` is an `IO`, its content is replaced in the same way, so it must be writable and seekable
+    (e.g. `IOBuffer(bytes; read=true, write=true)`).
+
 
 !!! note
 
@@ -587,6 +590,7 @@ function openxlsx(f::F, source::Union{AbstractString,IO};
                     xf.source = splitext(xf.source)[1] * ext
                 end
             end
+            xf.source isa IO && _reset_io_for_save!(xf.source)
             writexlsx(xf.source, xf, overwrite=true)
         end
     end

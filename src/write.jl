@@ -13,11 +13,17 @@ An `XLSXFile` created from a native Excel template (`.xltx`) file or a macro-ena
 will be saved as standard worksheet (`.xlsx`) or macro-enabled worksheet (`.xlsm`) respectively, regardless 
 of the extension of the original template file.
 
+If `f` was opened from an `IO`, the `IO`'s content is replaced: it is written from the start and
+truncated to the new workbook's length. The `IO` must be writable and seekable, such as an
+`IOBuffer(bytes; read=true, write=true)`.
+
 Returns the filepath of the written file if a filename is supplied, or `nothing` if writing to an `IO`.
 
 """
 function savexlsx(f::XLSXFile)
-    if isa(f.source, AbstractString)
+    if f.source isa IO
+        _reset_io_for_save!(f.source)
+    elseif isa(f.source, AbstractString)
         if f.source == "blank.xlsx"
             throw(XLSXError("Can't save to a blank `XLSXFile` instance. Use `writexlsx` instead to specify a file name."))
         elseif f.template_type != NotATemplate
@@ -28,6 +34,17 @@ function savexlsx(f::XLSXFile)
         end
     end
     return writexlsx(f.source, f; overwrite=true)
+end
+
+# Empty an `IO` source so that saving replaces its content, as saving replaces a file.
+function _reset_io_for_save!(io::IO)
+    try
+        seekstart(io)
+        truncate(io, 0)
+    catch
+        throw(XLSXError("Can't save back to the source `IO`: it must be writable and seekable. Use `writexlsx` to write to another `IO` or file."))
+    end
+    return io
 end
 
 
@@ -42,6 +59,10 @@ The source attribute of the `XLSXFile` will be updated to the `output_source` if
 Returns the filepath of the written file if a filename is supplied, or `nothing` if writing to an `IO`.
 
 If `overwrite=true`, `output_source` (when a filepath) will be overwritten if it exists.
+
+When `output_source` is an `IO`, it should be at its start (e.g. a new `IOBuffer()`), and
+`overwrite` has no effect. To save a workbook back to the `IO` it was opened from, replacing
+its content, use [`savexlsx`](@ref).
 
 See also [`savexlsx`](@ref).
 

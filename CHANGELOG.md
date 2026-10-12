@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 - `addImage` no longer empties a writable `IOBuffer` passed as the image. The buffer's contents and position are left as they were
+- `openxlsx(io; mode="rw") do … end` and `savexlsx` on a workbook opened from an `IO` now replace the `IO`'s content with the saved workbook. They previously threw an `ArgumentError` from ZipArchives, because the workbook was written after the bytes already read. An `IO` that can't be overwritten, such as a read-only `IOBuffer`, gives an `XLSXError`
 - Chart titles, axis titles and data labels set from a `RichTextString` keep each run's formatting (bold, italic, underline, strikethrough, superscript/subscript, size, font and color), with newlines handled as for plain strings. Previously this threw an `ArgumentError`. `addChart(...; title = rt)` keeps the run formatting on top of the new title's own
 - On Julia 1.11+, the same chart text setters and `addChart`'s `title` keyword accept a StyledStrings `styled"…"` string, converted to a `RichTextString` as for cells (in the StyledStrings extension)
 - `setChartTitleText` and `setAxisTitleText` accept a `CellRef` or `SheetCellRef`, binding the title to that cell (`c:tx/c:strRef`, with the cell's text cached). `addChart`'s `title` keyword accepts the same. A bound title has one style, so a typed title's formatting is moved into `c:txPr` and a rich-text cell lends the formatting its runs share; per-run formatting can't be kept, as Excel's file format doesn't allow it
