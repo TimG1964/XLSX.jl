@@ -293,6 +293,39 @@
                 filter(dn -> dn.name ∉ added, after))
             SAVE_FILES && save_outfile(f)
         end
+
+        # The copy once shared the original's cache, so a change to either sheet
+        # showed up in both.
+        @testset "copysheet! gives the copy its own cells" begin
+            f = XLSX.newxlsx()
+            s = f[1]
+            s["A1"] = 1
+            s["A2"] = 2
+            c = XLSX.copysheet!(s)
+
+            c["A1"] = 100
+            c["A5"] = 5
+            XLSX.setFont(c, "A2"; bold=true)
+            XLSX.setRowHeight(c, 2; height=30)
+            XLSX.setFormula(c, "C1", "=A1+1")
+            @test c["A1"] == 100 && c["A5"] == 5
+            @test s["A1"] == 1
+            @test ismissing(s["A5"])
+            @test isnothing(XLSX.getFont(s, "A2"))
+            @test isnothing(XLSX.getRowHeight(s, "A2"))
+            @test isnothing(XLSX.getFormula(s, "C1"))
+
+            # and the other way round
+            s["B1"] = "original"
+            @test ismissing(c["B1"])
+
+            io = IOBuffer()
+            XLSX.writexlsx(io, f)
+            r = XLSX.readxlsx(seekstart(io))
+            @test r[1]["A1"] == 1 && ismissing(r[1]["A5"]) && r[1]["B1"] == "original"
+            @test r[2]["A1"] == 100 && r[2]["A5"] == 5 && ismissing(r[2]["B1"])
+            SAVE_FILES && save_outfile(f)
+        end
     end
 
     @testset "deletesheet!" begin

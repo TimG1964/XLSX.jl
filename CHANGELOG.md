@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- `copysheet!` gives the copy its own cells. The copy shared the original's cell cache, so a value, format, row height or formula set on either sheet also appeared in the other, and a formula set on the copy left the original with a cell that `getFormula` couldn't read
 - `getdata` (and `ws[range]`) over a range of a writable sheet whose rows were written out of order could return wrong values, or write outside its result and corrupt memory, crashing Julia later in the garbage collector. The written rows are now sorted before the range is read
 - `setUniformFont`, `setUniformBorder`, `setUniformFill`, `setUniformAlignment` and `setUniformFormat` given a whole row or column as `(ws, row, :)` or `(ws, :, col)` now apply one attribute to every cell, as the other target forms do. They previously applied the per-cell setter (`setFont` etc.), so cells that started with different formatting kept their differences
 - `addImage` no longer empties a writable `IOBuffer` passed as the image. The buffer's contents and position are left as they were

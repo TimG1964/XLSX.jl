@@ -1525,13 +1525,14 @@ function copysheet!(ws::Worksheet, name::AbstractString="")::Worksheet
     # cache of copied sheet must be full
     ws.cache.is_full == true || throw(XLSXError("Cannot copy worksheet that does not have a full cache"))
 
-    # copy the original worksheet cache to the new worksheet
+    # copy the original worksheet cache to the new worksheet. Deep copies, so that
+    # writing to either sheet (values, formats, row heights) leaves the other alone.
     new_cache = WorksheetCache(
         true,
-        ws.cache.cells,
-        ws.cache.rows_in_cache,
-        ws.cache.row_ht,
-        ws.cache.row_index,
+        deepcopy(ws.cache.cells),
+        copy(ws.cache.rows_in_cache),
+        copy(ws.cache.row_ht),
+        copy(ws.cache.row_index),
         SheetRowStreamIterator(ws), # Dummy - not needed because using full cache.
         nothing,
         ws.cache.dirty,
