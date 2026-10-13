@@ -398,7 +398,7 @@ end
 mutable struct WorksheetCache{I<:SheetRowIterator} <: SheetRowIterator
     is_full::Bool # false until iterator runs to completion
     cells::CellCache # SheetRowNumber -> Dict{column_number, Cell}
-    rows_in_cache::Vector{Int} # ordered vector with row numbers that are stored in cache
+    rows_in_cache::Vector{Int} # row numbers stored in cache; sorted only when `dirty` is false (see `ensure_sorted!`)
     row_ht::Dict{Int, Union{Float64, Nothing}} # Maps a row number to a row height
     row_index::Dict{Int, Int} # maps a row number to the index of the row number in rows_in_cache
     stream_iterator::I

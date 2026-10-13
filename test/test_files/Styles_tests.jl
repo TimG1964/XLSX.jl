@@ -2398,4 +2398,14 @@ writing a number into a cell carrying a date/time format.
             @test attribute(s, "A1") == attribute(s, other)
         end
     end
+
+    @testset "setters in a family accept the same target forms" begin
+        targets(f) = Set(Base.tuple_type_tail(m.sig) for m in methods(f))
+        for f in (XLSX.setFill, XLSX.setAlignment, XLSX.setFormat, XLSX.setBorder)
+            @test targets(f) == targets(XLSX.setFont)
+        end
+        for f in (XLSX.setUniformBorder, XLSX.setUniformFill, XLSX.setUniformAlignment, XLSX.setUniformFormat)
+            @test targets(f) == targets(XLSX.setUniformFont)
+        end
+    end
 end

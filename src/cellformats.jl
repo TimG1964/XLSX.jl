@@ -81,27 +81,7 @@ julia> setFont(sh, :, 2:6; size=48, color="lightskyblue2")                      
 ```
 """
 function setFont end
-setFont(ws::Worksheet, ref::SheetCellRef; kw...) = do_sheet_names_match(ws, ref) && setFont(ws, ref.cellref; kw...)
-setFont(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setFont(ws, rng.rng; kw...)
-setFont(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setFont(ws, rng.colrng; kw...)
-setFont(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setFont(ws, rng.rowrng; kw...)
-setFont(ws::Worksheet, rng::CellRange; kw...)::Int = process_cellranges(setFont, ws, rng; kw...)
-setFont(ws::Worksheet, colrng::ColumnRange; kw...)::Int = process_columnranges(setFont, ws, colrng; kw...)
-setFont(ws::Worksheet, rowrng::RowRange; kw...)::Int = process_rowranges(setFont, ws, rowrng; kw...)
-setFont(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_ncranges(setFont, ws, ncrng; kw...)
-setFont(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setFont, ws, ref_or_rng; kw...)
-setFont(xl::XLSXFile, sheetcell::String; kw...)::Int = process_sheetcell(setFont, xl, sheetcell; kw...)
-#setFont(ws::Worksheet, row::Integer, col::Integer; kw...) = setFont(ws, CellRef(row, col); kw...)
-setFont(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setFont, ws, row, nothing; kw...)
-setFont(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setFont, ws, nothing, col; kw...)
-setFont(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setFont, ws, nothing, nothing; kw...)
-setFont(ws::Worksheet, ::Colon; kw...) = process_colon(setFont, ws, nothing, nothing; kw...)
-setFont(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_veccolon(setFont, ws, row, nothing; kw...)
-setFont(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_veccolon(setFont, ws, nothing, col; kw...)
-setFont(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint(setFont, ws, row, col; kw...)
-setFont(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_vecint(setFont, ws, row, col; kw...)
-setFont(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint(setFont, ws, row, col; kw...)
-setFont(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setFont(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
+define_percell_address_methods(:setFont)
 
 function setFont(sh::Worksheet, cellref::CellRef;
     bold::Union{Nothing,Bool}=nothing,
@@ -240,25 +220,7 @@ julia> setUniformFont(sh, "B2,A5:D22")                                          
 ```
 """
 function setUniformFont end
-setUniformFont(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setUniformFont(ws, rng.rng; kw...)
-setUniformFont(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setUniformFont(ws, rng.colrng; kw...)
-setUniformFont(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setUniformFont(ws, rng.rowrng; kw...)
-setUniformFont(ws::Worksheet, colrng::ColumnRange; kw...)::Int = process_columnranges(setUniformFont, ws, colrng; kw...)
-setUniformFont(ws::Worksheet, rowrng::RowRange; kw...)::Int = process_rowranges(setUniformFont, ws, rowrng; kw...)
-setUniformFont(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_uniform_ncranges(setFont, ws, ncrng, ["fontId", "applyFont"]; kw...)
-setUniformFont(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell(setUniformFont, xl, sheetcell; kw...)
-setUniformFont(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setUniformFont, ws, ref_or_rng; kw...)
-setUniformFont(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setUniformFont, ws, row, nothing; kw...)
-setUniformFont(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setUniformFont, ws, nothing, col; kw...)
-setUniformFont(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setUniformFont, ws, nothing, nothing; kw...)
-setUniformFont(ws::Worksheet, ::Colon; kw...) = process_colon(setUniformFont, ws, nothing, nothing; kw...)
-setUniformFont(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_uniform_veccolon(setFont, ws, row, nothing, ["fontId", "applyFont"]; kw...)
-setUniformFont(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_veccolon(setFont, ws, nothing, col, ["fontId", "applyFont"]; kw...)
-setUniformFont(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_vecint(setFont, ws, row, col, ["fontId", "applyFont"]; kw...)
-setUniformFont(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_uniform_vecint(setFont, ws, row, col, ["fontId", "applyFont"]; kw...)
-setUniformFont(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_vecint(setFont, ws, row, col, ["fontId", "applyFont"]; kw...)
-setUniformFont(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setUniformFont(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-setUniformFont(ws::Worksheet, rng::CellRange; kw...)::Int = process_uniform_attribute(setFont, ws, rng, ["fontId", "applyFont"]; kw...)
+define_uniform_address_methods(:setUniformFont, :setFont, ["fontId", "applyFont"])
 
 
 """
@@ -559,23 +521,7 @@ Julia> setBorder(xf, "Sheet1!D4"; left     = ["style" => "dotted", "color" => "F
 ```
 """
 function setBorder end
-setBorder(ws::Worksheet, ref::SheetCellRef; kw...) = do_sheet_names_match(ws, ref) && setBorder(ws, ref.cellref; kw...)
-setBorder(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setBorder(ws, rng.rng; kw...)
-setBorder(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setBorder(ws, rng.colrng; kw...)
-setBorder(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setBorder(ws, rng.rowrng; kw...)
-setBorder(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_ncranges(setBorder, ws, ncrng; kw...)
-setBorder(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setBorder, ws, ref_or_rng; kw...)
-#setBorder(ws::Worksheet, row::Integer, col::Integer; kw...) = setBorder(ws, CellRef(row, col); kw...)
-setBorder(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setBorder, ws, row, nothing; kw...)
-setBorder(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setBorder, ws, nothing, col; kw...)
-setBorder(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setBorder, ws, nothing, nothing; kw...)
-setBorder(ws::Worksheet, ::Colon; kw...) = process_colon(setBorder, ws, nothing, nothing; kw...)
-setBorder(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_veccolon(setBorder, ws, row, nothing; kw...)
-setBorder(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_veccolon(setBorder, ws, nothing, col; kw...)
-setBorder(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint(setBorder, ws, row, col; kw...)
-setBorder(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_vecint(setBorder, ws, row, col; kw...)
-setBorder(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint(setBorder, ws, row, col; kw...)
-setBorder(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setBorder(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
+define_percell_address_methods(:setBorder; ranges=false)
 
 function setBorder(ws::Worksheet, rng::CellRange;
     outside::BorderKw=nothing, allsides::BorderKw=nothing,
@@ -737,25 +683,7 @@ julia> setUniformBorder(sh, "B2,A5:D22")     # Copy `Border` from B2 to cells in
 ```
 """
 function setUniformBorder end
-setUniformBorder(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setUniformBorder(ws, rng.rng; kw...)
-setUniformBorder(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setUniformBorder(ws, rng.colrng; kw...)
-setUniformBorder(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setUniformBorder(ws, rng.rowrng; kw...)
-setUniformBorder(ws::Worksheet, colrng::ColumnRange; kw...)::Int = process_columnranges(setUniformBorder, ws, colrng; kw...)
-setUniformBorder(ws::Worksheet, rowrng::RowRange; kw...)::Int = process_rowranges(setUniformBorder, ws, rowrng; kw...)
-setUniformBorder(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_uniform_ncranges(setBorder, ws, ncrng, ["borderId", "applyBorder"]; kw...)
-setUniformBorder(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell(setUniformBorder, xl, sheetcell; kw...)
-setUniformBorder(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setUniformBorder, ws, ref_or_rng; kw...)
-setUniformBorder(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setUniformBorder, ws, row, nothing; kw...)
-setUniformBorder(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setUniformBorder, ws, nothing, col; kw...)
-setUniformBorder(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setUniformBorder, ws, nothing, nothing; kw...)
-setUniformBorder(ws::Worksheet, ::Colon; kw...) = process_colon(setUniformBorder, ws, nothing, nothing; kw...)
-setUniformBorder(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_uniform_veccolon(setBorder, ws, row, nothing, ["borderId", "applyBorder"]; kw...)
-setUniformBorder(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_veccolon(setBorder, ws, nothing, col, ["borderId", "applyBorder"]; kw...)
-setUniformBorder(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_vecint(setBorder, ws, row, col, ["borderId", "applyBorder"]; kw...)
-setUniformBorder(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_uniform_vecint(setBorder, ws, row, col, ["borderId", "applyBorder"]; kw...)
-setUniformBorder(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_vecint(setBorder, ws, row, col, ["borderId", "applyBorder"]; kw...)
-setUniformBorder(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setUniformBorder(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-setUniformBorder(ws::Worksheet, rng::CellRange; kw...)::Int = process_uniform_attribute(setBorder, ws, rng, ["borderId", "applyBorder"]; kw...)
+define_uniform_address_methods(:setUniformBorder, :setBorder, ["borderId", "applyBorder"])
 
 """
     setOutsideBorder(sh::Worksheet, cr::String; kw...) -> ::Int
@@ -1008,27 +936,7 @@ Julia> setFill(sh, "11:24"; pattern="none", fgColor = "yellow2")
 ```
 """
 function setFill end
-setFill(ws::Worksheet, ref::SheetCellRef; kw...) = do_sheet_names_match(ws, ref) && setFill(ws, ref.cellref; kw...)
-setFill(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setFill(ws, rng.rng; kw...)
-setFill(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setFill(ws, rng.colrng; kw...)
-setFill(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setFill(ws, rng.rowrng; kw...)
-setFill(ws::Worksheet, rng::CellRange; kw...)::Int = process_cellranges(setFill, ws, rng; kw...)
-setFill(ws::Worksheet, rowrng::RowRange; kw...)::Int = process_rowranges(setFill, ws, rowrng; kw...)
-setFill(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_ncranges(setFill, ws, ncrng; kw...)
-setFill(ws::Worksheet, colrng::ColumnRange; kw...)::Int = process_columnranges(setFill, ws, colrng; kw...)
-setFill(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setFill, ws, ref_or_rng; kw...)
-setFill(xl::XLSXFile, sheetcell::String; kw...)::Int = process_sheetcell(setFill, xl, sheetcell; kw...)
-#setFill(ws::Worksheet, row::Integer, col::Integer; kw...) = setFill(ws, CellRef(row, col); kw...)
-setFill(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setFill, ws, row, nothing; kw...)
-setFill(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setFill, ws, nothing, nothing; kw...)
-setFill(ws::Worksheet, ::Colon; kw...) = process_colon(setFill, ws, nothing, nothing; kw...)
-setFill(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setFill, ws, nothing, col; kw...)
-setFill(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_veccolon(setFill, ws, row, nothing; kw...)
-setFill(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_veccolon(setFill, ws, nothing, col; kw...)
-setFill(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint(setFill, ws, row, col; kw...)
-setFill(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_vecint(setFill, ws, row, col; kw...)
-setFill(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint(setFill, ws, row, col; kw...)
-setFill(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setFill(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
+define_percell_address_methods(:setFill)
 
 function setFill(sh::Worksheet, cellref::CellRef;
     pattern::Union{Nothing,String}=nothing,
@@ -1137,25 +1045,7 @@ julia> setUniformFill(sh, "B2,A5:D22")               # Copy `Fill` from B2 to ce
 ```
 """
 function setUniformFill end
-setUniformFill(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setUniformFill(ws, rng.rng; kw...)
-setUniformFill(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setUniformFill(ws, rng.colrng; kw...)
-setUniformFill(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setUniformFill(ws, rng.rowrng; kw...)
-setUniformFill(ws::Worksheet, colrng::ColumnRange; kw...)::Int = process_columnranges(setUniformFill, ws, colrng; kw...)
-setUniformFill(ws::Worksheet, rowrng::RowRange; kw...)::Int = process_rowranges(setUniformFill, ws, rowrng; kw...)
-setUniformFill(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_uniform_ncranges(setFill, ws, ncrng, ["fillId", "applyFill"]; kw...)
-setUniformFill(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell(setUniformFill, xl, sheetcell; kw...)
-setUniformFill(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setUniformFill, ws, ref_or_rng; kw...)
-setUniformFill(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setUniformFill, ws, row, nothing; kw...)
-setUniformFill(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setUniformFill, ws, nothing, col; kw...)
-setUniformFill(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setUniformFill, ws, nothing, nothing; kw...)
-setUniformFill(ws::Worksheet, ::Colon; kw...) = process_colon(setUniformFill, ws, nothing, nothing; kw...)
-setUniformFill(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_uniform_veccolon(setFill, ws, row, nothing, ["fillId", "applyFill"]; kw...)
-setUniformFill(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_veccolon(setFill, ws, nothing, col, ["fillId", "applyFill"]; kw...)
-setUniformFill(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_vecint(setFill, ws, row, col, ["fillId", "applyFill"]; kw...)
-setUniformFill(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_uniform_vecint(setFill, ws, row, col, ["fillId", "applyFill"]; kw...)
-setUniformFill(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_vecint(setFill, ws, row, col, ["fillId", "applyFill"]; kw...)
-setUniformFill(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setUniformFill(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-setUniformFill(ws::Worksheet, rng::CellRange; kw...)::Int = process_uniform_attribute(setFill, ws, rng, ["fillId", "applyFill"]; kw...)
+define_uniform_address_methods(:setUniformFill, :setFill, ["fillId", "applyFill"])
 
 #
 # -- Get and set alignment attributes
@@ -1295,27 +1185,7 @@ julia> setAlignment(sh, 1:3, 3:6; horizontal="center", rotation="90", shrink=tru
 ```
 """
 function setAlignment end
-setAlignment(ws::Worksheet, ref::SheetCellRef; kw...) = do_sheet_names_match(ws, ref) && setAlignment(ws, ref.cellref; kw...)
-setAlignment(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setAlignment(ws, rng.rng; kw...)
-setAlignment(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setAlignment(ws, rng.colrng; kw...)
-setAlignment(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setAlignment(ws, rng.rowrng; kw...)
-setAlignment(ws::Worksheet, rng::CellRange; kw...)::Int = process_cellranges(setAlignment, ws, rng; kw...)
-setAlignment(ws::Worksheet, colrng::ColumnRange; kw...)::Int = process_columnranges(setAlignment, ws, colrng; kw...)
-setAlignment(ws::Worksheet, rowrng::RowRange; kw...)::Int = process_rowranges(setAlignment, ws, rowrng; kw...)
-setAlignment(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_ncranges(setAlignment, ws, ncrng; kw...)
-setAlignment(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setAlignment, ws, ref_or_rng; kw...)
-setAlignment(xl::XLSXFile, sheetcell::String; kw...)::Int = process_sheetcell(setAlignment, xl, sheetcell; kw...)
-#setAlignment(ws::Worksheet, row::Integer, col::Integer; kw...) = setAlignment(ws, CellRef(row, col); kw...)
-setAlignment(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setAlignment, ws, row, nothing; kw...)
-setAlignment(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setAlignment, ws, nothing, nothing; kw...)
-setAlignment(ws::Worksheet, ::Colon; kw...) = process_colon(setAlignment, ws, nothing, nothing; kw...)
-setAlignment(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setAlignment, ws, nothing, col; kw...)
-setAlignment(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_veccolon(setAlignment, ws, row, nothing; kw...)
-setAlignment(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_veccolon(setAlignment, ws, nothing, col; kw...)
-setAlignment(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint(setAlignment, ws, row, col; kw...)
-setAlignment(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_vecint(setAlignment, ws, row, col; kw...)
-setAlignment(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint(setAlignment, ws, row, col; kw...)
-setAlignment(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setAlignment(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
+define_percell_address_methods(:setAlignment)
 
 function setAlignment(sh::Worksheet, cellref::CellRef;
     horizontal::Union{Nothing,String}=nothing,
@@ -1422,25 +1292,7 @@ julia> setUniformAlignment(sh, "B2,A5:D22")                # Copy `Alignment` fr
 ```
 """
 function setUniformAlignment end
-setUniformAlignment(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setUniformAlignment(ws, rng.rng; kw...)
-setUniformAlignment(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setUniformAlignment(ws, rng.colrng; kw...)
-setUniformAlignment(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setUniformAlignment(ws, rng.rowrng; kw...)
-setUniformAlignment(ws::Worksheet, colrng::ColumnRange; kw...)::Int = process_columnranges(setUniformAlignment, ws, colrng; kw...)
-setUniformAlignment(ws::Worksheet, rowrng::RowRange; kw...)::Int = process_rowranges(setUniformAlignment, ws, rowrng; kw...)
-setUniformAlignment(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_uniform_ncranges(setAlignment, ws, ncrng; kw...)
-setUniformAlignment(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell(setUniformAlignment, xl, sheetcell; kw...)
-setUniformAlignment(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setUniformAlignment, ws, ref_or_rng; kw...)
-setUniformAlignment(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setUniformAlignment, ws, row, nothing; kw...)
-setUniformAlignment(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setUniformAlignment, ws, nothing, col; kw...)
-setUniformAlignment(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setUniformAlignment, ws, nothing, nothing; kw...)
-setUniformAlignment(ws::Worksheet, ::Colon; kw...) = process_colon(setUniformAlignment, ws, nothing, nothing; kw...)
-setUniformAlignment(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_uniform_veccolon(setAlignment, ws, row, nothing; kw...)
-setUniformAlignment(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_veccolon(setAlignment, ws, nothing, col; kw...)
-setUniformAlignment(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_vecint(setAlignment, ws, row, col; kw...)
-setUniformAlignment(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_uniform_vecint(setAlignment, ws, row, col; kw...)
-setUniformAlignment(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_vecint(setAlignment, ws, row, col; kw...)
-setUniformAlignment(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setUniformAlignment(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-setUniformAlignment(ws::Worksheet, rng::CellRange; kw...)::Int = process_uniform_attribute(setAlignment, ws, rng; kw...)
+define_uniform_address_methods(:setUniformAlignment, :setAlignment, nothing)
 
 #
 # -- Get and set number format attributes
@@ -1604,27 +1456,7 @@ julia> XLSX.setFormat(sh, "named_range"; format = "39") # specifies the built-in
 ```
 """
 function setFormat end
-setFormat(ws::Worksheet, ref::SheetCellRef; kw...) = do_sheet_names_match(ws, ref) && setFormat(ws, ref.cellref; kw...)
-setFormat(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setFormat(ws, rng.rng; kw...)
-setFormat(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setFormat(ws, rng.colrng; kw...)
-setFormat(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setFormat(ws, rng.rowrng; kw...)
-setFormat(ws::Worksheet, rng::CellRange; kw...)::Int = process_cellranges(setFormat, ws, rng; kw...)
-setFormat(ws::Worksheet, colrng::ColumnRange; kw...)::Int = process_columnranges(setFormat, ws, colrng; kw...)
-setFormat(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_ncranges(setFormat, ws, ncrng; kw...)
-setFormat(ws::Worksheet, rowrng::RowRange; kw...)::Int = process_rowranges(setFormat, ws, rowrng; kw...)
-setFormat(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setFormat, ws, ref_or_rng; kw...)
-setFormat(xl::XLSXFile, sheetcell::String; kw...)::Int = process_sheetcell(setFormat, xl, sheetcell; kw...)
-#setFormat(ws::Worksheet, row::Integer, col::Integer; kw...) = setFormat(ws, CellRef(row, col); kw...)
-setFormat(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setFormat, ws, row, nothing; kw...)
-setFormat(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setFormat, ws, nothing, col; kw...)
-setFormat(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setFormat, ws, nothing, nothing; kw...)
-setFormat(ws::Worksheet, ::Colon; kw...) = process_colon(setFormat, ws, nothing, nothing; kw...)
-setFormat(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_veccolon(setFormat, ws, row, nothing; kw...)
-setFormat(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_veccolon(setFormat, ws, nothing, col; kw...)
-setFormat(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint(setFormat, ws, row, col; kw...)
-setFormat(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_vecint(setFormat, ws, row, col; kw...)
-setFormat(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint(setFormat, ws, row, col; kw...)
-setFormat(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setFormat(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
+define_percell_address_methods(:setFormat)
 
 function setFormat(sh::Worksheet, cellref::CellRef;
     format::Union{Nothing,String}=nothing
@@ -1708,25 +1540,7 @@ julia> setUniformFormat(sh, "B2,A5:D22")                   # Copy `Format` from 
 ```
 """
 function setUniformFormat end
-setUniformFormat(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setUniformFormat(ws, rng.rng; kw...)
-setUniformFormat(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setUniformFormat(ws, rng.colrng; kw...)
-setUniformFormat(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setUniformFormat(ws, rng.rowrng; kw...)
-setUniformFormat(ws::Worksheet, colrng::ColumnRange; kw...)::Int = process_columnranges(setUniformFormat, ws, colrng; kw...)
-setUniformFormat(ws::Worksheet, rowrng::RowRange; kw...)::Int = process_rowranges(setUniformFormat, ws, rowrng; kw...)
-setUniformFormat(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_uniform_ncranges(setFormat, ws, ncrng, ["numFmtId", "applyNumberFormat"]; kw...)
-setUniformFormat(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell(setUniformFormat, xl, sheetcell; kw...)
-setUniformFormat(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setUniformFormat, ws, ref_or_rng; kw...)
-setUniformFormat(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setUniformFormat, ws, row, nothing; kw...)
-setUniformFormat(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setUniformFormat, ws, nothing, col; kw...)
-setUniformFormat(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setUniformFormat, ws, nothing, nothing; kw...)
-setUniformFormat(ws::Worksheet, ::Colon; kw...) = process_colon(setUniformFormat, ws, nothing, nothing; kw...)
-setUniformFormat(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_uniform_veccolon(setFormat, ws, row, nothing, ["numFmtId", "applyNumberFormat"]; kw...)
-setUniformFormat(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_veccolon(setFormat, ws, nothing, col, ["numFmtId", "applyNumberFormat"]; kw...)
-setUniformFormat(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_vecint(setFormat, ws, row, col, ["numFmtId", "applyNumberFormat"]; kw...)
-setUniformFormat(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_uniform_vecint(setFormat, ws, row, col, ["numFmtId", "applyNumberFormat"]; kw...)
-setUniformFormat(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_vecint(setFormat, ws, row, col, ["numFmtId", "applyNumberFormat"]; kw...)
-setUniformFormat(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setUniformFormat(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-setUniformFormat(ws::Worksheet, rng::CellRange; kw...)::Int = process_uniform_attribute(setFormat, ws, rng, ["numFmtId", "applyNumberFormat"]; kw...)
+define_uniform_address_methods(:setUniformFormat, :setFormat, ["numFmtId", "applyNumberFormat"])
 
 #
 # -- Set uniform styles

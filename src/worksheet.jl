@@ -471,7 +471,7 @@ function getdata(ws::Worksheet, rng::CellRange)::Array{Any,2}
 
     if !isnothing(ws.cache) && is_cache_enabled(ws) && ws.cache.is_full
         cells = ws.cache.cells
-        rows  = ws.cache.rows_in_cache   # sorted Vector{Int} of populated row numbers
+        rows  = ensure_sorted!(ws.cache).rows_in_cache   # sorted Vector{Int} of populated row numbers
 
         # Binary-search the populated-row range instead of hash-probing every
         # integer in top:bottom — cheap for dense sheets (same row count, just
@@ -480,7 +480,7 @@ function getdata(ws::Worksheet, rng::CellRange)::Array{Any,2}
         lo = searchsortedfirst(rows, top)
         hi = searchsortedlast(rows, bottom)
 
-        @inbounds for k in lo:hi
+        for k in lo:hi
             r = rows[k]
             row_dict = cells[r]   # r came from rows_in_cache, so this key must exist
 

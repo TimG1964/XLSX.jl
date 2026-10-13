@@ -58,6 +58,34 @@ function process_cf_veccolon(f::Function, ws::Worksheet, row, col; kw...)
     return f(ws, NonContiguousRange(ws.name, _compress(cells)); kw...)
 end
 
+# Each `setCf*` setter is written by hand for a `CfRange`. This defines every
+# other way of naming the target, each reducing to that one, so that all the
+# setters accept the same forms.
+function define_cf_address_methods(F::Symbol)
+    @eval begin
+        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon($F, ws, row, nothing; kw...)
+        $F(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon($F, ws, nothing, col; kw...)
+        $F(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon($F, ws, nothing, nothing; kw...)
+        $F(ws::Worksheet, ::Colon; kw...) = process_colon($F, ws, nothing, nothing; kw...)
+        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = $F(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
+        $F(ws::Worksheet, cell::CellRef; kw...) = $F(ws, CellRange(cell, cell); kw...)
+        $F(ws::Worksheet, cell::SheetCellRef; kw...) = do_sheet_names_match(ws, cell) && $F(ws, CellRange(cell.cellref, cell.cellref); kw...)
+        $F(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.rng; kw...)
+        $F(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.colrng; kw...)
+        $F(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.rowrng; kw...)
+        $F(ws::Worksheet, rng::RowRange; kw...) = process_rowranges($F, ws, rng; kw...)
+        $F(ws::Worksheet, rng::ColumnRange; kw...) = process_columnranges($F, ws, rng; kw...)
+        $F(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell($F, xl, sheetcell; kw...)
+        $F(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges($F, ws, ref_or_rng; kw...)
+        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_cf_veccolon($F, ws, row, nothing; kw...)
+        $F(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_veccolon($F, ws, nothing, col; kw...)
+        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint($F, ws, row, col; kw...)
+        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_cf_vecint($F, ws, row, col; kw...)
+        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint($F, ws, row, col; kw...)
+    end
+    return nothing
+end
+
 function allCfs(ws::Worksheet)::Vector{XML.Node}
     wb = get_workbook(ws)
     xf = get_xlsxfile(ws)

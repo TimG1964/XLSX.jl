@@ -2900,4 +2900,13 @@
         @test XLSX._band_colors([:accent1, colorant"red"], 2) == [:accent1, "FFFF0000"]
         SAVE_FILES && save_outfile(xf)
     end
+
+    @testset "every setCf* setter accepts the same target forms" begin
+        targets(f) = Set(Base.tuple_type_tail(m.sig) for m in methods(f))
+        for f in (XLSX.setCfContainsText, XLSX.setCfTop10, XLSX.setCfAboveAverage, XLSX.setCfTimePeriod,
+                  XLSX.setCfContainsBlankErrorUniqDup, XLSX.setCfFormula, XLSX.setCfColorScale,
+                  XLSX.setCfIconSet, XLSX.setCfDataBar)
+            @test targets(f) == targets(XLSX.setCfCellIs)
+        end
+    end
 end

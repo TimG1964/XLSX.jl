@@ -1396,25 +1396,7 @@ function setConditionalFormat(f, r, c, type::Symbol; kw...)
     end
 end
 
-setCfCellIs(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setCfCellIs, ws, row, nothing; kw...)
-setCfCellIs(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setCfCellIs, ws, nothing, col; kw...)
-setCfCellIs(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setCfCellIs, ws, nothing, nothing; kw...)
-setCfCellIs(ws::Worksheet, ::Colon; kw...) = process_colon(setCfCellIs, ws, nothing, nothing; kw...)
-setCfCellIs(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setCfCellIs(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-setCfCellIs(ws::Worksheet, cell::CellRef; kw...) = setCfCellIs(ws, CellRange(cell, cell); kw...)
-setCfCellIs(ws::Worksheet, cell::SheetCellRef; kw...) = do_sheet_names_match(ws, cell) && setCfCellIs(ws, CellRange(cell.cellref, cell.cellref); kw...)
-setCfCellIs(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setCfCellIs(ws, rng.rng; kw...)
-setCfCellIs(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setCfCellIs(ws, rng.colrng; kw...)
-setCfCellIs(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setCfCellIs(ws, rng.rowrng; kw...)
-setCfCellIs(ws::Worksheet, rng::RowRange; kw...) = process_rowranges(setCfCellIs, ws, rng; kw...)
-setCfCellIs(ws::Worksheet, rng::ColumnRange; kw...) = process_columnranges(setCfCellIs, ws, rng; kw...)
-setCfCellIs(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell(setCfCellIs, xl, sheetcell; kw...)
-setCfCellIs(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setCfCellIs, ws, ref_or_rng; kw...)
-setCfCellIs(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_cf_veccolon(setCfCellIs, ws, row, nothing; kw...)
-setCfCellIs(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_veccolon(setCfCellIs, ws, nothing, col; kw...)
-setCfCellIs(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfCellIs, ws, row, col; kw...)
-setCfCellIs(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_cf_vecint(setCfCellIs, ws, row, col; kw...)
-setCfCellIs(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfCellIs, ws, row, col; kw...)
+define_cf_address_methods(:setCfCellIs)
 function setCfCellIs(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
 
     operator::Union{Nothing,String}="greaterThan"
@@ -1489,25 +1471,7 @@ function setCfCellIs(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::
     return 0
 end
 
-setCfContainsText(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setCfContainsText, ws, row, nothing; kw...)
-setCfContainsText(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setCfContainsText, ws, nothing, col; kw...)
-setCfContainsText(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setCfContainsText, ws, nothing, nothing; kw...)
-setCfContainsText(ws::Worksheet, ::Colon; kw...) = process_colon(setCfContainsText, ws, nothing, nothing; kw...)
-setCfContainsText(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setCfContainsText(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-setCfContainsText(ws::Worksheet, cell::CellRef; kw...) = setCfContainsText(ws, CellRange(cell, cell); kw...)
-setCfContainsText(ws::Worksheet, cell::SheetCellRef; kw...) = do_sheet_names_match(ws, cell) && setCfContainsText(ws, CellRange(cell.cellref, cell.cellref); kw...)
-setCfContainsText(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setCfContainsText(ws, rng.rng; kw...)
-setCfContainsText(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setCfContainsText(ws, rng.colrng; kw...)
-setCfContainsText(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setCfContainsText(ws, rng.rowrng; kw...)
-setCfContainsText(ws::Worksheet, rng::RowRange; kw...) = process_rowranges(setCfContainsText, ws, rng; kw...)
-setCfContainsText(ws::Worksheet, rng::ColumnRange; kw...) = process_columnranges(setCfContainsText, ws, rng; kw...)
-setCfContainsText(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell(setCfContainsText, xl, sheetcell; kw...)
-setCfContainsText(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setCfContainsText, ws, ref_or_rng; kw...)
-setCfContainsText(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_cf_veccolon(setCfContainsText, ws, row, nothing; kw...)
-setCfContainsText(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_veccolon(setCfContainsText, ws, nothing, col; kw...)
-setCfContainsText(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfContainsText, ws, row, col; kw...)
-setCfContainsText(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_cf_vecint(setCfContainsText, ws, row, col; kw...)
-setCfContainsText(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfContainsText, ws, row, col; kw...)
+define_cf_address_methods(:setCfContainsText)
 function setCfContainsText(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
 
     operator::Union{Nothing,String}="containsText"
@@ -1584,25 +1548,7 @@ function setCfContainsText(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}
     return 0
 end
 
-setCfTop10(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setCfTop10, ws, row, nothing; kw...)
-setCfTop10(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setCfTop10, ws, nothing, col; kw...)
-setCfTop10(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setCfTop10, ws, nothing, nothing; kw...)
-setCfTop10(ws::Worksheet, ::Colon; kw...) = process_colon(setCfTop10, ws, nothing, nothing; kw...)
-setCfTop10(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setCfTop10(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-setCfTop10(ws::Worksheet, cell::CellRef; kw...) = setCfTop10(ws, CellRange(cell, cell); kw...)
-setCfTop10(ws::Worksheet, cell::SheetCellRef; kw...) = do_sheet_names_match(ws, cell) && setCfTop10(ws, CellRange(cell.cellref, cell.cellref); kw...)
-setCfTop10(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setCfTop10(ws, rng.rng; kw...)
-setCfTop10(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setCfTop10(ws, rng.colrng; kw...)
-setCfTop10(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setCfTop10(ws, rng.rowrng; kw...)
-setCfTop10(ws::Worksheet, rng::RowRange; kw...) = process_rowranges(setCfTop10, ws, rng; kw...)
-setCfTop10(ws::Worksheet, rng::ColumnRange; kw...) = process_columnranges(setCfTop10, ws, rng; kw...)
-setCfTop10(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell(setCfTop10, xl, sheetcell; kw...)
-setCfTop10(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setCfTop10, ws, ref_or_rng; kw...)
-setCfTop10(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_cf_veccolon(setCfTop10, ws, row, nothing; kw...)
-setCfTop10(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_veccolon(setCfTop10, ws, nothing, col; kw...)
-setCfTop10(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfTop10, ws, row, col; kw...)
-setCfTop10(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_cf_vecint(setCfTop10, ws, row, col; kw...)
-setCfTop10(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfTop10, ws, row, col; kw...)
+define_cf_address_methods(:setCfTop10)
 function setCfTop10(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
 
     operator::Union{Nothing,String}="topN"
@@ -1680,25 +1626,7 @@ function setCfTop10(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::I
     return 0
 end
 
-setCfAboveAverage(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setCfAboveAverage, ws, row, nothing; kw...)
-setCfAboveAverage(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setCfAboveAverage, ws, nothing, col; kw...)
-setCfAboveAverage(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setCfAboveAverage, ws, nothing, nothing; kw...)
-setCfAboveAverage(ws::Worksheet, ::Colon; kw...) = process_colon(setCfAboveAverage, ws, nothing, nothing; kw...)
-setCfAboveAverage(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setCfAboveAverage(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-setCfAboveAverage(ws::Worksheet, cell::CellRef; kw...) = setCfAboveAverage(ws, CellRange(cell, cell); kw...)
-setCfAboveAverage(ws::Worksheet, cell::SheetCellRef; kw...) = do_sheet_names_match(ws, cell) && setCfAboveAverage(ws, CellRange(cell.cellref, cell.cellref); kw...)
-setCfAboveAverage(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setCfAboveAverage(ws, rng.rng; kw...)
-setCfAboveAverage(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setCfAboveAverage(ws, rng.colrng; kw...)
-setCfAboveAverage(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setCfAboveAverage(ws, rng.rowrng; kw...)
-setCfAboveAverage(ws::Worksheet, rng::RowRange; kw...) = process_rowranges(setCfAboveAverage, ws, rng; kw...)
-setCfAboveAverage(ws::Worksheet, rng::ColumnRange; kw...) = process_columnranges(setCfAboveAverage, ws, rng; kw...)
-setCfAboveAverage(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell(setCfAboveAverage, xl, sheetcell; kw...)
-setCfAboveAverage(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setCfAboveAverage, ws, ref_or_rng; kw...)
-setCfAboveAverage(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_cf_veccolon(setCfAboveAverage, ws, row, nothing; kw...)
-setCfAboveAverage(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_veccolon(setCfAboveAverage, ws, nothing, col; kw...)
-setCfAboveAverage(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfAboveAverage, ws, row, col; kw...)
-setCfAboveAverage(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_cf_vecint(setCfAboveAverage, ws, row, col; kw...)
-setCfAboveAverage(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfAboveAverage, ws, row, col; kw...)
+define_cf_address_methods(:setCfAboveAverage)
 function setCfAboveAverage(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
 
     operator::Union{Nothing,String}="aboveAverage"
@@ -1773,25 +1701,7 @@ function setCfAboveAverage(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}
     return 0
 end
 
-setCfTimePeriod(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setCfTimePeriod, ws, row, nothing; kw...)
-setCfTimePeriod(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setCfTimePeriod, ws, nothing, col; kw...)
-setCfTimePeriod(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setCfTimePeriod, ws, nothing, nothing; kw...)
-setCfTimePeriod(ws::Worksheet, ::Colon; kw...) = process_colon(setCfTimePeriod, ws, nothing, nothing; kw...)
-setCfTimePeriod(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setCfTimePeriod(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-setCfTimePeriod(ws::Worksheet, cell::CellRef; kw...) = setCfTimePeriod(ws, CellRange(cell, cell); kw...)
-setCfTimePeriod(ws::Worksheet, cell::SheetCellRef; kw...) = do_sheet_names_match(ws, cell) && setCfTimePeriod(ws, CellRange(cell.cellref, cell.cellref); kw...)
-setCfTimePeriod(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setCfTimePeriod(ws, rng.rng; kw...)
-setCfTimePeriod(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setCfTimePeriod(ws, rng.colrng; kw...)
-setCfTimePeriod(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setCfTimePeriod(ws, rng.rowrng; kw...)
-setCfTimePeriod(ws::Worksheet, rng::RowRange; kw...) = process_rowranges(setCfTimePeriod, ws, rng; kw...)
-setCfTimePeriod(ws::Worksheet, rng::ColumnRange; kw...) = process_columnranges(setCfTimePeriod, ws, rng; kw...)
-setCfTimePeriod(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell(setCfTimePeriod, xl, sheetcell; kw...)
-setCfTimePeriod(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setCfTimePeriod, ws, ref_or_rng; kw...)
-setCfTimePeriod(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_cf_veccolon(setCfTimePeriod, ws, row, nothing; kw...)
-setCfTimePeriod(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_veccolon(setCfTimePeriod, ws, nothing, col; kw...)
-setCfTimePeriod(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfTimePeriod, ws, row, col; kw...)
-setCfTimePeriod(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_cf_vecint(setCfTimePeriod, ws, row, col; kw...)
-setCfTimePeriod(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfTimePeriod, ws, row, col; kw...)
+define_cf_address_methods(:setCfTimePeriod)
 function setCfTimePeriod(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
 
     operator::Union{Nothing,String}="last7Days"
@@ -1854,25 +1764,7 @@ function setCfTimePeriod(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=(
     return 0
 end
 
-setCfContainsBlankErrorUniqDup(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setCfContainsBlankErrorUniqDup, ws, row, nothing; kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setCfContainsBlankErrorUniqDup, ws, nothing, col; kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setCfContainsBlankErrorUniqDup, ws, nothing, nothing; kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, ::Colon; kw...) = process_colon(setCfContainsBlankErrorUniqDup, ws, nothing, nothing; kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setCfContainsBlankErrorUniqDup(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, cell::CellRef; kw...) = setCfContainsBlankErrorUniqDup(ws, CellRange(cell, cell); kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, cell::SheetCellRef; kw...) = do_sheet_names_match(ws, cell) && setCfContainsBlankErrorUniqDup(ws, CellRange(cell.cellref, cell.cellref); kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setCfContainsBlankErrorUniqDup(ws, rng.rng; kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setCfContainsBlankErrorUniqDup(ws, rng.colrng; kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setCfContainsBlankErrorUniqDup(ws, rng.rowrng; kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::RowRange; kw...) = process_rowranges(setCfContainsBlankErrorUniqDup, ws, rng; kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::ColumnRange; kw...) = process_columnranges(setCfContainsBlankErrorUniqDup, ws, rng; kw...)
-setCfContainsBlankErrorUniqDup(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell(setCfContainsBlankErrorUniqDup, xl, sheetcell; kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setCfContainsBlankErrorUniqDup, ws, ref_or_rng; kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_cf_veccolon(setCfContainsBlankErrorUniqDup, ws, row, nothing; kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_veccolon(setCfContainsBlankErrorUniqDup, ws, nothing, col; kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfContainsBlankErrorUniqDup, ws, row, col; kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_cf_vecint(setCfContainsBlankErrorUniqDup, ws, row, col; kw...)
-setCfContainsBlankErrorUniqDup(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfContainsBlankErrorUniqDup, ws, row, col; kw...)
+define_cf_address_methods(:setCfContainsBlankErrorUniqDup)
 function setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
 
     operator::Union{Nothing,String}="containsBlanks"
@@ -1940,25 +1832,7 @@ function setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::CfRange; allkws::Dic
     return 0
 end
 
-setCfFormula(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setCfFormula, ws, row, nothing; kw...)
-setCfFormula(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setCfFormula, ws, nothing, col; kw...)
-setCfFormula(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setCfFormula, ws, nothing, nothing; kw...)
-setCfFormula(ws::Worksheet, ::Colon; kw...) = process_colon(setCfFormula, ws, nothing, nothing; kw...)
-setCfFormula(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setCfFormula(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-setCfFormula(ws::Worksheet, cell::CellRef; kw...) = setCfFormula(ws, CellRange(cell, cell); kw...)
-setCfFormula(ws::Worksheet, cell::SheetCellRef; kw...) = do_sheet_names_match(ws, cell) && setCfFormula(ws, CellRange(cell.cellref, cell.cellref); kw...)
-setCfFormula(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setCfFormula(ws, rng.rng; kw...)
-setCfFormula(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setCfFormula(ws, rng.colrng; kw...)
-setCfFormula(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setCfFormula(ws, rng.rowrng; kw...)
-setCfFormula(ws::Worksheet, rng::RowRange; kw...) = process_rowranges(setCfFormula, ws, rng; kw...)
-setCfFormula(ws::Worksheet, rng::ColumnRange; kw...) = process_columnranges(setCfFormula, ws, rng; kw...)
-setCfFormula(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell(setCfFormula, xl, sheetcell; kw...)
-setCfFormula(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setCfFormula, ws, ref_or_rng; kw...)
-setCfFormula(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_cf_veccolon(setCfFormula, ws, row, nothing; kw...)
-setCfFormula(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_veccolon(setCfFormula, ws, nothing, col; kw...)
-setCfFormula(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfFormula, ws, row, col; kw...)
-setCfFormula(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_cf_vecint(setCfFormula, ws, row, col; kw...)
-setCfFormula(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfFormula, ws, row, col; kw...)
+define_cf_address_methods(:setCfFormula)
 function setCfFormula(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
 
     formula::Union{Nothing,String}=nothing
@@ -2013,25 +1887,7 @@ function setCfFormula(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
     return 0
 end
 
-setCfColorScale(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setCfColorScale, ws, row, nothing; kw...)
-setCfColorScale(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setCfColorScale, ws, nothing, col; kw...)
-setCfColorScale(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setCfColorScale, ws, nothing, nothing; kw...)
-setCfColorScale(ws::Worksheet, ::Colon; kw...) = process_colon(setCfColorScale, ws, nothing, nothing; kw...)
-setCfColorScale(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setCfColorScale(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-setCfColorScale(ws::Worksheet, cell::CellRef; kw...) = setCfColorScale(ws, CellRange(cell, cell); kw...)
-setCfColorScale(ws::Worksheet, cell::SheetCellRef; kw...) = do_sheet_names_match(ws, cell) && setCfColorScale(ws, CellRange(cell.cellref, cell.cellref); kw...)
-setCfColorScale(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setCfColorScale(ws, rng.rng; kw...)
-setCfColorScale(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setCfColorScale(ws, rng.colrng; kw...)
-setCfColorScale(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setCfColorScale(ws, rng.rowrng; kw...)
-setCfColorScale(ws::Worksheet, rng::RowRange; kw...) = process_rowranges(setCfColorScale, ws, rng; kw...)
-setCfColorScale(ws::Worksheet, rng::ColumnRange; kw...) = process_columnranges(setCfColorScale, ws, rng; kw...)
-setCfColorScale(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell(setCfColorScale, xl, sheetcell; kw...)
-setCfColorScale(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setCfColorScale, ws, ref_or_rng; kw...)
-setCfColorScale(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_cf_veccolon(setCfColorScale, ws, row, nothing; kw...)
-setCfColorScale(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_veccolon(setCfColorScale, ws, nothing, col; kw...)
-setCfColorScale(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfColorScale, ws, row, col; kw...)
-setCfColorScale(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_cf_vecint(setCfColorScale, ws, row, col; kw...)
-setCfColorScale(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfColorScale, ws, row, col; kw...)
+define_cf_address_methods(:setCfColorScale)
 function setCfColorScale(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
     colorscale::Union{Nothing,String}=nothing
     min_type::Union{Nothing,String}="min"
@@ -2136,25 +1992,7 @@ function setCfColorScale(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=(
     return 0
 end
 
-setCfIconSet(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setCfIconSet, ws, row, nothing; kw...)
-setCfIconSet(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setCfIconSet, ws, nothing, col; kw...)
-setCfIconSet(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setCfIconSet, ws, nothing, nothing; kw...)
-setCfIconSet(ws::Worksheet, ::Colon; kw...) = process_colon(setCfIconSet, ws, nothing, nothing; kw...)
-setCfIconSet(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setCfIconSet(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-setCfIconSet(ws::Worksheet, cell::CellRef; kw...) = setCfIconSet(ws, CellRange(cell, cell); kw...)
-setCfIconSet(ws::Worksheet, cell::SheetCellRef; kw...) = do_sheet_names_match(ws, cell) && setCfIconSet(ws, CellRange(cell.cellref, cell.cellref); kw...)
-setCfIconSet(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setCfIconSet(ws, rng.rng; kw...)
-setCfIconSet(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setCfIconSet(ws, rng.colrng; kw...)
-setCfIconSet(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setCfIconSet(ws, rng.rowrng; kw...)
-setCfIconSet(ws::Worksheet, rng::RowRange; kw...) = process_rowranges(setCfIconSet, ws, rng; kw...)
-setCfIconSet(ws::Worksheet, rng::ColumnRange; kw...) = process_columnranges(setCfIconSet, ws, rng; kw...)
-setCfIconSet(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell(setCfIconSet, xl, sheetcell; kw...)
-setCfIconSet(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setCfIconSet, ws, ref_or_rng; kw...)
-setCfIconSet(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_cf_veccolon(setCfIconSet, ws, row, nothing; kw...)
-setCfIconSet(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_veccolon(setCfIconSet, ws, nothing, col; kw...)
-setCfIconSet(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfIconSet, ws, row, col; kw...)
-setCfIconSet(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_cf_vecint(setCfIconSet, ws, row, col; kw...)
-setCfIconSet(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfIconSet, ws, row, col; kw...)
+define_cf_address_methods(:setCfIconSet)
 function setCfIconSet(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
 
     iconset::Union{Nothing,String} = "3TrafficLights"
@@ -2353,25 +2191,7 @@ function setCfIconSet(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
     return 0
 end
 
-setCfDataBar(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setCfDataBar, ws, row, nothing; kw...)
-setCfDataBar(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setCfDataBar, ws, nothing, col; kw...)
-setCfDataBar(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon(setCfDataBar, ws, nothing, nothing; kw...)
-setCfDataBar(ws::Worksheet, ::Colon; kw...) = process_colon(setCfDataBar, ws, nothing, nothing; kw...)
-setCfDataBar(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setCfDataBar(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-setCfDataBar(ws::Worksheet, cell::CellRef; kw...) = setCfDataBar(ws, CellRange(cell, cell); kw...)
-setCfDataBar(ws::Worksheet, cell::SheetCellRef; kw...) = do_sheet_names_match(ws, cell) && setCfDataBar(ws, CellRange(cell.cellref, cell.cellref); kw...)
-setCfDataBar(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && setCfDataBar(ws, rng.rng; kw...)
-setCfDataBar(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && setCfDataBar(ws, rng.colrng; kw...)
-setCfDataBar(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && setCfDataBar(ws, rng.rowrng; kw...)
-setCfDataBar(ws::Worksheet, rng::RowRange; kw...) = process_rowranges(setCfDataBar, ws, rng; kw...)
-setCfDataBar(ws::Worksheet, rng::ColumnRange; kw...) = process_columnranges(setCfDataBar, ws, rng; kw...)
-setCfDataBar(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell(setCfDataBar, xl, sheetcell; kw...)
-setCfDataBar(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setCfDataBar, ws, ref_or_rng; kw...)
-setCfDataBar(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_cf_veccolon(setCfDataBar, ws, row, nothing; kw...)
-setCfDataBar(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_veccolon(setCfDataBar, ws, nothing, col; kw...)
-setCfDataBar(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfDataBar, ws, row, col; kw...)
-setCfDataBar(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_cf_vecint(setCfDataBar, ws, row, col; kw...)
-setCfDataBar(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint(setCfDataBar, ws, row, col; kw...)
+define_cf_address_methods(:setCfDataBar)
 function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
 
     databar::Union{Nothing,String}="bluegrad"

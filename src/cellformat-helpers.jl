@@ -1297,3 +1297,74 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
     end
     return new_index
 end
+
+#
+# --- Address forms shared by the formatting setters
+#
+# Each setter is written by hand for one target: a `CellRef` for the per-cell
+# setters, a `CellRange` for the uniform ones. These define every other way of
+# naming the target (sheet-qualified references, strings, rows and columns,
+# colons, vectors and step ranges), each reducing to that one. Generating them
+# keeps each family identical, so a form added or a routing fixed here applies
+# to every setter in it.
+
+# Per-cell setters (`setFont`, `setFill`, ...). A setter that defines the
+# `CellRange`, `ColumnRange`, `RowRange` and `XLSXFile` forms itself, as
+# `setBorder` does for its `outside` keyword, passes `ranges=false`.
+function define_percell_address_methods(F::Symbol; ranges::Bool=true)
+    @eval begin
+        $F(ws::Worksheet, ref::SheetCellRef; kw...) = do_sheet_names_match(ws, ref) && $F(ws, ref.cellref; kw...)
+        $F(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.rng; kw...)
+        $F(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.colrng; kw...)
+        $F(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.rowrng; kw...)
+        $F(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_ncranges($F, ws, ncrng; kw...)
+        $F(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges($F, ws, ref_or_rng; kw...)
+        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon($F, ws, row, nothing; kw...)
+        $F(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon($F, ws, nothing, col; kw...)
+        $F(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon($F, ws, nothing, nothing; kw...)
+        $F(ws::Worksheet, ::Colon; kw...) = process_colon($F, ws, nothing, nothing; kw...)
+        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_veccolon($F, ws, row, nothing; kw...)
+        $F(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_veccolon($F, ws, nothing, col; kw...)
+        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint($F, ws, row, col; kw...)
+        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_vecint($F, ws, row, col; kw...)
+        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint($F, ws, row, col; kw...)
+        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = $F(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
+    end
+    ranges && @eval begin
+        $F(ws::Worksheet, rng::CellRange; kw...)::Int = process_cellranges($F, ws, rng; kw...)
+        $F(ws::Worksheet, colrng::ColumnRange; kw...)::Int = process_columnranges($F, ws, colrng; kw...)
+        $F(ws::Worksheet, rowrng::RowRange; kw...)::Int = process_rowranges($F, ws, rowrng; kw...)
+        $F(xl::XLSXFile, sheetcell::String; kw...)::Int = process_sheetcell($F, xl, sheetcell; kw...)
+    end
+    return nothing
+end
+
+# Uniform setters (`setUniformFont`, ...). `P` is the per-cell setter applied to
+# the first cell, and `atts` the cellXfs attributes then copied to the others
+# (e.g. `["fontId", "applyFont"]`). `setUniformAlignment` copies an alignment
+# node rather than attributes, so passes `atts=nothing`.
+function define_uniform_address_methods(F::Symbol, P::Symbol, atts::Union{Nothing,Vector{String}})
+    a = isnothing(atts) ? () : (:([$(atts...)]),)   # a fresh vector literal at each call
+    @eval begin
+        $F(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.rng; kw...)
+        $F(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.colrng; kw...)
+        $F(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.rowrng; kw...)
+        $F(ws::Worksheet, colrng::ColumnRange; kw...)::Int = process_columnranges($F, ws, colrng; kw...)
+        $F(ws::Worksheet, rowrng::RowRange; kw...)::Int = process_rowranges($F, ws, rowrng; kw...)
+        $F(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_uniform_ncranges($P, ws, ncrng, $(a...); kw...)
+        $F(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell($F, xl, sheetcell; kw...)
+        $F(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges($F, ws, ref_or_rng; kw...)
+        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon($F, ws, row, nothing; kw...)
+        $F(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon($F, ws, nothing, col; kw...)
+        $F(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon($F, ws, nothing, nothing; kw...)
+        $F(ws::Worksheet, ::Colon; kw...) = process_colon($F, ws, nothing, nothing; kw...)
+        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_uniform_veccolon($P, ws, row, nothing, $(a...); kw...)
+        $F(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_veccolon($P, ws, nothing, col, $(a...); kw...)
+        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_vecint($P, ws, row, col, $(a...); kw...)
+        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_uniform_vecint($P, ws, row, col, $(a...); kw...)
+        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_vecint($P, ws, row, col, $(a...); kw...)
+        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = $F(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
+        $F(ws::Worksheet, rng::CellRange; kw...)::Int = process_uniform_attribute($P, ws, rng, $(a...); kw...)
+    end
+    return nothing
+end

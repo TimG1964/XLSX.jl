@@ -202,6 +202,17 @@ end
     nothing
 end
 
+# `rows_in_cache` is left unsorted while rows are added (sorting on every add is
+# costly) and `dirty` is set instead. Call this before anything relies on its order.
+function ensure_sorted!(wc::WorksheetCache)
+    if wc.dirty
+        sort!(wc.rows_in_cache)
+        wc.row_index = Dict{Int, Int}(wc.rows_in_cache[i] => i for i in eachindex(wc.rows_in_cache))
+        wc.dirty = false
+    end
+    return wc
+end
+
 #
 # WorksheetCache iterator
 #
@@ -220,12 +231,7 @@ function Base.iterate(ws_cache::WorksheetCache, state::Union{Nothing, WorksheetC
 
     isnothing(state) && (state=WorksheetCacheIteratorState(0))
 
-    # the sorting operation is very costly when adding row and only needed if we use the row iterator
-    if ws_cache.dirty
-        sort!(ws_cache.rows_in_cache)
-        ws_cache.row_index = Dict{Int, Int}(ws_cache.rows_in_cache[i] => i for i in 1:length(ws_cache.rows_in_cache))
-        ws_cache.dirty = false
-    end
+    ensure_sorted!(ws_cache)
 
     # read from cache
     if state.row_from_last_iteration == 0 && !isempty(ws_cache.rows_in_cache)

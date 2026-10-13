@@ -336,4 +336,30 @@ end
         @test XLSX.CellValue(Int32(3), XLSX.EmptyCellDataFormat()).value === Int64(3)
         SAVE_FILES && save_outfile(xf)
     end
+
+    # The cache keeps written rows unsorted until something needs their order. Reading a
+    # range must sort them first: it once binary-searched them unsorted, returning wrong
+    # values or writing out of bounds (and crashing Julia's GC later).
+    @testset "getdata over a range after rows written out of order" begin
+        xf = XLSX.newxlsx()
+        sh = xf[1]
+        for r in (5, 1, 9, 2, 3)
+            sh[r, 1] = r
+        end
+        @test vec(XLSX.getdata(sh, "A2:A3")) == [2, 3]
+
+        rng = Random.Xoshiro(1)
+        for _ in 1:200
+            xf = XLSX.newxlsx()
+            sh = xf[1]
+            rows = Random.shuffle(rng, 1:12)[1:rand(rng, 3:10)]
+            for r in rows
+                sh[r, 1] = r
+            end
+            top = rand(rng, 1:10)
+            bottom = rand(rng, top:12)
+            got = vec(XLSX.getdata(sh, XLSX.CellRange(top, 1, bottom, 1)))
+            @test isequal(got, [r in rows ? r : missing for r in top:bottom])
+        end
+    end
 end
