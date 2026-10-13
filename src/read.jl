@@ -667,12 +667,6 @@ function _strict_to_transitional_node!(node::XML.Node, filename::AbstractString)
             else
                 throw(XLSXError("Unsupported strict OOXML namespace or relationship type: \"$v\" in $filename. Please open an issue at https://github.com/JuliaData/XLSX.jl/issues"))
             end
-#        elseif k == "Type" && startswith(v, "http://purl.oclc.org/ooxml")
-#            if haskey(STRICT_TO_TRANSITIONAL, v)
-#                node[k] = STRICT_TO_TRANSITIONAL[v]
-#            else
-#                throw(XLSXError("Unsupported strict OOXML relationship type: \"$v\" in $filename. Please open an issue at https://github.com/JuliaData/XLSX.jl/issues"))
-#            end
         end
     end
     return nothing
@@ -1241,7 +1235,6 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
         foreach(wait, fill_tasks)
     end
 
-    #@sync for _ in 1:MAX_THREADS
     nworkers = min(max_threads(), length(ZipArchives.zip_names(zip_io)))
     @sync for _ in 1:max(nworkers, 1)
         Threads.@spawn begin
@@ -1449,45 +1442,7 @@ If `columns` is not given, the algorithm will find the first sequence
 of consecutive non-empty cells. A valid `sheet` must be specified 
 when specifying `columns`.
 
-Use `first_row` to indicate the first row of the table.
-`first_row=5` will look for a table starting at sheet row `5`.
-If `first_row` is not given, the algorithm will look for the first
-non-empty row in the spreadsheet.
-
-`header` is a `Bool` indicating if the first row is a header.
-If `header=true` and `column_labels` is not specified, the column labels
-for the table will be read from the first row of the table.
-If `header=false` and `column_labels` is not specified, the algorithm
-will generate column labels. The default value is `header=true`.
-
-Use `column_labels` to specify names for the header of the table.
-
-Use `normalizenames=true` to normalize column names to valid Julia identifiers.
-
-Use `missing_strings` to specify strings that should be interpreted as 
-`missing` values in the resulting table. `missing_strings` can be a single 
-string (e.g. `"N/A"`) or a vector of strings (e.g. `["N/A", "NULL"]`). 
-The default value is `missing_strings=nothing`.
-
-Use `infer_eltypes=true` to get `data` as a `Vector{Any}` of typed vectors.
-The default value is `infer_eltypes=true`.
-
-`stop_in_empty_row` is a boolean indicating whether an empty row marks the 
-end of the table. If `stop_in_empty_row=false`, the `TableRowIterator` will 
-continue to fetch rows until there's no more rows in the Worksheet or range.
-The default behavior is `stop_in_empty_row=true`.
-
-`stop_in_row_function` is a Function that receives a `TableRow` and returns
- a `Bool` indicating if the end of the table was reached.
-
-Example for `stop_in_row_function`:
-
-```julia
-function stop_function(r)
-    v = r[:col_label]
-    return !ismissing(v) && v == "unwanted value"
-end
-```
+$TABLE_READ_KEYWORDS_DOC
 
 `enable_cache` has no effect on `readtable` and is kept for compatibility.
 `readtable` reads the values it needs straight from the worksheet, without
@@ -1496,16 +1451,6 @@ only the cells in the table's columns and rows (and the one row after the
 table that shows where it ends), so an invalid cell anywhere else in the sheet
 does not raise an error, as it does when the sheet is read through
 [`XLSX.readxlsx`](@ref) or [`XLSX.openxlsx`](@ref).
-
-`keep_empty_rows` determines whether rows where all column values are equal 
-to `missing` are kept (`true`) or dropped (`false`) from the resulting table. 
-`keep_empty_rows` never affects the *bounds* of the table; the number of 
-rows read from a sheet is only affected by `first_row`, `stop_in_empty_row` 
-and `stop_in_row_function` (if specified).
-`keep_empty_rows` is only checked once the first and last row of the table 
-have been determined, to see whether to keep or drop empty rows between the 
-first and the last row.
-The default behavior is `keep_empty_rows=false`.
 
 # Example
 

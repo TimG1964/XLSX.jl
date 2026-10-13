@@ -1,3 +1,10 @@
+# The forms every color keyword accepts, completing a sentence such as "The `color`
+# can be ...". Interpolated into each setter's docstring so they describe them alike.
+const COLOR_FORMS_DOC = """a hex value (`"FF0000"`, `"#FF0000"` or 8-digit `"FFFF0000"`, whose
+first two digits, transparency, Excel ignores), the name of a [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/)
+color as a String or Symbol, a Colors.jl `Colorant`, or a theme color (`"accent1"`, `:tx1`
+or a [`XLSX.SchemeColor`](@ref)). See [Specifying colors](@ref)."""
+
 # Check if a string is a valid named color in Colors.jl and convert to "FFRRGGBB" if it is.
 get_colorant(color_symb::Symbol) = get_colorant(String(color_symb))
 function get_colorant(color_string::String)

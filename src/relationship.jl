@@ -122,7 +122,6 @@ function delete_relationships!(xf::XLSXFile, rel::Relationship)
 
 end
 
-#is_chartsheet(wb::Workbook, rid::String) = any(r.Id == rid && occursin("chartsheet", r.Type) for r in wb.relationships)
 function is_chartsheet(wb::Workbook, sheetname::AbstractString)::Bool
     name = unquoteit(sheetname)
     xroot = xml_root_element(get_xlsxfile(wb).data["xl/workbook.xml"])

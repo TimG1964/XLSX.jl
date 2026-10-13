@@ -116,7 +116,7 @@ mutable struct CellFont
     end
 end
 
-# A border postion element (e.g. `top` or `left`) has a style attribute, but `color` is a child element.
+# A border position element (e.g. `top` or `left`) has a style attribute, but `color` is a child element.
 # The `color` element has an attribute (e.g. `rgb`) that defines the color of the border.
 # These are both stored in the `border` field of `CellBorder`. The key for the color element
 # will vary depending on how the color is defined (e.g. `rgb`, `indexed`, `auto`, etc.).
@@ -919,11 +919,3 @@ struct FileArray <: AbstractVector{UInt8}
     offset::Int64
     len::Int64
 end
-
-#=
-mutable struct Locked{T}
-    value::T
-    lock::ReentrantLock
-    Locked(x::T) where {T} = new{T}(x, ReentrantLock())
-end
-=#

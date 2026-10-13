@@ -301,34 +301,34 @@ Base.issubset(subrng::CellRange, rng::CellRange) :: Bool = in(subrng.start, rng)
 function intersects(rng1::CellRange, rng2::CellRange) :: Bool
     if row_number(rng1.start) <= row_number(rng2.stop) && row_number(rng1.start) >= row_number(rng2.start) && 
         column_number(rng1.stop) <= column_number(rng2.stop) && column_number(rng1.stop) >= column_number(rng2.start)
-#        println("offset 1")
+        # offset 1
         return true
     end
     if row_number(rng2.start) <= row_number(rng1.stop) && row_number(rng2.start) >= row_number(rng1.start) && 
         column_number(rng2.stop) <= column_number(rng1.stop) && column_number(rng2.stop) >= column_number(rng1.start)
-#        println("offset 2")
+        # offset 2
         return true
     end
     if row_number(rng1.start)>=row_number(rng2.start) && column_number(rng1.start)<=column_number(rng2.start) && 
         row_number(rng1.stop)<=row_number(rng2.stop) && column_number(rng1.stop)>=column_number(rng2.stop)
-#        println("cruciform 1")
+        # cruciform 1
         return true
     end
     if row_number(rng2.start)>=row_number(rng1.start) && column_number(rng2.start)<=column_number(rng1.start) && 
         row_number(rng2.stop)<=row_number(rng1.stop) && column_number(rng2.stop)>=column_number(rng1.stop)
-#        println("cruciform 2")
+        # cruciform 2
         return true
     end
     if in(rng1.start, rng2) || in(rng1.stop, rng2)
-#        println("inside corner 1")
+        # inside corner 1
         return true
     end
     if in(rng2.start, rng1) || in(rng2.stop, rng1)
-#        println("inside corner 2")
+        # inside corner 2
         return true
     end
     if issubset(rng1, rng2) || issubset(rng2, rng1)
-#        println("subset")
+        # subset
         return true
     end
     return false
@@ -610,12 +610,6 @@ function Base.length(r::NonContiguousRange)::Int # Number of cells in `r`, elimi
             end
         end
     end
-#        if rng isa CellRef
-#            s += 1
-#        else
-#            s += length(rng)
-#        end
-#    end
     return length(unique(allcells))
 end
 

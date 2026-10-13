@@ -980,12 +980,8 @@ function setdata!(ws::Worksheet, ref::CellRef, val::Union{AbstractFormula,CellCo
     end
 end
 function setdata!(ws::Worksheet, ref::AbstractString, value)
-#    if value isa String # Don't do this! Only way to set a formula is with `setFormula` function. This should set a string value.
-#        i = findfirst(!isspace, value)
-#        if !isnothing(i) && length(value[i:end]) > 1 && value[i] == '=' # it's a formula!
-#            value = Formula(string(last(split(value, '='))))
-#        end
-#    end
+    # A string starting with `=` is stored as text, not as a formula: formulas are
+    # set only with `setFormula`.
     if is_worksheet_defined_name(ws, ref)
         v = get_defined_name_value(ws, ref)
         if is_defined_name_value_a_reference(v)
@@ -1637,7 +1633,6 @@ const REL_CHART       = "http://schemas.openxmlformats.org/officeDocument/2006/r
 const REL_CHARTEX     = "http://schemas.microsoft.com/office/2014/relationships/chartEx"
 const MIME_WORKSHEET  = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
 const MIME_CHARTSHEET = "application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml"
-const MIME_CHART      = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
 const MIME_CHART      = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
 const MIME_CHARTEX    = "application/vnd.ms-office.chartex+xml"
 

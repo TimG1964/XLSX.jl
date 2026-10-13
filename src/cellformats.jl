@@ -35,10 +35,7 @@ that value will be written to the XLSXFile.
 As an expedient to get fonts to work, the `scheme` attribute is simply dropped from
 new font definitions.
 
-The `color` can be a hex value (`"FF0000"`, `"#FF0000"` or 8-digit `"FFFF0000"`, whose
-first two digits, transparency, Excel ignores), the name of a [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/)
-color as a String or Symbol, a Colors.jl `Colorant`, or a theme color: `"accent1"`, `:tx1`
-or a [`XLSX.SchemeColor`](@ref). See [Specifying colors](@ref).
+The `color` can be $COLOR_FORMS_DOC
 
 Font attributes cannot be set for `EmptyCell`s. Set a cell value first.
 If a cell range or column range includes any `EmptyCell`s, they will be
@@ -239,22 +236,24 @@ Return a `CellFont` object containing:
 
 Return `nothing` if no cell font is found.
 
-Excel uses several tags to define font properties in its XML structure.
-Here's a list of some common tags and their purposes (thanks to Copilot!):
-- `b`        : Indicates bold font.
-- `i`        : Indicates italic font.
-- `strike`   : Indicates strikethrough.
-- `condense` : Condenses the font spacing.
-- `extend`   : Extends the font spacing.
-- `outline`  : Specifies outline text.
-- `shadow`   : Adds a shadow to the text.
-- `u`        : Specifies underlining (e.g., single, double).
-- `sz`       : Sets the font size.
-- `color`    : Sets the font color using RGB values).
-- `name`     : Specifies the font name.
-- `family`   : Defines the font family.
-- `charset`  : Specifies the character set code (e.g., 204 for Cyrillic).
-- `scheme`   : Specifies whether the font is part of the major or minor theme.
+Excel uses several tags to define font properties in its XML structure, and `font`
+can hold any of them. `setFont` sets those marked *; the others come from files
+written by Excel or other tools.
+- `b`         : bold *
+- `i`         : italic *
+- `strike`    : strikethrough *
+- `u`         : underline, e.g. single or double *
+- `sz`        : font size *
+- `color`     : font color *
+- `name`      : font name *
+- `vertAlign` : superscript or subscript *
+- `condense`  : condensed font spacing
+- `extend`    : extended font spacing
+- `outline`   : outline text
+- `shadow`    : shadowed text
+- `family`    : font family
+- `charset`   : character set code (e.g. 204 for Cyrillic)
+- `scheme`    : whether the font is the theme's major or minor font
 
 Excel defines colors in several ways. `getFont` will return the color in any of these
 e.g. `"color" => ("theme" => "1")`.
@@ -292,9 +291,7 @@ function getFont(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellFont}
             if isnothing(XML.attributes(c)) || length(XML.attributes(c)) == 0
                 font_atts[localname(c)] = nothing
             else
-#                for (k, v) in XML.attributes(c)
-                    font_atts[localname(c)] = Dict(XML.attributes(c))
-#                end
+                font_atts[localname(c)] = Dict(XML.attributes(c))
             end
         end
         return CellFont(fontid_int, font_atts, applyfont)
@@ -327,23 +324,10 @@ A cell border has two attributes, `style` and `color`. A diagonal border also ne
 a direction indicating whether a diagonal is needed from bottom-left to top-right ("up"), 
 from top-left to bottom-left ("down") or "both"
 
-Here's a list of the available `style`s (thanks to Copilot!):
-- `none`
-- `thin`
-- `medium`
-- `dashed`
-- `dotted`
-- `thick`
-- `double`
-- `hair`
-- `mediumDashed`
-- `dashDot`
-- `mediumDashDot`
-- `dashDotDot`
-- `mediumDashDotDot`
-- `slantDashDot`
+The available `style`s are:
+$(_doc_list(VALID_BORDER_STYLES))
 
-A border postion element (e.g. `top` or `left`) has a `style` attribute, but `color` is a child element.
+A border position element (e.g. `top` or `left`) has a `style` attribute, but `color` is a child element.
 The color element has one or two attributes (e.g. `rgb`) that define the color of the border.
 While the key for the `style` element will always be `style`, the keys for the `color` element
 will vary depending on how the color is defined (e.g. `rgb`, `indexed`, `auto`, etc.).
@@ -460,25 +444,9 @@ The two attributes that can be set for each keyword are `style` and `color`.
 Additionally, for diagonal borders, a third keyword, `direction` can be used.
 
 Allowed values for `style` are:
-- `none`
-- `thin`
-- `medium`
-- `dashed`
-- `dotted`
-- `thick`
-- `double`
-- `hair`
-- `mediumDashed`
-- `dashDot`
-- `mediumDashDot`
-- `dashDotDot`
-- `mediumDashDotDot`
-- `slantDashDot`
+$(_doc_list(VALID_BORDER_STYLES))
 
-The `color` attribute can be a hex value (`"FF0000"` or `"FFFF0000"`), the name of a
-[Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/) color as a String
-or Symbol, a Colors.jl `Colorant`, or a theme color (`"accent1"`, `:tx1` or a
-[`XLSX.SchemeColor`](@ref)). See [Specifying colors](@ref).
+The `color` attribute can be $COLOR_FORMS_DOC
 
 Valid values for the `direction` keyword (for diagonal borders) are:
 - `up`   : diagonal border runs bottom-left to top-right
@@ -788,26 +756,8 @@ indicates a solid fill with a foreground color defined by theme 0 (in Excel) and
 background color defined by an indexed value. In this case (solid fill), the 
 background color will be ignored.
 
-Here is a list of the `patternTypes` Excel uses (thanks to Copilot!):
-- `none`
-- `solid`
-- `mediumGray`
-- `darkGray`
-- `lightGray`
-- `darkHorizontal`
-- `darkVertical`
-- `darkDown`
-- `darkUp`
-- `darkGrid`
-- `darkTrellis`
-- `lightHorizontal`
-- `lightVertical`
-- `lightDown`
-- `lightUp`
-- `lightGrid`
-- `lightTrellis`
-- `gray125`
-- `gray0625`
+The `patternType`s Excel uses are:
+$(_doc_list(VALID_FILL_PATTERNS))
 
 Definitions for neither `fgColor` (foreground color) nor `bgColor` (background color) 
 are strictly necessary although certain pattern types are more visually meaningful 
@@ -879,31 +829,10 @@ The following keywords are used to define a fill:
 - `fgColor = nothing`           : Sets the foreground color for the fill.
 - `bgColor = nothing`           : Sets the background color for the fill.
 
-Here is a list of the available `pattern` values (thanks to Copilot!):
-- `none`
-- `solid`
-- `mediumGray`
-- `darkGray`
-- `lightGray`
-- `darkHorizontal`
-- `darkVertical`
-- `darkDown`
-- `darkUp`
-- `darkGrid`
-- `darkTrellis`
-- `lightHorizontal`
-- `lightVertical`
-- `lightDown`
-- `lightUp`
-- `lightGrid`
-- `lightTrellis`
-- `gray125`
-- `gray0625`
+The available `pattern` values are:
+$(_doc_list(VALID_FILL_PATTERNS))
 
-The two colors may each be a hex value (`"FF0000"` or `"FFFF0000"`), the name of a
-[Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/) color as a String
-or Symbol, a Colors.jl `Colorant`, or a theme color (`"accent1"`, `:tx1` or a
-[`XLSX.SchemeColor`](@ref)). See [Specifying colors](@ref).
+The two colors may each be $COLOR_FORMS_DOC
 
 Setting only one or two of the attributes leaves the other attribute(s) unchanged 
 for that cell's fill.
@@ -1669,7 +1598,6 @@ setColumnWidth(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_n
 setColumnWidth(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setColumnWidth, ws, ref_or_rng; kw...)
 setColumnWidth(xl::XLSXFile, sheetcell::String; kw...)::Int = process_sheetcell(setColumnWidth, xl, sheetcell; kw...)
 setColumnWidth(ws::Worksheet, cr::CellRef; kw...)::Int = setColumnWidth(ws, CellRange(cr, cr); kw...)
-#setColumnWidth(ws::Worksheet, row::Integer, col::Integer; kw...) = setColumnWidth(ws, CellRef(row, col); kw...)
 setColumnWidth(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setColumnWidth, ws, row, nothing; kw...)
 setColumnWidth(ws::Worksheet, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setColumnWidth, ws, nothing, col; kw...)  # convenience: bare column index/range
 setColumnWidth(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setColumnWidth, ws, nothing, col; kw...)
@@ -1867,7 +1795,6 @@ setRowHeight(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_ncr
 setRowHeight(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges(setRowHeight, ws, ref_or_rng; kw...)
 setRowHeight(xl::XLSXFile, sheetcell::String; kw...)::Int = process_sheetcell(setRowHeight, xl, sheetcell; kw...)
 setRowHeight(ws::Worksheet, cr::CellRef; kw...)::Int = setRowHeight(ws::Worksheet, CellRange(cr, cr); kw...)
-#setRowHeight(ws::Worksheet, row::Integer, col::Integer; kw...) = setRowHeight(ws, CellRef(row, col); kw...)
 setRowHeight(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setRowHeight, ws, row, nothing; kw...)
 setRowHeight(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon(setRowHeight, ws, row, nothing; kw...)
 setRowHeight(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setRowHeight, ws, nothing, col; kw...)
@@ -2196,8 +2123,6 @@ mergeCells(ws::Worksheet, ::Colon) = process_colon(mergeCells, ws, nothing, noth
 mergeCells(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}) = mergeCells(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))))
 function mergeCells(ws::Worksheet, cr::CellRange)
     # May be better if merged cells were part of ws.cache?
-
-    #    !is_valid_cell_range(cr) && throw(XLSXError("\"$cr\" is not a valid cell range."))
 
     !issubset(cr, get_dimension(ws)) && throw(XLSXError("Range `$cr` goes outside worksheet dimension."))
 

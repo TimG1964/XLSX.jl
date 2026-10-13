@@ -1122,7 +1122,6 @@ end
 # which is what makes a constructed DrawingText say only what the caller asked.
 
 _el(pfx, tag, kids...; attrs...) = XML.Element(prefixed_tag(pfx[NS_A], tag), kids...; attrs...)
-#_el(pfx, tag; kw...) = XML.Element(prefixed_tag(pfx[NS_A], tag); kw...)
 
 
 _emu(points) = round(Int, points * EMU_PER_POINT)

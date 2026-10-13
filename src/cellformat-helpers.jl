@@ -93,6 +93,10 @@ const VALID_BORDER_STYLES = (
 )
 const VALID_DIAGONAL_DIRECTIONS = ("up", "down", "both")
 
+# A Markdown bullet list of `vals`, for docstrings to list the values a setter
+# validates against from the same constant, so the two can't drift apart.
+_doc_list(vals) = join(("- `$v`" for v in vals), "\n")
+
 # Shared kwarg type alias for border sides
 const BorderKw = Union{Nothing,Vector{<:Pair{String}}}
 

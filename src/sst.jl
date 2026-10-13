@@ -328,21 +328,10 @@ function Base.show(io::IO, rts::RichTextString)
             # Convert pairs to "key=value"
             parts = (":"*string(k) * " => " * sprint(show, v) for (k,v) in sort(collect(run.atts), by=first))
 
-            s = join(parts, ", ")
-
-            # Truncate if too long
-#            if length(s) > maxlen_atts
-#                s = s[1:prevind(s, maxlen_atts)] * "…"
-#            end
-            s = truncate_len(s, maxlen_atts)
+            s = truncate_len(join(parts, ", "), maxlen_atts)
         end
 
         t = truncate_len(run.text, maxlen_txt)
-#        t = if length(run.text) > maxlen_txt
-#            run.text[1:prevind(run.text, maxlen_txt)] * "…"
-#        else
-#            run.text
-#        end
 
         @printf(io, " %-24s %-66s\n", "\""*t*"\"", "["*s*"]")
     end
@@ -439,21 +428,10 @@ function Base.show(io::IO, run::RichTextRun)
         s = " "
     else
         parts = (":"*string(k) * " => " * sprint(show, v) for (k,v) in sort(collect(run.atts), by=first))
-        s = join(parts, ", ")
+        s = truncate_len(join(parts, ", "), maxlen_atts)
+    end
 
-            # Truncate if too long
-#            if length(s) > maxlen_atts
-#                s = s[1:prevind(s, maxlen_atts)] * "…"
-#            end
-            s = truncate_len(s, maxlen_atts)
-        end
-
-        t = truncate_len(run.text, maxlen_txt)
-#        t = if length(run.text) > maxlen_txt
-#            run.text[1:prevind(run.text, maxlen_txt)] * "…"
-#        else
-#            run.text
-#        end
+    t = truncate_len(run.text, maxlen_txt)
 
     print(io,"RichTextRun (","\""*t*"\"  [", s,"])")
 end

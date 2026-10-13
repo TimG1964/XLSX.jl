@@ -1218,9 +1218,7 @@ The keywords `min_val`, `mid_val`, and `max_val` can be a number or cell referen
 of the related type keyword or, if the related type keyword is set to `formula`, may be a valid Excel formula that 
 calculates a number. Cell references used in a formula must be specified as absolute references.
 
-Colors can be a hex string (e.g. `FF0000FF` for blue), the name of a [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/)
-color as a String or Symbol, a Colors.jl `Colorant`, or a theme color (`"accent1"`, `:tx1` or a
-[`XLSX.SchemeColor`](@ref)). See [Specifying colors](@ref).
+Colors can be $COLOR_FORMS_DOC
 
 # Examples
 

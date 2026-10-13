@@ -872,13 +872,9 @@ setFormula(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw.
 setFormula(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setFormula, ws, nothing, col; kw...)
 setFormula(ws::Worksheet, ::Colon, ::Colon; kw...) = setFormula(ws, :; kw...)
 setFormula(ws::Worksheet, ::Colon; kw...) = process_colon(setFormula, ws, nothing, nothing; kw...)
-# These all give rise to (potentially) non-contiguous ranges so would need special handling if implemented. The cellformat-helpers functions won't work here because the kw will need processing.
-#setFormula(ws::Worksheet, ncrng::NonContiguousRange; kw...) = process_ncranges(setFormula, ws, ncrng; kw...)
-#setFormula(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_veccolon(setFormula, ws, row, nothing; kw...)
-#setFormula(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_veccolon(setFormula, ws, nothing, col; kw...)
-#setFormula(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint(setFormula, ws, row, col; kw...)
-#setFormula(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_vecint(setFormula, ws, row, col; kw...)
-#setFormula(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint(setFormula, ws, row, col; kw...)
+# Non-contiguous ranges, and vectors or step ranges of rows or columns, aren't supported:
+# each would need its own handling, since the cellformat-helpers functions can't process
+# setFormula's keywords.
 function setFormula(ws::Worksheet, rng::CellRange; val::AbstractString, raw::Bool=false, spill::Union{Nothing,Bool}=nothing)
 
     xf = get_xlsxfile(ws)
