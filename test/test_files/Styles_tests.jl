@@ -2377,4 +2377,25 @@ writing a number into a cell carrying a date/time format.
         @test XLSX.getBorder(xf2["Sheet1"], "C8").border["top"] == Dict("style" => "thin", "theme" => "7")
         SAVE_FILES && save_outfile(xf)
     end
+
+    # A whole row or column given as `(row, :)` or `(:, col)` must take the uniform path,
+    # not the per-cell one. Cells start with different attributes so the two differ.
+    @testset "setUniform* on a whole row or column is uniform" begin
+        cases = (
+            (XLSX.setUniformFont,      XLSX.setFont,      (s, c) -> XLSX.getFont(s, c).fontId,         (; size=14),                         (; bold=true),                   (; italic=true)),
+            (XLSX.setUniformBorder,    XLSX.setBorder,    (s, c) -> XLSX.getBorder(s, c).borderId,     (; top=["style" => "thin"]),         (; left=["style" => "thick"]),   (; right=["style" => "thick"])),
+            (XLSX.setUniformFill,      XLSX.setFill,      (s, c) -> XLSX.getFill(s, c).fillId,         (; pattern="solid", fgColor="red"),  (; pattern="gray125"),           (; pattern="darkGrid")),
+            (XLSX.setUniformAlignment, XLSX.setAlignment, (s, c) -> XLSX.getAlignment(s, c).alignment, (; wrapText=true),                   (; horizontal="left"),           (; horizontal="right")),
+            (XLSX.setUniformFormat,    XLSX.setFormat,    (s, c) -> XLSX.getFormat(s, c).numFmtId,     (; format="Percentage"),             (; format="Currency"),           (; format="0.000")),
+        )
+        for (setuniform, setone, attribute, kws, first_kws, other_kws) in cases, (target, other) in (((1, :), "B1"), ((:, 1), "A2"))
+            f = XLSX.newxlsx()
+            s = f[1]
+            s["A1:B2"] = 1.5
+            setone(s, "A1"; first_kws...)
+            setone(s, other; other_kws...)
+            setuniform(s, target...; kws...)
+            @test attribute(s, "A1") == attribute(s, other)
+        end
+    end
 end
