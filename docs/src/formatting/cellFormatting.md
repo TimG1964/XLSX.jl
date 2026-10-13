@@ -76,11 +76,59 @@ underline and make the font italic. However, the color, font name and size will
 all remain unchanged from before. This new combination of attributes is unique, 
 so a new `fontId` has been created.
 
-Font colors (and colors in any of the other formatting functions) can be set using a 
-hex RGB value or by name using any of the colors provided by [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/).
-
 The other set attribute functions behave in similar ways. See [`XLSX.setBorder`](@ref), 
 [`XLSX.setFill`](@ref), [`XLSX.setFormat`](@ref) and [`XLSX.setAlignment`](@ref).
+
+## Specifying colors
+
+Anywhere a color is set — `setFont`, `setFill`, `setBorder` and their `Uniform` forms,
+conditional formats, rich text runs and charts — these forms are accepted:
+
+```julia
+julia> XLSX.setFont(s, "A1"; color="FF0000")                       # hex RGB, "#RRGGBB" or AARRGGBB
+
+julia> XLSX.setFont(s, "A1"; color="coral")                        # any Colors.jl named color
+
+julia> XLSX.setFont(s, "A1"; color=:coral)                         # the same name as a symbol
+
+julia> XLSX.setFont(s, "A1"; color=RGB(0.2, 0.4, 0.6))             # a Colors.jl value
+
+julia> XLSX.setFont(s, "A1"; color="accent2")                      # a theme color, by name
+
+julia> XLSX.setFont(s, "A1"; color=XLSX.SchemeColor(:accent2; lumMod=75))   # a theme color, darker
+```
+
+Named colors are any of those provided by [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/).
+A Colors.jl value is useful for colors computed in code, such as a palette from
+`distinguishable_colors` or `range(colorant"red", colorant"blue"; length=5)`.
+
+Excel ignores the alpha (transparency) part of a cell color, so an `AARRGGBB` value or a
+Colors.jl value with alpha is accepted but always appears opaque. Charts are different:
+there, alpha is honored.
+
+A theme color refers to a slot in the workbook's theme rather than to a fixed RGB value,
+so it changes when the theme does, as colors picked from Excel's theme palette do. Name
+it as a string or symbol — `"bg1"`, `"tx1"`, `"bg2"`, `"tx2"`, `"accent1"` … `"accent6"`,
+`"hlink"` or `"folHlink"` — or as an [`XLSX.SchemeColor`](@ref) to make it lighter or
+darker. A cell color can only hold the lighter and darker shades Excel's own palette
+offers:
+
+```julia
+julia> XLSX.SchemeColor(:accent1)                          # Accent 1
+
+julia> XLSX.SchemeColor(:accent1; lumMod=75)               # Accent 1, Darker 25%
+
+julia> XLSX.SchemeColor(:accent1; lumMod=60, lumOff=40)    # Accent 1, Lighter 40%
+```
+
+That is, `lumMod` alone (darker) or `lumMod` and `lumOff` adding to 100 (lighter). Other
+`SchemeColor` transforms, such as `shade` or `satMod`, can only be used in charts and are
+an error elsewhere.
+
+When a theme color is read back, `getFont`, `getFill` and `getBorder` report it as
+`"theme"` and `"tint"` attributes (e.g. `Dict("theme" => "4", "tint" => "0.4")`).
+[`XLSX.getRichTextString`](@ref) reports every color as its `"FFRRGGBB"` value in the
+current theme.
 
 ## Formatting multiple cells at once
 

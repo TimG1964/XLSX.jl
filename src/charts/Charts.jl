@@ -107,6 +107,7 @@ using ..XLSX:
     ERROR_STRING_TO_CODE, get_error_string,
     # theme and colors (xlsx-colors.jl)
     get_color, get_colorant, _linear_to_srgb,
+    SchemeColor, SCHEME_TOKENS, COLOR_TRANSFORMS, SCHEME_ALIASES, canonical_token,
     get_theme_color_map, get_theme_fonts, resolve_theme_font, apply_drawingml_transforms
 
 export

@@ -13,8 +13,62 @@
         @test XLSX.get_color(:red)        == "FFFF0000"
         @test XLSX.get_color("grey")      == "FF808080"
         @test_throws XLSX.XLSXError XLSX.get_color("notacolour")
+        @test XLSX.get_color(colorant"red")         == "FFFF0000"
+        @test XLSX.get_color(RGB(0.2, 0.4, 0.6))    == "FF336699"
+        @test XLSX.get_color(RGBA(1, 0, 0, 0.5))    == "80FF0000"
     end
-    
+
+    @testset "SchemeColor is shared with Charts" begin
+        @test XLSX.SchemeColor === XLSX.Charts.SchemeColor
+    end
+
+    @testset "_color_atts" begin
+        # RGB forms
+        @test XLSX._color_atts("red")              == ["rgb" => "FFFF0000"]
+        @test XLSX._color_atts(:red)               == ["rgb" => "FFFF0000"]
+        @test XLSX._color_atts("#336699")          == ["rgb" => "FF336699"]
+        @test XLSX._color_atts(colorant"seagreen") == ["rgb" => "FF2E8B57"]
+        @test XLSX._color_atts(RGBA(1, 0, 0, 0.5)) == ["rgb" => "80FF0000"]   # written; Excel ignores alpha
+
+        # Every token maps to its spreadsheet theme index (dk/lt pairs swapped)
+        for (tokens, idx) in (((:bg1, :lt1), 0), ((:tx1, :dk1), 1), ((:bg2, :lt2), 2), ((:tx2, :dk2), 3),
+                              ((:accent1,), 4), ((:accent2,), 5), ((:accent3,), 6), ((:accent4,), 7),
+                              ((:accent5,), 8), ((:accent6,), 9), ((:hlink,), 10), ((:folHlink,), 11))
+            for t in tokens
+                @test XLSX._color_atts(XLSX.SchemeColor(t)) == ["theme" => string(idx)]
+                @test XLSX._color_atts(t)                   == ["theme" => string(idx)]
+                @test XLSX._color_atts(String(t))           == ["theme" => string(idx)]
+            end
+        end
+
+        # Darker and lighter shades become a tint
+        @test XLSX._color_atts(XLSX.SchemeColor(:accent1; lumMod = 75))              == ["theme" => "4", "tint" => "-0.25"]
+        @test XLSX._color_atts(XLSX.SchemeColor(:accent1; lumMod = 60, lumOff = 40)) == ["theme" => "4", "tint" => "0.4"]
+        @test XLSX._color_atts(XLSX.SchemeColor(:tx1; lumMod = 65, lumOff = 35))     == ["theme" => "1", "tint" => "0.35"]
+        @test XLSX._color_atts(XLSX.SchemeColor(:accent1; lumMod = 100))             == ["theme" => "4"]
+        @test XLSX._color_atts(XLSX.SchemeColor(:accent1; lumMod = 0))               == ["theme" => "4", "tint" => "-1.0"]
+        @test XLSX._color_atts(XLSX.SchemeColor(:accent1; lumMod = 0, lumOff = 100)) == ["theme" => "4", "tint" => "1.0"]
+
+        # Alpha is ignored
+        @test XLSX._color_atts(XLSX.SchemeColor(:accent2; alpha = 50))               == ["theme" => "5"]
+        @test XLSX._color_atts(XLSX.SchemeColor(:accent2; lumMod = 75, alpha = 50))  == ["theme" => "5", "tint" => "-0.25"]
+
+        # Transforms a cell color cannot express
+        for sc in (XLSX.SchemeColor(:accent1; shade = 50),
+                   XLSX.SchemeColor(:accent1; tint = 50),
+                   XLSX.SchemeColor(:accent1; satMod = 120),
+                   XLSX.SchemeColor(:accent1; lumOff = 40),
+                   XLSX.SchemeColor(:accent1; lumMod = 120),
+                   XLSX.SchemeColor(:accent1; lumMod = 50, lumOff = 40),
+                   XLSX.SchemeColor(:accent1, [:lumOff => 40.0, :lumMod => 60.0]))
+            @test_throws XLSX.XLSXError XLSX._color_atts(sc)
+        end
+
+        # Not a color at all
+        @test_throws XLSX.XLSXError XLSX._color_atts("notacolor")
+        @test_throws XLSX.XLSXError XLSX._color_atts(42)
+    end
+
     @testset "theme_xmlroot" begin
         # theme1.xml parses cleanly and has the correct root element
         theme_root = XLSX.theme_xmlroot(wb)
@@ -208,14 +262,10 @@
                     lc = XLSX.Charts.setMarkerLineColor(lc, 1, col)
                     @test iscoral(XLSX.Charts.getSeriesMarker(lc, 1).shape.line.fill.fgcolor.rgb)
 
-                    # cells: Symbol colours not yet accepted (borders need work)
+                    # cells
                     ws["A$i"] = "x"
-                    if col isa Symbol
-                        @test_broken (XLSX.setFont(ws, "A$i"; color = col); true) # formatting setters can't take a symbol for a colour yet.
-                    else
-                        XLSX.setFont(ws, "A$i"; color = col)
-                        @test iscoral(XLSX.getFont(ws, "A$i").font["color"]["rgb"])
-                    end
+                    XLSX.setFont(ws, "A$i"; color = col)
+                    @test iscoral(XLSX.getFont(ws, "A$i").font["color"]["rgb"])
                 end
             end
 

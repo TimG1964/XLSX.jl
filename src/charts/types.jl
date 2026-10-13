@@ -259,90 +259,6 @@ struct ChartExBinning
     binCount::Union{Nothing,Int,Symbol}
 end
 
-const SCHEME_TOKENS = (:bg1, :tx1, :bg2, :tx2, :accent1, :accent2, :accent3,
-                       :accent4, :accent5, :accent6, :hlink, :folHlink,
-                       :lt1, :dk1, :lt2, :dk2)
-
-const COLOR_TRANSFORMS = (:lumMod, :lumOff, :shade, :tint, :satMod, :alpha)
-
-# bg1/lt1, tx1/dk1, bg2/lt2 and tx2/dk2 name the same slot. The field keeps the
-# token as written so a round trip preserves it; equality and hashing normalize
-# so two spellings of one color compare equal.
-const SCHEME_ALIASES = Dict(:lt1 => :bg1, :dk1 => :tx1, :lt2 => :bg2, :dk2 => :tx2)
-
-"""
-    SchemeColor(token; lumMod = nothing, lumOff = nothing, ...)
-    SchemeColor(token, transforms)
-
-A DrawingML theme color: a token naming a slot in the workbook's color scheme,
-plus any transforms applied to it. Distinct from the spreadsheet
-`<color theme="N"/>` mechanism, which is index-ordered and uses a different
-tint algorithm — see `get_theme_colors` for that.
-
-`token` is one of `:bg1` (background), `:tx1` (text), `:bg2`, `:tx2` (likewise),
-`:accent1` … `:accent6`, `:hlink` (hyperlink), `:folHlink` (visited-hyperlink),
-or the aliases `:lt1` (light), `:dk1` (dark), `:lt2`, `:dk2`.
-
-The `:lt1`, `:dk1`, `:lt2` and `:dk2` aliases are preserved as written, so a
-round trip keeps the spelling the file used, but two spellings of one slot
-compare and hash equal.
-
-Transforms are held in document order, because DrawingML applies them in
-sequence and `lumMod` before `lumOff` is not the same as the reverse. Equality
-is positional for the same reason: two `SchemeColor`s with the same transforms
-in different orders are not equal, because they do not render the same. Values
-are percentages, not the hundredths DrawingML writes: `lumMod = 75` is 75%.
-
-The keyword constructor emits transforms in the conventional order — `lumMod`
-before `lumOff`, shade or tint last. Any other order needs the vector form.
-
-# Examples
-
-    SchemeColor(:accent1)
-    SchemeColor(:accent1; lumMod = 75)                    # 104862 against the Office theme
-    SchemeColor(:tx1; lumMod = 65, lumOff = 35)           # 595959
-    SchemeColor(:accent2, [:shade => 50.0, :alpha => 80.0])
-"""
-struct SchemeColor
-    token::Symbol
-    transforms::Vector{Pair{Symbol,Float64}}
-
-    function SchemeColor(token::Symbol, transforms::Vector{Pair{Symbol,Float64}})
-        token in SCHEME_TOKENS || throw(XLSXError(
-            "`$token` is not a theme color token. Valid tokens: " *
-            join(SCHEME_TOKENS, ", ") * "."))
-        for (name, _) in transforms
-            name in COLOR_TRANSFORMS || throw(XLSXError(
-                "`$name` is not a color transform. Valid transforms: " *
-                join(COLOR_TRANSFORMS, ", ") * "."))
-        end
-        return new(token, transforms)
-    end
-end
-
-function SchemeColor(token::Symbol; lumMod = nothing, lumOff = nothing,
-                     satMod = nothing, shade = nothing, tint = nothing,
-                     alpha = nothing)
-    t = Pair{Symbol,Float64}[]
-    isnothing(lumMod) || push!(t, :lumMod => Float64(lumMod))
-    isnothing(lumOff) || push!(t, :lumOff => Float64(lumOff))
-    isnothing(satMod) || push!(t, :satMod => Float64(satMod))
-    isnothing(shade)  || push!(t, :shade  => Float64(shade))
-    isnothing(tint)   || push!(t, :tint   => Float64(tint))
-    isnothing(alpha)  || push!(t, :alpha  => Float64(alpha))
-    return SchemeColor(token, t)
-end
-
-canonical_token(t::Symbol) = get(SCHEME_ALIASES, t, t)
-
-Base.:(==)(a::SchemeColor, b::SchemeColor) =
-    canonical_token(a.token) == canonical_token(b.token) && a.transforms == b.transforms
-
-Base.hash(c::SchemeColor, h::UInt) =
-    hash(c.transforms, hash(canonical_token(c.token), hash(:SchemeColor, h)))
-
-Base.isequal(a::SchemeColor, b::SchemeColor) = a == b
-
 """
     DrawingColor
 
@@ -724,9 +640,15 @@ function _rich_run_props(atts)
     end
     haskey(atts, :size)  && (kw[:size]  = convert(Float64, atts[:size]))
     haskey(atts, :name)  && (kw[:latin] = string(atts[:name]))
-    haskey(atts, :color) && (kw[:fill]  = DrawingFill(:solid; fgcolor = get_color(atts[:color])))
+    haskey(atts, :color) && (kw[:fill]  = DrawingFill(:solid; fgcolor = _rich_fgcolor(atts[:color])))
     return DrawingRunProps(; kw...)
 end
+
+# A run color as a chart fill color: theme colors stay theme colors.
+_rich_fgcolor(c::SchemeColor) = c
+_rich_fgcolor(c::Union{AbstractString,Symbol}) =
+    Symbol(c) in SCHEME_TOKENS ? SchemeColor(Symbol(c)) : get_color(c)
+_rich_fgcolor(c) = get_color(c)
 
 """
     DrawingBodyProps

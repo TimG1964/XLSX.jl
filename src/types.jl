@@ -532,7 +532,8 @@ Valid attributes that can be defined in `pairs` are:
 - `:under` - set `:under => true` to underline this run. Omit otherwise.
 - `:strike` - set `:strike => true` to apply strikethrough to this run. Omit otherwise.
 - `:vertAlign` - whether this run is `subscript` or `superscript` (eg `:vertAlign => "superscript"`). Omit otherwise.
-- `:color` - the color of this run (eg `:color => "red"`).
+- `:color` - the color of this run (eg `:color => "red"`), in any of the forms listed in
+  [Specifying colors](@ref). An invalid color is an error here, not when the run is written.
 - `:size` - the size of the font to be used (eg `:size => 12`).
 - `:name` - the name of the font to be used (e.g. `:name => "Arial"`).
 
@@ -585,6 +586,7 @@ struct RichTextRun
             for x in keys(atts)
                 in(x, ValidRichTextAttributes) || throw(XLSXError("Unknown Rich Text Attribute: ':$x'. Valid attributes are :bold, :italic, :under, :strike, :vertAlign, :color, :size, :name."))
             end
+            haskey(atts, :color) && _check_color(atts[:color])
             new(text, atts)
         end
     end

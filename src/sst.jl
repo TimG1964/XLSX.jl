@@ -237,7 +237,11 @@ function richTextRunToXML!(io::IO, run::RichTextRun, pfx)
             write(props, "<$(pfx)strike/>")
         end
         if (v = get(atts, :color, nothing)) !== nothing
-            write(props, "<$(pfx)color rgb=\"", get_color(v), "\"/>")
+            write(props, "<$(pfx)color")
+            for (k, a) in _color_atts(v)
+                write(props, " ", k, "=\"", a, "\"")
+            end
+            write(props, "/>")
         end
         if (v = get(atts, :size, nothing)) !== nothing
             write(props, "<$(pfx)sz val=\"", string(v), "\"/>") # size read as a float, output rounded to nearest half point.
@@ -398,7 +402,7 @@ function Base.:(==)(r1::RichTextRun, r2::RichTextRun)
         v1 = a1[k]
         v2 = a2[k]
         if k === :color
-            get_color(v1) == get_color(v2) || return false
+            _cell_color_key(v1) == _cell_color_key(v2) || return false
         else
             v1 == v2 || return false
         end
@@ -417,9 +421,9 @@ function Base.hash(r::RichTextRun, h::UInt)
     end
 
     # Order‑insensitive hash over attributes
-    # (color values canonicalized via get_color)
+    # (color values canonicalized via _cell_color_key)
     for (k, v) in atts
-        v′ = (k === :color ? get_color(v) : v)
+        v′ = (k === :color ? _cell_color_key(v) : v)
         h = hash((k, v′), h)
     end
     return h

@@ -2843,4 +2843,61 @@
             rm("reopen_cf.xlsx")
         end
     end
+
+    @testset "every color form in conditional formats" begin
+        xf = XLSX.newxlsx()
+        s = xf[1]
+        for r in 1:10, c in 1:6
+            s[r, c] = r * c - 20
+        end
+
+        XLSX.setConditionalFormat(s, "A1:A10", :colorScale;
+            min_type="min", min_col=:coral,
+            mid_type="percentile", mid_val="50", mid_col=XLSX.SchemeColor(:accent1; lumMod=60, lumOff=40),
+            max_type="max", max_col=colorant"seagreen")
+        XLSX.setConditionalFormat(s, "B1:B10", :dataBar;
+            fill_col=XLSX.SchemeColor(:accent2), border_col=:accent3,
+            neg_fill_col=colorant"red", neg_border_col="tx2", axis_col=:black)
+        XLSX.setConditionalFormat(s, "C1:C10", :cellIs; operator="greaterThan", value="0",
+            font=["color" => :accent4, "bold" => "true"],
+            fill=["pattern" => "solid", "bgColor" => XLSX.SchemeColor(:accent5; lumMod=75)],
+            border=["style" => "thin", "color" => colorant"blue"])
+        XLSX.setConditionalFormat(s, "D1:D10", :cellIs; operator="lessThan", value="0",
+            font=["color" => "red"])      # all-String pairs still work
+        XLSX.setColoredDataBars(s, "E1:E10"; bands=2, colors=[:accent1, XLSX.SchemeColor(:accent6)])
+        XLSX.setColoredDataBars(s, "F1:F10"; bands=3, colors=[:green, colorant"red"])
+
+        io = IOBuffer()
+        XLSX.writexlsx(io, xf)
+        zr = ZipArchives.ZipReader(take!(io))
+        sheet  = ZipArchives.zip_readentry(zr, "xl/worksheets/sheet1.xml", String)
+        styles = ZipArchives.zip_readentry(zr, "xl/styles.xml", String)
+
+        # color scale
+        @test occursin(r"<color rgb=\"FFFF7F50\"/>\s*<color theme=\"4\" tint=\"0.4\"/>\s*<color rgb=\"FF2E8B57\"/>", sheet)
+        # data bar, main and x14 parts
+        @test occursin("<color theme=\"5\"/>", sheet)
+        @test occursin("<x14:borderColor theme=\"6\"/>", sheet)
+        @test occursin("<x14:negativeFillColor rgb=\"FFFF0000\"/>", sheet)
+        @test occursin("<x14:negativeBorderColor theme=\"3\"/>", sheet)
+        @test occursin("<x14:axisColor rgb=\"FF000000\"/>", sheet)
+        # dxf font, fill and border
+        @test occursin("<color theme=\"7\"/>", styles)
+        @test occursin("<bgColor theme=\"8\" tint=\"-0.25\"/>", styles)
+        @test occursin("<color rgb=\"FF0000FF\"/>", styles)
+        @test occursin("<color rgb=\"FFFF0000\"/>", styles)
+        # colored data bars: one theme color per band
+        @test occursin("<color theme=\"4\"/>", sheet) && occursin("<color theme=\"9\"/>", sheet)
+
+        # Errors
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A10", :colorScale; min_col="notacolor")
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A10", :colorScale;
+            min_col=XLSX.SchemeColor(:accent1; shade=50))
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "C1:C10", :cellIs; operator="greaterThan", value="0",
+            font=["color" => 42])
+        # theme colors cannot be interpolated between
+        @test_throws XLSX.XLSXError XLSX.setColoredDataBars(s, "E1:E10"; bands=3, colors=[:accent1, :red])
+        @test XLSX._band_colors([:accent1, colorant"red"], 2) == [:accent1, "FFFF0000"]
+        SAVE_FILES && save_outfile(xf)
+    end
 end

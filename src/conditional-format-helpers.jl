@@ -281,15 +281,15 @@ function Add_Cf_Dx(wb::Workbook, new_dx::XML.Node)::DxFormat
     return DxFormat(existing_dxf_elements_count) # turns out this is the new index (because it's zero-based)
 
 end
-function get_dx(dxStyle::Union{Nothing,String}, format::Union{Nothing,Vector{Pair{String,String}}}, font::Union{Nothing,Vector{Pair{String,String}}}, border::Union{Nothing,Vector{Pair{String,String}}}, fill::Union{Nothing,Vector{Pair{String,String}}})::Dict{String,Dict{String,String}}
+function get_dx(dxStyle::Union{Nothing,String}, format::Union{Nothing,Vector{<:Pair{String}}}, font::Union{Nothing,Vector{<:Pair{String}}}, border::Union{Nothing,Vector{<:Pair{String}}}, fill::Union{Nothing,Vector{<:Pair{String}}})::AbstractDict{String,<:AbstractDict{String}}
     if isnothing(dxStyle)
         if all(isnothing.([border, fill, font, format]))
             dx = highlights["redfilltext"]
         else
-            dx = Dict{String,Dict{String,String}}()
+            dx = Dict{String,Dict{String,Any}}()
             for att in ["font" => font, "fill" => fill, "border" => border, "format" => format]
                 if !isnothing(last(att))
-                    dxx = Dict{String,String}()
+                    dxx = Dict{String,Any}()
                     for i in last(att)
                         push!(dxx, first(i) => last(i))
                     end
@@ -304,7 +304,7 @@ function get_dx(dxStyle::Union{Nothing,String}, format::Union{Nothing,Vector{Pai
     end
     return dx
 end
-function get_new_dx(wb::Workbook, dx::Dict{String,Dict{String,String}})::XML.Node
+function get_new_dx(wb::Workbook, dx::AbstractDict{String,<:AbstractDict{String}})::XML.Node
     new_dx = XML.Element("dxf")
 
     for k in ["font", "format", "fill", "border"]
@@ -317,7 +317,7 @@ function get_new_dx(wb::Workbook, dx::Dict{String,Dict{String,String}})::XML.Nod
             for (y, z) in v
                 y in ["pattern", "bgColor", "fgColor"] || throw(XLSXError("Invalid fill attribute: $y. Valid options are: `pattern`, `bgColor`, `fgColor`."))
                 if y in ["fgColor", "bgColor"]
-                    push!(patterndx, XML.Element(y, rgb=get_color(z)))
+                    push!(patterndx, _color_element(y, z))
                 elseif y == "pattern" && z != "none"
                     patterndx["patternType"] = z
                 end
@@ -329,7 +329,7 @@ function get_new_dx(wb::Workbook, dx::Dict{String,Dict{String,String}})::XML.Nod
             fontdx = XML.Element("font")
             for (y, z) in v
                 y in ["color", "bold", "italic", "under", "strike"] || throw(XLSXError("Invalid font attribute: $y. Valid options are: `color`, `bold`, `italic`, `under`, `strike`."))
-                if     y == "color"                  ; push!(fontdx, XML.Element(y, rgb=get_color(z)))
+                if     y == "color"                  ; push!(fontdx, _color_element(y, z))
                 elseif y == "bold"   && z == "true"  ; push!(fontdx, XML.Element("b", val="0"))
                 elseif y == "italic" && z == "true"  ; push!(fontdx, XML.Element("i", val="0"))
                 elseif y == "under"  && z != "none"  ; push!(fontdx, XML.Element("u"; val="v"))
@@ -341,7 +341,7 @@ function get_new_dx(wb::Workbook, dx::Dict{String,Dict{String,String}})::XML.Nod
         elseif k == "border"
             all(y in ["color", "style"] for y in keys(v)) || throw(XLSXError("Invalid border attribute. Valid options are: `color`, `style`."))
             borderdx = XML.Element("border")
-            cdx = haskey(v, "color") ? XML.Element("color", rgb=get_color(v["color"])) : nothing
+            cdx = haskey(v, "color") ? _color_element("color", v["color"]) : nothing
             sdx = get(v, "style", nothing)
             for side in ["left", "right", "top", "bottom"]
                 el = XML.Element(side)
@@ -424,13 +424,18 @@ end
 
 # Interpolation is done in LCHab rather than RGB: an RGB path from green to red
 # passes through a muddy olive, which defeats the point of visually ordered bands.
-function _band_colors(spec, n::Int)::Vector{String}
-    cols = get_color.(spec isa Union{AbstractString,Symbol} ? [spec] : collect(spec))
+# RGB colors come back as "AARRGGBB"; theme colors are kept as given, so they stay
+# theme colors, but cannot be interpolated between.
+function _band_colors(spec, n::Int)::Vector
+    cols = [_is_theme_color(c) ? (_check_color(c); c) : get_color(c)
+            for c in (spec isa CellColor ? [spec] : spec)]
 
     if length(cols) == n
         return cols
     elseif length(cols) == 2
         n == 1 && return [cols[1]]
+        any(_is_theme_color, cols) && throw(XLSXError(
+            "Theme colors cannot be interpolated between. Give RGB colors, or one color per band."))
         c1, c2 = convert.(Colors.LCHab, _to_colorant.(cols))
         return _from_colorant.(range(c1, c2; length=n))
     end

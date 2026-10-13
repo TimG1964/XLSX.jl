@@ -130,10 +130,15 @@ julia> setSeriesFill(c, 1, "coral");                   # any Colors.jl named col
 
 julia> setSeriesFill(c, 1, :coral);                    # the same name as a symbol
 
-julia> setSeriesFill(c, 1, colorant"seagreen");        # a Colors.jl value
+julia> setSeriesFill(c, 1, RGBA(0.2, 0.4, 0.6, 0.5)); # a Colors.jl value, e.g. computed, here half transparent
+
+julia> setSeriesFill(c, 1, "accent2");                 # a theme color, by name
 
 julia> setSeriesFill(c, 1, SchemeColor(:accent2));     # a theme color
 ```
+
+These are the same forms cells accept (see [Specifying colors](@ref)), except that in
+a chart, alpha is honored and a `SchemeColor` may use any transform.
 
 A [`SchemeColor`](@ref) names a slot in the workbook's theme rather than a fixed
 color, so it follows the theme the way Excel's own formatting does. Transforms

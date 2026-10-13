@@ -15,7 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `addChart(...; title = "A\nB")` now writes one paragraph per line, as `setChartTitleText` does, rather than a newline inside one run
 - `addChart` and `addChartEx` resolve a cell-reference title before adding anything, so a bad reference leaves the workbook unchanged
 - `getRichTextString` returns `nothing` for an empty cell, as documented, rather than throwing a `FieldError`
-- Cell getters treat a cell outside the sheet's dimension as empty, as `ws[ref]` does, rather than throwing: `getFont`, `getBorder`, `getFill`, `getAlignment`, `getFormat`, `getRichTextString`, `getFormula` and `getMergedBaseCell` return `nothing`, and `isMergedCell` returns `false`. `getColumnWidth` and `getRowHeight` still throw, since a row or column beyond the dimension can have a size
+- Cell getters treat a cell outside the sheet's dimension as empty, as `ws[ref]` does, rather than throwing: `getFont`, `getBorder`, `getFill`, `getAlignment`, `getFormat`, `getRichTextString`, `getFormula` and `getMergedBaseCell` return `nothing`, and `isMergedCell` returns `false`. `getColumnWidth` and `getRowHeight` still throw, since a row or column beyond the dimension can't have a size
 - Fixed a missing space in `setLabelText`'s error for a deleted label, and a typo in the `RichTextRun` docstring
 - Title getters for both chart schemas: new `getAxisTitle` (plain text) and `getAxisTitleRange` (the resolved cell of a bound axis title) for `Chart` and `ChartEx`; `getAxisTitleRef` and `getChartTitleRef` now have `ChartEx` methods, and `getChartTitleRange` a `Chart` method
 - `addSeries` and cell-bound titles now write elements in the chart part's own namespace prefixes rather than assuming Excel's `c:` and `a:`; a new chart's anchor likewise takes the drawing part's prefixes
@@ -32,6 +32,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The text-property setters check `:under`, `:strike` and `:caps` values against the DrawingML vocabularies, and throw on any other word rather than writing a file Excel refuses to open. `:under` and `:strike` also take a `Bool`, and Excel's names `:single`/`:double` (and `:none` for `:strike`)
 - Chart setter docstrings state the values each argument and keyword accepts. The color values, line keywords and text-property fields are each listed in full once — at `setSeriesFill`, `setSeriesLine` and `setChartTitleTextProp` — and the `ChartEx` single-property line setters and `addSeries(c::ChartEx, …)` have docstrings. The Charts API page gains a Conventions section
 - The documentation and docstrings spell "color" throughout
+- Cell formatting (`setFont`, `setFill`, `setBorder`, their `Uniform` forms and `setOutsideBorder`), conditional formats (color scales, data bars, `setColoredDataBars` and the `font`/`fill`/`border` keywords) and `RichTextRun` colors accept every color form charts do: a hex or Colors.jl name as a String or Symbol, a Colors.jl `Colorant`, or a theme color (`"accent1"`, `:tx1` or a `SchemeColor`). A theme color is written as `<color theme="N" tint="t"/>`, so it follows the workbook's theme. Outside charts, a `SchemeColor` can be lightened or darkened (`lumMod`, or `lumMod` with `lumOff` adding to 100, as Excel's own palette does); other transforms throw. Existing String arguments behave as before. A new "Specifying colors" section in the formatting guide covers all of this
+- `SchemeColor` is now defined in `XLSX` (and is `public` there), and is the same type as `XLSX.Charts.SchemeColor`
+- A `RichTextRun` with an invalid `:color` now throws when it is created, not when it is written
 
 ## [v0.13.1](https://github.com/JuliaData/XLSX.jl/tree/v0.13.1) - 2026-10-07
 

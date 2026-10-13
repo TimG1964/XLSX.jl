@@ -21,7 +21,7 @@ Font attributes are specified using keyword arguments:
 - `under::String = nothing`     : set to `single`, `double` or `none`.
 - `strike::Bool = nothing`      : set to `true` to strike through the font.
 - `size::Int = nothing`         : set the font size (0 < size < 410).
-- `color::String = nothing`     : set the font color.
+- `color = nothing`             : set the font color.
 - `name::String = nothing`      : set the font name.
 - `vertAlign::String = nothing` : set to `superscript`, `subscript` or `baseline`.
 
@@ -35,14 +35,10 @@ that value will be written to the XLSXFile.
 As an expedient to get fonts to work, the `scheme` attribute is simply dropped from
 new font definitions.
 
-The `color` attribute can be defined using 8-digit rgb values.
-- The first two digits represent transparency (α). Excel ignores transparency.
-- The next two digits give the red component.
-- The next two digits give the green component.
-- The next two digits give the blue component.
-So, FF000000 means a fully opaque black color.
-
-Alternatively, you can use the name of any named color from [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/).
+The `color` can be a hex value (`"FF0000"`, `"#FF0000"` or 8-digit `"FFFF0000"`, whose
+first two digits, transparency, Excel ignores), the name of a [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/)
+color as a String or Symbol, a Colors.jl `Colorant`, or a theme color: `"accent1"`, `:tx1`
+or a [`XLSX.SchemeColor`](@ref). See [Specifying colors](@ref).
 
 Font attributes cannot be set for `EmptyCell`s. Set a cell value first.
 If a cell range or column range includes any `EmptyCell`s, they will be
@@ -113,7 +109,7 @@ function setFont(sh::Worksheet, cellref::CellRef;
     under::Union{Nothing,String}=nothing,
     strike::Union{Nothing,Bool}=nothing,
     size::Union{Nothing,Int}=nothing,
-    color::Union{Nothing,String}=nothing,
+    color::Union{Nothing,CellColor}=nothing,
     name::Union{Nothing,String}=nothing,
     vertAlign::Union{Nothing,String}=nothing
 )::Int
@@ -157,7 +153,7 @@ function setFont(sh::Worksheet, cellref::CellRef;
     end
 
     # Color tag
-    result = _merge_dict_tag("color", color, old_font_atts, c -> Dict("rgb" => get_color(c)))
+    result = _merge_dict_tag("color", color, old_font_atts, c -> Dict(_color_atts(c)))
     ismissing(result) || (new_font_atts["color"] = result)
 
     # Underline: "none" explicitly removes, "single" => no attributes, "double" => val attribute
@@ -480,13 +476,13 @@ Alternatively, specify the row and column using any combination of
 Integer, UnitRange, Vector{Integer} or `:`.
 
 Borders are independently defined for the keywords:
-- `left::Vector{Pair{String,String}} = nothing`
-- `right::Vector{Pair{String,String}} = nothing`
-- `top::Vector{Pair{String,String}} = nothing`
-- `bottom::Vector{Pair{String,String}} = nothing`
-- `diagonal::Vector{Pair{String,String}} = nothing`
-- `[allsides::Vector{Pair{String,String}} = nothing]`
-- `[outside::Vector{Pair{String,String}} = nothing]`
+- `left::Vector{<:Pair{String}} = nothing`
+- `right::Vector{<:Pair{String}} = nothing`
+- `top::Vector{<:Pair{String}} = nothing`
+- `bottom::Vector{<:Pair{String}} = nothing`
+- `diagonal::Vector{<:Pair{String}} = nothing`
+- `[allsides::Vector{<:Pair{String}} = nothing]`
+- `[outside::Vector{<:Pair{String}} = nothing]`
 
 These represent each of the sides of a cell . The keyword `diagonal` defines 
 diagonal lines running across the cell. These lines must share the same style 
@@ -521,10 +517,10 @@ Allowed values for `style` are:
 - `mediumDashDotDot`
 - `slantDashDot`
 
-The `color` attribute can be set by specifying an 8-digit hexadecimal value 
-in the format "FFRRGGBB". The transparency ("FF") is ignored by Excel but 
-is required.
-Alternatively, you can use the name of any named color from [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/).
+The `color` attribute can be a hex value (`"FF0000"` or `"FFFF0000"`), the name of a
+[Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/) color as a String
+or Symbol, a Colors.jl `Colorant`, or a theme color (`"accent1"`, `:tx1` or a
+[`XLSX.SchemeColor`](@ref)). See [Specifying colors](@ref).
 
 Valid values for the `direction` keyword (for diagonal borders) are:
 - `up`   : diagonal border runs bottom-left to top-right
@@ -772,7 +768,7 @@ or a named range in a worksheet or XLSXFile.
 Alternatively, specify the rows and columns using integers, UnitRanges or `:`.
 
 There is one key word:
-- `outside::Union{Nothing,Vector{Pair{String,String}}}=nothing`
+- `outside::Union{Nothing,Vector{<:Pair{String}}}=nothing`
 
 For keyword definition see [`setBorder()`](@ref).
 
@@ -813,7 +809,7 @@ setOutsideBorder(ws::Worksheet, ::Colon; kw...) = process_colon(setOutsideBorder
 setOutsideBorder(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setOutsideBorder(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
 
 function setOutsideBorder(ws::Worksheet, rng::CellRange;
-    outside::Union{Nothing,Vector{Pair{String,String}}}=nothing
+    outside::BorderKw=nothing
 )::Int
     get_xlsxfile(ws).is_writable ||
         throw(XLSXError("Cannot set borders because XLSXFile is not writable."))
@@ -959,8 +955,8 @@ Integer, UnitRange, Vector{Integer} or `:`.
 
 The following keywords are used to define a fill:
 - `pattern::String = nothing`   : Sets the patternType for the fill.
-- `fgColor::String = nothing`   : Sets the foreground color for the fill.
-- `bgColor::String = nothing`   : Sets the background color for the fill.
+- `fgColor = nothing`           : Sets the foreground color for the fill.
+- `bgColor = nothing`           : Sets the background color for the fill.
 
 Here is a list of the available `pattern` values (thanks to Copilot!):
 - `none`
@@ -983,9 +979,10 @@ Here is a list of the available `pattern` values (thanks to Copilot!):
 - `gray125`
 - `gray0625`
 
-The two colors may be set by specifying an 8-digit hexadecimal value for the `fgColor`
-and/or `bgColor` keywords. 
-Alternatively, you can use the name of any named color from [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/).
+The two colors may each be a hex value (`"FF0000"` or `"FFFF0000"`), the name of a
+[Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/) color as a String
+or Symbol, a Colors.jl `Colorant`, or a theme color (`"accent1"`, `:tx1` or a
+[`XLSX.SchemeColor`](@ref)). See [Specifying colors](@ref).
 
 Setting only one or two of the attributes leaves the other attribute(s) unchanged 
 for that cell's fill.
@@ -1035,8 +1032,8 @@ setFill(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Inte
 
 function setFill(sh::Worksheet, cellref::CellRef;
     pattern::Union{Nothing,String}=nothing,
-    fgColor::Union{Nothing,String}=nothing,
-    bgColor::Union{Nothing,String}=nothing,
+    fgColor::Union{Nothing,CellColor}=nothing,
+    bgColor::Union{Nothing,CellColor}=nothing,
 )::Int
     get_xlsxfile(sh).is_writable || throw(XLSXError("Cannot set fill because XLSXFile is not writable."))
 
@@ -1069,14 +1066,16 @@ function setFill(sh::Worksheet, cellref::CellRef;
         patternFill["patternType"] = result isa Dict ? result["val"] : result
     end
 
-    # fg/bg colors: prefix-match to preserve all old fg*/bg* keys, or set new rgb
-    for (prefix, new_color, key) in (("fg", fgColor, "fgrgb"), ("bg", bgColor, "bgrgb"))
+    # fg/bg colors: prefix-match to preserve all old fg*/bg* keys, or set the new color
+    for (prefix, new_color) in (("fg", fgColor), ("bg", bgColor))
         if isnothing(new_color)
             for (k, v) in old_fill_atts
                 startswith(k, prefix) && (patternFill[k] = v)
             end
         else
-            patternFill[key] = get_color(new_color)
+            for (k, v) in _color_atts(new_color)
+                patternFill[prefix * k] = v
+            end
         end
     end
 

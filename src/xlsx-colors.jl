@@ -17,10 +17,83 @@ function get_color(str::AbstractString)::String
     s = replace(lowercase(str), "grey" => "gray")
     c = get_colorant(s)
     isnothing(c) && throw(XLSXError(
-        "Invalid color specified: $str. Give a color name from Colors.jl, or a hex " *
-        "color as RRGGBB or AARRGGBB, with or without a leading #."))
+        "Invalid color specified: $str. Give a color name from Colors.jl, a hex " *
+        "color as RRGGBB or AARRGGBB (with or without a leading #), a theme color " *
+        "name such as `accent1`, a Colors.jl `Colorant` or a `SchemeColor`."))
     return c
 end
+get_color(c::Colors.Colorant)::String = uppercase(Colors.hex(c, :AARRGGBB))
+
+# Anything that can be given as a color in cell formatting, conditional formats and rich text.
+const CellColor = Union{AbstractString,Symbol,Colors.Colorant,SchemeColor}
+
+# Spreadsheet theme-index slot for each SchemeColor token spelling.
+const _THEME_SLOT = Dict(:bg1 => "lt1", :tx1 => "dk1", :bg2 => "lt2", :tx2 => "dk2")
+
+_theme_index(token::Symbol)::Int =
+    findfirst(==(get(_THEME_SLOT, canonical_token(token), String(token))), THEME_COLOR_ORDER) - 1
+
+# The `tint` that gives `sc` in a spreadsheet `<color theme="N" tint="t"/>`. Only
+# the lighter/darker shades of Excel's palette have one: Excel's tint lightens
+# toward white as lumMod/lumOff do, and darkens as lumMod alone does.
+# `nothing` if `sc` has no such tint.
+function _theme_tint_or_nothing(sc::SchemeColor)::Union{Nothing,Float64}
+    t = filter(p -> first(p) !== :alpha, sc.transforms) # Excel ignores alpha in cells
+    isempty(t) && return 0.0
+    if length(t) == 1 && first(t[1]) === :lumMod && 0 <= last(t[1]) <= 100
+        return last(t[1]) / 100 - 1
+    elseif length(t) == 2 && first(t[1]) === :lumMod && first(t[2]) === :lumOff &&
+           0 <= last(t[2]) <= 100 && isapprox(last(t[1]) + last(t[2]), 100)
+        return last(t[2]) / 100
+    end
+    return nothing
+end
+
+function _theme_tint(sc::SchemeColor)::Float64
+    t = _theme_tint_or_nothing(sc)
+    isnothing(t) || return t
+    throw(XLSXError(
+        "$(sprint(show, sc)) cannot be used here. A theme color in a cell, conditional " *
+        "format or rich text can only be made darker, with `lumMod` alone (0 to 100), or " *
+        "lighter, with `lumMod` and `lumOff` adding to 100. Give an RGB color instead."))
+end
+
+"""
+    _color_atts(color) -> Vector{Pair{String,String}}
+
+The attributes of a spreadsheet `<color>` element for any `CellColor`:
+`["rgb" => "FFRRGGBB"]`, or `["theme" => "N"]` plus a `"tint"` for a theme color.
+A `SchemeColor`, or a theme token as a String or Symbol (`"accent2"`, `:tx1`),
+is a theme color, as in charts.
+"""
+function _color_atts(c::SchemeColor)::Vector{Pair{String,String}}
+    idx  = string(_theme_index(c.token))
+    tint = _theme_tint(c)
+    return iszero(tint) ? ["theme" => idx] : ["theme" => idx, "tint" => string(tint)]
+end
+_color_atts(c::Union{AbstractString,Symbol}) =
+    Symbol(c) in SCHEME_TOKENS ? _color_atts(SchemeColor(Symbol(c))) : ["rgb" => get_color(c)]
+_color_atts(c::Colors.Colorant) = ["rgb" => get_color(c)]
+_color_atts(c) = throw(XLSXError(
+    "Invalid color specified: $(repr(c)). Give a color name from Colors.jl, a hex color " *
+    "as RRGGBB or AARRGGBB, a theme color name such as `accent1`, a Colors.jl " *
+    "`Colorant` or a `SchemeColor`."))
+
+# A spreadsheet color element, e.g. `<color theme="4" tint="0.4"/>`, for any `CellColor`.
+_color_element(tag::AbstractString, c) =
+    XML.Element(tag; (Symbol(k) => v for (k, v) in _color_atts(c))...)
+
+# Canonical form of a color for comparing and hashing: its `<color>` attributes, so
+# "red", :red and colorant"red" are one color. A SchemeColor a cell cannot express
+# (it is still valid in a chart) is its own key rather than an error.
+_cell_color_key(c::SchemeColor) = isnothing(_theme_tint_or_nothing(c)) ? c : _color_atts(c)
+_cell_color_key(c) = _color_atts(c)
+
+_is_theme_color(c) = c isa SchemeColor ||
+    (c isa Union{AbstractString,Symbol} && Symbol(c) in SCHEME_TOKENS)
+
+# Throws if `c` is not a color in any form XLSX.jl accepts.
+_check_color(c) = (_cell_color_key(c); nothing)
 
 # This is Excel's 64-entry legacy indexed color palette
 const INDEXED_PALETTE = [

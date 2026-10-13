@@ -94,7 +94,7 @@ const VALID_BORDER_STYLES = (
 const VALID_DIAGONAL_DIRECTIONS = ("up", "down", "both")
 
 # Shared kwarg type alias for border sides
-const BorderKw = Union{Nothing,Vector{Pair{String,String}}}
+const BorderKw = Union{Nothing,Vector{<:Pair{String}}}
 
 const VALID_HORIZONTAL_ALIGNMENTS = ("left", "center", "right", "fill", "justify", "centerContinuous", "distributed")
 const VALID_VERTICAL_ALIGNMENTS   = ("top", "center", "bottom", "justify", "distributed")
@@ -320,8 +320,8 @@ function _merge_alignment_att(
     end
 end
 
-# Coerces a Vector{Pair{String,String}} kwarg to Dict{String,String}, or returns nothing.
-_to_border_dict(v) = isnothing(v) ? nothing : Dict{String,String}(p for p in v)
+# Coerces a border-side kwarg (a vector of `String => value` pairs) to a Dict, or returns nothing.
+_to_border_dict(v) = isnothing(v) ? nothing : Dict{String,Any}(p for p in v)
 
 # Validates that `outside` is not combined with any other border kwargs.
 function _check_outside_conflict(outside, left, right, top, bottom, diagonal, allsides)
@@ -333,7 +333,7 @@ end
 # Handles style, color, and (for diagonal) direction.
 function _merge_border_side(
     side::String,
-    new_val::Union{Nothing,Dict{String,String}},
+    new_val::Union{Nothing,AbstractDict{String}},
     old_atts::Union{Nothing,Dict{String,Union{Dict{String,String},Nothing}}}
 )::Dict{String,String}
 
@@ -354,7 +354,7 @@ function _merge_border_side(
 
     # Color: use new if provided, else inherit all non-style keys from old
     if haskey(new_val, "color")
-        result["rgb"] = get_color(new_val["color"])
+        merge!(result, Dict(_color_atts(new_val["color"])))
     elseif !isnothing(old_side)
         for (k, v) in old_side
             k != "style" && (result[k] = v)
@@ -1180,7 +1180,7 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
     under::Union{Nothing,String}=nothing,
     strike::Union{Nothing,Bool}=nothing,
     size::Union{Nothing,Int}=nothing,
-    color::Union{Nothing,String,Dict{String,String}}=nothing,
+    color::Union{Nothing,CellColor,Dict{String,String}}=nothing,
     name::Union{Nothing,String}=nothing
 ) :: Union{Nothing,Int64}
     # <rPr> elements in a sharedString override any font attributes in the cell Style.

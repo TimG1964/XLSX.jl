@@ -87,7 +87,7 @@ export
            getFormat, getFont, getBorder, getFill, getAlignment,
            DataTable, Table, TableStyleInfo, table, tables,
            getDefinedNames, getAllDefinedNames,
-           Workbook, XLSXError, 
+           Workbook, XLSXError, SchemeColor,
            CellErrorType, XL_NULL, XL_DIV0, XL_VALUE, XL_REF, 
            XL_NAME, XL_NUM, XL_NA, XL_SPILL
     """))
@@ -101,6 +101,7 @@ const ROW_CHUNKSIZE = 1_000           # number of rows to be processed in each t
 
 include("types.jl")
 include("xmlutil.jl")
+include("scheme-color.jl") # must load before xlsx-colors.jl
 include("xlsx-colors.jl") # must load before sst.jl and cellformat-helpers.jl
 include("formula.jl")
 include("cellref.jl")

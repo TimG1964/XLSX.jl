@@ -472,4 +472,58 @@ end
         @test XLSX.get_sst(xf) === XLSX.get_sst(XLSX.get_workbook(xf))
         SAVE_FILES && save_outfile(xf)
     end
+
+    @testset "rich text: every color form" begin
+        xf = XLSX.newxlsx()
+        s = xf[1]
+        sst(ref) = XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, ref).value)+1]
+
+        runs = [XLSX.RichTextRun("a", [:color => :coral]),
+                XLSX.RichTextRun("b", [:color => colorant"seagreen"]),
+                XLSX.RichTextRun("c", [:color => XLSX.SchemeColor(:accent1; lumMod = 60, lumOff = 40)]),
+                XLSX.RichTextRun("d", [:color => "accent2"]),
+                XLSX.RichTextRun("e", [:color => :tx1])]
+        s["A1"] = XLSX.RichTextString(runs)
+        @test sst("A1") == "<si><r><rPr><color rgb=\"FFFF7F50\"/></rPr><t>a</t></r>" *
+                           "<r><rPr><color rgb=\"FF2E8B57\"/></rPr><t>b</t></r>" *
+                           "<r><rPr><color theme=\"4\" tint=\"0.4\"/></rPr><t>c</t></r>" *
+                           "<r><rPr><color theme=\"5\"/></rPr><t>d</t></r>" *
+                           "<r><rPr><color theme=\"1\"/></rPr><t>e</t></r></si>"
+
+        # Reading resolves theme colors to RGB, as before
+        rts = XLSX.getRichTextString(s, "A1")
+        @test rts.runs[1].atts[:color] == "FFFF7F50"
+        @test rts.runs[3].atts[:color] isa String
+
+        # Equality and hashing treat every spelling of one color alike
+        r(c) = XLSX.RichTextRun("x", [:color => c])
+        @test r("red") == r(:red) == r(colorant"red") == r("FFFF0000")
+        @test hash(r("red")) == hash(r(colorant"red"))
+        @test r(:accent1) == r(XLSX.SchemeColor(:accent1)) == r("accent1")
+        @test hash(r(:accent1)) == hash(r(XLSX.SchemeColor(:accent1)))
+        @test r(:tx1) == r(:dk1)
+        @test r(:accent1) != r("red")
+
+        # A chart-only theme color (shade) is a valid run color: comparing it does not throw,
+        # but a cell cannot hold it
+        shaded = r(XLSX.SchemeColor(:accent1; shade = 50))
+        @test shaded == r(XLSX.SchemeColor(:accent1; shade = 50))
+        @test shaded != r(:accent1)
+        @test_throws XLSX.XLSXError (s["A2"] = XLSX.RichTextString([shaded, XLSX.RichTextRun("y")]))
+
+        # An invalid color is caught when the run is built
+        @test_throws XLSX.XLSXError XLSX.RichTextRun("x", [:color => "notacolor"])
+        @test_throws XLSX.XLSXError XLSX.RichTextRun("x", [:color => 42])
+
+        # A single run is applied to the whole cell with setFont
+        s["A3"] = XLSX.RichTextString([XLSX.RichTextRun("one", [:color => XLSX.SchemeColor(:accent3; lumMod = 75)])])
+        @test XLSX.getFont(s, "A3").font["color"] == Dict("theme" => "6", "tint" => "-0.25")
+
+        # In chart text, theme colors stay theme colors
+        @test XLSX.Charts._rich_run_props(Dict(:color => :accent1)).fill.fgcolor == XLSX.SchemeColor(:accent1)
+        @test XLSX.Charts._rich_run_props(Dict(:color => XLSX.SchemeColor(:accent1; shade = 50))).fill.fgcolor ==
+              XLSX.SchemeColor(:accent1; shade = 50)
+        @test XLSX.Charts._rich_run_props(Dict(:color => colorant"red")).fill.fgcolor == "FFFF0000"
+        SAVE_FILES && save_outfile(xf)
+    end
 end

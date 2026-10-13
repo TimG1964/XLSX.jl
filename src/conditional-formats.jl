@@ -595,8 +595,10 @@ Valid options are:
 - `redborder`       (dark red cell borders)
 
 Alternatively, you can define a custom format by using the keywords `format`, `font`,
-`border`, and `fill` which each take a vector of pairs of strings. The first string 
-is the name of the attribute to set and the second is the value to set it to.  
+`border`, and `fill` which each take a vector of pairs. The first element of each pair
+is the name of the attribute to set, as a string, and the second is the value to set it
+to, also a string except for colors, which may be given in any form described in
+[Specifying colors](@ref).
 Valid attributes for each keyword are:
 
 - `format` : `format`
@@ -1110,12 +1112,12 @@ Remaining keyword options provided are:
 - `min_val` - Defines the minimum value for the data bar scale. May be a number(as a string), a cell reference or a formula (if type="formula").
 - `max_type` - Defines how the maximum of the bar scale is defined ("num", "max", "percent", percentile", "formula" or "automatic")
 - `max_val` - Defines the maximum value for the data bar scale. May be a number(as a string), a cell reference or a formula (if type="formula").
-- `fill_col` - Defines the color of the fill for positive bars (8 digit hex or by name)
-- `border_col` - Defines the color of the border for positive bars (8 digit hex or by name)
-- `neg_fill_col` - Defines the color of the fill for negative bars (8 digit hex or by name)
-- `neg_border_col` - Defines the color of the border for negative bars (8 digit hex or by name)
+- `fill_col` - Defines the color of the fill for positive bars (any color form; see [Specifying colors](@ref))
+- `border_col` - Defines the color of the border for positive bars (any color form; see [Specifying colors](@ref))
+- `neg_fill_col` - Defines the color of the fill for negative bars (any color form; see [Specifying colors](@ref))
+- `neg_border_col` - Defines the color of the border for negative bars (any color form; see [Specifying colors](@ref))
 - `axis_pos` - Defines the position of the axis ("middle" or "none")
-- `axis_col` - Defines the color of the axis (8 digit hex or by name)
+- `axis_col` - Defines the color of the axis (any color form; see [Specifying colors](@ref))
 
 # Examples
 ```julia
@@ -1215,8 +1217,9 @@ The keywords `min_val`, `mid_val`, and `max_val` can be a number or cell referen
 of the related type keyword or, if the related type keyword is set to `formula`, may be a valid Excel formula that 
 calculates a number. Cell references used in a formula must be specified as absolute references.
 
-Colors can be specified using an 8-digit hex string (e.g. `FF0000FF` for blue) or any named 
-color from [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/).
+Colors can be a hex string (e.g. `FF0000FF` for blue), the name of a [Colors.jl](https://juliagraphics.github.io/Colors.jl/stable/namedcolors/)
+color as a String or Symbol, a Colors.jl `Colorant`, or a theme color (`"accent1"`, `:tx1` or a
+[`XLSX.SchemeColor`](@ref)). See [Specifying colors](@ref).
 
 # Examples
 
@@ -1419,10 +1422,10 @@ function setCfCellIs(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::
     value2::Union{Nothing,String}=nothing
     stopIfTrue::Union{Nothing,String}=nothing
     dxStyle::Union{Nothing,String}=nothing
-    format::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    font::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    border::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    fill::Union{Nothing,Vector{Pair{String,String}}}=nothing
+    format::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    font::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    border::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    fill::Union{Nothing,Vector{<:Pair{String}}}=nothing
 
     for (k, v) in allkws
         if k == :operator
@@ -1511,10 +1514,10 @@ function setCfContainsText(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}
     value::Union{Nothing,String}=nothing
     stopIfTrue::Union{Nothing,String}=nothing
     dxStyle::Union{Nothing,String}=nothing
-    format::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    font::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    border::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    fill::Union{Nothing,Vector{Pair{String,String}}}=nothing
+    format::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    font::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    border::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    fill::Union{Nothing,Vector{<:Pair{String}}}=nothing
     for (k, v) in allkws
         if k == :operator
             operator = String(v)
@@ -1606,10 +1609,10 @@ function setCfTop10(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::I
     value::Union{Nothing,String}="10"
     stopIfTrue::Union{Nothing,String}=nothing
     dxStyle::Union{Nothing,String}=nothing
-    format::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    font::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    border::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    fill::Union{Nothing,Vector{Pair{String,String}}}=nothing
+    format::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    font::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    border::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    fill::Union{Nothing,Vector{<:Pair{String}}}=nothing
     for (k, v) in allkws
         if k == :operator
             operator = v
@@ -1701,10 +1704,10 @@ function setCfAboveAverage(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}
     operator::Union{Nothing,String}="aboveAverage"
     stopIfTrue::Union{Nothing,String}=nothing
     dxStyle::Union{Nothing,String}=nothing
-    format::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    font::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    border::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    fill::Union{Nothing,Vector{Pair{String,String}}}=nothing
+    format::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    font::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    border::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    fill::Union{Nothing,Vector{<:Pair{String}}}=nothing
     for (k, v) in allkws
         if k == :operator
             operator = v
@@ -1794,10 +1797,10 @@ function setCfTimePeriod(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=(
     operator::Union{Nothing,String}="last7Days"
     stopIfTrue::Union{Nothing,String}=nothing
     dxStyle::Union{Nothing,String}=nothing
-    format::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    font::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    border::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    fill::Union{Nothing,Vector{Pair{String,String}}}=nothing
+    format::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    font::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    border::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    fill::Union{Nothing,Vector{<:Pair{String}}}=nothing
     for (k, v) in allkws
         if k == :operator
             operator = v
@@ -1875,10 +1878,10 @@ function setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::CfRange; allkws::Dic
     operator::Union{Nothing,String}="containsBlanks"
     stopIfTrue::Union{Nothing,String}=nothing
     dxStyle::Union{Nothing,String}=nothing
-    format::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    font::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    border::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    fill::Union{Nothing,Vector{Pair{String,String}}}=nothing
+    format::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    font::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    border::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    fill::Union{Nothing,Vector{<:Pair{String}}}=nothing
     for (k, v) in allkws
         if k == :operator
             operator = v
@@ -1961,10 +1964,10 @@ function setCfFormula(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
     formula::Union{Nothing,String}=nothing
     stopIfTrue::Union{Nothing,String}=nothing
     dxStyle::Union{Nothing,String}=nothing
-    format::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    font::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    border::Union{Nothing,Vector{Pair{String,String}}}=nothing
-    fill::Union{Nothing,Vector{Pair{String,String}}}=nothing
+    format::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    font::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    border::Union{Nothing,Vector{<:Pair{String}}}=nothing
+    fill::Union{Nothing,Vector{<:Pair{String}}}=nothing
     for (k, v) in allkws
         if k == :formula
             formula = v
@@ -2033,13 +2036,13 @@ function setCfColorScale(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=(
     colorscale::Union{Nothing,String}=nothing
     min_type::Union{Nothing,String}="min"
     min_val::Union{Nothing,String}=nothing
-    min_col::Union{Nothing,String}="FFF8696B"
+    min_col::Union{Nothing,CellColor}="FFF8696B"
     mid_type::Union{Nothing,String}=nothing
     mid_val::Union{Nothing,String}=nothing
-    mid_col::Union{Nothing,String}="FFFCFCFF"
+    mid_col::Union{Nothing,CellColor}="FFFCFCFF"
     max_type::Union{Nothing,String}="max"
     max_val::Union{Nothing,String}=nothing
-    max_col::Union{Nothing,String}="FFFFEB84"
+    max_col::Union{Nothing,CellColor}="FFFFEB84"
 
     for (k, v) in allkws
         if k == :colorscale
@@ -2114,9 +2117,9 @@ function setCfColorScale(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=(
                     XML.Element("$(pfx)cfvo"; type=max_type, val=max_val)
             )
 
-            push!(csc, XML.Element("$(pfx)color"; rgb=get_color(min_col)))
-            !isnothing(mid_type) && push!(csc, XML.Element("$(pfx)color"; rgb=get_color(mid_col)))
-            push!(csc, XML.Element("$(pfx)color"; rgb=get_color(max_col)))                
+            push!(csc, _color_element("$(pfx)color", min_col))
+            !isnothing(mid_type) && push!(csc, _color_element("$(pfx)color", mid_col))
+            push!(csc, _color_element("$(pfx)color", max_col))                
             push!(cfx, csc)
         else
             if !haskey(colorscales, colorscale)
@@ -2380,15 +2383,15 @@ function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
     sameNegBorders::Union{Nothing,String}=nothing
     direction::Union{Nothing,String}=nothing
     axis_pos::Union{Nothing,String}=nothing
-    axis_col::Union{Nothing,String}=nothing
+    axis_col::Union{Nothing,CellColor}=nothing
     min_type::Union{Nothing,String}=nothing
     min_val::Union{Nothing,String}=nothing
     max_type::Union{Nothing,String}=nothing
     max_val::Union{Nothing,String}=nothing
-    fill_col::Union{Nothing,String}=nothing
-    border_col::Union{Nothing,String}=nothing
-    neg_fill_col::Union{Nothing,String}=nothing
-    neg_border_col::Union{Nothing,String}=nothing
+    fill_col::Union{Nothing,CellColor}=nothing
+    border_col::Union{Nothing,CellColor}=nothing
+    neg_fill_col::Union{Nothing,CellColor}=nothing
+    neg_border_col::Union{Nothing,CellColor}=nothing
 
     for (k, v) in allkws
         if k == :databar
@@ -2467,7 +2470,7 @@ function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
             throw(XLSXError("Invalid dataBar option chosen: $databar. Valid options are: $(keys(databars))"))
         end
 
-        allkws::Dict{String,Union{String,Nothing}} = Dict(
+        allkws::Dict{String,Any} = Dict(
             "showVal" => showVal,
             "gradient" => gradient,
             "borders" => borders,
@@ -2516,7 +2519,7 @@ function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
                 XML.Element("$(pfx)cfvo"; type=mxt, val=allkws["max_val"])
         )
 
-        push!(cdb, XML.Element("$(pfx)color"; rgb=get_color(allkws["fill_col"])))
+        push!(cdb, _color_element("$(pfx)color", allkws["fill_col"]))
 
         push!(cfx, cdb)
 
@@ -2554,9 +2557,9 @@ function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
         if do_borders
             ext_db["border"] = "1"
             if haskey(allkws, "border_col") && !isnothing(allkws["border_col"])
-                push!(ext_db, XML.Element("x14:borderColor", rgb=get_color(allkws["border_col"])))
+                push!(ext_db, _color_element("x14:borderColor", allkws["border_col"]))
             else
-                push!(ext_db, XML.Element("x14:borderColor", rgb=get_color("FF638EC6"))) # Default color
+                push!(ext_db, _color_element("x14:borderColor", "FF638EC6")) # Default color
             end
         end
         if haskey(allkws, "direction")
@@ -2570,17 +2573,17 @@ function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
             ext_db["negativeBarColorSameAsPositive"] = "1"
         else
             if haskey(allkws, "neg_fill_col") && !isnothing(allkws["neg_fill_col"])
-                push!(ext_db, XML.Element("x14:negativeFillColor", rgb=get_color(allkws["neg_fill_col"])))
+                push!(ext_db, _color_element("x14:negativeFillColor", allkws["neg_fill_col"]))
             else
-                push!(ext_db, XML.Element("x14:negativeFillColor", rgb=get_color("FFFF0000"))) # Default color
+                push!(ext_db, _color_element("x14:negativeFillColor", "FFFF0000")) # Default color
             end
         end
         if do_borders && haskey(allkws, "sameNegBorders") && allkws["sameNegBorders"] == "false"
             ext_db["negativeBarBorderColorSameAsPositive"] = "0"
             if haskey(allkws, "neg_border_col") && !isnothing(allkws["neg_border_col"])
-                push!(ext_db, XML.Element("x14:negativeBorderColor", rgb=get_color(allkws["neg_border_col"])))
+                push!(ext_db, _color_element("x14:negativeBorderColor", allkws["neg_border_col"]))
             else
-                push!(ext_db, XML.Element("x14:negativeBorderColor", rgb=get_color("FFFF0000"))) # Default color
+                push!(ext_db, _color_element("x14:negativeBorderColor", "FFFF0000")) # Default color
             end
         end
         if haskey(allkws, "axis_pos")
@@ -2590,7 +2593,7 @@ function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=()):
                 ext_db["axisPosition"] = "middle"
             end
         end
-        haskey(allkws, "axis_col") && push!(ext_db, XML.Element("x14:axisColor", rgb=get_color(allkws["axis_col"])))
+        haskey(allkws, "axis_col") && push!(ext_db, _color_element("x14:axisColor", allkws["axis_col"]))
         push!(ext_cfx, ext_db)
 
         update_worksheet_cfx!(cfx, ws, rng)         # Add basic elements to worksheet xml file
@@ -2630,9 +2633,10 @@ it; set `gte=false` to place it in the band below, or give a vector of `Bool` wi
 entry per break.
 
 `colors` accepts either one color per band, or exactly two colors to interpolate
-between (in LCHab, so intermediate hues stay clean). Colors may be names or 8-digit
-`AARRGGBB` strings, as elsewhere in XLSX.jl. Note that Colors.jl's named colormaps are
-not accepted; for a red-amber-green ramp give the three colors explicitly.
+between (in LCHab, so intermediate hues stay clean). Colors may be given in any form
+described in [Specifying colors](@ref), but theme colors can only be used one per band,
+not interpolated between. Note that Colors.jl's named colormaps are not accepted; for a
+red-amber-green ramp give the three colors explicitly.
 
 `showVal` and `direction` are passed through to each band's rule unchanged. Bars are
 drawn with a solid fill rather than a gradient.

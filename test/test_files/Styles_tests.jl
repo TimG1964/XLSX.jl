@@ -2303,4 +2303,78 @@ writing a number into a cell carrying a date/time format.
         @test XLSX.get_colorant(:red) == XLSX.get_colorant("red")
         SAVE_FILES && save_outfile(xf)
     end
+
+    @testset "every color form in setFont, setFill and setBorder" begin
+        xf = XLSX.newxlsx()
+        sh = xf[1]
+        for r in 1:8, c in 1:3
+            sh[r, c] = "x"
+        end
+
+        # Font
+        XLSX.setFont(sh, "A1"; color = :coral)
+        XLSX.setFont(sh, "A2"; color = colorant"seagreen")
+        XLSX.setFont(sh, "A3"; color = RGBA(1, 0, 0, 0.5))
+        XLSX.setFont(sh, "A4"; color = XLSX.SchemeColor(:accent1; lumMod = 60, lumOff = 40))
+        XLSX.setFont(sh, "A5"; color = "accent2")
+        XLSX.setFont(sh, "A6"; color = :tx1)
+        XLSX.setUniformFont(sh, "A7:A8"; color = XLSX.SchemeColor(:accent3; lumMod = 75))
+        @test XLSX.getFont(sh, "A1").font["color"] == Dict("rgb" => "FFFF7F50")
+        @test XLSX.getFont(sh, "A2").font["color"] == Dict("rgb" => "FF2E8B57")
+        @test XLSX.getFont(sh, "A3").font["color"] == Dict("rgb" => "80FF0000")
+        @test XLSX.getFont(sh, "A4").font["color"] == Dict("theme" => "4", "tint" => "0.4")
+        @test XLSX.getFont(sh, "A5").font["color"] == Dict("theme" => "5")
+        @test XLSX.getFont(sh, "A6").font["color"] == Dict("theme" => "1")
+        @test XLSX.getFont(sh, "A8").font["color"] == Dict("theme" => "6", "tint" => "-0.25")
+
+        # A new color replaces a theme color completely, leaving no stale tint
+        XLSX.setFont(sh, "A4"; color = "red")
+        @test XLSX.getFont(sh, "A4").font["color"] == Dict("rgb" => "FFFF0000")
+
+        # Fill
+        XLSX.setFill(sh, "B1"; pattern = "solid", fgColor = :coral)
+        XLSX.setFill(sh, "B2"; pattern = "solid", fgColor = XLSX.SchemeColor(:accent1; lumMod = 75), bgColor = colorant"blue")
+        XLSX.setUniformFill(sh, "B3:B4"; pattern = "solid", fgColor = :accent6)
+        @test XLSX.getFill(sh, "B1").fill["patternFill"]["fgrgb"] == "FFFF7F50"
+        f2 = XLSX.getFill(sh, "B2").fill["patternFill"]
+        @test f2["fgtheme"] == "4" && f2["fgtint"] == "-0.25" && !haskey(f2, "fgrgb")
+        @test f2["bgrgb"] == "FF0000FF"
+        @test XLSX.getFill(sh, "B4").fill["patternFill"]["fgtheme"] == "9"
+
+        XLSX.setFill(sh, "B2"; fgColor = "yellow")    # replaces theme and tint
+        f2 = XLSX.getFill(sh, "B2").fill["patternFill"]
+        @test f2["fgrgb"] == "FFFFFF00" && !haskey(f2, "fgtheme") && !haskey(f2, "fgtint")
+
+        # Border
+        XLSX.setBorder(sh, "C1"; left = ["style" => "thin", "color" => :coral])
+        XLSX.setBorder(sh, "C2"; allsides = ["style" => "thick", "color" => XLSX.SchemeColor(:accent2)])
+        XLSX.setBorder(sh, "C3"; diagonal = ["style" => "thin", "color" => colorant"red", "direction" => "up"])
+        XLSX.setOutsideBorder(sh, "C5:C6"; outside = ["style" => "medium", "color" => :tx2])
+        XLSX.setUniformBorder(sh, "C7:C8"; top = ["style" => "thin", "color" => "accent4"])
+        @test XLSX.getBorder(sh, "C1").border["left"] == Dict("style" => "thin", "rgb" => "FFFF7F50")
+        @test XLSX.getBorder(sh, "C2").border["bottom"] == Dict("style" => "thick", "theme" => "5")
+        @test XLSX.getBorder(sh, "C3").border["diagonal"]["rgb"] == "FFFF0000"
+        @test XLSX.getBorder(sh, "C5").border["top"] == Dict("style" => "medium", "theme" => "3")
+        @test XLSX.getBorder(sh, "C8").border["top"] == Dict("style" => "thin", "theme" => "7")
+
+        XLSX.setBorder(sh, "C2"; bottom = ["color" => "red"])   # keeps style, replaces theme
+        @test XLSX.getBorder(sh, "C2").border["bottom"] == Dict("style" => "thick", "rgb" => "FFFF0000")
+
+        # Strings still work in a Vector{Pair{String,String}}, and bad values still error
+        XLSX.setBorder(sh, "C4"; right = ["style" => "thin", "color" => "FF00FF00"])
+        @test XLSX.getBorder(sh, "C4").border["right"] == Dict("style" => "thin", "rgb" => "FF00FF00")
+        @test_throws XLSX.XLSXError XLSX.setBorder(sh, "C4"; left = ["style" => :thin])
+        @test_throws XLSX.XLSXError XLSX.setBorder(sh, "C4"; left = ["style" => "thin", "color" => 42])
+        @test_throws XLSX.XLSXError XLSX.setFont(sh, "A1"; color = XLSX.SchemeColor(:accent1; shade = 50))
+        @test_throws XLSX.XLSXError XLSX.setFill(sh, "B1"; fgColor = "notacolor")
+
+        # The theme colors survive a save and reload
+        io = IOBuffer()
+        XLSX.writexlsx(io, xf)
+        xf2 = XLSX.readxlsx(seekstart(io))
+        @test XLSX.getFont(xf2["Sheet1"], "A8").font["color"] == Dict("theme" => "6", "tint" => "-0.25")
+        @test XLSX.getFill(xf2["Sheet1"], "B4").fill["patternFill"]["fgtheme"] == "9"
+        @test XLSX.getBorder(xf2["Sheet1"], "C8").border["top"] == Dict("style" => "thin", "theme" => "7")
+        SAVE_FILES && save_outfile(xf)
+    end
 end
