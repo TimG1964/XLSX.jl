@@ -266,6 +266,19 @@ function _normalise_cfvo_val(ws, val)
     end
     return uppercase_unquoted(val)
 end
+
+# Check one threshold (`cfvo`) of a color scale, data bar or icon set: its type must be
+# one of `types` (or, if `optional`, absent), and its value, unless the type is
+# `formula`, a fixed cell reference or a number. `name` is the keywords' prefix
+# (`min`, `mid`, ...), so errors name the keyword at fault.
+function _check_cfvo(name::AbstractString, type, val, types; optional::Bool=true)
+    (optional && isnothing(type)) || type in types ||
+        throw(XLSXError("Invalid $(name)_type: $type. Valid options are: $(join(types, ", "))."))
+    (!isnothing(type) && type == "formula") || isnothing(val) || is_valid_fixed_cellname(val) ||
+        is_valid_fixed_sheet_cellname(val) || !isnothing(tryparse(Float64, val)) ||
+        throw(XLSXError("Invalid $(name)_val: `$val`. Valid options (unless $(name)_type is `formula`) are a CellRef (e.g. `\$A\$1`) or a number."))
+    return nothing
+end
 #
 # ---- Formatting (styles) definitions for conditional formats
 #

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- `setConditionalFormat(...; :iconSet)` now rejects an invalid `mid_val` (one that is neither a number nor a fixed cell reference, unless `mid_type="formula"`), as it does every other threshold value; any `mid_val` was previously accepted. Errors for `mid2_type` and `mid2_val` now name those keywords rather than `mid_type` and `mid2_type`
+- `setConditionalFormat(...; :iconSet, iconset="Custom", reverse="true")` no longer reverses the caller's `icon_list` vector in place
 - Errors that said only "Something wrong here!" now say what is wrong, e.g. which part of a malformed file is unexpected. A file part that fails to parse now reports the parser's own error alongside the part's name, and failing to save back to a source `IO` says why. Interrupting (Ctrl-C) while a file is read or saved is no longer reported as a parse or save error
 - Rich-text cells now take `vertAlign` like any other font property: `setFont(...; vertAlign)` removes the runs' own superscript/subscript so the cell's shows, where it previously had no effect on those runs, and `setUniformFont(...; vertAlign)` no longer throws a `MethodError`
 - `setUniformStyle` over rich-text cells no longer throws when the first cell's font has `vertAlign`, a fractional size, or font details that Excel writes but XLSX.jl can't set (such as the font family and scheme)

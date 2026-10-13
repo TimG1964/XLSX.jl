@@ -2901,6 +2901,28 @@
         SAVE_FILES && save_outfile(xf)
     end
 
+    # Thresholds are checked by one helper; the icon set's own copies had drifted.
+    @testset "icon set thresholds are checked like every other" begin
+        xf = XLSX.newxlsx()
+        s = xf[1]
+        s["A1:A5"] = collect(1:5)
+        msg(f) = try f(); "" catch e; sprint(showerror, e) end
+
+        # `mid_val` was accepted whatever it held
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A5", :iconSet; iconset="4Arrows",
+            min_type="num", min_val="1", mid_type="num", mid_val="notanumber", max_type="num", max_val="5")
+        # `mid2_*` errors named the wrong keyword
+        @test occursin("mid2_type", msg(() -> XLSX.setConditionalFormat(s, "A1:A5", :iconSet; iconset="5Arrows", mid2_type="bogus")))
+        @test occursin("mid2_val", msg(() -> XLSX.setConditionalFormat(s, "A1:A5", :iconSet; iconset="5Arrows",
+            mid2_type="num", mid2_val="notanumber")))
+
+        # `reverse` reversed the caller's own `icon_list`
+        icons = [1, 2, 3]
+        XLSX.setConditionalFormat(s, "A1:A5", :iconSet; iconset="Custom", reverse="true",
+            min_type="num", min_val="1", max_type="num", max_val="5", icon_list=icons)
+        @test icons == [1, 2, 3]
+    end
+
     @testset "every setCf* setter accepts the same target forms" begin
         targets(f) = Set(Base.tuple_type_tail(m.sig) for m in methods(f))
         for f in (XLSX.setCfContainsText, XLSX.setCfTop10, XLSX.setCfAboveAverage, XLSX.setCfTimePeriod,
