@@ -2089,7 +2089,6 @@ function _removetotals!(t::Table)
     xf = get_xlsxfile(sheet)
     _require_writable(xf, "remove a totals row")
 
-#    t = table(sheet, name)
     t.has_totals_row || return t
 
     table_path = _table_part_path(sheet, name)
@@ -2226,10 +2225,8 @@ function _appendtable!(t::Table, data; check_empty::Bool=true, kw... )
     xf = get_xlsxfile(sheet)
     _require_writable(xf, "append to a table")
 
-#    t = table(sheet, name)
     ncols = length(t.columns)
     rows = _normalize_append_rows(data, t, name)
-#    rows = _normalize_append_rows(data, ncols, name)
     n = length(rows)
     n == 0 && return t
 

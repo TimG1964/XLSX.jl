@@ -126,10 +126,8 @@ function setCfContainsText(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}
         operator = "notContains"
         formula = "ISERROR(SEARCH(\"__txt__\",__CR__))"
     elseif operator == "beginsWith"
-        #        operator = "beginsWith"
         formula = "LEFT(__CR__,LEN(\"__txt__\"))=\"__txt__\""
     elseif operator == "endsWith"
-        #        operator = "endsWith"
         formula = "RIGHT(__CR__,LEN(\"__txt__\"))=\"__txt__\""
     else
         throw(XLSXError("Invalid operator: $type. Valid options are: `containsText`, `notContainsText`, `beginsWith`, `endsWith`."))

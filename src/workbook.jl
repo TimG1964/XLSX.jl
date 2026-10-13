@@ -106,7 +106,6 @@ function _print_sheet_table(io::IO, wb::Workbook)
     println(io, "-"^(21 + 1 + 13 + 1 + 13))
 
     for s in wb.sheets
-#        sheetname = length(s.name) > 20 ? first(s.name, 20) * "…" : s.name
         sheetname = truncate_len(s.name, 20)
         if s.dimension !== nothing
             rg = s.dimension

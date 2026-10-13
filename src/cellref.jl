@@ -599,7 +599,6 @@ function nc_bounds(r::NonContiguousRange)::CellRange # Smallest rectangualar `Ce
     return CellRange(CellRef(top, left), CellRef(bottom, right))
 end
 function Base.length(r::NonContiguousRange)::Int # Number of cells in `r`, eliminating duplicates.
-#    s = 0
     allcells= Vector{String}()
     for rng in r.rng
         if rng isa CellRef

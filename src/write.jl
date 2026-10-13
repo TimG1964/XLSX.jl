@@ -759,7 +759,6 @@ function update_workbook_xml!(xl::XLSXFile) # Need to update <sheets> and <defin
     end
 
     #update sheets
-#    doc = xmlroot(xl, "xl/workbook.xml")
 
     i, j = get_idces(wbdoc, "workbook", "sheets")
     unlink(wbdoc[i][j], ("sheets", "sheet"), pfx)
