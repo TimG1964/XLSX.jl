@@ -856,29 +856,36 @@ xlsx_encode(::Worksheet, val::Int64) = (CT_INT, reinterpret(UInt64, val))
 xlsx_encode(ws::Worksheet, val::Dates.Date) = (CT_DATE, reinterpret(UInt64, date_to_excel_value(val, isdate1904(get_xlsxfile(ws)))))
 xlsx_encode(ws::Worksheet, val::Dates.DateTime) = (CT_DATETIME, reinterpret(UInt64, datetime_to_excel_value(val, isdate1904(get_xlsxfile(ws)))))
 xlsx_encode(::Worksheet, val::Dates.Time) = (CT_TIME, reinterpret(UInt64, time_to_excel_value(val)))
-Base.setindex!(ws::Worksheet, v, row::Integer, col::Integer) = setdata!(ws, CellRef(row,col), v)
-Base.setindex!(ws::Worksheet, v, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}) = setdata!(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))), v)
-Base.setindex!(ws::Worksheet, v::AbstractVector, r::Union{Integer,UnitRange{<:Integer}}, c::UnitRange{T}) where {T<:Integer} = setdata!(ws, r, c, v)
-Base.setindex!(ws::Worksheet, v::AbstractVector, r::UnitRange{T}, c::Union{Integer,UnitRange{<:Integer}}) where {T<:Integer} = setdata!(ws, r, c, v)
+# `ws[ref] = v` and `ws[r, c] = v`. A vector is written along a row or column; any other
+# value goes in every cell addressed. Each has one entry point, the vector one more
+# specific, which then dispatches on the indices; typing the value and the indices on
+# the same methods made most vector forms ambiguous.
 Base.setindex!(ws::Worksheet, v::AbstractVector, ref; dim::Integer=2) = setdata!(ws, ref, v, dim)
-Base.setindex!(ws::Worksheet, v::AbstractVector, r, c; dim::Integer=2) = setdata!(ws, r, c, v, dim)
 Base.setindex!(ws::Worksheet, v, ref) = setdata!(ws, ref, v)
-Base.setindex!(ws::Worksheet, v, r, c) = setdata!(ws, r, c, v)
-function Base.setindex!(ws::Worksheet, v, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}})
+Base.setindex!(ws::Worksheet, v::AbstractVector, r, c; dim::Integer=2) = _setindex_vector!(ws, v, r, c, dim)
+Base.setindex!(ws::Worksheet, v, r, c) = _setindex_value!(ws, v, r, c)
+
+const _RowsOrCols = Union{Integer,UnitRange{<:Integer}}
+const _SparseRowsOrCols = Union{Vector{Int},StepRange{<:Integer}}
+
+# A vector from an anchor cell (along `dim`, as for `ws[ref] = v`), or along one row
+# or column.
+_setindex_vector!(ws::Worksheet, v, r::Integer, c::Integer, dim) = setdata!(ws, r, c, v, dim)
+_setindex_vector!(ws::Worksheet, v, r::Integer, c::Union{Colon,UnitRange{<:Integer}}, dim) = setdata!(ws, r, c, v)
+_setindex_vector!(ws::Worksheet, v, r::Union{Colon,UnitRange{<:Integer}}, c::Integer, dim) = setdata!(ws, r, c, v)
+_setindex_vector!(ws::Worksheet, v, r, c, dim) = throw(XLSXError(
+    "Can't write a vector to `ws[$r, $c]`: a vector is written along one row or column " *
+    "(`ws[row, :]`, `ws[:, col]`, `ws[row, c1:c2]`, `ws[r1:r2, col]`) or across from one cell (`ws[row, col]`)."))
+
+# Any other value, in every cell addressed.
+_setindex_value!(ws::Worksheet, v, row::Integer, col::Integer) = setdata!(ws, CellRef(row, col), v)
+_setindex_value!(ws::Worksheet, v, row::_RowsOrCols, col::_RowsOrCols) = setdata!(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))), v)
+function _setindex_value!(ws::Worksheet, v, row::Union{_RowsOrCols,_SparseRowsOrCols}, col::Union{_RowsOrCols,_SparseRowsOrCols})
     for a in row, b in col
         setdata!(ws, CellRef(a, b), v)
     end
 end
-function Base.setindex!(ws::Worksheet, v, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}})
-    for a in row, b in col
-        setdata!(ws, CellRef(a, b), v)
-    end
-end
-function Base.setindex!(ws::Worksheet, v, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}})
-    for a in row, b in col
-        setdata!(ws, CellRef(a, b), v)
-    end
-end
+_setindex_value!(ws::Worksheet, v, r, c) = setdata!(ws, r, c, v)
 
 function setdata!(ws::Worksheet, ref::CellRef, val::CellFormula)
     c = getcell(ws, ref)
@@ -1097,8 +1104,6 @@ function setdata!(sheet::Worksheet, ref::CellRef, data::AbstractVector, dim::Int
     end
 end
 
-Base.setindex!(ws::Worksheet, v::AbstractVector, r::Union{Colon,UnitRange{T}}, c) where {T<:Integer} = setdata!(ws, r, c, v)
-Base.setindex!(ws::Worksheet, v::AbstractVector, r, c::Union{Colon,UnitRange{T}}) where {T<:Integer} = setdata!(ws, r, c, v)
 setdata!(sheet::Worksheet, ::Colon, col::Integer, data::AbstractVector) = setdata!(sheet, 1, col, data, 1)
 setdata!(sheet::Worksheet, row::Integer, ::Colon, data::AbstractVector) = setdata!(sheet, row, 1, data, 2)
 

@@ -155,7 +155,6 @@ export
     setAxisTitleText, setAxisTitleTextProp, setAxisTickLabelPos, 
     setAxisScaling, setAxisMin, setAxisMax, setAxisOrientation, 
     setAxisCrosses, setAxisCrossesAt, setAxisNumberFormatCode, setAxisNumberFormatLinked, 
-    getGapWidth, setGapWidth, getOverlap, setOverlap,
     setAxisMajorTickMark, setAxisMinorTickMark, setAxisGridlines, setAxisTextProp, setAxisLine,
     setAxisMajorUnit, setAxisMinorUnit,
     # Data points, markers and labels

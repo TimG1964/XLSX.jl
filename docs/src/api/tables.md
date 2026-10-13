@@ -8,6 +8,7 @@ XLSX.gettransposedtable
 XLSX.readtransposedtable
 XLSX.writetable!
 XLSX.Table
+XLSX.TableStyleInfo
 XLSX.tables
 XLSX.table
 XLSX.addtable!

@@ -1,5 +1,5 @@
 define_cf_address_methods(:setCfIconSet)
-function setCfIconSet(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
+function setCfIconSet(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
     kw = _iconset_keywords(allkws)
 
     _check_cf_range(ws, rng)

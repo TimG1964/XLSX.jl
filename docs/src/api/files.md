@@ -5,6 +5,7 @@
 ```@docs
 XLSX.XLSXFile
 XLSX.XLSXFile(::Any)
+XLSX.Workbook
 XLSX.readxlsx
 XLSX.readto
 XLSX.openxlsx

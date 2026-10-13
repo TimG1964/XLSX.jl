@@ -320,6 +320,31 @@ struct RowRange <: ContiguousCellRange
     end
 end
 
+"""
+    SheetCellRef(ref::AbstractString)
+    SheetCellRef(sheet::AbstractString, cellref::CellRef)
+
+A cell on a named sheet: a [`CellRef`](@ref) together with the name of its sheet, in
+the fields `sheet` and `cellref`.
+
+`SheetCellRef("Sheet1!B2")` refers to cell `B2` on sheet `Sheet1`. A sheet name
+containing spaces or other special characters is quoted, as in Excel:
+`SheetCellRef("'Sheet 1'!B2")`, which `SheetCellRef("Sheet 1", CellRef("B2"))` also
+gives.
+
+# Examples
+
+```julia
+julia> r = XLSX.SheetCellRef("Sheet1!B2")
+Sheet1!B2
+
+julia> r.sheet
+"Sheet1"
+
+julia> r.cellref
+B2
+```
+"""
 struct SheetCellRef
     sheet::String
     cellref::CellRef
@@ -410,6 +435,17 @@ Base.isempty(wc::WorksheetCache) = isempty(wc.rows_in_cache)
 
 
 # Excel Tables
+"""
+    TableStyleInfo
+
+The style of an Excel [`XLSX.Table`](@ref), as the table's `style` field holds it: the
+table style's `name` (e.g. `"TableStyleMedium2"`, or `nothing` for none) and whether
+the first column, last column, row stripes and column stripes are emphasized, in the
+fields `show_first_column`, `show_last_column`, `show_row_stripes` and
+`show_column_stripes`.
+
+Give a new table a style with the `style` keyword of [`XLSX.addtable!`](@ref).
+"""
 struct TableStyleInfo
     name::Union{String,Nothing}
     show_first_column::Bool
@@ -671,6 +707,13 @@ end
 # The `xl/workbook.xml` will need to be updated using the Workbook_names and 
 # worksheet_names from here when a workbook is saved in case any new defined 
 # names have been created.
+"""
+    Workbook
+
+The workbook part of an [`XLSXFile`](@ref): its sheets, shared strings, styles and
+defined names, parsed from `xl/workbook.xml`. An `XLSXFile` holds one, as
+`xf.workbook`. Its fields are internal: work through the file and its worksheets.
+"""
 mutable struct Workbook
     package::MSOfficePackage
     sheets::Vector{Worksheet}

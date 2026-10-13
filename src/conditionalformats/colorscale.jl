@@ -1,5 +1,5 @@
 define_cf_address_methods(:setCfColorScale)
-function setCfColorScale(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
+function setCfColorScale(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
     colorscale::Union{Nothing,String}=nothing
     min_type::Union{Nothing,String}="min"
     min_val::Union{Nothing,String}=nothing

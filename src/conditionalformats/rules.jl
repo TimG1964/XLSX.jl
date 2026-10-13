@@ -1,5 +1,5 @@
 define_cf_address_methods(:setCfCellIs)
-function setCfCellIs(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
+function setCfCellIs(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
 
     operator::Union{Nothing,String}="greaterThan"
     value::Union{Nothing,String}=nothing
@@ -74,7 +74,7 @@ function setCfCellIs(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::
 end
 
 define_cf_address_methods(:setCfContainsText)
-function setCfContainsText(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
+function setCfContainsText(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
 
     operator::Union{Nothing,String}="containsText"
     value::Union{Nothing,String}=nothing
@@ -149,7 +149,7 @@ function setCfContainsText(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}
 end
 
 define_cf_address_methods(:setCfTop10)
-function setCfTop10(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
+function setCfTop10(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
 
     operator::Union{Nothing,String}="topN"
     value::Union{Nothing,String}="10"
@@ -227,7 +227,7 @@ function setCfTop10(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::I
 end
 
 define_cf_address_methods(:setCfAboveAverage)
-function setCfAboveAverage(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
+function setCfAboveAverage(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
 
     operator::Union{Nothing,String}="aboveAverage"
     stopIfTrue::Union{Nothing,String}=nothing
@@ -302,7 +302,7 @@ function setCfAboveAverage(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}
 end
 
 define_cf_address_methods(:setCfTimePeriod)
-function setCfTimePeriod(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
+function setCfTimePeriod(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
 
     operator::Union{Nothing,String}="last7Days"
     stopIfTrue::Union{Nothing,String}=nothing
@@ -365,7 +365,7 @@ function setCfTimePeriod(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=(
 end
 
 define_cf_address_methods(:setCfContainsBlankErrorUniqDup)
-function setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
+function setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
 
     operator::Union{Nothing,String}="containsBlanks"
     stopIfTrue::Union{Nothing,String}=nothing
@@ -412,6 +412,8 @@ function setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::CfRange; allkws::Dic
         formula = ""
     elseif operator == "duplicateValues"
         formula = ""
+    else
+        throw(XLSXError("Invalid operator: $operator. Valid options are: containsBlanks, notContainsBlanks, containsErrors, notContainsErrors, uniqueValues, duplicateValues."))
     end
     formula = replace(formula, "__CR__" => string(_cf_anchor(rng)))
 
@@ -433,7 +435,7 @@ function setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::CfRange; allkws::Dic
 end
 
 define_cf_address_methods(:setCfFormula)
-function setCfFormula(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
+function setCfFormula(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
 
     formula::Union{Nothing,String}=nothing
     stopIfTrue::Union{Nothing,String}=nothing

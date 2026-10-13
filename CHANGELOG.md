@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- `ws[row, col] = v` with a vector `v` now writes it across from that cell, as `ws["B2"] = v` does. Most other two-index vector assignments, such as `ws[1:2, 1:2] = v` or `ws[1, [1, 3]] = v`, threw an "ambiguous" `MethodError`; they now throw an `XLSXError` saying a vector is written along one row or column, or across from one cell
+- Removed `getGapWidth`, `setGapWidth`, `getOverlap` and `setOverlap` from the `XLSX.Charts` export list. They were never defined: the functions are `getGroupGapWidth`, `setGroupGapWidth`, `getGroupOverlap` and `setGroupOverlap`
+- `SheetCellRef`, `TableStyleInfo` and `Workbook` now have docstrings
 - `setConditionalFormat(...; :iconSet)` now rejects an invalid `mid_val` (one that is neither a number nor a fixed cell reference, unless `mid_type="formula"`), as it does every other threshold value; any `mid_val` was previously accepted. Errors for `mid2_type` and `mid2_val` now name those keywords rather than `mid_type` and `mid2_type`
 - `setConditionalFormat(...; :iconSet, iconset="Custom", reverse="true")` no longer reverses the caller's `icon_list` vector in place
 - Errors that said only "Something wrong here!" now say what is wrong, e.g. which part of a malformed file is unexpected. A file part that fails to parse now reports the parser's own error alongside the part's name, and failing to save back to a source `IO` says why. Interrupting (Ctrl-C) while a file is read or saved is no longer reported as a parse or save error

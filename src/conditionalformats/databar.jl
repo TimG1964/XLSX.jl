@@ -1,5 +1,5 @@
 define_cf_address_methods(:setCfDataBar)
-function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=())::Int
+function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
     kw = _databar_keywords(allkws)
 
     _check_cf_range(ws, rng)

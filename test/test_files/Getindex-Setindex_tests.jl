@@ -337,6 +337,25 @@ end
         SAVE_FILES && save_outfile(xf)
     end
 
+    # A vector is written along one row or column, or across from one cell; anywhere
+    # else it was an "ambiguous" MethodError, and is now an XLSXError saying so.
+    @testset "vector values in ws[r, c] = v" begin
+        xf = XLSX.newxlsx()
+        sh = xf[1]
+        sh["A1:D4"] = ""
+        sh[2, 2] = [1, 2, 3]                       # across from B2, as sh["B2"] = v
+        @test [sh[2, c] for c in 2:4] == [1, 2, 3]
+        sh[3, 1:2] = [5, 6]
+        @test [sh[3, 1], sh[3, 2]] == [5, 6]
+        sh[:, 4] = [7, 8]
+        @test [sh[1, 4], sh[2, 4]] == [7, 8]
+        for (r, c) in ((1:2, 1:2), (1, [1, 3]), ([1, 3], 2), (1:2, :), (:, :), (1:2:3, 1:2:3))
+            @test_throws XLSX.XLSXError (sh[r, c] = [1, 2])
+        end
+        sh[1, [1, 3]] = 9                          # any other value still fills each cell
+        @test sh[1, 1] == 9 && sh[1, 3] == 9
+    end
+
     # The cache keeps written rows unsorted until something needs their order. Reading a
     # range must sort them first: it once binary-searched them unsorted, returning wrong
     # values or writing out of bounds (and crashing Julia's GC later).
