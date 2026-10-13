@@ -32,6 +32,21 @@ Writable XLSXFile instances are opened with `XLSX.open_xlsx_template` method.
 =#
 is_writable(xl::XLSXFile) = xl.is_writable
 
+# Preconditions shared by every function that edits a file or reads its cell cache.
+# `x` is an `XLSXFile`, `Workbook` or `Worksheet`; `action` completes "Cannot ...",
+# e.g. `_require_writable(ws, "set font")`.
+function _require_writable(x, action::AbstractString)
+    is_writable(get_xlsxfile(x)) ||
+        throw(XLSXError("Cannot $action: the XLSXFile is not writable. Open it with `mode=\"rw\"`."))
+    return nothing
+end
+
+function _require_cache(x, action::AbstractString)
+    is_cache_enabled(get_xlsxfile(x)) ||
+        throw(XLSXError("Cannot $action: the XLSXFile's cell cache is not enabled. Open it with `enable_cache=true`."))
+    return nothing
+end
+
 """
     sheetnames(xl::XLSXFile)
     sheetnames(wb::Workbook)

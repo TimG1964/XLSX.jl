@@ -1535,7 +1535,7 @@ function addtable!(sheet::Worksheet, ref::CellRange;
                     has_totals_row::Bool=false)::Table
 
     xf = get_xlsxfile(sheet)
-    !is_writable(xf) && throw(XLSXError("XLSXFile instance is not writable. Open Excel file with `mode=\"rw\"` instead"))
+    _require_writable(xf, "add a table")
     wb = get_workbook(sheet)
 
     # --- name uniqueness (unchanged) ---
@@ -1707,7 +1707,7 @@ function _deletetable!(t::Table)
     sheet = t.sheet
     name = t.name
     xf = get_xlsxfile(sheet)
-    !is_writable(xf) && throw(XLSXError("XLSXFile instance is not writable. Open Excel file with `mode=\"rw\"` instead"))
+    _require_writable(xf, "delete a table")
 
     t=table(sheet, name)  # throws KeyError if not found — fail fast
 
@@ -1882,7 +1882,7 @@ function _settotals!(t::Table, settings::Pair...)
     sheet = t.sheet
     name = t.name
     xf = get_xlsxfile(sheet)
-    !is_writable(xf) && throw(XLSXError("XLSXFile instance is not writable. Open Excel file with `mode=\"rw\"` instead"))
+    _require_writable(xf, "set a totals row")
 
     sheet = t.sheet 
     name = t.name
@@ -2074,7 +2074,7 @@ function _removetotals!(t::Table)
     sheet = t.sheet
     name = t.name
     xf = get_xlsxfile(sheet)
-    !is_writable(xf) && throw(XLSXError("XLSXFile instance is not writable. Open Excel file with `mode=\"rw\"` instead"))
+    _require_writable(xf, "remove a totals row")
 
 #    t = table(sheet, name)
     t.has_totals_row || return t
@@ -2211,7 +2211,7 @@ function _appendtable!(t::Table, data; check_empty::Bool=true, kw... )
     sheet = t.sheet 
     name = t.name
     xf = get_xlsxfile(sheet)
-    !is_writable(xf) && throw(XLSXError("XLSXFile instance is not writable. Open Excel file with `mode=\"rw\"` instead"))
+    _require_writable(xf, "append to a table")
 
 #    t = table(sheet, name)
     ncols = length(t.columns)
@@ -2302,12 +2302,9 @@ function _normalize_append_rows(data, t::Table, name::AbstractString)
         else
             # Some Tables.jl sources expose names via columnnames without
             # implementing schema (e.g. anything relying on the column-access
-            # interface alone). Try that before giving up and going positional.
-            try
-                Tables.columnnames(Tables.columns(data))
-            catch
-                nothing
-            end
+            # interface alone). Ask a source that offers column access before
+            # giving up and going positional; asking any other is an error.
+            Tables.columnaccess(data) ? Tables.columnnames(Tables.columns(data)) : nothing
         end
         if isnothing(src_names)
             # Unnamed Tables.jl source — fall back to positional matching.

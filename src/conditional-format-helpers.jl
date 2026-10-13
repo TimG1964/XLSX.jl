@@ -47,12 +47,7 @@ function process_cf_vecint(f::Function, ws::Worksheet, row, col; kw...)
 end
 function process_cf_veccolon(f::Function, ws::Worksheet, row, col; kw...)
     dim = get_dimension(ws)
-    @assert isnothing(row) || isnothing(col) "Something wrong here!"
-    if isnothing(col)
-        col = dim.start.column_number:dim.stop.column_number
-    else
-        row = dim.start.row_number:dim.stop.row_number
-    end
+    row, col = _expand_colon(dim, row, col)
     isInDim(ws, dim, row, col)
     cells = [CellRef(a, b) for a in row for b in col]
     return f(ws, NonContiguousRange(ws.name, _compress(cells)); kw...)

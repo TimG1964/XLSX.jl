@@ -28,7 +28,8 @@ function Relationship(wb::Workbook, e::XML.Node)::Relationship
 end
 
 function parse_relationship_target(prefix::String, target::String)::String
-    isempty(prefix) || isempty(target) && throw(XLSXError("Something wrong here!"))
+    (isempty(prefix) || isempty(target)) &&
+        throw(XLSXError("Internal error: can't resolve a relationship target with an empty prefix (`$prefix`) or target (`$target`)."))
     if target[begin] == '/'
         sizeof(target) <= 1 && throw(XLSXError("Incomplete target path $target."))
         return target[nextind(target, begin):end]

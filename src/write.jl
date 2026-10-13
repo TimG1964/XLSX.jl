@@ -41,8 +41,11 @@ function _reset_io_for_save!(io::IO)
     try
         seekstart(io)
         truncate(io, 0)
-    catch
-        throw(XLSXError("Can't save back to the source `IO`: it must be writable and seekable. Use `writexlsx` to write to another `IO` or file."))
+    catch e
+        # The error depends on the kind of `IO` (read-only buffer or file, pipe, ...);
+        # all mean it can't be rewritten. Let an interrupt through, and keep the cause.
+        e isa InterruptException && rethrow()
+        throw(XLSXError("Can't save back to the source `IO`: it must be writable and seekable. Use `writexlsx` to write to another `IO` or file. ($(sprint(showerror, e)))"))
     end
     return io
 end
@@ -77,7 +80,7 @@ See also [`savexlsx`](@ref).
 """
 function writexlsx(output_source::Union{AbstractString,IO}, xf::XLSXFile; overwrite::Bool=false)
 
-    !is_writable(xf) && throw(XLSXError("XLSXFile instance is not writable."))
+    _require_writable(xf, "write the workbook")
     if !all(values(xf.files))
         throw(XLSXError("Some internal files were not loaded into memory for unknown reasons."))
     end
@@ -220,7 +223,7 @@ function add_node_formula!(io, f::ReferencedFormula, pfx)
 end
 
 function find_all_nodes(givenpath::String, doc::XML.Node)::Vector{XML.Node}
-    XML.nodetype(doc) != XML.Document && throw(XLSXError("Something wrong here!"))
+    XML.nodetype(doc) != XML.Document && throw(XLSXError("Internal error: `find_all_nodes` needs an XML Document, got a $(XML.nodetype(doc)) node."))
     found_nodes = Vector{XML.Node}()
     for xp in get_node_paths(doc)
         if xp.path == givenpath
@@ -231,7 +234,7 @@ function find_all_nodes(givenpath::String, doc::XML.Node)::Vector{XML.Node}
 end
 
 function get_node_paths(node::XML.Node)
-    XML.nodetype(node) != XML.Document && throw(XLSXError("Something wrong here!"))
+    XML.nodetype(node) != XML.Document && throw(XLSXError("Internal error: `get_node_paths` needs an XML Document, got a $(XML.nodetype(node)) node."))
     default_ns = get_default_namespace(xml_root_element(node))
     xpaths = Vector{XPathInfo}()
     get_node_paths!(xpaths, node, default_ns, "")
@@ -799,7 +802,7 @@ function add_cell_to_worksheet_dimension!(ws::Worksheet, cell::Cell)
 end
 
 function setdata!(ws::Worksheet, cell::Cell)
-    !is_writable(get_xlsxfile(ws)) && throw(XLSXError("XLSXFile instance is not writable. Open Excel file with `mode=\"rw\"` instead"))
+    _require_writable(ws, "write to a cell")
     ws.cache === nothing && throw(XLSXError("Can't write data to a Worksheet with empty cache."))
     cache = ws.cache
 
@@ -1350,7 +1353,7 @@ function renamesheet!(ws::Worksheet, name::AbstractString)
     end
 
     xf = get_xlsxfile(ws)
-    !is_writable(xf) && throw(XLSXError("XLSXFile instance is not writable."))
+    _require_writable(xf, "rename a sheet")
     name ∈ sheetnames(xf) && throw(XLSXError("Sheetname $name is already in use."))
 
     # updates XML
@@ -1479,7 +1482,7 @@ function copysheet!(ws::Worksheet, name::AbstractString="")::Worksheet
     wb = get_workbook(ws)
     is_chartsheet(wb, ws.name) && throw(XLSXError("Cannot copy a Chartsheet."))
     xl = get_xlsxfile(ws)
-    !is_writable(get_xlsxfile(ws)) && throw(XLSXError("XLSXFile instance is not writable."))
+    _require_writable(ws, "copy a sheet")
     dim = get_dimension(ws)
 
     # make sure cache and XML are consistent
@@ -1682,7 +1685,7 @@ function _register_sheet!(wb::Workbook, xdoc::XML.Node, name::AbstractString;
                           default_name::String, pfx::String = "",
                           dim::CellRange = CellRange("A1:A1"))::Worksheet
     xf = get_xlsxfile(wb)
-    !is_writable(xf) && throw(XLSXError("XLSXFile instance is not writable."))
+    _require_writable(xf, "add a sheet")
 
     new_name = name
     existing = sheetnames(wb)
@@ -1757,7 +1760,8 @@ end
 add_override!(wb::Workbook, part::String, content::String) = add_override!(get_xlsxfile(wb), part, content)
 function add_override!(xf::XLSXFile, part::String, content::String)
     ctype_root = xml_root_element(xmlroot(xf, "[Content_Types].xml"))
-    XML.tag(ctype_root) != "Types" && throw(XLSXError("Something wrong here!"))
+    XML.tag(ctype_root) != "Types" &&
+        throw(XLSXError("Malformed `[Content_Types].xml`: its root element is `$(XML.tag(ctype_root))`, not `Types`."))
     override_node = XML.Element("Override";
         PartName=part,
         ContentType=content

@@ -1030,7 +1030,8 @@ end
 @inline internal_xml_file_exists(xl::XLSXFile, filename::String)::Bool = haskey(xl.files, filename)
 
 function internal_xml_file_add!(xl::XLSXFile, filename::String)
-    !(endswith(filename, ".xml") || endswith(filename, ".rels")) && throw(XLSXError("Something wrong here!"))
+    !(endswith(filename, ".xml") || endswith(filename, ".rels")) &&
+        throw(XLSXError("Internal error: `$filename` is not an XML part (`.xml` or `.rels`), so can't be registered as one."))
     xl.files[filename] = false
     nothing
 end
@@ -1281,7 +1282,8 @@ function process_file(zip_io::ZipArchives.ZipReader, filename::String, split_she
             bin = bytes
         end
     catch err
-        throw(XLSXError("Failed to parse internal XML file `$filename`"))
+        err isa InterruptException && rethrow()
+        throw(XLSXError("Failed to parse internal XML file `$filename`: $(sprint(showerror, err))"))
     end
 
     return ReadFile(node, raw, bin, filename)

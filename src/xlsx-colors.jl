@@ -5,7 +5,8 @@ function get_colorant(color_string::String)
         c = parse(Colors.Colorant, color_string)
         rgb = Colors.hex(c, :RRGGBB)
         return "FF" * rgb
-    catch
+    catch e
+        e isa ArgumentError || rethrow()   # Colors.jl's error for an unrecognised color
         return nothing
     end
 end
@@ -291,21 +292,14 @@ function resolveColor(wb::Workbook, atts::AbstractDict; prefix::AbstractString="
 
     elseif haskey(atts, prefix*"theme")
         rawtheme = strip(atts[prefix*"theme"])
-        theme = try
-            parse(Int, rawtheme)
-        catch
-            throw(XLSXError("Invalid theme index: $rawtheme"))
-        end
+        theme = tryparse(Int, rawtheme)
+        isnothing(theme) && throw(XLSXError("Invalid theme index: $rawtheme"))
 
         tint = 0.0
         if haskey(atts, prefix*"tint")
             rawt = strip(atts[prefix*"tint"])
-            tint = try
-                parse(Float64, rawt)
-            catch
-                throw(XLSXError("Invalid tint value: $rawt. Must be between -1.0 and 1.0."))
-            end
-            if !isfinite(tint)
+            tint = tryparse(Float64, rawt)
+            if isnothing(tint) || !isfinite(tint)
                 throw(XLSXError("Invalid tint value: $rawt. Must be between -1.0 and 1.0."))
             end
             tint = clamp(tint, -1.0, 1.0)
@@ -315,11 +309,8 @@ function resolveColor(wb::Workbook, atts::AbstractDict; prefix::AbstractString="
 
     elseif haskey(atts, prefix*"indexed")
         rawidx = strip(atts[prefix*"indexed"])
-        idx = try
-            parse(Int, rawidx)
-        catch
-            throw(XLSXError("Invalid indexed color index: $rawidx. Must be an integer between 0 and $(length(INDEXED_PALETTE)-1)."))
-        end
+        idx = tryparse(Int, rawidx)
+        isnothing(idx) && throw(XLSXError("Invalid indexed color index: $rawidx. Must be an integer between 0 and $(length(INDEXED_PALETTE)-1)."))
         if idx < 0 || idx >= length(INDEXED_PALETTE)
             throw(XLSXError("Invalid indexed color index: $idx. Must be between 0 and $(length(INDEXED_PALETTE)-1)."))
         end

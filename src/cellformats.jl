@@ -93,7 +93,7 @@ function setFont(sh::Worksheet, cellref::CellRef;
     name::Union{Nothing,String}=nothing,
     vertAlign::Union{Nothing,String}=nothing
 )::Int
-    get_xlsxfile(sh).is_writable || throw(XLSXError("Cannot set font because XLSXFile is not writable."))
+    _require_writable(sh, "set font")
 
     # Validate before any work
     !isnothing(under) && under ∉ ("none", "single", "double") &&
@@ -155,7 +155,7 @@ function setFont(sh::Worksheet, cellref::CellRef;
     cell.style = newstyle
 
     if cell.datatype == CT_STRING
-        v = update_sharedString_font(sh, cell; bold, italic, under, strike, size, color, name)
+        v = update_sharedString_font(sh, cell; bold, italic, under, strike, size, color, name, vertAlign)
         cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v))
     end
 
@@ -279,9 +279,7 @@ getFont(ws::Worksheet, row::Integer, col::Integer) = getFont(ws, CellRef(row, co
 getDefaultFont(ws::Worksheet) = getFont(get_workbook(ws), styles_cell_xf(get_workbook(ws), 0))
 function getFont(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellFont}
 
-    if !get_xlsxfile(wb).use_cache_for_sheet_data
-        throw(XLSXError("Cannot get font because cache is not enabled."))
-    end
+    _require_cache(wb, "get font")
 
     if haskey(cell_style, "fontId")
         fontid = cell_style["fontId"]
@@ -381,9 +379,7 @@ getBorder(ws::Worksheet, row::Integer, col::Integer) = getBorder(ws, CellRef(row
 getDefaultBorders(ws::Worksheet) = getBorder(get_workbook(ws), styles_cell_xf(get_workbook(ws), 0))
 function getBorder(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellBorder}
 
-    if !get_xlsxfile(wb).use_cache_for_sheet_data
-        throw(XLSXError("Cannot get border because cache is not enabled."))
-    end
+    _require_cache(wb, "get border")
 
     if haskey(cell_style, "borderId")
         borderid = cell_style["borderId"]
@@ -576,8 +572,7 @@ function setBorder(sh::Worksheet, cellref::CellRef;
     top::BorderKw=nothing, bottom::BorderKw=nothing,
     diagonal::BorderKw=nothing
 )::Int
-    get_xlsxfile(sh).is_writable ||
-        throw(XLSXError("Cannot set borders because XLSXFile is not writable."))
+    _require_writable(sh, "set borders")
 
     # allsides expands to all four sides, then recurses — early return
     if !isnothing(allsides)
@@ -739,8 +734,7 @@ setOutsideBorder(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::U
 function setOutsideBorder(ws::Worksheet, rng::CellRange;
     outside::BorderKw=nothing
 )::Int
-    get_xlsxfile(ws).is_writable ||
-        throw(XLSXError("Cannot set borders because XLSXFile is not writable."))
+    _require_writable(ws, "set borders")
 
     topLeft     = rng.start
     topRight    = CellRef(rng.start.row_number, rng.stop.column_number)
@@ -846,8 +840,7 @@ getFill(ws::Worksheet, row::Integer, col::Integer) = getFill(ws, CellRef(row, co
 getDefaultFill(ws::Worksheet) = getFill(get_workbook(ws), styles_cell_xf(get_workbook(ws), 0))
 
 function getFill(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellFill}
-    get_xlsxfile(wb).use_cache_for_sheet_data ||
-        throw(XLSXError("Cannot get fill because cache is not enabled."))
+    _require_cache(wb, "get fill")
 
     haskey(cell_style, "fillId") || return nothing
 
@@ -943,7 +936,7 @@ function setFill(sh::Worksheet, cellref::CellRef;
     fgColor::Union{Nothing,CellColor}=nothing,
     bgColor::Union{Nothing,CellColor}=nothing,
 )::Int
-    get_xlsxfile(sh).is_writable || throw(XLSXError("Cannot set fill because XLSXFile is not writable."))
+    _require_writable(sh, "set fill")
 
     # Validate before any work
     !isnothing(pattern) && pattern ∉ VALID_FILL_PATTERNS &&
@@ -1111,8 +1104,7 @@ getAlignment(ws::Worksheet, cr::String) = process_get_cellname(getAlignment, ws,
 getAlignment(ws::Worksheet, row::Integer, col::Integer) = getAlignment(ws, CellRef(row, col))
 
 function getAlignment(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellAlignment}
-    get_xlsxfile(wb).use_cache_for_sheet_data ||
-        throw(XLSXError("Cannot get alignment because cache is not enabled."))
+    _require_cache(wb, "get alignment")
 
     # alignment is an optional child element of the cell xf node
     children = filter(n -> XML.nodetype(n) == XML.Element, XML.children(cell_style))
@@ -1195,8 +1187,7 @@ function setAlignment(sh::Worksheet, cellref::CellRef;
     indent::Union{Nothing,Int}=nothing,
     rotation::Union{Nothing,Int}=nothing
 )::Int
-    get_xlsxfile(sh).is_writable ||
-        throw(XLSXError("Cannot set alignment because XLSXFile is not writable."))
+    _require_writable(sh, "set alignment")
 
     # Validate before any work
     !isnothing(horizontal) && horizontal ∉ VALID_HORIZONTAL_ALIGNMENTS &&
@@ -1336,8 +1327,7 @@ getFormat(ws::Worksheet, cr::String) = process_get_cellname(getFormat, ws, cr)
 getFormat(ws::Worksheet, row::Integer, col::Integer) = getFormat(ws, CellRef(row, col))
 
 function getFormat(wb::Workbook, cell_style::XML.Node)::Union{Nothing,CellFormat}
-    get_xlsxfile(wb).use_cache_for_sheet_data ||
-        throw(XLSXError("Cannot get number formats because cache is not enabled."))
+    _require_cache(wb, "get number formats")
 
     haskey(cell_style, "numFmtId") || return nothing
 
@@ -1461,8 +1451,7 @@ define_percell_address_methods(:setFormat)
 function setFormat(sh::Worksheet, cellref::CellRef;
     format::Union{Nothing,String}=nothing
 )::Int
-    get_xlsxfile(sh).is_writable ||
-        throw(XLSXError("Cannot set number format because XLSXFile is not writable."))
+    _require_writable(sh, "set number format")
 
     wb   = get_workbook(sh)
     cell = getcell(sh, cellref)
@@ -1603,8 +1592,7 @@ setUniformStyle(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col
 setUniformStyle(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}) = setUniformStyle(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))))
 
 function setUniformStyle(ws::Worksheet, rng::CellRange)::Union{Nothing,Int}
-    get_xlsxfile(ws).is_writable ||
-        throw(XLSXError("Cannot set styles because XLSXFile is not writable."))
+    _require_writable(ws, "set styles")
 
     newid::Union{Nothing,Int} = nothing
     is_first   = true
@@ -1695,8 +1683,7 @@ setColumnWidth(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col:
 setColumnWidth(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint(setColumnWidth, ws, row, col; kw...)
 setColumnWidth(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setColumnWidth(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
 function setColumnWidth(ws::Worksheet, rng::CellRange; width::Union{Nothing,Real}=nothing)::Int
-    get_xlsxfile(ws).is_writable ||
-        throw(XLSXError("Cannot set column widths: `XLSXFile` is not writable."))
+    _require_writable(ws, "set column widths")
 
     # Validate and resolve width before any XML work
     isnothing(width) && return 0
@@ -1794,9 +1781,7 @@ getColumnWidth(ws::Worksheet, row::Integer, col::Integer) = getColumnWidth(ws, C
 function getColumnWidth(ws::Worksheet, cellref::CellRef)::Union{Nothing,Real}
     # May be better if column width were part of ws.cache?
 
-    if !get_xlsxfile(ws).is_writable
-        throw(XLSXError("Cannot get column width: `XLSXFile` is not writable."))
-    end
+    _require_writable(ws, "get column width")
 
     d = get_dimension(ws)
     if cellref ∉ d
@@ -1897,9 +1882,7 @@ setRowHeight(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::U
 setRowHeight(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = setRowHeight(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
 function setRowHeight(ws::Worksheet, rng::CellRange; height::Union{Nothing,Real}=nothing)::Int
 
-    if !get_xlsxfile(ws).is_writable
-        throw(XLSXError("Cannot get row height: `XLSXFile` is not writable."))
-    end
+    _require_writable(ws, "get row height")
 
     top = rng.start.row_number
     bottom = rng.stop.row_number
@@ -1966,9 +1949,7 @@ getRowHeight(ws::Worksheet, cr::String) = process_get_cellname(getRowHeight, ws,
 getRowHeight(ws::Worksheet, row::Integer, col::Integer) = getRowHeight(ws, CellRef(row, col))
 function getRowHeight(ws::Worksheet, cellref::CellRef)::Union{Nothing,Real}
 
-    if !get_xlsxfile(ws).is_writable
-        throw(XLSXError("Cannot get row height: `XLSXFile` is not writable."))
-    end
+    _require_writable(ws, "get row height")
 
     d = get_dimension(ws)
     if cellref ∉ d
@@ -2019,13 +2000,9 @@ julia> XLSX.getMergedCells(s)
 function getMergedCells(ws::Worksheet)::Union{Vector{CellRange},Nothing}
     # May be better if merged cells were part of ws.cache?
 
-    if !get_xlsxfile(ws).is_writable
-        throw(XLSXError("Cannot get merged cells: `XLSXFile` is not writable."))
-    end
+    _require_writable(ws, "get merged cells")
 
-    if !get_xlsxfile(ws).use_cache_for_sheet_data
-        throw(XLSXError("Cannot get merged cells because cache is not enabled."))
-    end
+    _require_cache(ws, "get merged cells")
 
     sheetdoc = xmlroot(get_workbook(ws), ws.relationship_id)
     i, j = get_idces(sheetdoc, "worksheet", "mergeCells")
@@ -2087,13 +2064,9 @@ isMergedCell(ws::Worksheet, cr::String; kw...)::Bool = process_get_cellname(isMe
 isMergedCell(ws::Worksheet, row::Integer, col::Integer; kw...) = isMergedCell(ws, CellRef(row, col); kw...)
 function isMergedCell(ws::Worksheet, cellref::CellRef; mergedCells::Union{Vector{CellRange},Nothing,Missing}=missing)::Bool
 
-    if !get_xlsxfile(ws).is_writable
-        throw(XLSXError("Cannot get merged cells: `XLSXFile` is not writable."))
-    end
+    _require_writable(ws, "get merged cells")
 
-    if !get_xlsxfile(ws).use_cache_for_sheet_data
-        throw(XLSXError("Cannot get merged cells because cache is not enabled."))
-    end
+    _require_cache(ws, "get merged cells")
 
     if ismissing(mergedCells) # Get mergedCells if missing
         mergedCells = getMergedCells(ws)
@@ -2155,13 +2128,9 @@ getMergedBaseCell(ws::Worksheet, cr::String; kw...) = process_get_cellname(getMe
 getMergedBaseCell(ws::Worksheet, row::Integer, col::Integer; kw...) = getMergedBaseCell(ws, CellRef(row, col); kw...)
 function getMergedBaseCell(ws::Worksheet, cellref::CellRef; mergedCells::Union{Vector{CellRange},Nothing,Missing}=missing)
 
-    if !get_xlsxfile(ws).is_writable
-        throw(XLSXError("Cannot get merged cells: `XLSXFile` is not writable."))
-    end
+    _require_writable(ws, "get merged cells")
 
-    if !get_xlsxfile(ws).use_cache_for_sheet_data
-        throw(XLSXError("Cannot get merged cells because cache is not enabled."))
-    end
+    _require_cache(ws, "get merged cells")
 
     if ismissing(mergedCells) # Get mergedCells if missing
         mergedCells = getMergedCells(ws)
@@ -2234,13 +2203,9 @@ function mergeCells(ws::Worksheet, cr::CellRange)
 
     length(cr) == 1 && throw(XLSXError("Cannot merge a single cell: `$cr`"))
 
-    if !get_xlsxfile(ws).is_writable
-        throw(XLSXError("Cannot merge cells: `XLSXFile` is not writable."))
-    end
+    _require_writable(ws, "merge cells")
 
-    if !get_xlsxfile(ws).use_cache_for_sheet_data
-        throw(XLSXError("Cannot get merged cells because cache is not enabled."))
-    end
+    _require_cache(ws, "get merged cells")
 
     for t in tables(ws) # Excel drops a table that overlaps a merged range
         if intersects(cr, t.ref)
@@ -2372,13 +2337,9 @@ function _remove_merged_cells(ws::Worksheet, cr::Union{CellRange,Nothing})::Int
 
     xf = get_xlsxfile(ws)
 
-    if !xf.is_writable
-        throw(XLSXError("Cannot remove merged cells: `XLSXFile` is not writable."))
-    end
+    _require_writable(xf, "remove merged cells")
 
-    if !xf.use_cache_for_sheet_data
-        throw(XLSXError("Cannot remove merged cells because cache is not enabled."))
-    end
+    _require_cache(xf, "remove merged cells")
 
     if !isnothing(cr) && !issubset(cr, get_dimension(ws))
         throw(XLSXError("Range `$cr` goes outside worksheet dimension."))

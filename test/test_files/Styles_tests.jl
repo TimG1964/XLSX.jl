@@ -2399,6 +2399,21 @@ writing a number into a cell carrying a date/time format.
         end
     end
 
+    @testset "setUniformAlignment on a vector of columns aligns only those columns" begin
+        horizontal(s, c) = (a = XLSX.getAlignment(s, c); isnothing(a) ? nothing : get(something(a.alignment["alignment"], Dict()), "horizontal", nothing))
+        f = XLSX.newxlsx()
+        s = f[1]
+        s["A1:C3"] = 1
+        XLSX.setUniformAlignment(s, :, [2]; horizontal="right")
+        @test [horizontal(s, c) for c in ("A1", "B1", "C1", "B3")] == [nothing, "right", nothing, "right"]
+
+        f = XLSX.newxlsx()
+        s = f[1]
+        s["A1:C3"] = 1
+        XLSX.setUniformAlignment(s, [2], :; horizontal="right")
+        @test [horizontal(s, c) for c in ("A1", "A2", "C2", "A3")] == [nothing, "right", "right", nothing]
+    end
+
     @testset "setters in a family accept the same target forms" begin
         targets(f) = Set(Base.tuple_type_tail(m.sig) for m in methods(f))
         for f in (XLSX.setFill, XLSX.setAlignment, XLSX.setFormat, XLSX.setBorder)

@@ -64,7 +64,8 @@ end
 
 function Worksheet(xf::XLSXFile, sheet_element::XML.Node)
     wb = get_workbook(xf)
-    localname(sheet_element) !=   "sheet" && throw(XLSXError("Something wrong here!"))
+    localname(sheet_element) != "sheet" &&
+        throw(XLSXError("Malformed workbook: an entry in `<sheets>` is `$(localname(sheet_element))`, not `sheet`."))
     a = XML.attributes(sheet_element)
     sheetId = parse(Int, a["sheetId"])
     relationship_id = a["r:id"]

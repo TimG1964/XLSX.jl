@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- Errors that said only "Something wrong here!" now say what is wrong, e.g. which part of a malformed file is unexpected. A file part that fails to parse now reports the parser's own error alongside the part's name, and failing to save back to a source `IO` says why. Interrupting (Ctrl-C) while a file is read or saved is no longer reported as a parse or save error
+- Rich-text cells now take `vertAlign` like any other font property: `setFont(...; vertAlign)` removes the runs' own superscript/subscript so the cell's shows, where it previously had no effect on those runs, and `setUniformFont(...; vertAlign)` no longer throws a `MethodError`
+- `setUniformStyle` over rich-text cells no longer throws when the first cell's font has `vertAlign`, a fractional size, or font details that Excel writes but XLSX.jl can't set (such as the font family and scheme)
+- Formatting a rich-text cell keeps the run properties XLSX.jl can't set but which files written by Excel or other tools may contain (such as a character set or outline). Every run property not on a fixed list was previously dropped
+- `setUniformAlignment(ws, :, cols)` with a vector or step range of columns aligned every column of the sheet rather than only `cols`
+- Errors for an operation on a file that isn't writable, or whose cell cache isn't enabled, now share one wording that names the operation and says how to open the file (`mode="rw"` or `enable_cache=true`)
 - `copysheet!` gives the copy its own cells. The copy shared the original's cell cache, so a value, format, row height or formula set on either sheet also appeared in the other, and a formula set on the copy left the original with a cell that `getFormula` couldn't read
 - `getdata` (and `ws[range]`) over a range of a writable sheet whose rows were written out of order could return wrong values, or write outside its result and corrupt memory, crashing Julia later in the garbage collector. The written rows are now sorted before the range is read
 - `setUniformFont`, `setUniformBorder`, `setUniformFill`, `setUniformAlignment` and `setUniformFormat` given a whole row or column as `(ws, row, :)` or `(ws, :, col)` now apply one attribute to every cell, as the other target forms do. They previously applied the per-cell setter (`setFont` etc.), so cells that started with different formatting kept their differences

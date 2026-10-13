@@ -16,7 +16,8 @@ function create_new_sst(wb::Workbook, sst::SharedStringTable)
 
         # add Content Type <Override ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml" PartName="/xl/sharedStrings.xml"/>
         ctype_root = xml_root_element(xmlroot(get_xlsxfile(wb), "[Content_Types].xml"))
-        XML.tag(ctype_root) != "Types" && throw(XLSXError("Something wrong here!"))
+        XML.tag(ctype_root) != "Types" &&
+            throw(XLSXError("Malformed `[Content_Types].xml`: its root element is `$(XML.tag(ctype_root))`, not `Types`."))
         override_node = XML.Element("Override";
             ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",
             PartName = "/xl/sharedStrings.xml"

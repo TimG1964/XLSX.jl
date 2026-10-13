@@ -485,7 +485,8 @@ function getConditionalExtFormats(ws::Worksheet, allcfnodes::Vector{XML.Node})::
     allcfs = Vector{Pair{CfKey,NamedTuple{(:type, :priority),Tuple{String,Int64}}}}()
     for cf in allcfnodes
         let t, p, r, rule = false, ref = false
-            @assert localname(cf) == "conditionalFormatting" "Something wrong here"
+            localname(cf) == "conditionalFormatting" ||
+                throw(XLSXError("Malformed worksheet `$(ws.name)`: its x14 conditional formats contain a `$(localname(cf))` element, not `conditionalFormatting`."))
             # Children may be interleaved with whitespace text nodes from the
             # writer's indentation, so locate `xm:sqref` by name rather than
             # assuming it is the last child.

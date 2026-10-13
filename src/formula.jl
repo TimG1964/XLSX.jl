@@ -683,7 +683,7 @@ function get_external_workbook_path(xf::XLSXFile, id::Int)
     isnothing(i) && throw(XLSXError("Malformed external reference in workbook. Missing externalLink node."))
     isnothing(j) && throw(XLSXError("Malformed external reference in workbook. Missing externalBook node."))
     k, l = get_idces(extXml[i], "externalBook", "externalBookPr")
-    k == j || throw(XLSXError("Something wrong here!"))
+    k == j || throw(XLSXError("Internal error: two lookups of the externalBook node in `$rel` disagree ($j and $k)."))
 
     # find the file name, searching in order:
     # 1. externalBook filename attribute
@@ -706,7 +706,7 @@ function get_external_workbook_path(xf::XLSXFile, id::Int)
     k, l = get_idces(extXml[i], "externalBook", "xxl21:alternateUrls")
     if !isnothing(l)
         atts = XML.attributes(extXml[i][k][l][1]) # prefer the first alternateUrls r:id if multiple
-        haskey(atts, "r:id") || throw(XLSXError("Something wrong here!"))
+        haskey(atts, "r:id") || throw(XLSXError("Malformed external reference in `$rel`: an alternateUrls entry has no `r:id`."))
         target = external_link_target(xf, rel, atts["r:id"])
         isnothing(target) || return target
     end
@@ -715,7 +715,6 @@ function get_external_workbook_path(xf::XLSXFile, id::Int)
 end
 
 function get_formula_from_cache(ws::Worksheet, ref::CellRef)
-    #    get_xlsxfile(ws).is_writable || throw(XLSXError("Workbook is not writable - cannot get formulae!"))
     wb = get_workbook(ws)
     return wb.formulas[SheetCellRef(combine_sheet_ref(ws, ref))]
 end
@@ -884,9 +883,7 @@ function setFormula(ws::Worksheet, rng::CellRange; val::AbstractString, raw::Boo
 
     xf = get_xlsxfile(ws)
 
-    if xf.is_writable == false
-        throw(XLSXError("Cannot set formula because because XLSXFile is not writable."))
-    end
+    _require_writable(xf, "set formula")
 
     is_array = is_array_formula(val)
 
@@ -940,9 +937,7 @@ function setFormula(ws::Worksheet, cellref::CellRef; val::AbstractString, raw::B
 
     xf = get_xlsxfile(ws)
 
-    if xf.is_writable == false
-        throw(XLSXError("Cannot set formula because because XLSXFile is not writable."))
-    end
+    _require_writable(xf, "set formula")
 
     c = getcell(ws, cellref)
 
@@ -1011,9 +1006,7 @@ getFormula(xl::XLSXFile, sheetcell::String; kw...) = process_get_sheetcell(getFo
 getFormula(ws::Worksheet, row::Integer, col::Integer; kw...) = getFormula(ws, CellRef(row, col); kw...)
 function getFormula(ws::Worksheet, cellref::CellRef; get_external_refs::Bool=false)
     xf = get_xlsxfile(ws)
-    if !xf.use_cache_for_sheet_data
-        throw(XLSXError("Cannot get formula because cache is not enabled."))
-    end
+    _require_cache(xf, "get formula")
     cell = getcell(ws, cellref)
     (isa(cell, EmptyCell) || !cell.formula) && return nothing
     f = get_formula_from_cache(ws, cellref)

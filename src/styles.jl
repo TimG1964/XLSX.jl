@@ -246,7 +246,7 @@ end
 styles_is_datetime(wb::Workbook, fmt::CellDataFormat) = styles_is_datetime(wb, Int(fmt.id))
 
 function styles_is_datetime(wb::Workbook, index::AbstractString)
-    isempty(index) && throw(XLSXError("Something wrong here!"))
+    isempty(index) && throw(XLSXError("Internal error: empty style index given to `styles_is_datetime`."))
     styles_is_datetime(wb, parse(Int, index))
 end
 
@@ -284,7 +284,7 @@ function styles_is_float(wb::Workbook, index::Integer)::Bool
 end
 
 function styles_is_float(wb::Workbook, index::AbstractString)
-    isempty(index) && throw(XLSXError("Something wrong here!"))
+    isempty(index) && throw(XLSXError("Internal error: empty style index given to `styles_is_float`."))
     styles_is_float(wb, parse(Int, index))
 end
 

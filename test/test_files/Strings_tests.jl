@@ -211,6 +211,56 @@ end
         SAVE_FILES && save_outfile(xf)
     end
 
+    # A run's own properties override the cell font, so a font change removes the ones
+    # it sets from every run. `vertAlign` was missed, and a uniform style threw on it.
+    @testset "every font property reaches the runs of rich text" begin
+        function rich_sheet()
+            xf = XLSX.newxlsx()
+            sh = xf[1]
+            sh["A1"] = XLSX.RichTextString([XLSX.RichTextRun("ab", [:bold => true]),
+                                            XLSX.RichTextRun("cd", [:italic => true, :vertAlign => "subscript"])])
+            sh["A2"] = XLSX.RichTextString([XLSX.RichTextRun("ef", [:bold => true]),
+                                            XLSX.RichTextRun("gh", [:vertAlign => "subscript"])])
+            return xf, sh
+        end
+        run_atts(sh, ref) = [r.atts for r in XLSX.getRichTextString(sh, ref).runs]
+
+        xf, sh = rich_sheet()
+        XLSX.setFont(sh, "A1"; vertAlign="superscript")
+        @test run_atts(sh, "A1") == [Dict(:bold => true), Dict(:italic => true)]
+        @test XLSX.getFont(sh, "A1").font["vertAlign"] == Dict("val" => "superscript")
+
+        xf, sh = rich_sheet()
+        XLSX.setUniformFont(sh, "A1:A2"; vertAlign="superscript")
+        @test run_atts(sh, "A1") == [Dict(:bold => true), Dict(:italic => true)]
+        @test run_atts(sh, "A2")[2] === nothing || isempty(run_atts(sh, "A2")[2])
+
+        xf, sh = rich_sheet()
+        XLSX.setFont(sh, "A1"; vertAlign="superscript")
+        XLSX.setUniformStyle(sh, "A1:A2")
+        @test XLSX.getFont(sh, "A2").font["vertAlign"] == Dict("val" => "superscript")
+        @test all(a -> isnothing(a) || !haskey(a, :vertAlign), run_atts(sh, "A2"))
+
+        # A font size Excel wrote as a fraction is a tag like any other.
+        xf, sh = rich_sheet()
+        cell = XLSX.getcell(sh, "A1")
+        font = XLSX.CellFont(0, Dict{String,Union{Dict{String,String},Nothing}}("sz" => Dict("val" => "10.5")), "1")
+        @test XLSX.update_sharedString_font(sh, cell, font) isa Integer
+
+        # Run properties the new font doesn't set are kept, including ones XLSX.jl
+        # doesn't otherwise read, such as `charset` and `outline`.
+        xf, sh = rich_sheet()
+        wb = XLSX.get_workbook(sh)
+        si = "<si><r><rPr><b/><charset val=\"0\"/></rPr><t>ab</t></r><r><rPr><i/><outline/></rPr><t>cd</t></r></si>"
+        cell = XLSX.getcell(sh, "A1")
+        cell.value = reinterpret(UInt64, Int64(XLSX.add_formatted_string!(wb, si)))
+        XLSX.setFont(sh, "A1"; bold=true)
+        s = XLSX.get_sst(wb).shared_strings[reinterpret(Int64, XLSX.getcell(sh, "A1").value) + 1]
+        @test occursin("charset", s) && occursin("outline", s) && occursin("<i", s)
+        @test !occursin("<b/>", s)
+        SAVE_FILES && save_outfile(xf)
+    end
+
     @static if VERSION >= v"1.11-"
         @testset "styledStrings" begin
             f=XLSX.newxlsx()

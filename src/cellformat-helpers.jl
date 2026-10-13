@@ -696,31 +696,20 @@ end
 #
 # - Used for indexing `setAttribute` family of functions
 #
-function process_colon(f::Function, ws::Worksheet, row, col; kw...)
-    dim = get_dimension(ws)
-    @assert isnothing(row) || isnothing(col) "Something wrong here!"
-    if isnothing(row) && isnothing(col)
-        return f(ws, dim; kw...)
-    elseif isnothing(col)
-        rng = CellRange(CellRef(first(row), dim.start.column_number), CellRef(last(row), dim.stop.column_number))
-    else
-        rng = CellRange(CellRef(dim.start.row_number, first(col)), CellRef(dim.stop.row_number, last(col)))
-#    else
-#        throw(XLSXError("Something wrong here!"))
-    end
+# In a `(row, col)` target, `nothing` stands for `:`. Expand it to the full extent of
+# the sheet's dimension `dim`. A target with neither a colon is not a colon form,
+# so has no method.
+_expand_colon(dim::CellRange, row, ::Nothing) = (row, dim.start.column_number:dim.stop.column_number)
+_expand_colon(dim::CellRange, ::Nothing, col) = (dim.start.row_number:dim.stop.row_number, col)
+_expand_colon(dim::CellRange, ::Nothing, ::Nothing) = (dim.start.row_number:dim.stop.row_number, dim.start.column_number:dim.stop.column_number)
 
-    return f(ws, rng; kw...)
+function process_colon(f::Function, ws::Worksheet, row, col; kw...)
+    row, col = _expand_colon(get_dimension(ws), row, col)
+    return f(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
 end
 function process_veccolon(f::Function, ws::Worksheet, row, col; kw...)
     dim = get_dimension(ws)
-    @assert isnothing(row) || isnothing(col) "Something wrong here!"
-    if isnothing(col)
-        col = dim.start.column_number:dim.stop.column_number
-    else
-        row = dim.start.row_number:dim.stop.row_number
-#    else
-#        throw(XLSXError("Something wrong here!"))
-    end
+    row, col = _expand_colon(dim, row, col)
     isInDim(ws, dim, row, col)
     if length(row) == 1 && length(col) == 1
         single = true
@@ -789,7 +778,7 @@ function process_uniform_core(f::Function, ws::Worksheet, allXfNodes::Vector{XML
 end
 
 function process_uniform_attribute(f::Function, ws::Worksheet, rng::CellRange, atts::Vector{String}; kw...)
-    get_xlsxfile(ws).use_cache_for_sheet_data || throw(XLSXError("Cannot set uniform attributes because cache is not enabled."))
+    _require_cache(ws, "set uniform attributes")
     allXfNodes = get_cellXfs_nodes(get_workbook(ws))
     newid, first = nothing, true
     isInDim(ws, get_dimension(ws), rng)
@@ -814,7 +803,6 @@ function process_uniform_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguo
 
     newid, first = nothing, true
     for r in ncrng.rng
-        @assert r isa CellRef || r isa CellRange "Something wrong here"
         if r isa CellRef
             cell = getcell(ws, r)
             if cell isa EmptyCell
@@ -834,11 +822,9 @@ function process_uniform_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguo
 end
 
 function process_uniform_veccolon(f::Function, ws::Worksheet, row, col, atts::Vector{String}; kw...)
-    @assert isnothing(row) || isnothing(col) "Something wrong here!"
     allXfNodes = get_cellXfs_nodes(get_workbook(ws))
     dim = get_dimension(ws)
-    isnothing(col) ? (col = dim.start.column_number:dim.stop.column_number) :
-                     (row = dim.start.row_number:dim.stop.row_number)
+    row, col = _expand_colon(dim, row, col)
     isInDim(ws, dim, row, col)
     newid, first = nothing, true
     for a in row, b in col
@@ -908,7 +894,6 @@ function process_uniform_ncranges(ws::Worksheet, ncrng::NonContiguousRange)
             first = true
             firstFont=nothing
             for r in ncrng.rng
-                @assert r isa CellRef || r isa CellRange "Something wrong here"
                 if r isa CellRef
                     if getcell(ws, r) isa EmptyCell
                         single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
@@ -919,8 +904,6 @@ function process_uniform_ncranges(ws::Worksheet, ncrng::NonContiguousRange)
                     for c in r
                         newid, first, firstFont = process_uniform_core(ws, c, newid, first, firstFont)
                     end
-#                else
-#                    throw(XLSXError("Something wrong here!"))
                 end
             end
             if first
@@ -932,31 +915,10 @@ function process_uniform_ncranges(ws::Worksheet, ncrng::NonContiguousRange)
         throw(XLSXError("Non-contiguous range $ncrng is out of bounds. Worksheet `$(ws.name)` only has dimension `$dim`."))
     end
 end
-function process_colon(ws::Worksheet, row, col)
-    dim = get_dimension(ws)
-    @assert isnothing(row) || isnothing(col) "Something wrong here!"
-    if isnothing(row) && isnothing(col)
-        return setUniformStyle(ws, dim)
-    elseif isnothing(col)
-        rng = CellRange(CellRef(first(row), dim.start.column_number), CellRef(last(row), dim.stop.column_number))
-    else
-        rng = CellRange(CellRef(dim.start.row_number, first(col)), CellRef(dim.stop.row_number, last(col)))
-#    else
-#        throw(XLSXError("Something wrong here!"))
-    end
-
-    return setUniformStyle(ws, rng)
-end
+process_colon(ws::Worksheet, row, col) = process_colon(setUniformStyle, ws, row, col)
 function process_uniform_veccolon(ws::Worksheet, row, col)
     dim = get_dimension(ws)
-    @assert isnothing(row) || isnothing(col) "Something wrong here!"
-    if isnothing(col)
-        col = dim.start.column_number:dim.stop.column_number
-    else
-        row = dim.start.row_number:dim.stop.row_number
-#    else
-#        throw(XLSXError("Something wrong here!"))
-    end
+    row, col = _expand_colon(dim, row, col)
     isInDim(ws, dim, row, col)
     let newid::Union{Int,Nothing}, first::Bool
         newid = nothing
@@ -1020,9 +982,7 @@ function process_uniform_core(f::Function, ws::Worksheet, allXfNodes::Vector{XML
     return newid, first, alignment_node
 end
 function process_uniform_attribute(f::Function, ws::Worksheet, rng::CellRange; kw...)
-    if !get_xlsxfile(ws).use_cache_for_sheet_data
-        throw(XLSXError("Cannot set uniform attributes because cache is not enabled."))
-    end
+    _require_cache(ws, "set uniform attributes")
 allXfNodes = get_cellXfs_nodes(get_workbook(ws))
     let newid::Union{Int,Nothing}, first::Bool, alignment_node::Union{XML.Node,Nothing}
         newid = nothing
@@ -1060,11 +1020,6 @@ function process_uniform_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguo
             first = true
             alignment_node = nothing
             for r in ncrng.rng
-                @assert r isa CellRef || r isa CellRange "Something wrong here"
-                if r isa CellRef && getcell(ws, r) isa EmptyCell
-                    single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
-                    continue
-                end
                 if r isa CellRef
                     if getcell(ws, r) isa EmptyCell
                         single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
@@ -1075,8 +1030,6 @@ function process_uniform_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguo
                     for c in r
                         newid, first, alignment_node = process_uniform_core(f, ws, allXfNodes, c, newid, first, alignment_node; kw...)
                     end
-#                else
-#                    throw(XLSXError("Something wrong here!"))
                 end
             end
             if first
@@ -1093,22 +1046,15 @@ function process_uniform_veccolon(f::Function, ws::Worksheet, row, col; kw...)
     if dim === nothing
         throw(XLSXError("No worksheet dimension found"))
     else
-        @assert isnothing(row) || isnothing(col) "Something wrong here!"
         allXfNodes = get_cellXfs_nodes(get_workbook(ws))
-        if isnothing(col)
-            col = dim.start.column_number:dim.stop.column_number
-        else
-            row = dim.start.row_number:dim.stop.row_number
-#        else
-#            throw(XLSXError("Something wrong here!"))
-        end
+        row, col = _expand_colon(dim, row, col)
         isInDim(ws, dim, row, col)
         let newid::Union{Int,Nothing}, first::Bool, alignment_node::Union{XML.Node,Nothing}
             newid = nothing
             first = true
             alignment_node = nothing
             for a in row
-                for b in dim.start.column_number:dim.stop.column_number
+                for b in col
                     cellref = CellRef(a, b)
                     if getcell(ws, cellref) isa EmptyCell
                         continue
@@ -1149,44 +1095,53 @@ function process_uniform_vecint(f::Function, ws::Worksheet, row, col; kw...)
 end
 
 
+# The run properties (`<rPr>` children) that name a run's typeface. A cell font that
+# sets any of them sets the typeface as a whole, so overrides all of them. XLSX.jl only
+# writes `rFont`, but files from Excel carry `family` and `scheme` beside it (and
+# `charset` for many fonts). `scheme` must go when the name changes, or Excel shows
+# the theme font in place of the new one.
+const RUN_FACE_TAGS = ("rFont", "family", "scheme", "charset")
+
+# A cell font's tags are the run properties it overrides: the same names, except the
+# cell font's `name` (or any other typeface tag) stands for all of `RUN_FACE_TAGS`.
+_run_tags(font_tag::AbstractString) = font_tag in ("name", RUN_FACE_TAGS...) ? RUN_FACE_TAGS : (font_tag,)
+
+# Each cell of a uniform range takes the first cell's font, so a rich-text cell's runs
+# lose every property that font sets.
 function update_sharedString_font(ws::Worksheet, cell::Cell, firstFont::CellFont) :: Union{Nothing,Int64}
-    let bold=nothing, italic=nothing, under=nothing, strike=nothing, size=nothing, color=nothing, name=nothing
-        for (k, v) in firstFont.font
-            if k=="b"
-                bold = true
-            elseif k=="i"
-                italic = true
-            elseif k=="strike"
-                strike = true
-            elseif k=="u"
-                under = v === nothing ? nothing : v["val"]
-            elseif k=="sz"
-                size = v === nothing ? nothing : parse(Int, v["val"])
-            elseif k=="color"
-                color = v
-            elseif k=="name"
-                name = v === nothing ? nothing : v["val"]
-            else
-                throw(XLSXError("Something wrong here!"))
-            end
-        end
-        return update_sharedString_font(ws, cell; bold, italic, under, strike, size, color, name)
+    tags = Set{String}()
+    for k in keys(firstFont.font)
+        union!(tags, _run_tags(k))
     end
+    return _strip_run_props!(ws, cell, tags)
 end
-        
+
+# `setFont` and `setUniformFont` give the font as keywords; each one given overrides
+# the matching run properties. Keywords that don't concern runs are ignored.
 function update_sharedString_font(ws::Worksheet, cell::Cell;
     bold::Union{Nothing,Bool}=nothing,
     italic::Union{Nothing,Bool}=nothing,
     under::Union{Nothing,String}=nothing,
     strike::Union{Nothing,Bool}=nothing,
-    size::Union{Nothing,Int}=nothing,
+    size::Union{Nothing,Real}=nothing,
     color::Union{Nothing,CellColor,Dict{String,String}}=nothing,
-    name::Union{Nothing,String}=nothing
+    name::Union{Nothing,String}=nothing,
+    vertAlign::Union{Nothing,String}=nothing,
+    _...
 ) :: Union{Nothing,Int64}
-    # <rPr> elements in a sharedString override any font attributes in the cell Style.
-    # If setFont is called, we need to replace any of the attributes it is setting in the <rPr> elements.
-    # When this makes successive <rPr> elements identical, the <r> elements that contain them can be merged.
-    # starting values
+    tags = Set{String}()
+    for (val, font_tag) in ((bold, "b"), (italic, "i"), (strike, "strike"), (under, "u"),
+                            (size, "sz"), (color, "color"), (name, "name"), (vertAlign, "vertAlign"))
+        isnothing(val) || union!(tags, _run_tags(font_tag))
+    end
+    return _strip_run_props!(ws, cell, tags)
+end
+
+# <rPr> elements in a sharedString override any font attributes in the cell Style.
+# When the cell's font changes, remove from each run the properties named in `tags`,
+# so the new cell font shows through, and keep every other property. When this makes
+# successive <rPr> elements identical, the <r> elements that contain them are merged.
+function _strip_run_props!(ws::Worksheet, cell::Cell, tags::Set{String}) :: Union{Nothing,Int64}
     wb=get_workbook(ws)
     index=reinterpret(Int64,cell.value)
     sst=get_sst(wb)
@@ -1212,34 +1167,12 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
 
     first_had_rPr = !isnothing(rPrs[1])
 
-    atts = ["b", "i", "strike", "u", "vertAlign", "sz", "color", "rFont", "family", "scheme"]
-
     for rPr in rPrs
         isnothing(rPr) && continue    # nothing to strip from an unattributed run
-
-        new_rPr = fill(XML.Element("DeleteMe"), length(atts))
-        for att in XML.children(rPr)
-            for i in eachindex(atts)
-                XML.tag(att) == atts[i] && (new_rPr[i] = att)
-            end
-        end
-
-        !isnothing(bold)   && (new_rPr[1]  = XML.Element("DeleteMe"))
-        !isnothing(italic) && (new_rPr[2]  = XML.Element("DeleteMe"))
-        !isnothing(strike) && (new_rPr[3]  = XML.Element("DeleteMe"))
-        !isnothing(under)  && (new_rPr[4]  = XML.Element("DeleteMe"))
-        !isnothing(size)   && (new_rPr[6]  = XML.Element("DeleteMe"))
-        !isnothing(color)  && (new_rPr[7]  = XML.Element("DeleteMe"))
-        if !isnothing(name)
-            new_rPr[8] = new_rPr[9] = new_rPr[10] = XML.Element("DeleteMe")
-        end
-
-        if !isnothing(rPr.children)
-            empty!(rPr.children)
-            foreach(new_rPr) do element
-                XML.tag(element) != "DeleteMe" && push!(rPr.children, element)
-            end
-        end
+        # Whitespace between the properties is dropped too, so that a stripped-bare
+        # <rPr> is empty below.
+        isnothing(rPr.children) ||
+            filter!(k -> XML.nodetype(k) == XML.Element && localname(k) ∉ tags, rPr.children)
     end
 
     # An <rPr> stripped down to nothing means the same as no <rPr> at all:
