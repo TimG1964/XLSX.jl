@@ -137,3 +137,10 @@ function with_attribute(node::XML.Node, name::AbstractString, value)
                         isempty(attrs) ? nothing : attrs,
                         XML.value(node), node.children)
 end
+
+# ── nodes ──────────────────────────────────────────────────────────────────
+function copynode(o::XML.Node)
+    attrs = isnothing(o.attributes) ? nothing : copy(o.attributes)
+    children = isnothing(o.children) ? nothing : XML.Node{String}[copynode(x) for x in o.children]
+    return XML.Node{String}(o.nodetype, o.tag, attrs, o.value, children)
+end

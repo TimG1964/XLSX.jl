@@ -116,11 +116,6 @@ const EXCEL_COLUMN_WIDTH_PADDING = 0.7109375
 # -- A bunch of helper functions ...
 #
 
-function copynode(o::XML.Node)
-    attrs = isnothing(o.attributes) ? nothing : copy(o.attributes)
-    children = isnothing(o.children) ? nothing : XML.Node{String}[copynode(x) for x in o.children]
-    return XML.Node{String}(o.nodetype, o.tag, attrs, o.value, children)
-end
 function do_sheet_names_match(ws::Worksheet, rng::T) where {T<:Union{SheetCellRef,AbstractSheetCellRange}}
     if ws.name == rng.sheet
         return true

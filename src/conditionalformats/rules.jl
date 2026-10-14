@@ -1,54 +1,81 @@
+#
+# -- Rule-based conditional formats: each matches cells by a rule and gives them a
+#    differential format (`dxStyle`, or `format`, `font`, `border` and `fill`)
+#
+
+# The keywords every rule-based setter takes, after its own: whether later rules are
+# skipped once this one applies, and the format given to matching cells.
+const CF_FORMAT_KEYWORDS = (:stopIfTrue, :dxStyle, :format, :font, :border, :fill)
+
+# A string keyword's value, given as a string or Symbol.
+function _cf_string(k::Symbol, v)
+    (isnothing(v) || v isa String) && return v
+    (v isa AbstractString || v isa Symbol) && return String(v)
+    throw(XLSXError("`$k` must be a string, not $(repr(v))."))
+end
+
+# Read a rule setter's keywords from `allkws`. `own` holds the setter's own string
+# keywords with their defaults; the format keywords follow. Any other keyword is an error.
+function _cf_rule_keywords(allkws, own::NamedTuple)
+    valid = (keys(own)..., CF_FORMAT_KEYWORDS...)
+    for k in keys(allkws)
+        k in valid || throw(XLSXError("Invalid keyword argument: $k. Valid options are: $(join(("`$v`" for v in valid), ", "))."))
+    end
+    names = keys(own)
+    strings = NamedTuple{names}(map(k -> _cf_string(k, get(allkws, k, own[k])), names))
+    stopIfTrue = _cf_string(:stopIfTrue, get(allkws, :stopIfTrue, nothing))
+    dxStyle = _cf_string(:dxStyle, get(allkws, :dxStyle, nothing))
+    format::Union{Nothing,Vector{<:Pair{String}}} = get(allkws, :format, nothing)
+    font::Union{Nothing,Vector{<:Pair{String}}} = get(allkws, :font, nothing)
+    border::Union{Nothing,Vector{<:Pair{String}}} = get(allkws, :border, nothing)
+    fill::Union{Nothing,Vector{<:Pair{String}}} = get(allkws, :fill, nothing)
+    return (; strings..., stopIfTrue, dxStyle, format, font, border, fill)
+end
+
+# A rule's value or threshold: a number or a cell reference.
+function _check_cf_value(name, v)
+    isnothing(v) || is_valid_cellname(v) || is_valid_fixed_cellname(v) || !isnothing(tryparse(Float64, v)) ||
+        throw(XLSXError("Invalid `$name`: $v. Must be a number or a CellRef."))
+    return nothing
+end
+
+# The differential format given to the cells a rule matches, added to the workbook.
+function _cf_rule_dx(ws::Worksheet, kw)
+    wb = get_workbook(ws)
+    return Add_Cf_Dx(wb, get_new_dx(wb, get_dx(kw.dxStyle, kw.format, kw.font, kw.border, kw.fill)))
+end
+
+# A new `<cfRule>` of `type`, giving matching cells format `dxid`, with the next
+# priority. `attrs` follow the priority, and `stopIfTrue` comes last.
+function _cf_rule_element(ws::Worksheet, pfx, type, dxid, kw; attrs...)
+    cfx = XML.Element("$(pfx)cfRule"; type=type, dxfId=string(dxid.id))
+    cfx["priority"] = next_cf_priority!(ws)
+    for (k, v) in attrs
+        cfx[string(k)] = v
+    end
+    if !isnothing(kw.stopIfTrue) && kw.stopIfTrue == "true"
+        cfx["stopIfTrue"] = "1"
+    end
+    return cfx
+end
+
+_cf_prefix(ws::Worksheet) = (pfx = get_prefix(ws); pfx == "" ? pfx : pfx * ":")
+
+const CELLIS_OPERATORS = ("greaterThan", "greaterEqual", "lessThan", "lessEqual", "equal", "notEqual", "between", "notBetween")
+
 define_cf_address_methods(:setCfCellIs)
 function setCfCellIs(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
-
-    operator::Union{Nothing,String}="greaterThan"
-    value::Union{Nothing,String}=nothing
-    value2::Union{Nothing,String}=nothing
-    stopIfTrue::Union{Nothing,String}=nothing
-    dxStyle::Union{Nothing,String}=nothing
-    format::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    font::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    border::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    fill::Union{Nothing,Vector{<:Pair{String}}}=nothing
-
-    for (k, v) in allkws
-        if k == :operator
-            operator = v
-        elseif k == :value
-            value = v
-        elseif k == :value2
-            value2 = v
-        elseif k == :stopIfTrue
-            stopIfTrue = v
-        elseif k == :dxStyle
-            dxStyle = v
-        elseif k == :format
-            format = v
-        elseif k == :font
-            font = v
-        elseif k == :border
-            border = v
-        elseif k == :fill
-            fill = v
-        else
-            throw(XLSXError("Invalid keyword argument: $k. Valid keywords are: `operator`, `value`, `value2`, `stopIfTrue`, `dxStyle`, `format`, `font`, `border` and `fill`."))
-        end
-    end
-
+    kw = _cf_rule_keywords(allkws, (; operator="greaterThan", value=nothing, value2=nothing))
     _check_cf_range(ws, rng)
+    pfx = _cf_prefix(ws)
 
-    pfx = get_prefix(ws)
-    pfx = pfx == "" ? pfx : pfx * ":"
+    _check_cf_value("value", kw.value)
+    _check_cf_value("value2", kw.value2)
+    !isnothing(kw.operator) && kw.operator ∉ CELLIS_OPERATORS &&
+        throw(XLSXError("Invalid `operator`: $(kw.operator). Valid options are: $(join(("`$o`" for o in CELLIS_OPERATORS), ", "))"))
+    dxid = _cf_rule_dx(ws, kw)
 
-
-    !isnothing(value) && !is_valid_cellname(value) && !is_valid_fixed_cellname(value) && isnothing(tryparse(Float64, value)) && throw(XLSXError("Invalid `value`: $value. Must be a number or a CellRef."))
-    !isnothing(value2) && !is_valid_cellname(value2) && !is_valid_fixed_cellname(value2) && isnothing(tryparse(Float64, value2)) && throw(XLSXError("Invalid `value2`: $value2. Must be a number or a CellRef."))
-    !isnothing(operator) && operator ∉ ["greaterThan", "greaterEqual", "lessThan", "lessEqual", "equal", "notEqual", "between", "notBetween"] && throw(XLSXError("Invalid `operator`: $operator. Valid options are: `greaterThan`, `greaterEqual`, `lessThan`, `lessEqual`, `equal`, `notEqual`, `between`, `notBetween`"))
-    wb = get_workbook(ws)
-    dx = get_dx(dxStyle, format, font, border, fill)
-    new_dx = get_new_dx(wb, dx)
-    dxid = Add_Cf_Dx(wb, new_dx)
-
+    value = kw.value
     if isnothing(value)
         # The average of the range's numbers, as Excel's AVERAGE takes it: text,
         # booleans and empty cells are ignored.
@@ -56,435 +83,165 @@ function setCfCellIs(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{
         value = isempty(nums) ? nothing : string(sum(nums) / length(nums))
     end
 
-    cfx = XML.Element("$(pfx)cfRule"; type="cellIs", dxfId=string(dxid.id))
-    cfx["priority"] = next_cf_priority!(ws)
-    if !isnothing(stopIfTrue) && stopIfTrue == "true"
-        cfx["stopIfTrue"] = "1"
-    end
-    cfx["operator"] = operator
+    cfx = _cf_rule_element(ws, pfx, "cellIs", dxid, kw)
+    cfx["operator"] = kw.operator
     push!(cfx, XML.Element("$(pfx)formula", XML.Text(value)))
-    if !isnothing(value2) && operator ∈ ["between", "notBetween"]
-
-        push!(cfx, XML.Element("$(pfx)formula", XML.Text(value2)))
+    if !isnothing(kw.value2) && kw.operator ∈ ["between", "notBetween"]
+        push!(cfx, XML.Element("$(pfx)formula", XML.Text(kw.value2)))
     end
 
     update_worksheet_cfx!(cfx, ws, rng)
-
     return 0
 end
+
+# Operator => (the operator Excel stores, the rule's formula).
+const CONTAINSTEXT_RULES = Dict(
+    "containsText"    => ("containsText", "NOT(ISERROR(SEARCH(\"__txt__\",__CR__)))"),
+    "notContainsText" => ("notContains",  "ISERROR(SEARCH(\"__txt__\",__CR__))"),
+    "beginsWith"      => ("beginsWith",   "LEFT(__CR__,LEN(\"__txt__\"))=\"__txt__\""),
+    "endsWith"        => ("endsWith",     "RIGHT(__CR__,LEN(\"__txt__\"))=\"__txt__\""),
+)
 
 define_cf_address_methods(:setCfContainsText)
 function setCfContainsText(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
-
-    operator::Union{Nothing,String}="containsText"
-    value::Union{Nothing,String}=nothing
-    stopIfTrue::Union{Nothing,String}=nothing
-    dxStyle::Union{Nothing,String}=nothing
-    format::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    font::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    border::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    fill::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    for (k, v) in allkws
-        if k == :operator
-            operator = String(v)
-        elseif k == :value
-            value = String(v)
-        elseif k == :stopIfTrue
-            stopIfTrue = String(v)
-        elseif k == :dxStyle
-            dxStyle = String(v)
-        elseif k == :format
-            format = v
-        elseif k == :font
-            font = v
-        elseif k == :border
-            border = v
-        elseif k == :fill
-            fill = v
-        else
-            throw(XLSXError("Invalid keyword argument: $k. Valid options are: `operator`, `value`, `stopIfTrue`, `dxStyle`, `format`, `font`, `border`, `fill`."))
-        end
-    end
-
+    kw = _cf_rule_keywords(allkws, (; operator="containsText", value=nothing))
     _check_cf_range(ws, rng)
+    pfx = _cf_prefix(ws)
 
-    pfx = get_prefix(ws)
-    pfx = pfx == "" ? pfx : pfx * ":"
+    isnothing(kw.value) && throw(XLSXError("Invalid `value`: $(kw.value). Must contain text or a CellRef."))
+    haskey(CONTAINSTEXT_RULES, kw.operator) ||
+        throw(XLSXError("Invalid operator: $(kw.operator). Valid options are: `containsText`, `notContainsText`, `beginsWith`, `endsWith`."))
+    operator, formula = CONTAINSTEXT_RULES[kw.operator]
+    formula = replace(formula, "__txt__" => kw.value, "__CR__" => string(_cf_anchor(rng)))
+    dxid = _cf_rule_dx(ws, kw)
 
-
-    isnothing(value) && throw(XLSXError("Invalid `value`: $value. Must contain text or a CellRef."))
-
-    wb = get_workbook(ws)
-    dx = get_dx(dxStyle, format, font, border, fill)
-    new_dx = get_new_dx(wb, dx)
-    dxid = Add_Cf_Dx(wb, new_dx)
-
-    type = operator
-    if operator == "containsText"
-        formula = "NOT(ISERROR(SEARCH(\"__txt__\",__CR__)))"
-    elseif operator == "notContainsText"
-        operator = "notContains"
-        formula = "ISERROR(SEARCH(\"__txt__\",__CR__))"
-    elseif operator == "beginsWith"
-        formula = "LEFT(__CR__,LEN(\"__txt__\"))=\"__txt__\""
-    elseif operator == "endsWith"
-        formula = "RIGHT(__CR__,LEN(\"__txt__\"))=\"__txt__\""
-    else
-        throw(XLSXError("Invalid operator: $type. Valid options are: `containsText`, `notContainsText`, `beginsWith`, `endsWith`."))
-    end
-    formula = replace(formula, "__txt__" => value, "__CR__" => string(_cf_anchor(rng)))
-
-    cfx = XML.Element("$(pfx)cfRule"; type=type, dxfId=string(dxid.id))
-    cfx["priority"] = next_cf_priority!(ws)
-    if !isnothing(stopIfTrue) && stopIfTrue == "true"
-        cfx["stopIfTrue"] = "1"
-    end
+    cfx = _cf_rule_element(ws, pfx, kw.operator, dxid, kw)
     cfx["operator"] = operator
-    cfx["text"] = value
+    cfx["text"] = kw.value
     push!(cfx, XML.Element("$(pfx)formula", XML.Text(formula)))
 
     update_worksheet_cfx!(cfx, ws, rng)
-
     return 0
 end
+
+# Operator => (percent, bottom) attributes; "" leaves one out.
+const TOP10_RULES = Dict(
+    "topN"     => ("",  ""),
+    "topN%"    => ("1", ""),
+    "bottomN"  => ("",  "1"),
+    "bottomN%" => ("1", "1"),
+)
 
 define_cf_address_methods(:setCfTop10)
 function setCfTop10(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
-
-    operator::Union{Nothing,String}="topN"
-    value::Union{Nothing,String}="10"
-    stopIfTrue::Union{Nothing,String}=nothing
-    dxStyle::Union{Nothing,String}=nothing
-    format::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    font::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    border::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    fill::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    for (k, v) in allkws
-        if k == :operator
-            operator = v
-        elseif k == :value
-            value = v
-        elseif k == :stopIfTrue
-            stopIfTrue = v
-        elseif k == :dxStyle
-            dxStyle = v
-        elseif k == :format
-            format = v
-        elseif k == :font
-            font = v
-        elseif k == :border
-            border = v
-        elseif k == :fill
-            fill = v
-        else
-            throw(XLSXError("Invalid keyword argument: $k. Valid options are: `operator`, `value`, `stopIfTrue`, `dxStyle`, `format`, `font`, `border`, `fill`."))
-        end
-    end
-
+    kw = _cf_rule_keywords(allkws, (; operator="topN", value="10"))
     _check_cf_range(ws, rng)
+    pfx = _cf_prefix(ws)
 
-    pfx = get_prefix(ws)
-    pfx = pfx == "" ? pfx : pfx * ":"
+    _check_cf_value("value", kw.value)
+    haskey(TOP10_RULES, kw.operator) ||
+        throw(XLSXError("Invalid operator: $(kw.operator). Valid options are: `topN`, `topN%`, `bottomN`, `bottomN%`."))
+    percent, bottom = TOP10_RULES[kw.operator]
+    dxid = _cf_rule_dx(ws, kw)
 
-
-    !isnothing(value) && !is_valid_cellname(value) && !is_valid_fixed_cellname(value) && isnothing(tryparse(Float64, value)) && throw(XLSXError("Invalid `value`: $value. Must be a number or a CellRef."))
-
-    wb = get_workbook(ws)
-    dx = get_dx(dxStyle, format, font, border, fill)
-    new_dx = get_new_dx(wb, dx)
-    dxid = Add_Cf_Dx(wb, new_dx)
-
-    percent = ""
-    bottom = ""
-    cfx = XML.Element("$(pfx)cfRule"; type="top10", dxfId=string(dxid.id))
-    if operator == "topN"
-    elseif operator == "topN%"
-        percent = "1"
-    elseif operator == "bottomN"
-        bottom = "1"
-    elseif operator == "bottomN%"
-        percent = "1"
-        bottom = "1"
-    else
-        throw(XLSXError("Invalid operator: $operator. Valid options are: `topN`, `topN%`, `bottomN`, `bottomN%`."))
-    end
-
-    cfx["priority"] = next_cf_priority!(ws)
-    if !isnothing(stopIfTrue) && stopIfTrue == "true"
-        cfx["stopIfTrue"] = "1"
-    end
-    if percent != ""
-        cfx["percent"] = percent
-    end
-    if bottom != ""
-        cfx["bottom"] = bottom
-    end
-    cfx["rank"] = value
+    cfx = _cf_rule_element(ws, pfx, "top10", dxid, kw)
+    percent != "" && (cfx["percent"] = percent)
+    bottom != "" && (cfx["bottom"] = bottom)
+    cfx["rank"] = kw.value
 
     update_worksheet_cfx!(cfx, ws, rng)
-
     return 0
 end
 
+# Operator => the attributes Excel stores for it on an `aboveAverage` rule.
+const ABOVEAVERAGE_RULES = Dict(
+    "aboveAverage"   => (;),
+    "aboveEqAverage" => (; equalAverage="1"),
+    "plus1StdDev"    => (; stdDev="1"),
+    "plus2StdDev"    => (; stdDev="2"),
+    "plus3StdDev"    => (; stdDev="3"),
+    "belowAverage"   => (; aboveAverage="0"),
+    "belowEqAverage" => (; aboveAverage="0", equalAverage="1"),
+    "minus1StdDev"   => (; aboveAverage="0", stdDev="1"),
+    "minus2StdDev"   => (; aboveAverage="0", stdDev="2"),
+    "minus3StdDev"   => (; aboveAverage="0", stdDev="3"),
+)
+
 define_cf_address_methods(:setCfAboveAverage)
 function setCfAboveAverage(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
-
-    operator::Union{Nothing,String}="aboveAverage"
-    stopIfTrue::Union{Nothing,String}=nothing
-    dxStyle::Union{Nothing,String}=nothing
-    format::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    font::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    border::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    fill::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    for (k, v) in allkws
-        if k == :operator
-            operator = v
-        elseif k == :stopIfTrue
-            stopIfTrue = v
-        elseif k == :dxStyle
-            dxStyle = v
-        elseif k == :format
-            format = v
-        elseif k == :font
-            font = v
-        elseif k == :border
-            border = v
-        elseif k == :fill
-            fill = v
-        else
-            throw(XLSXError("Invalid keyword argument: $k. Valid options are: `operator`, `stopIfTrue`, `dxStyle`, `format`, `font`, `border`, `fill`."))
-        end
-    end
-
+    kw = _cf_rule_keywords(allkws, (; operator="aboveAverage"))
     _check_cf_range(ws, rng)
+    pfx = _cf_prefix(ws)
 
-    pfx = get_prefix(ws)
-    pfx = pfx == "" ? pfx : pfx * ":"
+    haskey(ABOVEAVERAGE_RULES, kw.operator) ||
+        throw(XLSXError("Invalid operator: $(kw.operator). Valid options are: `aboveAverage`, `aboveEqAverage`, `plus1StdDev`, `plus2StdDev`, `plus3StdDev`, `belowAverage`, `belowEqAverage`, `minus1StdDev`, `minus2StdDev`, `minus3StdDev`."))
+    dxid = _cf_rule_dx(ws, kw)
 
-
-    wb = get_workbook(ws)
-    dx = get_dx(dxStyle, format, font, border, fill)
-    new_dx = get_new_dx(wb, dx)
-    dxid = Add_Cf_Dx(wb, new_dx)
-
-    if operator == "aboveAverage"
-        cfx = XML.Element("$(pfx)cfRule"; type=operator, dxfId=string(dxid.id), priority="1")
-    elseif operator == "aboveEqAverage"
-        cfx = XML.Element("$(pfx)cfRule"; type="aboveAverage", dxfId=string(dxid.id), priority="1", equalAverage="1")
-    elseif operator == "plus1StdDev"
-        cfx = XML.Element("$(pfx)cfRule"; type="aboveAverage", dxfId=string(dxid.id), priority="1", stdDev="1")
-    elseif operator == "plus2StdDev"
-        cfx = XML.Element("$(pfx)cfRule"; type="aboveAverage", dxfId=string(dxid.id), priority="1", stdDev="2")
-    elseif operator == "plus3StdDev"
-        cfx = XML.Element("$(pfx)cfRule"; type="aboveAverage", dxfId=string(dxid.id), priority="1", stdDev="3")
-    elseif operator == "belowAverage"
-        cfx = XML.Element("$(pfx)cfRule"; type="aboveAverage", dxfId=string(dxid.id), priority="1", aboveAverage="0")
-    elseif operator == "belowEqAverage"
-        cfx = XML.Element("$(pfx)cfRule"; type="aboveAverage", dxfId=string(dxid.id), priority="1", aboveAverage="0", equalAverage="1")
-    elseif operator == "minus1StdDev"
-        cfx = XML.Element("$(pfx)cfRule"; type="aboveAverage", dxfId=string(dxid.id), priority="1", aboveAverage="0", stdDev="1")
-    elseif operator == "minus2StdDev"
-        cfx = XML.Element("$(pfx)cfRule"; type="aboveAverage", dxfId=string(dxid.id), priority="1", aboveAverage="0", stdDev="2")
-    elseif operator == "minus3StdDev"
-        cfx = XML.Element("$(pfx)cfRule"; type="aboveAverage", dxfId=string(dxid.id), priority="1", aboveAverage="0", stdDev="3")
-    else
-        throw(XLSXError("Invalid operator: $operator. Valid options are: `aboveAverage`, `aboveEqAverage`, `plus1sStdDev`, `plus2StdDev`, `plus3StdDev`, `belowAverage`, `belowEqAverage`, `minus1StdDev`, `minus2StdDev`, `minus3StdDev`."))
-    end
-
-    cfx["priority"] = next_cf_priority!(ws)
-    if !isnothing(stopIfTrue) && stopIfTrue == "true"
-        cfx["stopIfTrue"] = "1"
-    end
+    cfx = _cf_rule_element(ws, pfx, "aboveAverage", dxid, kw; ABOVEAVERAGE_RULES[kw.operator]...)
 
     update_worksheet_cfx!(cfx, ws, rng)
-
     return 0
 end
 
 define_cf_address_methods(:setCfTimePeriod)
 function setCfTimePeriod(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
-
-    operator::Union{Nothing,String}="last7Days"
-    stopIfTrue::Union{Nothing,String}=nothing
-    dxStyle::Union{Nothing,String}=nothing
-    format::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    font::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    border::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    fill::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    for (k, v) in allkws
-        if k == :operator
-            operator = v
-        elseif k == :stopIfTrue
-            stopIfTrue = v
-        elseif k == :dxStyle
-            dxStyle = v
-        elseif k == :format
-            format = v
-        elseif k == :font
-            font = v
-        elseif k == :border
-            border = v
-        elseif k == :fill
-            fill = v
-        else
-            throw(XLSXError("Invalid keyword argument: $k. Valid options are: `operator`, `stopIfTrue`, `dxStyle`, `format`, `font`, `border`, `fill`."))
-        end
-    end
-
+    kw = _cf_rule_keywords(allkws, (; operator="last7Days"))
     _check_cf_range(ws, rng)
+    pfx = _cf_prefix(ws)
 
-    pfx = get_prefix(ws)
-    pfx = pfx == "" ? pfx : pfx * ":"
+    haskey(timeperiods, kw.operator) ||
+        throw(XLSXError("Invalid operator: $(kw.operator). Valid options are: `yesterday`, `today`, `tomorrow`, `last7Days`, `lastWeek`, `thisWeek`, `nextWeek`, `lastMonth`, `thisMonth`, `nextMonth`."))
+    formula = replace(timeperiods[kw.operator], "__CR__" => string(_cf_anchor(rng)))
+    dxid = _cf_rule_dx(ws, kw)
 
-
-    if haskey(timeperiods, operator)
-        formula = timeperiods[operator]
-    else
-        throw(XLSXError("Invalid operator: $operator. Valid options are: `yesterday`, `today`, `tomorrow`, `last7Days`, `lastWeek`, `thisWeek`, `nextWeek`, `lastMonth`, `thisMonth`, `nextMonth`."))
-    end
-
-    formula = replace(formula, "__CR__" => string(_cf_anchor(rng)))
-
-    wb = get_workbook(ws)
-    dx = get_dx(dxStyle, format, font, border, fill)
-    new_dx = get_new_dx(wb, dx)
-    dxid = Add_Cf_Dx(wb, new_dx)
-
-    cfx = XML.Element("$(pfx)cfRule"; type="timePeriod", dxfId=string(dxid.id))
-    cfx["priority"] = next_cf_priority!(ws)
-    if !isnothing(stopIfTrue) && stopIfTrue == "true"
-        cfx["stopIfTrue"] = "1"
-    end
-    cfx["timePeriod"] = operator
-
+    cfx = _cf_rule_element(ws, pfx, "timePeriod", dxid, kw)
+    cfx["timePeriod"] = kw.operator
     push!(cfx, XML.Element("$(pfx)formula", XML.Text(formula)))
 
     update_worksheet_cfx!(cfx, ws, rng)
-
     return 0
 end
 
+# Operator => the rule's formula; unique and duplicate values need none.
+const BLANKERRORUNIQDUP_RULES = Dict(
+    "containsBlanks"    => "LEN(TRIM(__CR__))=0",
+    "notContainsBlanks" => "LEN(TRIM(__CR__))>0",
+    "containsErrors"    => "ISERROR(__CR__)",
+    "notContainsErrors" => "NOT(ISERROR(__CR__))",
+    "uniqueValues"      => "",
+    "duplicateValues"   => "",
+)
+
 define_cf_address_methods(:setCfContainsBlankErrorUniqDup)
 function setCfContainsBlankErrorUniqDup(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
-
-    operator::Union{Nothing,String}="containsBlanks"
-    stopIfTrue::Union{Nothing,String}=nothing
-    dxStyle::Union{Nothing,String}=nothing
-    format::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    font::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    border::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    fill::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    for (k, v) in allkws
-        if k == :operator
-            operator = v
-        elseif k == :stopIfTrue
-            stopIfTrue = v
-        elseif k == :dxStyle
-            dxStyle = v
-        elseif k == :format
-            format = v
-        elseif k == :font
-            font = v
-        elseif k == :border
-            border = v
-        elseif k == :fill
-            fill = v
-        else
-            throw(XLSXError("Invalid keyword argument: $k. Valid options are: `operator`, `stopIfTrue`, `dxStyle`, `format`, `font`, `border`, `fill`."))
-        end
-    end
-
+    kw = _cf_rule_keywords(allkws, (; operator="containsBlanks"))
     _check_cf_range(ws, rng)
+    pfx = _cf_prefix(ws)
 
-    pfx = get_prefix(ws)
-    pfx = pfx == "" ? pfx : pfx * ":"
+    haskey(BLANKERRORUNIQDUP_RULES, kw.operator) ||
+        throw(XLSXError("Invalid operator: $(kw.operator). Valid options are: containsBlanks, notContainsBlanks, containsErrors, notContainsErrors, uniqueValues, duplicateValues."))
+    formula = replace(BLANKERRORUNIQDUP_RULES[kw.operator], "__CR__" => string(_cf_anchor(rng)))
+    dxid = _cf_rule_dx(ws, kw)
 
-
-    if operator == "containsBlanks"
-        formula = "LEN(TRIM(__CR__))=0"
-    elseif operator == "notContainsBlanks"
-        formula = "LEN(TRIM(__CR__))>0"
-    elseif operator == "containsErrors"
-        formula = "ISERROR(__CR__)"
-    elseif operator == "notContainsErrors"
-        formula = "NOT(ISERROR(__CR__))"
-    elseif operator == "uniqueValues"
-        formula = ""
-    elseif operator == "duplicateValues"
-        formula = ""
-    else
-        throw(XLSXError("Invalid operator: $operator. Valid options are: containsBlanks, notContainsBlanks, containsErrors, notContainsErrors, uniqueValues, duplicateValues."))
-    end
-    formula = replace(formula, "__CR__" => string(_cf_anchor(rng)))
-
-    wb = get_workbook(ws)
-    dx = get_dx(dxStyle, format, font, border, fill)
-    new_dx = get_new_dx(wb, dx)
-    dxid = Add_Cf_Dx(wb, new_dx)
-
-    cfx = XML.Element("$(pfx)cfRule"; type=operator, dxfId=string(dxid.id))
-    cfx["priority"] = next_cf_priority!(ws)
-    if !isnothing(stopIfTrue) && stopIfTrue == "true"
-        cfx["stopIfTrue"] = "1"
-    end
+    cfx = _cf_rule_element(ws, pfx, kw.operator, dxid, kw)
     formula != "" && push!(cfx, XML.Element("$(pfx)formula", XML.Text(formula)))
 
     update_worksheet_cfx!(cfx, ws, rng)
-
     return 0
 end
 
 define_cf_address_methods(:setCfFormula)
 function setCfFormula(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
-
-    formula::Union{Nothing,String}=nothing
-    stopIfTrue::Union{Nothing,String}=nothing
-    dxStyle::Union{Nothing,String}=nothing
-    format::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    font::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    border::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    fill::Union{Nothing,Vector{<:Pair{String}}}=nothing
-    for (k, v) in allkws
-        if k == :formula
-            formula = v
-        elseif k == :stopIfTrue
-            stopIfTrue = v
-        elseif k == :dxStyle
-            dxStyle = v
-        elseif k == :format
-            format = v
-        elseif k == :font
-            font = v
-        elseif k == :border
-            border = v
-        elseif k == :fill
-            fill = v
-        else
-            throw(XLSXError("Invalid keyword argument: $k. Valid options are: `formula`, `stopIfTrue`, `dxStyle`, `format`, `font`, `border`, `fill`."))
-        end
-    end
-    isnothing(formula) && throw(XLSXError("A `formula` must be provided as a keyword argument."))
-
+    kw = _cf_rule_keywords(allkws, (; formula=nothing))
+    isnothing(kw.formula) && throw(XLSXError("A `formula` must be provided as a keyword argument."))
     _check_cf_range(ws, rng)
+    pfx = _cf_prefix(ws)
 
-    pfx = get_prefix(ws)
-    pfx = pfx == "" ? pfx : pfx * ":"
+    dxid = _cf_rule_dx(ws, kw)
 
-
-    wb = get_workbook(ws)
-    dx = get_dx(dxStyle, format, font, border, fill)
-    new_dx = get_new_dx(wb, dx)
-    dxid = Add_Cf_Dx(wb, new_dx)
-
-    cfx = XML.Element("$(pfx)cfRule"; type="expression", dxfId=string(dxid.id))
-    cfx["priority"] = next_cf_priority!(ws)
-    if !isnothing(stopIfTrue) && stopIfTrue == "true"
-        cfx["stopIfTrue"] = "1"
-    end
-
-    push!(cfx, XML.Element("$(pfx)formula", XML.Text("(" * uppercase_unquoted(formula) * ")")))
+    cfx = _cf_rule_element(ws, pfx, "expression", dxid, kw)
+    push!(cfx, XML.Element("$(pfx)formula", XML.Text("(" * uppercase_unquoted(kw.formula) * ")")))
 
     update_worksheet_cfx!(cfx, ws, rng)
-
     return 0
 end

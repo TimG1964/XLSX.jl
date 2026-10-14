@@ -39,8 +39,7 @@ function setCfColorScale(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=D
 
     _check_cf_range(ws, rng)
 
-    pfx = get_prefix(ws)
-    pfx = pfx == "" ? pfx : pfx * ":"
+    pfx = _cf_prefix(ws)
 
 
     let new_pr, new_cf

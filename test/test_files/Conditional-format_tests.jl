@@ -2923,6 +2923,18 @@
         @test icons == [1, 2, 3]
     end
 
+    # The rule-based setters read their keywords the same way.
+    @testset "rule keywords take strings or Symbols" begin
+        xf = XLSX.newxlsx()
+        s = xf[1]
+        s["A1:A5"] = collect(1:5)
+        XLSX.setConditionalFormat(s, "A1:A5", :cellIs; operator=:between, value="2", value2="4")
+        XLSX.setConditionalFormat(s, "A1:A5", :top10; operator=:bottomN, value="2")
+        @test length(XLSX.getConditionalFormats(s)) == 2
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A5", :cellIs; value=3)
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A5", :timePeriod; operator=7)
+    end
+
     @testset "every setCf* setter accepts the same target forms" begin
         targets(f) = Set(Base.tuple_type_tail(m.sig) for m in methods(f))
         for f in (XLSX.setCfContainsText, XLSX.setCfTop10, XLSX.setCfAboveAverage, XLSX.setCfTimePeriod,

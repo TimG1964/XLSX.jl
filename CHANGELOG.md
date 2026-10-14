@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- The rule-based conditional formats (`:cellIs`, `:containsText`, `:top10`, `:aboveAverage`, `:timePeriod`, `:expression` and the blanks, errors, unique and duplicate rules) accept a Symbol for any string keyword, as `:containsText` already did, and a value of another type gives an `XLSXError` rather than a `MethodError`. An invalid `operator` no longer adds an unused format to the workbook's styles before the error
 - `ws[row, col] = v` with a vector `v` now writes it across from that cell, as `ws["B2"] = v` does. Most other two-index vector assignments, such as `ws[1:2, 1:2] = v` or `ws[1, [1, 3]] = v`, threw an "ambiguous" `MethodError`; they now throw an `XLSXError` saying a vector is written along one row or column, or across from one cell
 - Removed `getGapWidth`, `setGapWidth`, `getOverlap` and `setOverlap` from the `XLSX.Charts` export list. They were never defined: the functions are `getGroupGapWidth`, `setGroupGapWidth`, `getGroupOverlap` and `setGroupOverlap`
 - `SheetCellRef`, `TableStyleInfo` and `Workbook` now have docstrings

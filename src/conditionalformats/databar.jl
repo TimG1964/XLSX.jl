@@ -4,8 +4,7 @@ function setCfDataBar(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict
 
     _check_cf_range(ws, rng)
 
-    pfx = get_prefix(ws)
-    pfx = pfx == "" ? pfx : pfx * ":"
+    pfx = _cf_prefix(ws)
 
     # `priority` is for internal callers only and is deliberately undocumented: it is
     # omitted from the valid-keyword list so a user passing it gets an error.
