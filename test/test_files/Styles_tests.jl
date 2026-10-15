@@ -2423,6 +2423,46 @@ writing a number into a cell carrying a date/time format.
             @test targets(f) == targets(XLSX.setUniformFont)
         end
     end
+
+    @testset "an unrecognized keyword is an XLSXError naming the setter and the keyword" begin
+        f = XLSX.newxlsx()
+        s = f[1]
+        s["A1:C3"] = 1
+        err(g) = try g(); nothing catch e; e end
+        for (setter, kws) in (
+            (XLSX.setFont,             (; bold=true, colour="red")),
+            (XLSX.setFill,             (; pattern="solid", colour="red")),
+            (XLSX.setAlignment,        (; wrap=true)),
+            (XLSX.setFormat,           (; fmt="0.00")),
+            (XLSX.setBorder,           (; sides=["style" => "thin"])),
+            (XLSX.setUniformFont,      (; colour="red")),
+            (XLSX.setUniformFill,      (; colour="red")),
+            (XLSX.setUniformAlignment, (; wrap=true)),
+            (XLSX.setUniformFormat,    (; fmt="0.00")),
+            (XLSX.setUniformBorder,    (; sides=["style" => "thin"])),
+        )
+            for call in ((g; kw...) -> g(s, "A1:B2"; kw...),
+                         (g; kw...) -> g(s, 1:2, 1:2; kw...),
+                         (g; kw...) -> g(f, "Sheet1!A1:B2"; kw...))
+                e = err(() -> call(setter; kws...))
+                @test e isa XLSX.XLSXError
+                @test occursin("`$(nameof(setter))`", e.msg)
+                bad = filter(k -> k ∉ (:bold, :pattern), keys(kws))
+                @test all(k -> occursin("`$k`", e.msg), bad)
+            end
+        end
+        @test occursin("Unrecognized keyword arguments `a`, `b` for `setFont`", err(() -> XLSX.setFont(s, "A1"; a=1, b=2)).msg)
+    end
+
+    @testset "`outside` needs a range" begin
+        f = XLSX.newxlsx()
+        s = f[1]
+        s["A1:C3"] = 1
+        @test_throws XLSX.XLSXError XLSX.setBorder(s, "A1"; outside=["style" => "thin"])
+        @test_throws XLSX.XLSXError XLSX.setUniformBorder(s, "A1:B2"; outside=["style" => "thin"])
+        @test XLSX.setBorder(s, "A1:C3"; outside=["style" => "thin"]) == -1
+        @test XLSX.getBorder(s, "A1").border["top"]["style"] == "thin"
+    end
 end
 
 @testset "review fixes: number formats and fonts" begin

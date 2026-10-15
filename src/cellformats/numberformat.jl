@@ -159,11 +159,10 @@ julia> XLSX.setFormat(sh, "named_range"; format = "39") # specifies the built-in
 ```
 """
 function setFormat end
-define_percell_address_methods(:setFormat)
+define_percell_spec_methods(:setFormat, :_setFormat, :FormatSpec)
 
-function setFormat(sh::Worksheet, cellref::CellRef;
-    format::Union{Nothing,String}=nothing
-)::Int
+function _setFormat(sh::Worksheet, cellref::CellRef; spec::FormatSpec)::Int
+    (; format) = spec
     _require_writable(sh, "set number format")
 
     wb   = get_workbook(sh)
@@ -242,4 +241,4 @@ julia> setUniformFormat(sh, "B2,A5:D22")                   # Copy `Format` from 
 ```
 """
 function setUniformFormat end
-define_uniform_address_methods(:setUniformFormat, :setFormat, ["numFmtId", "applyNumberFormat"])
+define_uniform_spec_methods(:setUniformFormat, :_setUniformFormat, :_setFormat, :FormatSpec, ["numFmtId", "applyNumberFormat"])

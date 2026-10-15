@@ -32,9 +32,6 @@ function get_color(str::AbstractString)::String
 end
 get_color(c::Colors.Colorant)::String = uppercase(Colors.hex(c, :AARRGGBB))
 
-# Anything that can be given as a color in cell formatting, conditional formats and rich text.
-const CellColor = Union{AbstractString,Symbol,Colors.Colorant,SchemeColor}
-
 # Spreadsheet theme-index slot for each SchemeColor token spelling.
 const _THEME_SLOT = Dict(:bg1 => "lt1", :tx1 => "dk1", :bg2 => "lt2", :tx2 => "dk2")
 

@@ -138,13 +138,10 @@ Julia> setFill(sh, "11:24"; pattern="none", fgColor = "yellow2")
 ```
 """
 function setFill end
-define_percell_address_methods(:setFill)
+define_percell_spec_methods(:setFill, :_setFill, :FillSpec)
 
-function setFill(sh::Worksheet, cellref::CellRef;
-    pattern::Union{Nothing,String}=nothing,
-    fgColor::Union{Nothing,CellColor}=nothing,
-    bgColor::Union{Nothing,CellColor}=nothing,
-)::Int
+function _setFill(sh::Worksheet, cellref::CellRef; spec::FillSpec)::Int
+    (; pattern, fgColor, bgColor) = spec
     _require_writable(sh, "set fill")
 
     # Validate before any work
@@ -247,4 +244,4 @@ julia> setUniformFill(sh, "B2,A5:D22")               # Copy `Fill` from B2 to ce
 ```
 """
 function setUniformFill end
-define_uniform_address_methods(:setUniformFill, :setFill, ["fillId", "applyFill"])
+define_uniform_spec_methods(:setUniformFill, :_setUniformFill, :_setFill, :FillSpec, ["fillId", "applyFill"])

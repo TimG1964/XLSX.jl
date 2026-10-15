@@ -97,9 +97,6 @@ const VALID_DIAGONAL_DIRECTIONS = ("up", "down", "both")
 # validates against from the same constant, so the two can't drift apart.
 _doc_list(vals) = join(("- `$v`" for v in vals), "\n")
 
-# Shared kwarg type alias for border sides
-const BorderKw = Union{Nothing,Vector{<:Pair{String}}}
-
 const VALID_HORIZONTAL_ALIGNMENTS = ("left", "center", "right", "fill", "justify", "centerContinuous", "distributed")
 const VALID_VERTICAL_ALIGNMENTS   = ("top", "center", "bottom", "justify", "distributed")
 
@@ -330,8 +327,8 @@ end
 _to_border_dict(v) = isnothing(v) ? nothing : Dict{String,Any}(p for p in v)
 
 # Validates that `outside` is not combined with any other border kwargs.
-function _check_outside_conflict(outside, left, right, top, bottom, diagonal, allsides)
-    !isnothing(outside) && !all(isnothing, [left, right, top, bottom, diagonal, allsides]) &&
+function _check_outside_conflict(s::BorderSpec)
+    !isnothing(s.outside) && !all(isnothing, (s.left, s.right, s.top, s.bottom, s.diagonal, s.allsides)) &&
         throw(XLSXError("Keyword `outside` is incompatible with any other keywords."))
 end
 
@@ -743,11 +740,11 @@ end
 #
 # Most setUniform functions (but not Style or Alignment - see below)
 #
-function maybe_update_font!(f::Function, ws::Worksheet, cell, cellref; kw...)
-    f == setFont || return
+function maybe_update_font!(f::Function, ws::Worksheet, cell, cellref; spec)
+    f === _setFont || return
     cell isa EmptyCell && return
     cell.datatype == CT_STRING || return
-    v = update_sharedString_font(ws, cell; kw...)
+    v = update_sharedString_font(ws, cell, spec)
     cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v))
 end
 
@@ -1106,22 +1103,13 @@ function update_sharedString_font(ws::Worksheet, cell::Cell, firstFont::CellFont
 end
 
 # `setFont` and `setUniformFont` give the font as keywords; each one given overrides
-# the matching run properties. Keywords that don't concern runs are ignored.
-function update_sharedString_font(ws::Worksheet, cell::Cell;
-    bold::Union{Nothing,Bool}=nothing,
-    italic::Union{Nothing,Bool}=nothing,
-    under::Union{Nothing,String}=nothing,
-    strike::Union{Nothing,Bool}=nothing,
-    size::Union{Nothing,Real}=nothing,
-    color::Union{Nothing,CellColor,Dict{String,String}}=nothing,
-    name::Union{Nothing,String}=nothing,
-    vertAlign::Union{Nothing,String}=nothing,
-    _...
-) :: Union{Nothing,Int64}
+# the matching run properties.
+function update_sharedString_font(ws::Worksheet, cell::Cell, s::FontSpec) :: Union{Nothing,Int64}
     tags = Set{String}()
-    for (val, font_tag) in ((bold, "b"), (italic, "i"), (strike, "strike"), (under, "u"),
-                            (size, "sz"), (color, "color"), (name, "name"), (vertAlign, "vertAlign"))
-        isnothing(val) || union!(tags, _run_tags(font_tag))
+    for (given, font_tag) in ((!isnothing(s.bold), "b"), (!isnothing(s.italic), "i"), (!isnothing(s.strike), "strike"),
+                              (!isnothing(s.under), "u"), (!isnothing(s.size), "sz"), (!isnothing(s.color), "color"),
+                              (!isnothing(s.name), "name"), (!isnothing(s.vertAlign), "vertAlign"))
+        given && union!(tags, _run_tags(font_tag))
     end
     return _strip_run_props!(ws, cell, tags)
 end
@@ -1253,31 +1241,69 @@ end
 # Per-cell setters (`setFont`, `setFill`, ...). A setter that defines the
 # `CellRange`, `ColumnRange`, `RowRange` and `XLSXFile` forms itself, as
 # `setBorder` does for its `outside` keyword, passes `ranges=false`.
+# Each entry is (arguments, body, return type or `nothing`).
+function _percell_address_methods(F::Symbol, ranges::Bool)
+    IntOrUR = :(Union{Integer,UnitRange{<:Integer}})
+    VecOrSR = :(Union{Vector{Int},StepRange{<:Integer}})
+    ms = Any[
+        ((:(ws::Worksheet), :(ref::SheetCellRef)),      :(do_sheet_names_match(ws, ref) && $F(ws, ref.cellref; kw...)), nothing),
+        ((:(ws::Worksheet), :(rng::SheetCellRange)),    :(do_sheet_names_match(ws, rng) && $F(ws, rng.rng; kw...)), nothing),
+        ((:(ws::Worksheet), :(rng::SheetColumnRange)),  :(do_sheet_names_match(ws, rng) && $F(ws, rng.colrng; kw...)), nothing),
+        ((:(ws::Worksheet), :(rng::SheetRowRange)),     :(do_sheet_names_match(ws, rng) && $F(ws, rng.rowrng; kw...)), nothing),
+        ((:(ws::Worksheet), :(ncrng::NonContiguousRange)),   :(process_ncranges($F, ws, ncrng; kw...)), :Int),
+        ((:(ws::Worksheet), :(ref_or_rng::AbstractString)),  :(process_ranges($F, ws, ref_or_rng; kw...)), :Int),
+        ((:(ws::Worksheet), :(row::$IntOrUR), :(c::Colon)),  :(process_colon($F, ws, row, nothing; kw...)), nothing),
+        ((:(ws::Worksheet), :(r::Colon), :(col::$IntOrUR)),  :(process_colon($F, ws, nothing, col; kw...)), nothing),
+        ((:(ws::Worksheet), :(r::Colon), :(c::Colon)),       :(process_colon($F, ws, nothing, nothing; kw...)), nothing),
+        ((:(ws::Worksheet), :(rc::Colon)),                   :(process_colon($F, ws, nothing, nothing; kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$VecOrSR), :(c::Colon)),  :(process_veccolon($F, ws, row, nothing; kw...)), nothing),
+        ((:(ws::Worksheet), :(r::Colon), :(col::$VecOrSR)),  :(process_veccolon($F, ws, nothing, col; kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$IntOrUR), :(col::$VecOrSR)), :(process_vecint($F, ws, row, col; kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$VecOrSR), :(col::$IntOrUR)), :(process_vecint($F, ws, row, col; kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$VecOrSR), :(col::$VecOrSR)), :(process_vecint($F, ws, row, col; kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$IntOrUR), :(col::$IntOrUR)),
+            :($F(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)), nothing),
+    ]
+    ranges && append!(ms, Any[
+        ((:(ws::Worksheet), :(rng::CellRange)),       :(process_cellranges($F, ws, rng; kw...)), :Int),
+        ((:(ws::Worksheet), :(colrng::ColumnRange)),  :(process_columnranges($F, ws, colrng; kw...)), :Int),
+        ((:(ws::Worksheet), :(rowrng::RowRange)),     :(process_rowranges($F, ws, rowrng; kw...)), :Int),
+        ((:(xl::XLSXFile), :(sheetcell::String)),     :(process_sheetcell($F, xl, sheetcell; kw...)), :Int),
+    ])
+    return ms
+end
+
 function define_percell_address_methods(F::Symbol; ranges::Bool=true)
-    @eval begin
-        $F(ws::Worksheet, ref::SheetCellRef; kw...) = do_sheet_names_match(ws, ref) && $F(ws, ref.cellref; kw...)
-        $F(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.rng; kw...)
-        $F(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.colrng; kw...)
-        $F(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.rowrng; kw...)
-        $F(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_ncranges($F, ws, ncrng; kw...)
-        $F(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges($F, ws, ref_or_rng; kw...)
-        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon($F, ws, row, nothing; kw...)
-        $F(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon($F, ws, nothing, col; kw...)
-        $F(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon($F, ws, nothing, nothing; kw...)
-        $F(ws::Worksheet, ::Colon; kw...) = process_colon($F, ws, nothing, nothing; kw...)
-        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_veccolon($F, ws, row, nothing; kw...)
-        $F(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_veccolon($F, ws, nothing, col; kw...)
-        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint($F, ws, row, col; kw...)
-        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_vecint($F, ws, row, col; kw...)
-        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_vecint($F, ws, row, col; kw...)
-        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = $F(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
+    for (args, body, T) in _percell_address_methods(F, ranges)
+        sig = :($F($(args...); kw...))
+        isnothing(T) || (sig = :($sig::$T))
+        @eval $sig = $body
     end
-    ranges && @eval begin
-        $F(ws::Worksheet, rng::CellRange; kw...)::Int = process_cellranges($F, ws, rng; kw...)
-        $F(ws::Worksheet, colrng::ColumnRange; kw...)::Int = process_columnranges($F, ws, colrng; kw...)
-        $F(ws::Worksheet, rowrng::RowRange; kw...)::Int = process_rowranges($F, ws, rowrng; kw...)
-        $F(xl::XLSXFile, sheetcell::String; kw...)::Int = process_sheetcell($F, xl, sheetcell; kw...)
+    return nothing
+end
+
+# Defines the public setter `F` over the internal setter `G`: each method of `F`
+# gathers its keywords into one `S(:F; kw...)` and passes it to the same method
+# of `G` as the keyword `spec`. The methods of `F` are those in `methods`, so its
+# signatures, and the errors for a target it doesn't take, are those of any
+# other setter in its family; but the many helpers behind `G` see only the
+# keyword `spec`, so they compile once, rather than again for every new set of
+# keywords. An unrecognized keyword is an `XLSXError` naming `F`.
+function _define_spec_wrappers(F::Symbol, G::Symbol, S::Symbol, methods)
+    for (args, _, _) in methods
+        names = [a.args[1] for a in args]
+        @eval $F($(args...); kw...) = $G($(names...); spec=$S($(QuoteNode(F)); kw...))
     end
+    return nothing
+end
+
+# A per-cell setter `F` taking its keywords as an `S` (see `_define_spec_wrappers`).
+# The internal setter `G` defines the `CellRef` method, taking `spec`, and with
+# `ranges=false` the range methods too.
+function define_percell_spec_methods(F::Symbol, G::Symbol, S::Symbol; ranges::Bool=true)
+    define_percell_address_methods(G; ranges)
+    cellref = ((:(ws::Worksheet), :(ref::CellRef)), nothing, nothing)
+    _define_spec_wrappers(F, G, S, [_percell_address_methods(G, true); [cellref]])
     return nothing
 end
 
@@ -1285,28 +1311,51 @@ end
 # the first cell, and `atts` the cellXfs attributes then copied to the others
 # (e.g. `["fontId", "applyFont"]`). `setUniformAlignment` copies an alignment
 # node rather than attributes, so passes `atts=nothing`.
-function define_uniform_address_methods(F::Symbol, P::Symbol, atts::Union{Nothing,Vector{String}})
+# Each entry is (arguments, body, return type or `nothing`).
+function _uniform_address_methods(F::Symbol, P::Symbol, atts::Union{Nothing,Vector{String}})
     a = isnothing(atts) ? () : (:([$(atts...)]),)   # a fresh vector literal at each call
-    @eval begin
-        $F(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.rng; kw...)
-        $F(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.colrng; kw...)
-        $F(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.rowrng; kw...)
-        $F(ws::Worksheet, colrng::ColumnRange; kw...)::Int = process_columnranges($F, ws, colrng; kw...)
-        $F(ws::Worksheet, rowrng::RowRange; kw...)::Int = process_rowranges($F, ws, rowrng; kw...)
-        $F(ws::Worksheet, ncrng::NonContiguousRange; kw...)::Int = process_uniform_ncranges($P, ws, ncrng, $(a...); kw...)
-        $F(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell($F, xl, sheetcell; kw...)
-        $F(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges($F, ws, ref_or_rng; kw...)
-        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon($F, ws, row, nothing; kw...)
-        $F(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon($F, ws, nothing, col; kw...)
-        $F(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon($F, ws, nothing, nothing; kw...)
-        $F(ws::Worksheet, ::Colon; kw...) = process_colon($F, ws, nothing, nothing; kw...)
-        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_uniform_veccolon($P, ws, row, nothing, $(a...); kw...)
-        $F(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_veccolon($P, ws, nothing, col, $(a...); kw...)
-        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_vecint($P, ws, row, col, $(a...); kw...)
-        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_uniform_vecint($P, ws, row, col, $(a...); kw...)
-        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_uniform_vecint($P, ws, row, col, $(a...); kw...)
-        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = $F(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
-        $F(ws::Worksheet, rng::CellRange; kw...)::Int = process_uniform_attribute($P, ws, rng, $(a...); kw...)
+    IntOrUR = :(Union{Integer,UnitRange{<:Integer}})
+    VecOrSR = :(Union{Vector{Int},StepRange{<:Integer}})
+    return Any[
+        ((:(ws::Worksheet), :(rng::SheetCellRange)),    :(do_sheet_names_match(ws, rng) && $F(ws, rng.rng; kw...)), nothing),
+        ((:(ws::Worksheet), :(rng::SheetColumnRange)),  :(do_sheet_names_match(ws, rng) && $F(ws, rng.colrng; kw...)), nothing),
+        ((:(ws::Worksheet), :(rng::SheetRowRange)),     :(do_sheet_names_match(ws, rng) && $F(ws, rng.rowrng; kw...)), nothing),
+        ((:(ws::Worksheet), :(colrng::ColumnRange)),    :(process_columnranges($F, ws, colrng; kw...)), :Int),
+        ((:(ws::Worksheet), :(rowrng::RowRange)),       :(process_rowranges($F, ws, rowrng; kw...)), :Int),
+        ((:(ws::Worksheet), :(ncrng::NonContiguousRange)),     :(process_uniform_ncranges($P, ws, ncrng, $(a...); kw...)), :Int),
+        ((:(xl::XLSXFile), :(sheetcell::AbstractString)),      :(process_sheetcell($F, xl, sheetcell; kw...)), :Int),
+        ((:(ws::Worksheet), :(ref_or_rng::AbstractString)),    :(process_ranges($F, ws, ref_or_rng; kw...)), :Int),
+        ((:(ws::Worksheet), :(row::$IntOrUR), :(c::Colon)),    :(process_colon($F, ws, row, nothing; kw...)), nothing),
+        ((:(ws::Worksheet), :(r::Colon), :(col::$IntOrUR)),    :(process_colon($F, ws, nothing, col; kw...)), nothing),
+        ((:(ws::Worksheet), :(r::Colon), :(c::Colon)),         :(process_colon($F, ws, nothing, nothing; kw...)), nothing),
+        ((:(ws::Worksheet), :(rc::Colon)),                     :(process_colon($F, ws, nothing, nothing; kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$VecOrSR), :(c::Colon)),    :(process_uniform_veccolon($P, ws, row, nothing, $(a...); kw...)), nothing),
+        ((:(ws::Worksheet), :(r::Colon), :(col::$VecOrSR)),    :(process_uniform_veccolon($P, ws, nothing, col, $(a...); kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$IntOrUR), :(col::$VecOrSR)), :(process_uniform_vecint($P, ws, row, col, $(a...); kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$VecOrSR), :(col::$IntOrUR)), :(process_uniform_vecint($P, ws, row, col, $(a...); kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$VecOrSR), :(col::$VecOrSR)), :(process_uniform_vecint($P, ws, row, col, $(a...); kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$IntOrUR), :(col::$IntOrUR)),
+            :($F(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)), nothing),
+        ((:(ws::Worksheet), :(rng::CellRange)),         :(process_uniform_attribute($P, ws, rng, $(a...); kw...)), :Int),
+    ]
+end
+
+function define_uniform_address_methods(F::Symbol, P::Symbol, atts::Union{Nothing,Vector{String}})
+    for (args, body, T) in _uniform_address_methods(F, P, atts)
+        sig = :($F($(args...); kw...))
+        isnothing(T) || (sig = :($sig::$T))
+        @eval $sig = $body
     end
+    return nothing
+end
+
+# A uniform setter `F` taking its keywords as an `S` (see `_define_spec_wrappers`),
+# over the internal uniform setter `G` and internal per-cell setter `P`.
+function define_uniform_spec_methods(F::Symbol, G::Symbol, P::Symbol, S::Symbol, atts::Union{Nothing,Vector{String}})
+    define_uniform_address_methods(G, P, atts)
+    _define_spec_wrappers(F, G, S, _uniform_address_methods(G, P, atts))
+    # A string naming a single cell reaches `G` as a `CellRef`, which a uniform
+    # setter doesn't take: report it against `F`, as for any other target it doesn't take.
+    @eval $G(ws::Worksheet, ref::CellRef; _...) = throw(MethodError($F, (ws, ref)))
     return nothing
 end

@@ -77,18 +77,10 @@ julia> setFont(sh, :, 2:6; size=48, color="lightskyblue2")                      
 ```
 """
 function setFont end
-define_percell_address_methods(:setFont)
+define_percell_spec_methods(:setFont, :_setFont, :FontSpec)
 
-function setFont(sh::Worksheet, cellref::CellRef;
-    bold::Union{Nothing,Bool}=nothing,
-    italic::Union{Nothing,Bool}=nothing,
-    under::Union{Nothing,String}=nothing,
-    strike::Union{Nothing,Bool}=nothing,
-    size::Union{Nothing,Real}=nothing,
-    color::Union{Nothing,CellColor}=nothing,
-    name::Union{Nothing,String}=nothing,
-    vertAlign::Union{Nothing,String}=nothing
-)::Int
+function _setFont(sh::Worksheet, cellref::CellRef; spec::FontSpec)::Int
+    (; bold, italic, under, strike, size, color, name, vertAlign) = spec
     _require_writable(sh, "set font")
 
     # Validate before any work
@@ -151,7 +143,7 @@ function setFont(sh::Worksheet, cellref::CellRef;
     cell.style = newstyle
 
     if cell.datatype == CT_STRING
-        v = update_sharedString_font(sh, cell; bold, italic, under, strike, size, color, name, vertAlign)
+        v = update_sharedString_font(sh, cell, spec)
         cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v))
     end
 
@@ -216,7 +208,7 @@ julia> setUniformFont(sh, "B2,A5:D22")                                          
 ```
 """
 function setUniformFont end
-define_uniform_address_methods(:setUniformFont, :setFont, ["fontId", "applyFont"])
+define_uniform_spec_methods(:setUniformFont, :_setUniformFont, :_setFont, :FontSpec, ["fontId", "applyFont"])
 
 
 """

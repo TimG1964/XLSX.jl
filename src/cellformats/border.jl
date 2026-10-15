@@ -183,68 +183,48 @@ Julia> setBorder(xf, "Sheet1!D4"; left     = ["style" => "dotted", "color" => "F
 ```
 """
 function setBorder end
-define_percell_address_methods(:setBorder; ranges=false)
+define_percell_spec_methods(:setBorder, :_setBorder, :BorderSpec; ranges=false)
 
-function setBorder(ws::Worksheet, rng::CellRange;
-    outside::BorderKw=nothing, allsides::BorderKw=nothing,
-    left::BorderKw=nothing, right::BorderKw=nothing,
-    top::BorderKw=nothing, bottom::BorderKw=nothing,
-    diagonal::BorderKw=nothing
-)::Int
-    _check_outside_conflict(outside, left, right, top, bottom, diagonal, allsides)
-    isnothing(outside) || return setOutsideBorder(ws, rng; outside)
-    return process_cellranges(setBorder, ws, rng; allsides, left, right, top, bottom, diagonal)
+# The range forms take `outside`, which is set around the range as a whole.
+function _setBorder(ws::Worksheet, rng::CellRange; spec::BorderSpec)::Int
+    _check_outside_conflict(spec)
+    isnothing(spec.outside) || return setOutsideBorder(ws, rng; spec.outside)
+    return process_cellranges(_setBorder, ws, rng; spec)
 end
 
-function setBorder(ws::Worksheet, rng::ColumnRange;
-    outside::BorderKw=nothing, allsides::BorderKw=nothing,
-    left::BorderKw=nothing, right::BorderKw=nothing,
-    top::BorderKw=nothing, bottom::BorderKw=nothing,
-    diagonal::BorderKw=nothing
-)::Int
-    _check_outside_conflict(outside, left, right, top, bottom, diagonal, allsides)
-    isnothing(outside) || return process_columnranges(setOutsideBorder, ws, rng; outside)
-    return process_columnranges(setBorder, ws, rng; allsides, left, right, top, bottom, diagonal)
+function _setBorder(ws::Worksheet, rng::ColumnRange; spec::BorderSpec)::Int
+    _check_outside_conflict(spec)
+    isnothing(spec.outside) || return process_columnranges(setOutsideBorder, ws, rng; spec.outside)
+    return process_columnranges(_setBorder, ws, rng; spec)
 end
 
-function setBorder(ws::Worksheet, rng::RowRange;
-    outside::BorderKw=nothing, allsides::BorderKw=nothing,
-    left::BorderKw=nothing, right::BorderKw=nothing,
-    top::BorderKw=nothing, bottom::BorderKw=nothing,
-    diagonal::BorderKw=nothing
-)::Int
-    _check_outside_conflict(outside, left, right, top, bottom, diagonal, allsides)
-    isnothing(outside) || return process_rowranges(setOutsideBorder, ws, rng; outside)
-    return process_rowranges(setBorder, ws, rng; allsides, left, right, top, bottom, diagonal)
+function _setBorder(ws::Worksheet, rng::RowRange; spec::BorderSpec)::Int
+    _check_outside_conflict(spec)
+    isnothing(spec.outside) || return process_rowranges(setOutsideBorder, ws, rng; spec.outside)
+    return process_rowranges(_setBorder, ws, rng; spec)
 end
 
-function setBorder(xl::XLSXFile, sheetcell::String;
-    outside::BorderKw=nothing, allsides::BorderKw=nothing,
-    left::BorderKw=nothing, right::BorderKw=nothing,
-    top::BorderKw=nothing, bottom::BorderKw=nothing,
-    diagonal::BorderKw=nothing
-)::Int
-    _check_outside_conflict(outside, left, right, top, bottom, diagonal, allsides)
-    if isnothing(outside)
-        return process_sheetcell(setBorder, xl, sheetcell; allsides, left, right, top, bottom, diagonal)
+function _setBorder(xl::XLSXFile, sheetcell::String; spec::BorderSpec)::Int
+    _check_outside_conflict(spec)
+    if isnothing(spec.outside)
+        return process_sheetcell(_setBorder, xl, sheetcell; spec)
     else
-        return process_sheetcell(setOutsideBorder, xl, sheetcell; outside)
+        return process_sheetcell(setOutsideBorder, xl, sheetcell; spec.outside)
     end
 end
 
-function setBorder(sh::Worksheet, cellref::CellRef;
-    allsides::BorderKw=nothing,
-    left::BorderKw=nothing, right::BorderKw=nothing,
-    top::BorderKw=nothing, bottom::BorderKw=nothing,
-    diagonal::BorderKw=nothing
-)::Int
+function _setBorder(sh::Worksheet, cellref::CellRef; spec::BorderSpec)::Int
+    (; outside, allsides, left, right, top, bottom, diagonal) = spec
     _require_writable(sh, "set borders")
+
+    isnothing(outside) ||
+        throw(XLSXError("Keyword `outside` sets the border around a range, so cannot be used for the single cell $(cellname(cellref)) or with `setUniformBorder`."))
 
     # allsides expands to all four sides, then recurses — early return
     if !isnothing(allsides)
         !all(isnothing, [left, right, top, bottom]) &&
             throw(XLSXError("Keyword `allsides` is incompatible with `left`, `right`, `top`, or `bottom`."))
-        return setBorder(sh, cellref; left=allsides, right=allsides, top=allsides, bottom=allsides, diagonal)
+        return _setBorder(sh, cellref; spec=BorderSpec(nothing, nothing, allsides, allsides, allsides, allsides, diagonal))
     end
 
     wb   = get_workbook(sh)
@@ -344,7 +324,7 @@ julia> setUniformBorder(sh, "B2,A5:D22")     # Copy `Border` from B2 to cells in
 ```
 """
 function setUniformBorder end
-define_uniform_address_methods(:setUniformBorder, :setBorder, ["borderId", "applyBorder"])
+define_uniform_spec_methods(:setUniformBorder, :_setUniformBorder, :_setBorder, :BorderSpec, ["borderId", "applyBorder"])
 
 """
     setOutsideBorder(sh::Worksheet, cr::String; kw...) -> ::Int
@@ -407,10 +387,10 @@ function setOutsideBorder(ws::Worksheet, rng::CellRange;
     bottomLeft  = CellRef(rng.stop.row_number,  rng.start.column_number)
     bottomRight = rng.stop
 
-    setBorder(ws, CellRange(topLeft,    topRight);    top=outside)
-    setBorder(ws, CellRange(topLeft,    bottomLeft);  left=outside)
-    setBorder(ws, CellRange(topRight,   bottomRight); right=outside)
-    setBorder(ws, CellRange(bottomLeft, bottomRight); bottom=outside)
+    _setBorder(ws, CellRange(topLeft,    topRight);    spec=BorderSpec(:setOutsideBorder; top=outside))
+    _setBorder(ws, CellRange(topLeft,    bottomLeft);  spec=BorderSpec(:setOutsideBorder; left=outside))
+    _setBorder(ws, CellRange(topRight,   bottomRight); spec=BorderSpec(:setOutsideBorder; right=outside))
+    _setBorder(ws, CellRange(bottomLeft, bottomRight); spec=BorderSpec(:setOutsideBorder; bottom=outside))
 
     return -1
 

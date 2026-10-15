@@ -135,16 +135,10 @@ julia> setAlignment(sh, 1:3, 3:6; horizontal="center", rotation="90", shrink=tru
 ```
 """
 function setAlignment end
-define_percell_address_methods(:setAlignment)
+define_percell_spec_methods(:setAlignment, :_setAlignment, :AlignmentSpec)
 
-function setAlignment(sh::Worksheet, cellref::CellRef;
-    horizontal::Union{Nothing,String}=nothing,
-    vertical::Union{Nothing,String}=nothing,
-    wrapText::Union{Nothing,Bool}=nothing,
-    shrink::Union{Nothing,Bool}=nothing,
-    indent::Union{Nothing,Int}=nothing,
-    rotation::Union{Nothing,Int}=nothing
-)::Int
+function _setAlignment(sh::Worksheet, cellref::CellRef; spec::AlignmentSpec)::Int
+    (; horizontal, vertical, wrapText, shrink, indent, rotation) = spec
     _require_writable(sh, "set alignment")
 
     # Validate before any work
@@ -241,4 +235,4 @@ julia> setUniformAlignment(sh, "B2,A5:D22")                # Copy `Alignment` fr
 ```
 """
 function setUniformAlignment end
-define_uniform_address_methods(:setUniformAlignment, :setAlignment, nothing)
+define_uniform_spec_methods(:setUniformAlignment, :_setUniformAlignment, :_setAlignment, :AlignmentSpec, nothing)

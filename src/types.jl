@@ -163,6 +163,114 @@ mutable struct CellAlignment # Alignment is part of the cell style `xf` so doesn
     end
 end
 
+# Anything that can be given as a color in cell formatting, conditional formats and rich text.
+const CellColor = Union{AbstractString,Symbol,Colors.Colorant,SchemeColor}
+
+# The value of a border side keyword, e.g. `["style" => "thin", "color" => "red"]`.
+const BorderKw = Union{Nothing,Vector{<:Pair{String}}}
+
+# The keywords of a formatting setter (`setFont`, `setFill`, ...), gathered once at
+# the public entry (see `define_percell_spec_methods`). The address methods forward
+# their keywords through many helpers, each compiled again for every new set of
+# keywords; forwarding a single `spec` lets them compile once. Each is made by
+# `S(caller; kw...)`, which takes the setter's keywords with their usual types and
+# defaults, and names `caller` in the error for an unrecognized keyword.
+struct FontSpec
+    bold::Union{Nothing,Bool}
+    italic::Union{Nothing,Bool}
+    under::Union{Nothing,String}
+    strike::Union{Nothing,Bool}
+    size::Union{Nothing,Real}
+    color::Union{Nothing,CellColor}
+    name::Union{Nothing,String}
+    vertAlign::Union{Nothing,String}
+end
+function FontSpec(caller::Symbol;
+    bold::Union{Nothing,Bool}=nothing,
+    italic::Union{Nothing,Bool}=nothing,
+    under::Union{Nothing,String}=nothing,
+    strike::Union{Nothing,Bool}=nothing,
+    size::Union{Nothing,Real}=nothing,
+    color::Union{Nothing,CellColor}=nothing,
+    name::Union{Nothing,String}=nothing,
+    vertAlign::Union{Nothing,String}=nothing,
+    kw...
+)
+    _check_keywords(caller, FontSpec, kw)
+    return FontSpec(bold, italic, under, strike, size, color, name, vertAlign)
+end
+
+struct FillSpec
+    pattern::Union{Nothing,String}
+    fgColor::Union{Nothing,CellColor}
+    bgColor::Union{Nothing,CellColor}
+end
+function FillSpec(caller::Symbol;
+    pattern::Union{Nothing,String}=nothing,
+    fgColor::Union{Nothing,CellColor}=nothing,
+    bgColor::Union{Nothing,CellColor}=nothing,
+    kw...
+)
+    _check_keywords(caller, FillSpec, kw)
+    return FillSpec(pattern, fgColor, bgColor)
+end
+
+struct AlignmentSpec
+    horizontal::Union{Nothing,String}
+    vertical::Union{Nothing,String}
+    wrapText::Union{Nothing,Bool}
+    shrink::Union{Nothing,Bool}
+    indent::Union{Nothing,Int}
+    rotation::Union{Nothing,Int}
+end
+function AlignmentSpec(caller::Symbol;
+    horizontal::Union{Nothing,String}=nothing,
+    vertical::Union{Nothing,String}=nothing,
+    wrapText::Union{Nothing,Bool}=nothing,
+    shrink::Union{Nothing,Bool}=nothing,
+    indent::Union{Nothing,Int}=nothing,
+    rotation::Union{Nothing,Int}=nothing,
+    kw...
+)
+    _check_keywords(caller, AlignmentSpec, kw)
+    return AlignmentSpec(horizontal, vertical, wrapText, shrink, indent, rotation)
+end
+
+struct FormatSpec
+    format::Union{Nothing,String}
+end
+function FormatSpec(caller::Symbol; format::Union{Nothing,String}=nothing, kw...)
+    _check_keywords(caller, FormatSpec, kw)
+    return FormatSpec(format)
+end
+
+struct BorderSpec
+    outside::BorderKw
+    allsides::BorderKw
+    left::BorderKw
+    right::BorderKw
+    top::BorderKw
+    bottom::BorderKw
+    diagonal::BorderKw
+end
+function BorderSpec(caller::Symbol;
+    outside::BorderKw=nothing, allsides::BorderKw=nothing,
+    left::BorderKw=nothing, right::BorderKw=nothing,
+    top::BorderKw=nothing, bottom::BorderKw=nothing,
+    diagonal::BorderKw=nothing,
+    kw...
+)
+    _check_keywords(caller, BorderSpec, kw)
+    return BorderSpec(outside, allsides, left, right, top, bottom, diagonal)
+end
+
+function _check_keywords(caller::Symbol, ::Type{S}, kw) where {S}
+    isempty(kw) && return nothing
+    bad = join(("`$k`" for k in keys(kw)), ", ")
+    valid = join(("`$k`" for k in fieldnames(S)), ", ")
+    throw(XLSXError("Unrecognized keyword argument$(length(kw) == 1 ? "" : "s") $bad for `$caller`. Valid keywords are $valid."))
+end
+
 @enum CellValueType::UInt8 begin
     CT_EMPTY = 0
     CT_STRING = 1
