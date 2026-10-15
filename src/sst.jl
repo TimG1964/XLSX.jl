@@ -344,32 +344,28 @@ end
 
 # Take a substring from a RichTextString as another RichTextString
 Base.getindex(rts::RichTextString, i::Int) = getindex(rts, i:i)
+# Indices are those of `rts.text`, as for a String: `r` selects the characters
+# starting at indices in `r`, which must be valid ones.
 function Base.getindex(rts::RichTextString, r::UnitRange{Int})::RichTextString
     substr = rts.text[r]
 
     new_runs = RichTextRun[]
-    global_char_pos = 1
+    pos = 1                                   # index in `rts.text` of the run's first byte
 
     for run in rts.runs
         run_text = run.text
-        run_chars = length(run_text)
-        run_range = global_char_pos:(global_char_pos + run_chars - 1)
+        run_first = pos
+        run_last  = pos - 1 + lastindex(run_text)   # start of the run's last character
 
-        overlap_start = max(first(r), first(run_range))
-        overlap_end   = min(last(r), last(run_range))
+        overlap_start = max(first(r), run_first)
+        overlap_end   = min(last(r), run_last)
 
         if overlap_start <= overlap_end
-            # Convert global character indices to local character indices
-            local_start = overlap_start - global_char_pos + 1
-            local_end   = overlap_end   - global_char_pos + 1
-
-            # Slice using character indexing
-            sliced_text = run_text[local_start:local_end]
-
+            sliced_text = run_text[(overlap_start - pos + 1):(overlap_end - pos + 1)]
             push!(new_runs, RichTextRun(sliced_text, run.atts))
         end
 
-        global_char_pos += run_chars
+        pos += ncodeunits(run_text)
     end
 
     return RichTextString(substr, new_runs)
@@ -410,13 +406,15 @@ function Base.hash(r::RichTextRun, h::UInt)
         return hash(0xdebdceef, h)  # any constant
     end
 
-    # Order‑insensitive hash over attributes
-    # (color values canonicalized via _cell_color_key)
+    # Order‑insensitive hash over attributes, as `==` compares them: each pair is
+    # hashed alone and the results combined commutatively, so the Dict's iteration
+    # order cannot matter. (color values canonicalized via _cell_color_key)
+    acc = zero(UInt)
     for (k, v) in atts
         v′ = (k === :color ? _cell_color_key(v) : v)
-        h = hash((k, v′), h)
+        acc ⊻= hash((k, v′))
     end
-    return h
+    return hash(acc, h)
 end
 Base.length(run::RichTextRun) = length(run.text)
 function Base.show(io::IO, run::RichTextRun)
@@ -598,18 +596,21 @@ function getRichTextString(wb::Workbook, xml_string::String)::Union{RichTextStri
             bold = italic = strike = under = false
             size_val = color_val = name_val = vertAlign_val = nothing
 
+            # `<b val="0"/>` and `<u val="none"/>` switch a property off.
+            flag_on(c) = !(get(something(XML.attributes(c), Dict{String,String}()), "val", "1") in ("0", "false", "none"))
             for c in XML.children(rpr_child)
                 ln = localname(c)
                 if ln == "b"
-                    bold = true
+                    bold = flag_on(c)
                 elseif ln == "i"
-                    italic = true
+                    italic = flag_on(c)
                 elseif ln == "strike"
-                    strike = true
+                    strike = flag_on(c)
                 elseif ln == "u"
-                    under = true
+                    under = flag_on(c)
                 elseif ln == "sz" && isnothing(size_val)
-                    size_val = parse(Int, XML.attributes(c)["val"])
+                    sz = parse(Float64, XML.attributes(c)["val"])     # half points are common (10.5)
+                    size_val = isinteger(sz) ? Int(sz) : sz
                 elseif ln == "color" && isnothing(color_val)
                     color_val = resolveColor(wb, XML.attributes(c))
                 elseif ln == "rFont" && isnothing(name_val)

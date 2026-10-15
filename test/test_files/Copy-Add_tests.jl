@@ -924,3 +924,14 @@
 
     end
 end
+
+@testset "review fixes: copysheet! shared formula ids" begin
+    f = XLSX.newxlsx("S"); s = f[1]
+    s["A1:A4"] = 1
+    XLSX.setFormula(s, "B1:B4", "=A1+1")
+    c = XLSX.copysheet!(s, "C")
+    XLSX.setFormula(c, "D1:D4", "=A1*3")
+    ids = [f.id for (k, f) in f.workbook.formulas if k.sheet == "C" && f isa XLSX.ReferencedFormula]
+    @test allunique(ids)
+    SAVE_FILES && save_outfile(f)
+end

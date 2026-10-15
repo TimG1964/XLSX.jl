@@ -244,15 +244,12 @@ function mergeCells(ws::Worksheet, cr::CellRange)
     sheetdoc = xmlroot(get_workbook(ws), ws.relationship_id) # find the <mergeCells> block in the worksheet's xml file
     i, j = get_idces(sheetdoc, "worksheet", "mergeCells")
 
-    if isnothing(j) # There are no existing merged cells. Insert immediately after the <sheetData> block and push everything else down one.
-        k, l = get_idces(sheetdoc, "worksheet", "sheetData")
-        len = length(sheetdoc[k])
-        i != k && throw(XLSXError("Some problem here!"))
-        if l != len
-            insert!(sheetdoc[k].children, l+1, XML.Element("mergeCells"))
-        else
-            push!(sheetdoc[k], XML.Element("mergeCells"))
-        end
+    pfx = get_prefix(ws)
+    pfx = pfx == "" ? pfx : pfx * ":"
+    if isnothing(j) # There are no existing merged cells. Insert a block where the schema puts it.
+        root = sheetdoc[i]
+        l = insert_index(root, "mergeCells", WORKSHEET_ORDER)
+        insert!(root.children, l + 1, XML.Element("$(pfx)mergeCells"))
         j = l + 1
         count = 0
     else # There are already some existing merged cells
@@ -268,7 +265,7 @@ function mergeCells(ws::Worksheet, cr::CellRange)
         end
     end
 
-    push!(sheetdoc[i][j], XML.Element("mergeCell", ref=string(cr))) # Add the new merged cell range.
+    push!(sheetdoc[i][j], XML.Element("$(pfx)mergeCell", ref=string(cr))) # Add the new merged cell range.
     count += 1
     sheetdoc[i][j]["count"] = count
 

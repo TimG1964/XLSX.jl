@@ -591,3 +591,44 @@ end
         end
     end
 end
+
+@testset "review fixes: reading" begin
+    @testset "a worksheet part not named sheetN.xml" begin
+        XLSX.writetable("base_part.xlsx", [[1, 2, 3]], ["a"]; overwrite=true)
+        r = ZipReader(read("base_part.xlsx"))
+        open("renamed_part.xlsx", "w") do io
+            ZipWriter(io) do w
+                for n in zip_names(r)
+                    bytes = zip_readentry(r, n)
+                    if n in ("xl/_rels/workbook.xml.rels", "[Content_Types].xml")
+                        bytes = Vector{UInt8}(replace(String(bytes), "worksheets/sheet1.xml" => "worksheets/Data.xml"))
+                    end
+                    zip_newfile(w, n == "xl/worksheets/sheet1.xml" ? "xl/worksheets/Data.xml" : n)
+                    write(w, bytes)
+                end
+            end
+        end
+        @test XLSX.readxlsx("renamed_part.xlsx")[1]["A3"] == 2
+        @test XLSX.readtable("renamed_part.xlsx", 1).data == Any[[1, 2, 3]]
+        XLSX.openxlsx("renamed_part.xlsx"; mode="rw") do xf
+            xf[1]["B1"] = "new"
+        end
+        @test XLSX.readxlsx("renamed_part.xlsx")[1]["B1"] == "new"
+        SAVE_FILES && save_outfile("renamed_part.xlsx")
+    end
+    @testset "negative number in a date-formatted cell" begin
+        f = XLSX.newxlsx(); s = f[1]
+        st = Int(XLSX.get_num_style_index(s, 14).id)
+        @test XLSX.process_tv(f.workbook, "", "-1", st) == (XLSX.CT_INT, reinterpret(UInt64, -1))
+        @test XLSX.process_tv(f.workbook, "", "-1.5", st)[1] == XLSX.CT_FLOAT
+    end
+    @testset "a datetime that rounds up to midnight" begin
+        @test XLSX.excel_value_to_datetime(45000.999999999, false) == DateTime(2023, 3, 16)
+    end
+    @testset "too-short file and missing sheet index give XLSXError" begin
+        touch("empty.xlsx")
+        @test_throws XLSX.XLSXError XLSX.readxlsx("empty.xlsx")
+        XLSX.writetable("one_sheet.xlsx", [[1, 2]], ["a"]; overwrite=true)
+        @test_throws XLSX.XLSXError XLSX.readtable("one_sheet.xlsx", 5)
+    end
+end

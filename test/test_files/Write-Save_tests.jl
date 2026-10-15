@@ -137,3 +137,60 @@ end
     SAVE_FILES && save_outfile(outfile)
     isfile(outfile) && rm(outfile)
 end
+
+@testset "review fixes: write" begin
+    @testset "hidden sheets stay hidden" begin
+        f = XLSX.newxlsx("A"); s2 = XLSX.addsheet!(f, "B")
+        s2.is_hidden = true
+        XLSX.writexlsx("hidden.xlsx", f; overwrite=true)
+        @test XLSX.readxlsx("hidden.xlsx")["B"].is_hidden
+        SAVE_FILES && save_outfile("hidden.xlsx")
+    end
+    @testset "hidden and veryHidden sheets read from a file survive an edit" begin
+        f = XLSX.newxlsx("Visible"); XLSX.addsheet!(f, "Hidden"); XLSX.addsheet!(f, "VeryHidden")
+        XLSX.writexlsx("states_base.xlsx", f; overwrite=true)
+        r = ZipReader(read("states_base.xlsx"))
+        open("states.xlsx", "w") do io                      # mark them as Excel does
+            ZipWriter(io) do w
+                for n in zip_names(r)
+                    bytes = zip_readentry(r, n)
+                    n == "xl/workbook.xml" && (bytes = Vector{UInt8}(replace(String(bytes),
+                        r"(<sheet [^>]*name=\"Hidden\")" => s"\1 state=\"hidden\"",
+                        r"(<sheet [^>]*name=\"VeryHidden\")" => s"\1 state=\"veryHidden\"")))
+                    zip_newfile(w, n); write(w, bytes)
+                end
+            end
+        end
+        XLSX.openxlsx("states.xlsx"; mode="rw") do xf
+            xf[1]["A1"] = "edited"
+        end
+        states = Dict(m[1] => m[2] for m in eachmatch(r"<sheet [^>]*name=\"([^\"]+)\"[^>]*state=\"([^\"]+)\"",
+                      String(ZipReader(read("states.xlsx")) |> z -> zip_readentry(z, "xl/workbook.xml"))))
+        @test states == Dict("Hidden" => "hidden", "VeryHidden" => "veryHidden")
+        SAVE_FILES && save_outfile("states.xlsx")
+    end
+    @testset "dimension grows on all sides at once" begin
+        f = XLSX.newxlsx(); s = f[1]
+        s["B2:D10"] = 1
+        XLSX.set_dimension!(s, XLSX.CellRange("B2:D10"))
+        s["A20"] = 2
+        @test XLSX.get_dimension(s) == XLSX.CellRange("A2:D20")
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "rw do-block that throws leaves the file unchanged" begin
+        XLSX.writetable("rw_throw.xlsx", [[1, 2]], ["a"]; overwrite=true)
+        @test_throws ErrorException XLSX.openxlsx("rw_throw.xlsx"; mode="rw") do xf
+            xf[1]["A2"] = "partially edited"
+            error("boom")
+        end
+        @test XLSX.readxlsx("rw_throw.xlsx")[1]["A2"] == 1
+    end
+    @testset "sheet names are unique ignoring case" begin
+        f = XLSX.newxlsx("Sheet1")
+        @test XLSX.addsheet!(f, "SHEET1").name == "SHEET1 1"
+        @test_throws XLSX.XLSXError XLSX.renamesheet!(f[2], "sheet1")
+        XLSX.renamesheet!(f[1], "SHEET1")                    # a new case of its own name
+        @test XLSX.sheetnames(f)[1] == "SHEET1"
+        SAVE_FILES && save_outfile(f)
+    end
+end

@@ -536,7 +536,8 @@
             @test ismissing(first(XLSX.parse_defined_name_value("\"\"")))
             @test XLSX.parse_defined_name_value("42") == (42, false)
             @test XLSX.parse_defined_name_value("3.5") == (3.5, false)
-            @test XLSX.parse_defined_name_value("SomethingElse") == ("SomethingElse", false)
+            # any other expression is formula text, held with a leading `=`
+            @test XLSX.parse_defined_name_value("SomethingElse") == ("=SomethingElse", false)
         end
     end
 
@@ -740,5 +741,70 @@ end
         @test string(pa.value) == "'Mock-up'!A1:K116"
         isfile("mytest.xlsx") && rm("mytest.xlsx")
         SAVE_FILES && save_outfile(f)
+    end
+end
+
+@testset "review fixes: defined names" begin
+    @testset "string constants and formulas" begin
+        f = XLSX.newxlsx("S")
+        XLSX.addDefinedName(f, "greeting", "Say \"hi\"")
+        XLSX.addDefinedName(f, "rows", "=COUNTA(S!\$A:\$A)")
+        XLSX.update_workbook_xml!(f)
+        texts = Dict(n["name"] => XLSX.text_value(n) for n in XLSX.elements_with_tag(XLSX.first_element_with_tag(XLSX.xml_root_element(XLSX.xmlroot(f, "xl/workbook.xml")), "definedNames"), "definedName"))
+        @test texts["greeting"] == "\"Say \"\"hi\"\"\""
+        @test texts["rows"] == "COUNTA(S!\$A:\$A)"
+        XLSX.writexlsx("dn_consts.xlsx", f; overwrite=true)
+        f2 = XLSX.readxlsx("dn_consts.xlsx")
+        @test f2["greeting"] == "Say \"hi\""
+        @test XLSX.get_defined_name_value(f2.workbook, "rows") == "=COUNTA(S!\$A:\$A)"
+        @test XLSX.parse_defined_name_value("\"a\"&\"b\"") == ("=\"a\"&\"b\"", false)
+        SAVE_FILES && save_outfile("dn_consts.xlsx")
+    end
+    @testset "names on sheets whose names need quoting" begin
+        f = XLSX.newxlsx("2024"); f[1]["A1"] = 42
+        a1 = XLSX.addsheet!(f, "A1"); a1["A1"] = 7
+        XLSX.addDefinedName(f, "fromDigit", "'2024'!A1")
+        XLSX.addDefinedName(f, "fromA1", "'A1'!A1")
+        XLSX.update_workbook_xml!(f)
+        texts = Dict(n["name"] => XLSX.text_value(n) for n in XLSX.elements_with_tag(XLSX.first_element_with_tag(XLSX.xml_root_element(XLSX.xmlroot(f, "xl/workbook.xml")), "definedNames"), "definedName"))
+        @test texts["fromDigit"] == "'2024'!\$A\$1"
+        @test texts["fromA1"] == "'A1'!\$A\$1"
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "names that are cell addresses in any case are refused" begin
+        @test !XLSX.is_valid_defined_name("a1")
+        @test !XLSX.is_valid_defined_name("xfd100")
+    end
+    @testset "a non-contiguous name recreated from getDefinedNames" begin
+        f = XLSX.newxlsx("S")
+        XLSX.addDefinedName(f, "nc", "S!A1,S!B2"; absolute=false)
+        dn = only(XLSX.getDefinedNames(f))
+        XLSX.deleteDefinedName(f, "nc")
+        XLSX.addDefinedName(f, dn.name, dn.value; absolute=dn.absolute)
+        @test only(XLSX.getDefinedNames(f)) == dn
+        @test_throws XLSX.XLSXError XLSX.addDefinedName(f, "nc2", dn.value; absolute=[true])
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "copysheet! repoints the copy's names" begin
+        f = XLSX.newxlsx("S")
+        XLSX.addDefinedName(f[1], "cell", "B2")
+        XLSX.addDefinedName(f[1], "nc", "A1,B2")
+        t = XLSX.copysheet!(f[1], "T")
+        @test Dict(dn.name => dn.value for dn in XLSX.getDefinedNames(t)) ==
+              Dict("cell" => XLSX.SheetCellRef("T!B2"), "nc" => XLSX.NonContiguousRange("T!A1,T!B2"))
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "deletesheet! drops other sheets' names that refer to it" begin
+        f = XLSX.newxlsx("S1"); s2 = XLSX.addsheet!(f, "S2")
+        XLSX.addDefinedName(s2, "pt", XLSX.SheetCellRef("S1!A1"))
+        XLSX.deletesheet!(f, "S1")
+        @test isempty(XLSX.getDefinedNames(s2))
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "quoteit" begin
+        @test XLSX.quoteit("2024") == "'2024'"
+        @test XLSX.quoteit("A1") == "'A1'"
+        @test XLSX.quoteit("rc") == "'rc'"
+        @test XLSX.quoteit("Sheet1") == "Sheet1"
     end
 end

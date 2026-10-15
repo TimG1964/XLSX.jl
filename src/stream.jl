@@ -493,25 +493,18 @@ function first_cache_fill!(ws::Worksheet, lznode::XML.LazyNode)
     ws.sst_count = sst_total
     ws.unhandled_attributes = isempty(unhandled_attributes) ? nothing : unhandled_attributes
     
+    # Update next_formula_id from this sheet's own formulas — all of them are in
+    # `local_formulas`, so there is no need to scan the whole workbook's under the lock.
+    max_id = -1
+    for f in values(local_formulas)
+        f isa ReferencedFormula && (max_id = max(max_id, f.id))
+    end
+    max_id >= ws.next_formula_id && (ws.next_formula_id = max_id + 1)
+
     # Merge local formulas into workbook dict under single lock
     if !isempty(local_formulas)
         lock(wb.formulas_lock) do
             merge!(wb.formulas, local_formulas)
-        end
-    end
-
-    # Update next_formula_id from merged formulas
-      lock(wb.formulas_lock) do
-          isempty(wb.formulas) && return
-            ws_name = ws.name
-            max_id = -1
-            for (ref, f) in wb.formulas
-                if ref.sheet == ws_name && f isa ReferencedFormula
-                max_id = max(max_id, f.id)
-            end             
-        end
-        if max_id >= ws.next_formula_id
-            ws.next_formula_id = max_id + 1
         end
     end
 

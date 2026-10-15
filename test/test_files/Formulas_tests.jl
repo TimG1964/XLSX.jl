@@ -421,3 +421,67 @@ end
     end
 
 end
+
+@testset "review fixes: formulas" begin
+    @testset "shift_excel_references shifts each reference in place" begin
+        @test XLSX.shift_excel_references("=A1+A10", (1, 0)) == "=A2+A11"
+        @test XLSX.shift_excel_references("=LOG10(A1)+ATAN2(B1,C1)", (4, 0)) == "=LOG10(A5)+ATAN2(B5,C5)"
+        @test XLSX.shift_excel_references("=\$A\$1+A\$1+\$A1", (2, 1)) == "=\$A\$1+B\$1+\$A3"
+        @test XLSX.shift_excel_references("=\"A1\"&'Q1 2024'!B2&DATA2024!C3", (1, 0)) == "=\"A1\"&'Q1 2024'!B3&DATA2024!C4"
+        @test XLSX.shift_excel_references("=SUM(T[QTY1])+B1", (1, 0)) == "=SUM(T[QTY1])+B2"
+    end
+    @testset "getFormula on shared-formula children" begin
+        f = XLSX.newxlsx(); s = f[1]
+        s["A1:A5"] = 1
+        XLSX.setFormula(s, "B1:B5", "=LOG10(A1)+A10")
+        @test XLSX.getFormula(s, "B5") == "=LOG10(A5)+A14"
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "setFormula with 2-argument IF and non-literal OFFSET size" begin
+        f = XLSX.newxlsx(); s = f[1]
+        @test XLSX.setFormula(s, "A1", "=IF(B1>0,1)") == "=IF(B1>0,1)"
+        @test XLSX.setFormula(s, "A2", "=SUM(OFFSET(B1,0,0,C1,D1))") == "=SUM(OFFSET(B1,0,0,C1,D1))"
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "GROUPBY inside a larger formula keeps the rest" begin
+        f = XLSX.newxlsx(); s = f[1]
+        XLSX.setFormula(s, "G1", "=1+GROUPBY(E1:E9,A1:D9,SUM)")
+        @test XLSX.get_formula_from_cache(s, XLSX.CellRef("G1")).formula == "=1+_xlfn.GROUPBY(E1:E9,A1:D9,_xleta.SUM)"
+    end
+    @testset "overwriting the master of a wide shared formula" begin
+        f = XLSX.newxlsx(); s = f[1]
+        s["A1:A5"] = 1
+        XLSX.setFormula(s, "B2:D3", "=A1+1")
+        s["B2"] = 5
+        @test s["B2"] == 5
+        @test XLSX.getFormula(s, "C2") == "=B1+1"
+        @test XLSX.getFormula(s, "D3") == "=C2+1"
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "renaming a sheet leaves similarly named sheets alone" begin
+        f = XLSX.newxlsx("Sheet1"); s2 = XLSX.addsheet!(f, "MySheet1"); s3 = XLSX.addsheet!(f, "Other")
+        s2["A1"] = 1
+        XLSX.setFormula(s3, "A1", "=MySheet1!A1+Sheet1!A1")
+        XLSX.setFormula(s2, "B1", "=A1*2")
+        XLSX.renamesheet!(f[1], "Data")
+        @test XLSX.getFormula(s3, "A1") == "=MySheet1!A1+Data!A1"
+        @test XLSX.getFormula(s2, "B1") == "=A1*2"
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "deleting a sheet" begin
+        f = XLSX.newxlsx("Sheet1"); s2 = XLSX.addsheet!(f, "MySheet1")
+        s2["A1"] = 1
+        XLSX.setFormula(f[1], "B1:B3", "=A1+1")          # a shared formula on the deleted sheet
+        XLSX.setFormula(s2, "B1", "=A1*2+Sheet1!A1:A2")
+        XLSX.deletesheet!(f, "Sheet1")
+        @test XLSX.getFormula(s2, "B1") == "=A1*2+#REF!"
+        @test XLSX.iserror(s2, "B1")
+        SAVE_FILES && save_outfile(f)
+
+        f = XLSX.newxlsx("Q1 (2024)"); s2 = XLSX.addsheet!(f, "Other")
+        XLSX.setFormula(s2, "A1", "='Q1 (2024)'!A1*2")
+        XLSX.deletesheet!(f, "Q1 (2024)")
+        @test XLSX.getFormula(s2, "A1") == "=#REF!*2"
+        SAVE_FILES && save_outfile(f)
+    end
+end

@@ -137,38 +137,36 @@ function new_ReferencedFormula_Id(ws::Worksheet)
 end
 
 function build_reference_index(ws::Worksheet)
-    # Create Dict of all ReferencedFormulae in worksheet
+    # Create Dict of all ReferencedFormulae in worksheet, from the formulas recorded
+    # for it (a pass over the formulas, not over every cell of the sheet)
     refs = Dict{Int,ReferencedFormula}() # Id => ReferencedFormula
-    for r in eachrow(ws)
-        for cell in values(r.rowcells)
-            if cell.formula
-                f = get_formula_from_cache(ws, cell.ref)
-                if f isa ReferencedFormula
-                    refs[f.id] = f
-                end
-            end
-        end
+    for (k, f) in get_workbook(ws).formulas
+        k.sheet == ws.name && f isa ReferencedFormula && (refs[f.id] = f)
     end
     return refs
 end
 
+# The sheet's ReferencedFormula with shared-formula id `id`, or `nothing`.
+function _find_referenced_formula(ws::Worksheet, id::Int)::Union{Nothing,ReferencedFormula}
+    for (k, f) in get_workbook(ws).formulas
+        k.sheet == ws.name && f isa ReferencedFormula && f.id == id && return f
+    end
+    return nothing
+end
 
 function get_referenced_formula(ws::Worksheet, cellref::CellRef; refs::Union{Nothing,Dict{Int,ReferencedFormula}}=nothing)
     # find the actual formula a cell's FormulaReference refers to
-    if isnothing(refs)
-        refs = build_reference_index(ws)
-    end
     cell = getcell(ws, cellref)
     if cell.formula
         f = get_formula_from_cache(ws, cellref)
         if isa(f, FormulaReference)
             id = f.id
-            haskey(refs, id) || throw(XLSXError("No ReferencedFormula found for id=$id"))
-            offset = cell_offset(CellRange(refs[id].ref).start, cellref)
-            f = shift_excel_references(refs[id].formula, offset)
-            return f
+            master = isnothing(refs) ? _find_referenced_formula(ws, id) : get(refs, id, nothing)
+            isnothing(master) && throw(XLSXError("No ReferencedFormula found for id=$id"))
+            offset = cell_offset(CellRange(master.ref).start, cellref)
+            return shift_excel_references(master.formula, offset)
         else
-            throw(XLSXError("Cell `$CellRef` does not contain a formula reference!"))
+            throw(XLSXError("Cell `$cellref` does not contain a formula reference!"))
         end
     end
 end
@@ -196,191 +194,180 @@ function rereference_formulae(ws::Worksheet, cell::Cell)
         push!(ranges, CellRange(CellRef(old_range.start.row_number + 1, old_range.start.column_number), CellRef(old_range.stop.row_number, old_range.stop.column_number)))
     end
 
+    f = get_formula_from_cache(ws, cell.ref)
     for newrng in ranges
         if size(newrng) == (1, 1) # replace with simple formula for single cell
-            f = get_formula_from_cache(ws, cell.ref)
             offset = cell_offset(cell.ref, newrng.start)
             shifted = shift_excel_references(f.formula, offset)
             add_formula_to_cache(ws, newrng.stop, Formula(shifted, nothing, nothing, f.unhandled))
         else # update reference and re-index all referring formulas
-            f = get_formula_from_cache(ws, cell.ref)
-            delete!(wb.formulas, SheetCellRef(ws.name, cell.ref))
-            cell.formula=false
             newid = new_ReferencedFormula_Id(ws)
             rereference_formulae(ws, cell, f, newrng, newid)
         end
     end
+    delete!(wb.formulas, SheetCellRef(ws.name, cell.ref))
+    cell.formula = false
 end
 
+# The cells keep their cached values and styles: only the formula each refers to changes.
 function rereference_formulae(ws::Worksheet, oldcell::Cell, f::AbstractFormula, newrng::CellRange, newid::Int)
-    wb = get_workbook(ws)
-    oldform = f.formula
     oldunhandled = f.unhandled
     offset = cell_offset(oldcell.ref, newrng.start)
-    newform = ReferencedFormula(shift_excel_references(oldform, offset), newid, string(newrng), oldunhandled)
+    newform = ReferencedFormula(shift_excel_references(f.formula, offset), newid, string(newrng), oldunhandled)
     for fr in newrng
         newfr = getcell(ws, fr)
         if fr != newrng.start
-            if newfr.formula
+            if !(newfr isa EmptyCell) && newfr.formula
                 formula = get_formula_from_cache(ws, fr)
                 if formula isa FormulaReference && formula.id == f.id
-                    t = encode(newfr.datatype)
                     add_formula_to_cache(ws, fr, FormulaReference(newid, oldunhandled))
-                    setdata!(ws, Cell(wb, fr, t, string(newfr.style), string(newfr.value), string(newfr.meta), true))
                 end
             end
         else
-            t = encode(oldcell.datatype)
             add_formula_to_cache(ws, fr, newform)
-            setdata!(ws, Cell(wb, fr, t, string(newfr.style), string(newfr.value), string(newfr.meta), true))
+            if newfr isa EmptyCell
+                setdata!(ws, Cell(fr, UInt64(0), UInt32(0), UInt16(0), CT_EMPTY, true))
+            else
+                newfr.formula = true
+            end
         end
     end
     return nothing
 end
 
+# An A1 cell reference standing on its own: not part of a longer name (`LOG10`,
+# `ATAN2`, `DATA2024!`) and not a function call. Each match is replaced where it
+# stands, so `A1` never rewrites the start of `A10`.
+const RGX_SHIFT_REF = r"(?<![A-Za-z0-9_.])(\$?)([A-Z]{1,3})(\$?)([1-9][0-9]*)(?![A-Za-z0-9_(!])"
+
+# `formula` with `f` applied to the text outside string literals ("…"), quoted
+# sheet names ('…') and brackets ([1], Table1[Col1]), which are copied unchanged.
+function _map_formula_code(f, formula::AbstractString)::String
+    out  = IOBuffer()
+    code = IOBuffer()
+    emit_code() = write(out, f(String(take!(code))))
+    s = String(formula)
+    i = firstindex(s)
+    while i <= lastindex(s)
+        c = s[i]
+        if c == '"' || c == '\''
+            emit_code()
+            j = nextind(s, i)
+            while j <= lastindex(s)               # a doubled quote is an escaped one
+                if s[j] == c
+                    k = nextind(s, j)
+                    (k <= lastindex(s) && s[k] == c) || break
+                    j = k
+                end
+                j = nextind(s, j)
+            end
+            j = min(j, lastindex(s))
+            write(out, SubString(s, i, j))
+            i = nextind(s, j)
+        elseif c == '['
+            emit_code()
+            depth, j = 0, i
+            while j <= lastindex(s)
+                s[j] == '[' && (depth += 1)
+                s[j] == ']' && (depth -= 1; depth == 0 && break)
+                j = nextind(s, j)
+            end
+            j = min(j, lastindex(s))
+            write(out, SubString(s, i, j))
+            i = nextind(s, j)
+        else
+            write(code, c)
+            i = nextind(s, i)
+        end
+    end
+    emit_code()
+    return String(take!(out))
+end
+
 # shift the relative cell references in a formula when shifting a ReferencedFormula
-function shift_excel_references(formula::AbstractString, offset::Tuple{Int32,Int32})
-    # Regex to match Excel-style cell references (e.g., A1, $A$1, A$1, $A1)
-    pattern = r"\$?[A-Z]{1,3}\$?[1-9][0-9]*"
+function shift_excel_references(formula::AbstractString, offset::Tuple{Integer,Integer})
     row_shift, col_shift = offset
-
-    initial = [string(x.match) for x in eachmatch(pattern, formula)]
-    result = Vector{String}()
-
-    for ref in eachmatch(pattern, formula)
-        # Extract parts using regex
-        m = match(r"(\$?)([A-Z]{1,3})(\$?)([1-9][0-9]*)", ref.match)
-        col_abs, col_letters, row_abs, row_digits = m.captures
-
-        col_num = decode_column_number(col_letters)
-        row_num = parse(Int, row_digits)
-
-        # Apply shifts only if not absolute
-        new_col = col_abs == "\$" ? col_letters : encode_column_number(col_num + col_shift)
-        new_row = row_abs == "\$" ? row_digits : string(row_num + row_shift)
-
-        push!(result, col_abs * new_col * row_abs * new_row)
+    shift_one(ref) = begin
+        col_abs, col_letters, row_abs, row_digits = match(RGX_SHIFT_REF, ref).captures
+        new_col = col_abs == "\$" ? col_letters : encode_column_number(decode_column_number(col_letters) + col_shift)
+        new_row = row_abs == "\$" ? row_digits : string(parse(Int, row_digits) + row_shift)
+        col_abs * new_col * row_abs * new_row
     end
-
-    pairs = Dict(zip(initial, result))
-    if !isempty(pairs)
-        formula = replace(formula, pairs...)
-    end
-
-    return formula
+    return _map_formula_code(code -> replace(code, RGX_SHIFT_REF => shift_one), formula)
 end
 
 # Replace formula references to a sheet that has been deleted with #REF errors
 function update_formulas_missing_sheet!(wb::Workbook, name::String)
     xf = get_xlsxfile(wb)
-    quoted_name = quoteit(name)
-    sheet_prefix = quoted_name * "!"
-    
-    # Pre-compile regex pattern
-    ref_pattern = Regex(sheet_prefix * raw"\$?[A-Z]{1,3}\$?[1-9][0-9]*")
-    
-    deleted_formula_ids = Set{Int}()
+
+    # A reference to a cell or range on the deleted sheet: the whole of it becomes #REF!.
+    ref_pattern = Regex(_formula_sheet_ref_pattern(quoteit(name) * "!") *
+                        raw"\$?[A-Z]{1,3}\$?[1-9][0-9]*(?::\$?[A-Z]{1,3}\$?[1-9][0-9]*)?")
+
     error_formula_ids = Set{Int}()
     formulas_to_delete = Set{SheetCellRef}()
-    
+
     # Single pass: process non-reference formulas
     for (ref, f) in wb.formulas
-        if f isa FormulaReference
-            continue
-        end
-        
-        ref_str = string(ref)
-        
-        # Check if formula is in the deleted sheet
-        if occursin(sheet_prefix, ref_str)
-            if f isa ReferencedFormula
-                push!(deleted_formula_ids, f.formula.id)
-            end
+        f isa FormulaReference && continue
+
+        # Formula in the deleted sheet
+        if ref.sheet == name
             push!(formulas_to_delete, ref)
             continue
         end
-        
-        # Check if formula refers to the deleted sheet
-        if occursin(sheet_prefix, f.formula)
-            old_formula = f.formula
-            # Replace references to deleted sheet
-            f.formula = replace(f.formula, ref_pattern => "#REF!")
-            # Update cell if formula changed
-            if old_formula != f.formula
-                cell = getcell(xf, ref)
-                cell.datatype = CT_ERROR
-                cell.value = UInt64(XL_REF)
-                f isa ReferencedFormula &&push!(error_formula_ids, f.id) # all FormulaReferences to this formula need updating
-            end
+
+        # Formula referring to the deleted sheet
+        old_formula = f.formula
+        f.formula = replace(f.formula, ref_pattern => "#REF!")
+        if old_formula != f.formula
+            cell = getcell(xf, ref)
+            cell.datatype = CT_ERROR
+            cell.value = UInt64(XL_REF)
+            f isa ReferencedFormula && push!(error_formula_ids, f.id) # all FormulaReferences to this formula need updating
         end
     end
-    
-    # Second pass: handle FormulaReferences
+
+    # Second pass: handle FormulaReferences. Shared-formula ids are per sheet.
     for (ref, f) in wb.formulas
-        if f isa FormulaReference
-            if f.id ∈ error_formula_ids && f.id ∉ deleted_formula_ids
-                cell = getcell(xf, ref)
-                cell.datatype = CT_ERROR
-                cell.value = UInt64(XL_REF)
-            end
-            if occursin(sheet_prefix, string(ref)) || f.id ∈ deleted_formula_ids
-                push!(formulas_to_delete, ref)
-            end
+        f isa FormulaReference || continue
+        if ref.sheet == name
+            push!(formulas_to_delete, ref)
+        elseif f.id ∈ error_formula_ids
+            cell = getcell(xf, ref)
+            cell.datatype = CT_ERROR
+            cell.value = UInt64(XL_REF)
         end
     end
-    
+
     # Delete all marked formulas
     for ref in formulas_to_delete
         delete!(wb.formulas, ref)
     end
-    
+
     return nothing
 end
 
+# Regex source matching a sheet prefix such as `Data!` or `'My Sheet'!` where it starts a
+# reference: not inside a longer name (`MyData!`) nor after an external workbook's `[1]`.
+_formula_sheet_ref_pattern(prefix::AbstractString) = "(?<![\\w.'\\]])\\Q" * prefix * "\\E"
+
 # Update formula references to a sheet that has been renamed with new names
 function update_formulas_renamed_sheet!(wb::Workbook, old_name::String, new_name::String)
-    xf = get_xlsxfile(wb)
-    old_quoted = quoteit(old_name)
-    new_quoted = quoteit(new_name)
-    old_prefix = old_quoted * "!"
-    new_prefix = new_quoted * "!"
-    
-    formulas_to_move = Dict{SheetCellRef, Tuple{SheetCellRef, AbstractFormula}}()  # old_ref => (new_ref, formula)
-    
-    # First pass: update formula values and identify keys that need updating
+    old_ref = Regex(_formula_sheet_ref_pattern(quoteit(old_name) * "!"))
+    new_prefix = quoteit(new_name) * "!"
+
+    formulas_to_move = Pair{SheetCellRef,AbstractFormula}[]
     for (ref, f) in wb.formulas
-        ref_str = string(ref)
-        needs_key_update = occursin(old_prefix, ref_str)
-        
-        # Calculate new reference if key needs updating
-        new_ref = if needs_key_update
-            new_ref_str = replace(ref_str, old_quoted => new_quoted)
-            SheetCellRef(new_ref_str)  
-        else
-            nothing
-        end
-        
-        # Update formula values for non-FormulaReference types
-        if f isa ExplicitFormula
-            needs_value_update = occursin(old_prefix, f.formula)
-            
-            if needs_value_update
-                f.formula = replace(f.formula, old_prefix => new_prefix)
-            end
-        end
-        
-        # Store formulas that need key updates
-        if needs_key_update
-            formulas_to_move[ref] = (new_ref, f)
-        end
+        f isa ExplicitFormula && (f.formula = replace(f.formula, old_ref => new_prefix))
+        ref.sheet == old_name && push!(formulas_to_move, ref => f)
     end
-    
-    # Second pass: update keys by deleting old and inserting with new keys
-    for (old_ref, (new_ref, f)) in formulas_to_move
-        delete!(wb.formulas, old_ref)
-        wb.formulas[new_ref] = f
+
+    for (ref, f) in formulas_to_move
+        delete!(wb.formulas, ref)
+        wb.formulas[SheetCellRef(new_name, ref.cellref)] = f
     end
-    
+
     return nothing
 end
 
@@ -429,6 +416,18 @@ end
 # Simplified regex for cell/range references
 const RGX_RANGE_RE = r"[A-Z]+\$?\d+:[A-Z]+\$?\d+"
 
+# Index of the `)` closing a call whose arguments start at byte `start`, or `nothing`.
+function _closing_paren(s::AbstractString, start::Int)
+    depth = 1
+    i = start
+    while i <= lastindex(s)
+        s[i] == '(' && (depth += 1)
+        s[i] == ')' && (depth -= 1; depth == 0 && return i)
+        i = nextind(s, i)
+    end
+    return nothing
+end
+
 """
     needs_array_attr(fname::String, args::Vector{String}) -> Bool
 
@@ -436,9 +435,12 @@ Determine if a function call will spill and thus require t="array".
 """
 function needs_array_attr(fname::AbstractString, args::Vector{String})
     f = uppercase(fname)
+    isempty(args) && return false
 
     # Helper: does an argument look like a range?
     is_range(arg) = occursin(RGX_RANGE_RE, arg)
+    # Helper: is an argument a literal integer greater than 1? (it may be a reference)
+    over_one(arg) = something(tryparse(Int, arg), 0) > 1
 
     # INDEX(array, row_num, [col_num])
     if f == "INDEX"
@@ -453,17 +455,15 @@ function needs_array_attr(fname::AbstractString, args::Vector{String})
             return true
         end
         # If height or width > 1, OFFSET returns a multi-cell reference
-        if length(args) >= 5
-            return (tryparse(Int, args[4]) |> x -> x > 1 ? true : false) ||
-                   (tryparse(Int, args[5]) |> x -> x > 1 ? true : false)
-        end
+        length(args) >= 4 && over_one(args[4]) && return true
+        length(args) >= 5 && over_one(args[5]) && return true
         return false
     end
 
-    # IF(logical_test, value_if_true, value_if_false)
+    # IF(logical_test, value_if_true, [value_if_false])
     if f == "IF"
         # IF spills if either branch is a range/array
-        return any(is_range, args[1:3])
+        return any(is_range, args[1:min(3, end)])
     end
 
     # CHOOSE(index_num, value1, value2, ...)
@@ -628,8 +628,12 @@ function process_dynamic_array_functions(xf::XLSXFile, cellref::CellRef, val::Ab
                     throw(XLSXError("Currently only simple aggregation functions like sum or average are supported with `raw=false`."))
                 end
 
-                # Reconstruct
-                formula = fname * "(" * join(args, ",") * ")"
+                # Reconstruct the call in place, keeping the rest of the formula
+                close = _closing_paren(formula, m.offset + ncodeunits(m.match))
+                head  = formula[1:prevind(formula, m.offset)]
+                head == "=" && (head = "")    # a bare call is stored without its `=`, as before
+                formula = head * fname * "(" * join(args, ",") * ")" *
+                          (isnothing(close) ? "" : formula[nextind(formula, close):end])
             end
         end
 
@@ -892,7 +896,7 @@ function setFormula(ws::Worksheet, rng::CellRange; val::AbstractString, raw::Boo
         for c in rng
             offset = (c.row_number - start.row_number, c.column_number - start.column_number)
             newval = shift_excel_references(val, offset)
-            f = setFormula(ws, c, newval)
+            f = setFormula(ws, c; val=newval, raw, spill)
             first && (first = false; f1 = f) # return the formula from the first cell only
         end
         return f1
@@ -958,8 +962,7 @@ end
 Get the formula for a single cell reference in a worksheet `sh` or XLSXFile `xf`.
 A cell outside the sheet dimension is an `EmptyCell`.
 
-If the cell does not contain any formula (but is not an `EmptyCell`), return an empty string ("").
-If the cell is an EmptyCell, return `nothing`.
+If the cell is an `EmptyCell` or does not contain a formula, return `nothing`.
 
 If the cell contains a `FormulaReference`, look up the actual formula.
 
@@ -1008,7 +1011,7 @@ function getFormula(ws::Worksheet, cellref::CellRef; get_external_refs::Bool=fal
     f = get_formula_from_cache(ws, cellref)
     if f isa FormulaReference
         # need to look up the ReferencedFormula this FormulaReference points to
-        f = get_referenced_formula(ws, cell.ref; refs=build_reference_index(ws))
+        f = get_referenced_formula(ws, cell.ref)
     else
         f = f.formula
     end

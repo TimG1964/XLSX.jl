@@ -98,34 +98,48 @@ function setColumnWidth(ws::Worksheet, rng::CellRange; width::Union{Nothing,Real
         j = l
     end
 
-    # Build a map of existing column definitions keyed by min (column index string)
-    col_defs = Dict{String,Dict{String,String}}()
+    # Existing definitions each span columns min:max. Split any span at the edges of
+    # left:right, so the part inside takes the new width while keeping its other
+    # settings (style, hidden, ...), the parts outside are unchanged, and no two
+    # definitions overlap (Excel repairs a file where they do).
+    width_atts = Dict("width" => string(padded_width), "customWidth" => "1")
+    covered = falses(right - left + 1)
+    col_defs = Dict{String,String}[]
     for c in xml_elements(sheetdoc[i][j])
-        col_defs[c["min"]] = Dict{String,String}(XML.attributes(c))
-    end
-
-    # Update or insert column definitions for each column in the range
-    for col in left:right
-        scol = string(col)
-        if haskey(col_defs, scol)
-            col_defs[scol]["width"]       = string(padded_width)
-            col_defs[scol]["customWidth"] = "1"
-        else
-            col_defs[scol] = Dict(
-                "min"         => scol,
-                "max"         => scol,
-                "width"       => string(padded_width),
-                "customWidth" => "1"
-            )
+        atts = Dict{String,String}(XML.attributes(c))
+        lo, hi = parse(Int, atts["min"]), parse(Int, get(atts, "max", atts["min"]))
+        for (a, b, inside) in ((lo, min(hi, left - 1), false),
+                               (max(lo, left), min(hi, right), true),
+                               (max(lo, right + 1), hi, false))
+            a <= b || continue
+            d = merge(atts, Dict("min" => string(a), "max" => string(b)))
+            inside && (merge!(d, width_atts); covered[(a:b) .- (left - 1)] .= true)
+            push!(col_defs, d)
         end
     end
 
-    # Rebuild the <cols> node from the updated definitions
+    # New definitions for the columns in the range that had none
+    k = 1
+    while k <= length(covered)
+        if covered[k]
+            k += 1
+            continue
+        end
+        e = something(findnext(covered, k), length(covered) + 1) - 1
+        push!(col_defs, merge(Dict("min" => string(left + k - 1), "max" => string(left + e - 1)), width_atts))
+        k = e + 1
+    end
+
+    # Rebuild the <cols> node, in column order as the schema requires
+    sort!(col_defs; by = d -> parse(Int, d["min"]))
     new_cols = unlink(sheetdoc[i][j], ("cols", "col"), pfx)
-    for atts in values(col_defs)
+    for atts in col_defs
         new_col = XML.Element("$(pfx)col")
+        for k in ("min", "max")
+            new_col[k] = atts[k]
+        end
         for (k, v) in atts
-            new_col[k] = v
+            k in ("min", "max") || (new_col[k] = v)
         end
         push!(new_cols, new_col)
     end
@@ -184,8 +198,9 @@ function getColumnWidth(ws::Worksheet, cellref::CellRef)::Union{Nothing,Real}
     if isnothing(j) # There are no existing column formats defined.
         return nothing
     end
+    col = cellref.column_number
     for c in xml_elements(sheetdoc[i][j])
-        if c["min"] == string(cellref.column_number)
+        if parse(Int, c["min"]) <= col <= parse(Int, get(c, "max", c["min"]))   # a definition may span columns
             if haskey(c, "width")
                 return parse(Float64, c["width"])
             else

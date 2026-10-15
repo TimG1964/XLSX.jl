@@ -189,3 +189,17 @@
     end
     
 end
+
+@testset "review fixes: a new image never reuses a taken media name" begin
+    png = read(joinpath(data_directory, "track_start.png"))
+    jpg = read(joinpath(data_directory, "track_start.jpg"))
+    f = XLSX.newxlsx("S1"); s2 = XLSX.addsheet!(f, "S2")
+    XLSX.addImage(f[1], "A1", IOBuffer(png))                 # image1.png
+    i2 = XLSX.addImage(s2, "A1", IOBuffer(jpg))               # used by S2
+    XLSX.deletesheet!(f, "S1")                                 # image1.png goes
+    i3 = XLSX.addImage(s2, "D1", IOBuffer(png))
+    @test i3.media_name != i2.media_name
+    @test f.binary_data["xl/media/$(i2.media_name)"] == jpg
+    @test f.binary_data["xl/media/$(i3.media_name)"] == png
+    SAVE_FILES && save_outfile(f)
+end

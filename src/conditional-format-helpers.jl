@@ -366,9 +366,12 @@ function get_new_dx(wb::Workbook, dx::AbstractDict{String,<:AbstractDict{String}
             for (y, z) in v
                 y in ["color", "bold", "italic", "under", "strike"] || throw(XLSXError("Invalid font attribute: $y. Valid options are: `color`, `bold`, `italic`, `under`, `strike`."))
                 if     y == "color"                  ; push!(fontdx, _color_element(y, z))
-                elseif y == "bold"   && z == "true"  ; push!(fontdx, XML.Element("b", val="0"))
-                elseif y == "italic" && z == "true"  ; push!(fontdx, XML.Element("i", val="0"))
-                elseif y == "under"  && z != "none"  ; push!(fontdx, XML.Element("u"; val="v"))
+                elseif y == "bold"   && z == "true"  ; push!(fontdx, XML.Element("b"))   # `val="0"` would mean not bold
+                elseif y == "italic" && z == "true"  ; push!(fontdx, XML.Element("i"))
+                elseif y == "under"
+                    z ∈ ("none", "single", "double") || throw(XLSXError("Invalid font attribute value: under=$z. Valid options are: `none`, `single`, `double`."))
+                    z == "single" && push!(fontdx, XML.Element("u"))
+                    z == "double" && push!(fontdx, XML.Element("u"; val="double"))
                 elseif y == "strike" && z == "true"  ; push!(fontdx, XML.Element(y))
                 end
             end

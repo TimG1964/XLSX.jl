@@ -821,6 +821,21 @@ XLSX.setConditionalFormat(s, "A2:A11", :iconSet;
 ```
 
 """
+# The text rules share one setter, which takes the rule as its `operator`. With
+# `:containsText` the `operator` keyword chooses the rule (default `containsText`);
+# `:notContainsText`, `:beginsWith` and `:endsWith` are that operator, so one given
+# as well must agree. (They previously all made a `containsText` rule.)
+function _text_rule_operator!(allkws::Dict{Symbol,Any}, type::Symbol)
+    type === :containsText && return nothing
+    if haskey(allkws, :operator)
+        string(allkws[:operator]) == string(type) || throw(XLSXError(
+            "`operator=$(allkws[:operator])` conflicts with the conditional format type `:$type`. Omit `operator`: the type sets it."))
+    else
+        allkws[:operator] = string(type)
+    end
+    return nothing
+end
+
 function setConditionalFormat(f, r, type::Symbol; kw...)
     _allkws = Dict{Symbol,Any}(k => v for (k, v) in kw)
     haskey(_allkws, :priority) && throw(XLSXError("Invalid keyword argument: `priority`. Conditional format rules are prioritised in the order they are applied."))
@@ -835,6 +850,7 @@ function setConditionalFormat(f, r, type::Symbol; kw...)
     elseif type == :timePeriod
         setCfTimePeriod(f, r; allkws=_allkws)
     elseif type ∈ [:containsText, :notContainsText, :beginsWith, :endsWith]
+        _text_rule_operator!(_allkws, type)
         setCfContainsText(f, r; allkws=_allkws)
     elseif type ∈ [:containsBlanks, :notContainsBlanks, :containsErrors, :notContainsErrors, :duplicateValues, :uniqueValues]
         push!(_allkws, :operator => string(type))
@@ -864,6 +880,7 @@ function setConditionalFormat(f, r, c, type::Symbol; kw...)
     elseif type == :timePeriod
         setCfTimePeriod(f, r, c; allkws=_allkws)
     elseif type ∈ [:containsText, :notContainsText, :beginsWith, :endsWith]
+        _text_rule_operator!(_allkws, type)
         setCfContainsText(f, r, c; allkws=_allkws)
     elseif type ∈ [:containsBlanks, :notContainsBlanks, :containsErrors, :notContainsErrors, :duplicateValues, :uniqueValues]
         push!(_allkws, :operator => string(type))

@@ -19,7 +19,7 @@ Font attributes are specified using keyword arguments:
 - `italic::Bool = nothing`      : set to `true` to make the font italic.
 - `under::String = nothing`     : set to `single`, `double` or `none`.
 - `strike::Bool = nothing`      : set to `true` to strike through the font.
-- `size::Int = nothing`         : set the font size (0 < size < 410).
+- `size::Real = nothing`        : set the font size (1 to 409, e.g. `11` or `10.5`).
 - `color = nothing`             : set the font color.
 - `name::String = nothing`      : set the font name.
 - `vertAlign::String = nothing` : set to `superscript`, `subscript` or `baseline`.
@@ -84,7 +84,7 @@ function setFont(sh::Worksheet, cellref::CellRef;
     italic::Union{Nothing,Bool}=nothing,
     under::Union{Nothing,String}=nothing,
     strike::Union{Nothing,Bool}=nothing,
-    size::Union{Nothing,Int}=nothing,
+    size::Union{Nothing,Real}=nothing,
     color::Union{Nothing,CellColor}=nothing,
     name::Union{Nothing,String}=nothing,
     vertAlign::Union{Nothing,String}=nothing

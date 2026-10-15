@@ -157,6 +157,16 @@ _first_data_row(t::Table) = t.ref.start.row_number + (t.has_header_row ? 1 : 0)
 _last_data_row(t::Table)  = t.ref.stop.row_number - (t.has_totals_row ? 1 : 0)
 _col_start(t::Table) = column_number(t.ref.start)
 
+# The table's data rows as a rows × columns matrix, read in one pass over the
+# sheet (cell by cell, an uncached sheet would be re-read for every cell).
+function _table_data_matrix(t::Table)::Matrix{Any}
+    top, bottom = _first_data_row(t), _last_data_row(t)
+    ncols = length(t.columns)
+    bottom < top && return Matrix{Any}(undef, 0, ncols)
+    col0 = _col_start(t)
+    return getdata(t.sheet, CellRange(CellRef(top, col0), CellRef(bottom, col0 + ncols - 1)))
+end
+
 # Tables.jl interface — mirrors the existing TableRowIterator/TableRow pattern
 
 Tables.istable(::Type{<:Table}) = true
@@ -182,8 +192,11 @@ Tables.schema(it::XLSXTableRowIterator) = Tables.schema(it.table)
 Tables.columnnames(t::Table) = Symbol.(_resolve(t).columns)
 Tables.columnnames(tr::XLSXTableRow) = Symbol.(tr.table.columns)
 
-Tables.getcolumn(tr::XLSXTableRow, nm::Symbol) =
-    getdata(tr.table.sheet, CellRef(tr.row_number, _col_start(tr.table) + findfirst(==(nm), Symbol.(tr.table.columns)) - 1))
+function Tables.getcolumn(tr::XLSXTableRow, nm::Symbol)
+    i = findfirst(==(nm), Symbol.(tr.table.columns))
+    isnothing(i) && throw(XLSXError("Table `$(tr.table.name)` has no column `$nm`. Its columns are: " * join(tr.table.columns, ", ") * "."))
+    return getdata(tr.table.sheet, CellRef(tr.row_number, _col_start(tr.table) + i - 1))
+end
 Tables.getcolumn(tr::XLSXTableRow, i::Int) =
     getdata(tr.table.sheet, CellRef(tr.row_number, _col_start(tr.table) + i - 1))
 
@@ -197,10 +210,9 @@ function Base.iterate(it::XLSXTableRowIterator, state::Int = _first_data_row(it.
 end
 function Tables.columns(t::Table)
     t = _resolve(t)
-    row_range = _first_data_row(t):_last_data_row(t)
-    col0 = _col_start(t)
+    m = _table_data_matrix(t)
     NamedTuple(
-        Symbol(name) => typed_column(Any[getdata(t.sheet, CellRef(r, col0 + i - 1)) for r in row_range])
+        Symbol(name) => typed_column(Vector{Any}(m[:, i]))
         for (i, name) in enumerate(t.columns)
     )
 end

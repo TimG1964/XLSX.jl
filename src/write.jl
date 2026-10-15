@@ -694,7 +694,21 @@ function make_absolute(dn::DefinedNameValue)
     end
 end
 
-function update_workbook_xml!(xl::XLSXFile) # Need to update <sheets> and <definedNames>. 
+# The text of a `<definedName>`: a reference, formula text (held with a leading `=`,
+# which the file omits), or a constant, a string being quoted with `"` doubled.
+function _defined_name_text(v::DefinedNameValue)::String
+    x = v.value
+    x isa DefinedNameRangeTypes && return make_absolute(v)
+    ismissing(x) && return "\"\""
+    x isa Bool && return x ? "TRUE" : "FALSE"
+    if x isa AbstractString
+        startswith(x, '=') && return String(x[nextind(x, 1):end])
+        return "\"" * replace(x, "\"" => "\"\"") * "\""
+    end
+    return string(x)
+end
+
+function update_workbook_xml!(xl::XLSXFile) # Need to update <sheets> and <definedNames>.
     wb = get_workbook(xl)
 
     pfx = get_prefix("xl/workbook.xml", xl)
@@ -733,7 +747,7 @@ function update_workbook_xml!(xl::XLSXFile) # Need to update <sheets> and <defin
         end
 
         for (k, v) in wb.workbook_names
-            txt = v.value isa DefinedNameRangeTypes ? make_absolute(v) : string(v.value)
+            txt = _defined_name_text(v)
             dn_node = XML.Element("$(pfx)definedName", name=k, XML.Text(txt))
             if v.hidden
                 dn_node["hidden"] = "1"
@@ -747,7 +761,7 @@ function update_workbook_xml!(xl::XLSXFile) # Need to update <sheets> and <defin
             ordinal = get(sheet_ordinals, first(k), nothing)
             isnothing(ordinal) &&
                 throw(XLSXError("Defined name `$(last(k))` is scoped to sheetId $(first(k)), which is not in the workbook."))
-            txt = v.value isa DefinedNameRangeTypes ? make_absolute(v) : string(v.value)
+            txt = _defined_name_text(v)
             dn_node = XML.Element("$(pfx)definedName", name=last(k),
                                 localSheetId=string(ordinal - 1), XML.Text(txt))
             if v.hidden
@@ -761,11 +775,21 @@ function update_workbook_xml!(xl::XLSXFile) # Need to update <sheets> and <defin
     #update sheets
 
     i, j = get_idces(wbdoc, "workbook", "sheets")
-    unlink(wbdoc[i][j], ("sheets", "sheet"), pfx)
+    # The visibility each sheet was read with (`hidden` or `veryHidden`), keyed by r:id.
+    old_states = Dict{String,String}()
+    for n in xml_elements(wbdoc[i][j])
+        a = XML.attributes(n)
+        (isnothing(a) || !haskey(a, "r:id") || !haskey(a, "state")) && continue
+        old_states[a["r:id"]] = a["state"]
+    end
     sheets_element = XML.Element("$(pfx)sheets")
     for s in wb.sheets
         sheet_element = XML.Element("$(pfx)sheet"; name=s.name)
         sheet_element["sheetId"] = string(s.sheetId)
+        if s.is_hidden
+            state = get(old_states, s.relationship_id, "hidden")
+            sheet_element["state"] = state == "visible" ? "hidden" : state
+        end
         sheet_element["r:id"] = s.relationship_id
         push!(sheets_element, sheet_element)
     end
@@ -787,14 +811,8 @@ function add_cell_to_worksheet_dimension!(ws::Worksheet, cell::Cell)
     r = row_number(cell)
     c = column_number(cell)
 
-    if r < top || c < left
-        top = min(r, top)
-        left = min(c, left)
-        set_dimension!(ws, CellRange(top, left, bottom, right))
-    elseif r > bottom || c > right
-        bottom = max(r, bottom)
-        right = max(c, right)
-        set_dimension!(ws, CellRange(top, left, bottom, right))
+    if r < top || c < left || r > bottom || c > right
+        set_dimension!(ws, CellRange(min(r, top), min(c, left), max(r, bottom), max(c, right)))
     end
 
     nothing
@@ -821,7 +839,20 @@ function setdata!(ws::Worksheet, cell::Cell)
 end
  
 # Issue #284
+# Whether `c` is a character `strip_illegal_chars` removes.
+@inline function _is_illegal_xml_char(c::Char, strip_discouraged::Bool)::Bool
+    isvalid(c) || return false
+    u = UInt32(c)
+    (u <= 0x1F && u != 0x09 && u != 0x0A && u != 0x0D) && return true
+    (u == 0xFFFE || u == 0xFFFF) && return true
+    strip_discouraged || return false
+    return (0xFDD0 <= u <= 0xFDEF) || (u >= 0x1FFFE && (u & 0xFFFE) == 0xFFFE)
+end
+
 function strip_illegal_chars(s::String; strip_discouraged::Bool=true)
+    # Nearly every string is clean: one pass to confirm it, rather than the
+    # many full-string `replace`s below.
+    any(c -> _is_illegal_xml_char(c, strip_discouraged), s) || return s
     # remove XML 1.0 illegal C0 controls and U+0000
     s = replace(s, r"[\x00-\x08\x0B\x0C\x0E-\x1F]" => "")
     # remove BMP non-characters U+FFFE U+FFFF
@@ -948,7 +979,7 @@ function setdata!(ws::Worksheet, ref::CellRef, val::Union{AbstractFormula,CellCo
     if !(c isa EmptyCell) && c.formula && get_formula_from_cache(ws, ref) isa ReferencedFormula
         rereference_formulae(ws, c)
     end
-    if c isa EmptyCell || c.style == ""
+    if c isa EmptyCell || c.style == 0
         if val isa AbstractFormula
             return setdata!(ws, ref, CellFormula(ws, val))
         else
@@ -1166,8 +1197,9 @@ function setdata!(sheet::Worksheet, ref::CellRef, rts::RichTextString)
         c.datatype = CT_STRING
     else # add single run as a normal cell value with a cell level font style
         sheet[ref] = rts.text
-        setFont(sheet, ref; pairs(rts.runs[1].atts)...)
-    end     
+        kw = _run_font_kwargs(rts.runs[1].atts)
+        isempty(kw) || setFont(sheet, ref; kw...)
+    end
 
     return sheet[ref]
 end
@@ -1344,17 +1376,16 @@ function renamesheet!(ws::Worksheet, name::AbstractString)
         return
     end
     
-    name ∈ sheetnames(xf) && throw(XLSXError("Sheetname $name is already in use."))
+    _require_writable(xf, "rename a sheet")
+    # Excel compares sheet names case-insensitively; renaming a sheet to a new case of its own name is fine.
+    any(s -> s !== ws && _same_sheetname(s.name, name), get_workbook(xf).sheets) &&
+        throw(XLSXError("Sheetname $name is already in use."))
     isempty(name) && throw(XLSXError("A sheet name cannot be empty."))
     check_valid_sheetname(name)
 
     for p in (parts_with_content_type(xf, MIME_CHART)..., parts_with_content_type(xf, MIME_CHARTEX)...)
         repoint_chart_refs!(xf, p, ws.name, name)
     end
-
-    xf = get_xlsxfile(ws)
-    _require_writable(xf, "rename a sheet")
-    name ∈ sheetnames(xf) && throw(XLSXError("Sheetname $name is already in use."))
 
     # updates XML
     xroot = xml_root_element(xmlroot(xf, "xl/workbook.xml"))
@@ -1612,13 +1643,13 @@ function copysheet!(ws::Worksheet, name::AbstractString="")::Worksheet
     end
 
     # copy defined names from the original worksheet to the new worksheet
+    # References to the original sheet are repointed at the copy; others are kept as they are.
     ws_keys = [x for x in keys(wb.worksheet_names) if first(x) == ws.sheetId]
     for k in ws_keys
-        val = wb.worksheet_names[k].value
-        val = val isa CellRange ? string(val) :
-              val isa SheetCellRange ? new_ws.name * "!" * string(val.rng) :
-              val
-        addDefinedName(new_ws, last(k), val; absolute=wb.worksheet_names[k].isabs)
+        dnv = wb.worksheet_names[k]
+        val = dnv.value isa DefinedNameRangeTypes && dnv.value.sheet == ws.name ?
+              rename_sheet(dnv.value, new_ws.name) : dnv.value
+        wb.worksheet_names[(new_ws.sheetId, last(k))] = DefinedNameValue(val, copy(dnv.isabs), dnv.hidden)
     end
 
     # Copy the formula cache from the original worksheet to the new worksheet
@@ -1627,6 +1658,7 @@ function copysheet!(ws::Worksheet, name::AbstractString="")::Worksheet
         newkey = SheetCellRef(new_ws.name, k.cellref)
         wb.formulas[newkey] = copy(wb.formulas[k])
     end
+    new_ws.next_formula_id = ws.next_formula_id   # the copied shared formulas keep their ids
 
     return new_ws
 end
@@ -1639,6 +1671,9 @@ const MIME_WORKSHEET  = "application/vnd.openxmlformats-officedocument.spreadshe
 const MIME_CHARTSHEET = "application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml"
 const MIME_CHART      = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
 const MIME_CHARTEX    = "application/vnd.ms-office.chartex+xml"
+
+# Whether two sheet names are the same to Excel, which ignores case.
+_same_sheetname(a::AbstractString, b::AbstractString) = uppercase(a) == uppercase(b)
 
 # A sheet name Excel accepts: at most 31 characters, none of : \ / ? * [ ].
 function check_valid_sheetname(n::AbstractString)
@@ -1689,7 +1724,7 @@ function _register_sheet!(wb::Workbook, xdoc::XML.Node, name::AbstractString;
     new_name = name
     existing = sheetnames(wb)
     i = 1
-    while new_name == "" || new_name in existing
+    while new_name == "" || any(n -> _same_sheetname(n, new_name), existing)
         new_name = (name == "" ? default_name : name * " ") * string(i)
         i += 1
     end
@@ -1926,8 +1961,12 @@ function deletesheet!(wb::Workbook, name::AbstractString)::XLSXFile
         startswith(k, "_xlchart.") && (dead_xlchart[k] = string(wb.workbook_names[k].value))
         delete!(wb.workbook_names, k)
     end
-    for k in [k for k in keys(wb.worksheet_names) if first(k) == sId]
-        delete!(wb.worksheet_names, k)
+    # The sheet's own names, and names on other sheets that refer to it, which
+    # would otherwise be left pointing at a sheet that no longer exists.
+    for (k, v) in collect(wb.worksheet_names)
+        if first(k) == sId || (v.value isa DefinedNameRangeTypes && v.value.sheet == name)
+            delete!(wb.worksheet_names, k)
+        end
     end
 
     # Sheet-owned parts. Drawings and media keep their dedup-aware handling (media
@@ -2009,11 +2048,11 @@ function _table_name_from_sheet(wb::Workbook, sheet::Worksheet, sheetname::Abstr
     for ws in wb.sheets
         is_chartsheet(wb, ws.name) && continue
         for t in tables(ws)
-            push!(existing_names, t.name)
+            push!(existing_names, uppercase(t.name))
         end
     end
 
-    if candidate ∈ existing_names ||
+    if uppercase(candidate) ∈ existing_names ||
        is_workbook_defined_name(wb, candidate) || is_worksheet_defined_name(sheet, candidate)
         @warn "Normalized table name `$candidate` (from sheet name `$sheetname`) collides with an existing table name or defined name; using an auto-generated table name instead."
         return ""

@@ -219,7 +219,14 @@ end
 # Merges a boolean/flag font tag (e.g. "b", "i", "strike").
 # Returns nothing (present, no attributes) if kept/set, or missing to omit.
 function _merge_flag_tag(tag::String, new_val::Union{Nothing,Bool}, old_atts::Dict)
-    (isnothing(new_val) ? haskey(old_atts, tag) : new_val) ? nothing : missing
+    (isnothing(new_val) ? _flag_set(old_atts, tag) : new_val) ? nothing : missing
+end
+
+# Whether a font's flag tag is on: present, and not `<b val="0"/>` / `val="false"`.
+function _flag_set(atts::Dict, tag::String)::Bool
+    haskey(atts, tag) || return false
+    a = atts[tag]
+    return isnothing(a) || !(get(a, "val", "1") in ("0", "false"))
 end
 
 # Merges a single-value font tag (e.g. "sz", "name", "vertAlign").
@@ -377,32 +384,16 @@ function _merge_border_side(
 end
 
 function get_new_formatId(wb::Workbook, format::String)::Int
-    if haskey(builtinFormatNames, uppercasefirst(format)) # User specified a format by name
-        return builtinFormatNames[format]
-    elseif haskey(builtinFormats, format)                 # User specified a built-in format by ID
+    for (name, id) in builtinFormatNames                  # User specified a format by name
+        lowercase(name) == lowercase(format) && return id
+    end
+    if haskey(builtinFormats, format)                     # User specified a built-in format by ID
         return parse(Int64, format)
     else                                                  # user specified a format code
         if !is_valid_format(format)
             throw(XLSXError("Specified format is not a valid numFmt: $format"))
         end
-
-        xroot = styles_xmlroot(wb)
-        i, j = get_idces(xroot, "styleSheet", "numFmts")
-        if isnothing(j) # There are no existing custom formats
-            return styles_add_numFmt(wb, format)
-        else
-            existing_elements_count = length(xml_elements(xroot[i][j]))
-            if parse(Int, xroot[i][j]["count"]) != existing_elements_count
-                throw(XLSXError("Wrong number of font elements found: $existing_elements_count. Expected $(parse(Int, xroot[i][j]["count"]))."))
-            end
-
-            format_node = XML.Element("numFmt";
-                numFmtId=string(existing_elements_count + PREDEFINED_NUMFMT_COUNT),
-                formatCode=format
-            )
-
-            return styles_add_cell_attribute(wb, format_node, "numFmts") + PREDEFINED_NUMFMT_COUNT
-        end
+        return styles_add_numFmt(wb, format)              # reuses an identical format
     end
 end
 function update_template_xf(ws::Worksheet, existing_style::CellDataFormat, attributes::Vector{String}, vals::Vector{String})::CellDataFormat
@@ -859,7 +850,7 @@ function process_uniform_core(ws::Worksheet, cellref::CellRef, newid::Union{Int,
         return newid, first, firstFont
     end
     if first                           # Get the style of the first cell in the range.
-        if cell.style !== UInt64(0)
+        if cell.style != 0
             newid = Int(cell.style)
         end
         firstFont=getFont(ws, cellref)
@@ -1200,11 +1191,12 @@ function _strip_run_props!(ws::Worksheet, cell::Cell, tags::Set{String}) :: Unio
 
         new_index = add_shared_string!(wb, t[1])
 
-        if !isnothing(atts1) && !isempty(atts1)
+        kw = _run_font_kwargs(atts1)
+        if !isempty(kw)
             # Point the cell at the plain string first, otherwise the setFont
             # below re-enters this function on the same rich text and recurses.
             cell.value = reinterpret(UInt64, Int64(new_index))
-            setFont(ws, cell.ref; atts1...)
+            setFont(ws, cell.ref; kw...)
         end
     else
         new_r = IOBuffer()
@@ -1227,6 +1219,25 @@ function _strip_run_props!(ws::Worksheet, cell::Cell, tags::Set{String}) :: Unio
         new_index = add_formatted_string!(wb, sst, str_formatted)
     end
     return new_index
+end
+
+# A rich-text run's attributes as `setFont` keywords: `:under => true` is a single
+# underline, and false or absent flags set nothing.
+function _run_font_kwargs(atts::Union{Nothing,AbstractDict})
+    kw = Pair{Symbol,Any}[]
+    isnothing(atts) && return kw
+    for (k, v) in atts
+        if k in (:bold, :italic, :strike)
+            v in (true, 1) && push!(kw, k => true)
+        elseif k === :under
+            v in (true, 1) ? push!(kw, :under => "single") : v isa AbstractString && push!(kw, :under => String(v))
+        elseif k === :name || k === :vertAlign
+            push!(kw, k => String(v))
+        else                                            # :size, :color
+            push!(kw, k => v)
+        end
+    end
+    return kw
 end
 
 #

@@ -2424,3 +2424,67 @@ writing a number into a cell carrying a date/time format.
         end
     end
 end
+
+@testset "review fixes: number formats and fonts" begin
+    @testset "custom numFmt ids come from the file, not positions" begin
+        f = XLSX.newxlsx(); s = f[1]; wb = f.workbook
+        s["A1"] = 1.5; s["A2"] = 2.5; s["A3"] = 3.5
+        XLSX.setFormat(s, "A1"; format="0.000")
+        xroot = XLSX.styles_xmlroot(wb)
+        i, j = XLSX.get_idces(xroot, "styleSheet", "numFmts")
+        XLSX.xml_elements(xroot[i][j])[1]["numFmtId"] = "170"   # a gap, as files may have
+        wb.numFmt_cache = nothing
+        @test XLSX.setFormat(s, "A2"; format="0.000") == 170
+        @test XLSX.setFormat(s, "A3"; format="0.0000") == 171
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "built-in format names in any case" begin
+        f = XLSX.newxlsx(); s = f[1]; s["A1"] = 0.5
+        @test XLSX.setFormat(s, "A1"; format="percentage") == 9
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "fractional font size" begin
+        f = XLSX.newxlsx(); s = f[1]; s["A1"] = "x"
+        XLSX.setFont(s, "A1"; size=10.5)
+        @test XLSX.getFont(s, "A1").font["sz"]["val"] == "10.5"
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "a font with <b val=\"0\"/> stays not bold" begin
+        @test XLSX._merge_flag_tag("b", nothing, Dict("b" => Dict("val" => "0"))) === missing
+        @test XLSX._merge_flag_tag("b", nothing, Dict("b" => nothing)) === nothing
+    end
+    @testset "column widths split existing spans and stay sorted" begin
+        f = XLSX.newxlsx(); s = f[1]; s["A1:L1"] = 1
+        XLSX.setColumnWidth(s, "A1:E1"; width=20)
+        XLSX.setColumnWidth(s, "C1"; width=8)
+        XLSX.setColumnWidth(s, "K1"; width=5)
+        XLSX.setColumnWidth(s, "H1"; width=5)
+        doc = XLSX.xmlroot(f.workbook, s.relationship_id)
+        i, j = XLSX.get_idces(doc, "worksheet", "cols")
+        spans = [(parse(Int, c["min"]), parse(Int, c["max"])) for c in XLSX.xml_elements(doc[i][j])]
+        @test spans == [(1, 2), (3, 3), (4, 5), (8, 8), (11, 11)]
+        @test XLSX.getColumnWidth(s, "B1") ≈ 20 + XLSX.EXCEL_COLUMN_WIDTH_PADDING
+        @test XLSX.getColumnWidth(s, "C1") ≈ 8 + XLSX.EXCEL_COLUMN_WIDTH_PADDING
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "a width set inside a spanning <col> read from a file" begin
+        f = XLSX.newxlsx(); f[1]["A1:H3"] = 1
+        XLSX.writexlsx("span_base.xlsx", f; overwrite=true)
+        r = ZipReader(read("span_base.xlsx"))
+        open("span.xlsx", "w") do io                        # one definition for A:E, as Excel writes it
+            ZipWriter(io) do w
+                for n in zip_names(r)
+                    bytes = zip_readentry(r, n)
+                    n == "xl/worksheets/sheet1.xml" && (bytes = Vector{UInt8}(replace(String(bytes),
+                        "<sheetData" => "<cols><col min=\"1\" max=\"5\" width=\"20.7109375\" customWidth=\"1\"/></cols><sheetData"; count=1)))
+                    zip_newfile(w, n); write(w, bytes)
+                end
+            end
+        end
+        f = XLSX.openxlsx("span.xlsx"; mode="rw"); s = f[1]
+        XLSX.setColumnWidth(s, "C1"; width=8)
+        @test [XLSX.getColumnWidth(s, "$(c)1") for c in "ABCDE"] ≈
+              [20.7109375, 20.7109375, 8 + XLSX.EXCEL_COLUMN_WIDTH_PADDING, 20.7109375, 20.7109375]
+        SAVE_FILES && save_outfile(f)
+    end
+end

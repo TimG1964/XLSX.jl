@@ -172,8 +172,11 @@
         maxidx = length(XLSX.INDEXED_PALETTE) - 1
         @test XLSX.resolveColor(wb, Dict("indexed" => "0")) == "FF" * XLSX.INDEXED_PALETTE[1]
         @test XLSX.resolveColor(wb, Dict("indexed" => string(maxidx))) == "FF" * XLSX.INDEXED_PALETTE[maxidx+1]
+        # 64 and 65 are the system foreground and background, which Excel writes for defaults
+        @test XLSX.resolveColor(wb, Dict("indexed" => "64")) == "FF000000"
+        @test XLSX.resolveColor(wb, Dict("indexed" => "65")) == "FFFFFFFF"
         # out-of-range indices throw
-        @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("indexed" => string(maxidx+1)))
+        @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("indexed" => "66"))
         @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("indexed" => "-1"))
     end
 
@@ -184,7 +187,7 @@
         @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("theme" => "3", "tint" => "nan"))
         @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("theme" => "3", "tint" => "inf"))
         @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("theme" => "3", "tint" => "notanumber"))
-        @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("indexed" => "64"))
+        @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("indexed" => "66"))
         @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("theme" => "notanint"))
         @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("indexed" => "foo"))
         @test_throws XLSX.XLSXError XLSX.resolveColor(wb, Dict("theme" => "-1"))
@@ -281,4 +284,10 @@
             isfile(tmp) && rm(tmp)
         end
     end
+end
+
+@testset "review fixes: system indexed colors" begin
+    f = XLSX.newxlsx()
+    @test XLSX.resolveColor(f.workbook, Dict("indexed" => "64")) == "FF000000"
+    @test XLSX.resolveColor(f.workbook, Dict("indexed" => "65")) == "FFFFFFFF"
 end

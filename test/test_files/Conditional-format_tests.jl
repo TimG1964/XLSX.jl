@@ -2944,3 +2944,29 @@
         end
     end
 end
+
+@testset "review fixes: dxf fonts and text rules" begin
+    f = XLSX.newxlsx(); s = f[1]; s["A1:A3"] = 1
+    XLSX.setConditionalFormat(s, "A1:A3", :cellIs; value="0", font=["bold"=>"true", "italic"=>"true", "under"=>"double"])
+    xroot = XLSX.styles_xmlroot(f.workbook)
+    i, j = XLSX.get_idces(xroot, "styleSheet", "dxfs")
+    font = XLSX.first_element_with_tag(last(XLSX.xml_elements(xroot[i][j])), "font")
+    @test Set((XLSX.localname(n), XLSX.get_attr(n, "val")) for n in XLSX.xml_elements(font)) == Set([("b", ""), ("i", ""), ("u", "double")])
+    @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A3", :cellIs; value="0", font=["under"=>"wavy"])
+
+    s["B1:B3"] = "x"
+    XLSX.setConditionalFormat(s, "B1:B3", :containsText; value="say \"hi\"")
+    XLSX.setConditionalFormat(s, "B1:B3", :beginsWith; value="\$C\$1")
+    rules = [r for cf in XLSX.allCfs(s) for r in XLSX.xml_elements(cf) if cf["sqref"] == "B1:B3"]
+    formulas = [XLSX.child_text(r, "formula") for r in rules]
+    @test "NOT(ISERROR(SEARCH(\"say \"\"hi\"\"\",B1)))" in formulas
+    @test "LEFT(B1,LEN(\$C\$1))=\$C\$1" in formulas
+
+    # the type alone chooses the rule; a conflicting operator is refused
+    s["C1:C3"] = "x"
+    XLSX.setConditionalFormat(s, "C1:C3", :endsWith; value="z")
+    rule = only(r for cf in XLSX.allCfs(s) for r in XLSX.xml_elements(cf) if cf["sqref"] == "C1:C3")
+    @test rule["type"] == "endsWith"
+    @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "C1:C3", :endsWith; value="z", operator="beginsWith")
+    SAVE_FILES && save_outfile(f)
+end

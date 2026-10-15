@@ -96,11 +96,16 @@ end
 
 # Operator => (the operator Excel stores, the rule's formula).
 const CONTAINSTEXT_RULES = Dict(
-    "containsText"    => ("containsText", "NOT(ISERROR(SEARCH(\"__txt__\",__CR__)))"),
-    "notContainsText" => ("notContains",  "ISERROR(SEARCH(\"__txt__\",__CR__))"),
-    "beginsWith"      => ("beginsWith",   "LEFT(__CR__,LEN(\"__txt__\"))=\"__txt__\""),
-    "endsWith"        => ("endsWith",     "RIGHT(__CR__,LEN(\"__txt__\"))=\"__txt__\""),
+    "containsText"    => ("containsText", "NOT(ISERROR(SEARCH(__txt__,__CR__)))"),
+    "notContainsText" => ("notContains",  "ISERROR(SEARCH(__txt__,__CR__))"),
+    "beginsWith"      => ("beginsWith",   "LEFT(__CR__,LEN(__txt__))=__txt__"),
+    "endsWith"        => ("endsWith",     "RIGHT(__CR__,LEN(__txt__))=__txt__"),
 )
+
+# The rule's text operand: a cell reference as given, or literal text as a quoted
+# formula string (an embedded `"` doubled).
+_cf_text_operand(v::AbstractString) =
+    (is_valid_cellname(v) || is_valid_fixed_cellname(v)) ? String(v) : "\"" * replace(v, "\"" => "\"\"") * "\""
 
 define_cf_address_methods(:setCfContainsText)
 function setCfContainsText(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}=Dict{Symbol,Any}())::Int
@@ -112,12 +117,13 @@ function setCfContainsText(ws::Worksheet, rng::CfRange; allkws::Dict{Symbol,Any}
     haskey(CONTAINSTEXT_RULES, kw.operator) ||
         throw(XLSXError("Invalid operator: $(kw.operator). Valid options are: `containsText`, `notContainsText`, `beginsWith`, `endsWith`."))
     operator, formula = CONTAINSTEXT_RULES[kw.operator]
-    formula = replace(formula, "__txt__" => kw.value, "__CR__" => string(_cf_anchor(rng)))
+    operand = _cf_text_operand(kw.value)
+    formula = replace(formula, "__txt__" => operand, "__CR__" => string(_cf_anchor(rng)))
     dxid = _cf_rule_dx(ws, kw)
 
     cfx = _cf_rule_element(ws, pfx, kw.operator, dxid, kw)
     cfx["operator"] = operator
-    cfx["text"] = kw.value
+    startswith(operand, '"') && (cfx["text"] = kw.value)   # Excel stores `text` only for literal text
     push!(cfx, XML.Element("$(pfx)formula", XML.Text(formula)))
 
     update_worksheet_cfx!(cfx, ws, rng)

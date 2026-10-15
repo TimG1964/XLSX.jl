@@ -185,6 +185,7 @@ function check_for_xlsx_file_format(source::IO, label::AbstractString="input")
     header = Base.read(source, 8)
     reset(source)
 
+    length(header) < 4 && throw(XLSXError("`$label` is not a valid XLSX file: it is empty or too short."))
     if header[1:4] == ZIP_FILE_HEADER # valid Zip file header
         return
     elseif header == XLS_FILE_HEADER # either an old XLS file or a password protected XLSX file
@@ -485,6 +486,7 @@ The `mode` argument controls how the file is opened. The following modes are all
 !!! warning
 
     Using do-block syntax in "rw" mode will overwrite the file you read in with the modified data when the do block ends.
+    If the do block throws an error, the file is not written and `source` is left unchanged.
     Care is needed to ensure data are not inadvertantly overwritten, especially if the xlsx file contains any elements 
     that `XLSX.jl` cannot process (such as charts, pivot tables, etc), but that would otherwise be preserved if not 
     overwritten. You may avoid this risk by choosing to open files in "rw" mode without using do-block syntax, in which 
@@ -579,21 +581,21 @@ function openxlsx(f::F, source::Union{AbstractString,IO};
         xf.source = source
     end
 
-    try
-        f(xf)
+    # Saved only if `f` returns normally: an error part-way through must not
+    # overwrite `source` with a half-edited workbook.
+    result = f(xf)
 
-    finally
-        if _write
-            if xf.template_type != NotATemplate
-                if isa(xf.source, AbstractString)
-                    ext = xf.template_type == XLTMTemplate ? ".xlsm" : ".xlsx"
-                    xf.source = splitext(xf.source)[1] * ext
-                end
+    if _write
+        if xf.template_type != NotATemplate
+            if isa(xf.source, AbstractString)
+                ext = xf.template_type == XLTMTemplate ? ".xlsm" : ".xlsx"
+                xf.source = splitext(xf.source)[1] * ext
             end
-            xf.source isa IO && _reset_io_for_save!(xf.source)
-            writexlsx(xf.source, xf, overwrite=true)
         end
+        xf.source isa IO && _reset_io_for_save!(xf.source)
+        writexlsx(xf.source, xf, overwrite=true)
     end
+    return result
 end
 
 """
@@ -684,15 +686,15 @@ function convert_strict_to_transitional!(xf::XLSXFile, pass::Int)
     for filename in keys(xf.files)
         haskey(xf.data, filename) || continue      # target_sheet: only some files are loaded
         should_process = if pass == 1
-            !occursin(r"xl/worksheets/sheet\d*\.xml|xl/sharedStrings\.xml", filename)
+            !_is_worksheet_part(filename) && !occursin(r"xl/sharedStrings\.xml", filename)
         elseif pass == 2
             occursin(r"xl/sharedStrings\.xml", filename)
         else  # pass == 3
-            occursin(r"xl/worksheets/sheet\d*\.xml", filename)
+            _is_worksheet_part(filename)
         end
 
         if should_process
-            if occursin(r"xl/worksheets/sheet\d*\.xml", filename)
+            if _is_worksheet_part(filename)
                 # Worksheet data (whether the full raw or the stripped stub) is
                 # always stored as a plain String. Fix root-element namespace
                 # attributes with cheap string substitution rather than parsing
@@ -760,6 +762,8 @@ function open_or_read_xlsx(source::Union{IO,AbstractString}, _read::Bool, enable
     target_file = if !isnothing(target_sheet) && !_write
         wb = get_workbook(xf)
         ws = if target_sheet isa Integer
+            1 <= target_sheet <= length(wb.sheets) ||
+                throw(XLSXError("Sheet $target_sheet not found: $(xf.source) has $(length(wb.sheets)) sheet(s)."))
             wb.sheets[target_sheet]
         else
             s = findfirst(s -> s.name == target_sheet, wb.sheets)
@@ -973,8 +977,9 @@ function parse_defined_name_value(s::String)::Tuple{DefinedNameValueTypes, Any}
         defined_value, isabs = SheetCellRange(unquote_sheet(s)), true
     elseif is_valid_sheet_cellrange(s)
         defined_value, isabs = SheetCellRange(unquote_sheet(s)), false
-    elseif startswith(s, '"') && endswith(s, '"')
-        inner = String(chop(s, head=1, tail=1))
+    elseif length(s) >= 2 && startswith(s, '"') && endswith(s, '"') &&
+           !occursin('"', replace(chop(s, head=1, tail=1), "\"\"" => ""))   # not `"a"&"b"`
+        inner = replace(String(chop(s, head=1, tail=1)), "\"\"" => "\"")
         defined_value, isabs = (isempty(inner) ? missing : inner), false
     elseif (n = tryparse(Int64, s)) !== nothing
         defined_value, isabs = n, false
@@ -983,7 +988,10 @@ function parse_defined_name_value(s::String)::Tuple{DefinedNameValueTypes, Any}
     elseif isempty(s)
         defined_value, isabs = missing, false
     else
-        defined_value, isabs = string(s), false
+        # Any other expression (a formula, a whole-column reference, ...) is kept as
+        # formula text with a leading `=`, as Excel's Name Manager shows it, so it
+        # stays distinct from a string constant and is written back unquoted.
+        defined_value, isabs = "=" * s, false
     end
 
     return defined_value, isabs
@@ -1116,6 +1124,10 @@ function splitNode(xml_str::String, skipnode::String)
     return stripped_xml, ""
 end
 
+# A worksheet part. Not only `sheetN.xml`: the part name is the producer's choice
+# (`Sheet1.xml`, `data.xml`), and every stage of reading must agree on it.
+_is_worksheet_part(filename::AbstractString) = occursin(r"^xl/worksheets/[^/]+\.xml$", filename)
+
 const BINARY_PREFIXES = ["customxml"] # must be lowercase
 is_binary_path(filename) = any(p -> startswith(lowercase(filename), p), BINARY_PREFIXES)
 
@@ -1155,7 +1167,7 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
     filtered_files = Channel{String}(1 << 20) do out
         for file in all_files
             is_sst = occursin(r"^xl/sharedStrings\.xml$", file)
-            is_worksheet = occursin(r"^xl/worksheets/[^/]+\.xml$", file)
+            is_worksheet = _is_worksheet_part(file)
             should_process = if pass == 1
                 !is_sst && !is_worksheet
             elseif pass == 2
@@ -1229,7 +1241,10 @@ function load_files!(xf::XLSXFile, zip_io::ZipArchives.ZipReader; pass::Int,
             end
         end
 
-        # Every write to xf's Dicts is done; the fills now only read them.
+        # Every write to xf's Dicts is done; the fills now only read them. That
+        # includes the style lookups each cell makes: fill them for every cell
+        # format now, since a Dict must not be read on one thread while written on another.
+        isempty(pending) || _prefill_style_buffers!(wb)
         fill_tasks = [Threads.@spawn(first_cache_fill!(sheet, parse(raw, XML.LazyNode)))
                       for (sheet, raw) in pending]
         foreach(wait, fill_tasks)
@@ -1265,7 +1280,7 @@ function process_file(zip_io::ZipArchives.ZipReader, filename::String, split_she
             if filename == "xl/sharedStrings.xml"
                 node = XML.Element("sst")  # placeholder; SST is loaded via sst_load!
                 raw  = xml_str
-            elseif occursin(r"xl/worksheets/sheet\d*\.xml", filename)
+            elseif _is_worksheet_part(filename)
                 node = split_sheets ? first(splitNode(xml_str, "sheetData")) : nothing
                 raw  = xml_str      # full worksheet for LazyNode construction
             else

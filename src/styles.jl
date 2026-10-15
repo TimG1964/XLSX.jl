@@ -160,14 +160,23 @@ function styles_add_numFmt(wb::Workbook, format_code::AbstractString)::Integer
         numfmts = numfmts[1]
     end
 
-    existing_numFmt_elements_count = length(xml_elements(numfmts))
-    fmt_code = existing_numFmt_elements_count + PREDEFINED_NUMFMT_COUNT
+    # Reuse an identical format. Ids are read from the file, not derived from
+    # positions: a file's custom ids need not run contiguously from 164.
+    existing = xml_elements(numfmts)
+    max_id = PREDEFINED_NUMFMT_COUNT - 1
+    for n in existing
+        haskey(n, "numFmtId") || continue
+        id = parse(Int, n["numFmtId"])
+        haskey(n, "formatCode") && n["formatCode"] == format_code && return id
+        max_id = max(max_id, id)
+    end
+    fmt_code = max_id + 1
     new_fmt = XML.Element("numFmt";
         numFmtId=string(fmt_code),
         formatCode=format_code
     )
     push!(numfmts, new_fmt)
-    numfmts["count"] = string(existing_numFmt_elements_count + 1)
+    numfmts["count"] = string(length(existing) + 1)
     wb.numFmt_cache !== nothing && (wb.numFmt_cache[fmt_code] = format_code)
     return fmt_code
 end
@@ -244,6 +253,23 @@ function styles_is_datetime(wb::Workbook, index::Integer)::Bool
 end
 
 styles_is_datetime(wb::Workbook, fmt::CellDataFormat) = styles_is_datetime(wb, Int(fmt.id))
+
+# Fill `buffer_styles_is_datetime` and `buffer_styles_is_float` for every cell
+# format, so that cells read on several threads at once only ever read them.
+function _prefill_style_buffers!(wb::Workbook)
+    has_relationship_by_type(wb, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles") || return nothing
+    for index in 0:length(get_cellXfs_nodes(wb))-1
+        try
+            styles_is_datetime(wb, index)
+            styles_is_float(wb, index)
+        catch e
+            # A malformed format that no cell may use: leave it to fail, as before,
+            # only if a cell reads it.
+            e isa XLSXError || rethrow()
+        end
+    end
+    return nothing
+end
 
 function styles_is_datetime(wb::Workbook, index::AbstractString)
     isempty(index) && throw(XLSXError("Internal error: empty style index given to `styles_is_datetime`."))

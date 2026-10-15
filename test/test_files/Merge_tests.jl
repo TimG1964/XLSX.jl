@@ -288,3 +288,14 @@ end
         SAVE_FILES && save_outfile(xf)
     end
 end
+
+@testset "review fixes: mergeCells goes where the schema puts it" begin
+    f = XLSX.newxlsx(); s = f[1]; s["A1:C3"] = 1
+    doc = XLSX.xmlroot(f.workbook, s.relationship_id)
+    k, l = XLSX.get_idces(doc, "worksheet", "sheetData")
+    insert!(doc[k].children, l + 1, XML.Element("autoFilter"; ref="A1:C3"))
+    XLSX.mergeCells(s, "A1:B1")
+    names = [XLSX.localname(c) for c in XLSX.xml_elements(doc[k])]
+    @test findfirst(==("autoFilter"), names) < findfirst(==("mergeCells"), names)
+    SAVE_FILES && save_outfile(f)
+end

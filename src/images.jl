@@ -179,9 +179,14 @@ add_media!(xf::XLSXFile, path::AbstractString) = _add_media_bytes!(xf, read(path
 add_media!(xf::XLSXFile, io::IOBuffer)         = _add_media_bytes!(xf, take!(copy(io)))
 
 function _add_media_bytes!(xf::XLSXFile, bytes::Vector{UInt8})::String
-    ext      = detect_image_ext(bytes)
-    existing = count(k -> startswith(k, "xl/media/"), keys(xf.binary_data))
-    name     = "image$(existing + 1)$ext"
+    ext = detect_image_ext(bytes)
+    # The first free number: media names need not be contiguous (a deleted sheet's
+    # images go), and reusing a taken one would overwrite an image still in use.
+    i = 1
+    while haskey(xf.binary_data, "xl/media/image$i$ext") || haskey(xf.files, "xl/media/image$i$ext")
+        i += 1
+    end
+    name = "image$i$ext"
     xf.binary_data["xl/media/$name"] = bytes
     ext_no_dot = String(lstrip(ext, '.'))
     register_content_type!(xf, "[Content_Types].xml";

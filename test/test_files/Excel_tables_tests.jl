@@ -3981,3 +3981,19 @@ end
         end
     end
 end
+
+@testset "review fixes: tables" begin
+    f = XLSX.newxlsx(); s = f[1]
+    s["A1:B1"] = ["Item" "Price [USD]"]; s["A2:A3"] = "x"; s["B2:B3"] = 1.0
+    XLSX.addtable!(s, "A1:B3"; name="Sales")
+    s["D1:E1"] = ["x" "y"]; s["D2:E3"] = 1
+    @test_throws XLSX.XLSXError XLSX.addtable!(s, "D1:E3"; name="sales")
+    s["G1:H1"] = ["Col" "col"]; s["G2:H3"] = 1
+    @test_throws XLSX.XLSXError XLSX.addtable!(s, "G1:H3")
+    XLSX.settotals!(s, "Sales", "Price [USD]" => :sum)
+    @test XLSX.getFormula(s, "B4") == "=SUBTOTAL(109,Sales[Price '[USD']])"
+    SAVE_FILES && save_outfile(f)                    # the escaped totals formula, as Excel reads it
+    XLSX.deletetable!(s, "Sales")
+    @test XLSX.getFormula(s, "B4") == "=SUBTOTAL(109,Sheet1!\$B\$2:\$B\$3)"
+    SAVE_FILES && save_outfile(f)
+end

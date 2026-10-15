@@ -318,6 +318,8 @@ function resolveColor(wb::Workbook, atts::AbstractDict; prefix::AbstractString="
         rawidx = strip(atts[prefix*"indexed"])
         idx = tryparse(Int, rawidx)
         isnothing(idx) && throw(XLSXError("Invalid indexed color index: $rawidx. Must be an integer between 0 and $(length(INDEXED_PALETTE)-1)."))
+        idx == 64 && return "FF000000"   # system foreground, which Excel writes for default borders and text
+        idx == 65 && return "FFFFFFFF"   # system background
         if idx < 0 || idx >= length(INDEXED_PALETTE)
             throw(XLSXError("Invalid indexed color index: $idx. Must be between 0 and $(length(INDEXED_PALETTE)-1)."))
         end

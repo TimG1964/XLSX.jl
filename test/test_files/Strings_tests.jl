@@ -577,3 +577,25 @@ end
         SAVE_FILES && save_outfile(xf)
     end
 end
+
+@testset "review fixes: rich text" begin
+    f = XLSX.newxlsx(); s = f[1]
+    s["A1"] = XLSX.RichTextString(XLSX.RichTextRun("plain"))
+    s["A2"] = XLSX.RichTextString(XLSX.RichTextRun("u", [:under => true, :size => 12.5]))
+    @test s["A1"] == "plain" && s["A2"] == "u"
+    @test XLSX.getFont(s, "A2").font["u"] === nothing
+    @test XLSX.getFont(s, "A2").font["sz"]["val"] == "12.5"
+    SAVE_FILES && save_outfile(f)
+
+    rt = XLSX.getRichTextString(f.workbook, "<si><r><rPr><sz val=\"10.5\"/><b val=\"0\"/><u val=\"none\"/></rPr><t>ab</t></r><r><rPr><b/></rPr><t>cd</t></r></si>")
+    @test rt.runs[1].atts == Dict{Symbol,Any}(:size => 10.5)
+    @test rt.runs[2].atts == Dict{Symbol,Any}(:bold => true)
+
+    r = XLSX.RichTextString(XLSX.RichTextRun("é"), XLSX.RichTextRun("ab", [:bold => true]))
+    @test r[3:4] == XLSX.RichTextString(XLSX.RichTextRun("ab", [:bold => true]))
+    @test r[1:3].runs == [XLSX.RichTextRun("é"), XLSX.RichTextRun("a", [:bold => true])]
+
+    a = XLSX.RichTextRun("x", [:bold => true, :size => 12, :italic => true, :name => "Arial", :color => "red", :under => true, :strike => true, :vertAlign => "subscript"])
+    b = XLSX.RichTextRun("x", [:vertAlign => "subscript", :strike => true, :under => true, :color => "red", :name => "Arial", :italic => true, :size => 12, :bold => true])
+    @test a == b && hash(a) == hash(b)
+end

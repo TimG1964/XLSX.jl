@@ -1551,26 +1551,26 @@ function addtable!(sheet::Worksheet, ref::CellRange;
     _require_writable(xf, "add a table")
     wb = get_workbook(sheet)
 
-    # --- name uniqueness (unchanged) ---
+    # --- name uniqueness: Excel compares table names case-insensitively ---
     existing_names = Set{String}()
     for ws in wb.sheets
         is_chartsheet(wb, ws.name) && continue
         for t in tables(ws)
-            push!(existing_names, t.name)
+            push!(existing_names, uppercase(t.name))
         end
     end
 
     if name == ""
         i = 1
         candidate = "Table$i"
-        while candidate ∈ existing_names ||
+        while uppercase(candidate) ∈ existing_names ||
               is_workbook_defined_name(wb, candidate) || is_worksheet_defined_name(sheet, candidate)
             i += 1
             candidate = "Table$i"
         end
         name = candidate
     else
-        name ∈ existing_names && throw(XLSXError("Table name `$name` is already in use."))
+        uppercase(name) ∈ existing_names && throw(XLSXError("Table name `$name` is already in use."))
         (is_workbook_defined_name(wb, name) || is_worksheet_defined_name(sheet, name)) &&
             throw(XLSXError("Table name `$name` collides with an existing defined name."))
     end
@@ -1593,7 +1593,7 @@ function addtable!(sheet::Worksheet, ref::CellRange;
             throw(XLSXError("Table header cell $(CellRef(header_row, c)) is empty; every column needs a header value before calling `addtable!`."))
         push!(columns, string(v))
     end
-    length(unique(columns)) != length(columns) &&
+    length(unique(uppercase.(columns))) != length(columns) &&   # case-insensitive, as in Excel
         throw(XLSXError("Table header row contains duplicate column names."))
 
     # --- totals row: last row of `ref`, when requested, which must be empty —
@@ -1677,6 +1677,11 @@ function _check_table_overlap(sheet::Worksheet, ref::CellRange, name::AbstractSt
     return nothing
 end
 
+# `Table[Column]` as a formula writes it: `[`, `]`, `#` and `'` in a column name are
+# escaped with `'`, so `Price [USD]` gives `Sales[Price '[USD']]`.
+_structured_ref(table::AbstractString, column::AbstractString) =
+    table * "[" * replace(column, r"(['\[\]#])" => s"'\1") * "]"
+
 """
     deletetable!(t::Table)
     deletetable!(sheet::Worksheet, name::AbstractString)
@@ -1754,7 +1759,7 @@ function _deletetable!(t::Table)
             for (j, other) in enumerate(t.columns)
                 other_letter = encode_column_number(col0 + j - 1)
                 other_range = "$(qsheet)!\$$(other_letter)\$$(first_data):\$$(other_letter)\$$(last_data)"
-                new_f = replace(new_f, "$(name)[$(other)]" => other_range)
+                new_f = replace(new_f, _structured_ref(name, other) => other_range)
             end
 
             setFormula(sheet, cell_ref; val=lstrip(new_f, '='))
@@ -1953,7 +1958,7 @@ function _settotals!(t::Table, settings::Pair...)
                 throw(XLSXError("Unknown totals function `:$value`. Supported: $(join(sort(string.(keys(TOTALS_ROW_FUNCTIONS))), ", ")), or pass `(:custom, \"formula\")` for a custom function."))
             func_name, subtotal_code = TOTALS_ROW_FUNCTIONS[value]
             col_node["totalsRowFunction"] = func_name
-            setFormula(sheet, cell_ref; val="SUBTOTAL($subtotal_code,$(name)[$col_name])")
+            setFormula(sheet, cell_ref; val="SUBTOTAL($subtotal_code,$(_structured_ref(name, col_name)))")
 
         elseif value isa Tuple{Symbol,S} where {S<:AbstractString}
             fn, formula_str = value
@@ -2170,12 +2175,11 @@ function gettable(t::Table;
     missing_set = missing_strings === nothing ? nothing :
                   missing_strings isa AbstractString ? Set([missing_strings]) : Set(missing_strings)
 
-    row_range = _first_data_row(t):_last_data_row(t)
-    col0 = _col_start(t)
+    m = _table_data_matrix(t)
 
     data = Vector{Any}(undef, length(t.columns))
     for i in eachindex(t.columns)
-        col = Any[getdata(t.sheet, CellRef(r, col0 + i - 1)) for r in row_range]
+        col = Vector{Any}(m[:, i])
         if !isnothing(missing_set)
             col = Any[(x isa AbstractString && x in missing_set) ? missing : x for x in col]
         end
