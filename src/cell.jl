@@ -250,7 +250,7 @@ end
 function _record_formula!(wb::Workbook, ws::Worksheet, ref::CellRef, f_node::XML.LazyNode,
                           local_formulas::Union{Nothing, Dict{SheetCellRef, AbstractFormula}})
     f = parse_formula_from_element(wb, f_node)
-    key = SheetCellRef(combine_sheet_ref(ws, ref))
+    key = SheetCellRef(ws.name, ref)
     if isnothing(local_formulas)
         lock(wb.formulas_lock) do
             wb.formulas[key] = f

@@ -720,11 +720,11 @@ end
 
 function get_formula_from_cache(ws::Worksheet, ref::CellRef)
     wb = get_workbook(ws)
-    return wb.formulas[SheetCellRef(combine_sheet_ref(ws, ref))]
+    return wb.formulas[SheetCellRef(ws.name, ref)]
 end
 function add_formula_to_cache(ws::Worksheet, ref::CellRef, f::AbstractFormula)
     wb = get_workbook(ws)
-    wb.formulas[SheetCellRef(combine_sheet_ref(ws, ref))] = f
+    wb.formulas[SheetCellRef(ws.name, ref)] = f
 end
 
 """

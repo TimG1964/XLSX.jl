@@ -428,10 +428,6 @@ const RGX_SINGLE_ROW = r"^[1-9][0-9]*$"
     end
 end
 
-@inline function combine_sheet_ref(s::Worksheet, ref::CellRef)
-    return string(quoteit(s.name), "!", encode_column_number(ref.column_number), ref.row_number)
-end
-
 function is_valid_column_range(r::AbstractString) :: Bool
     if occursin(RGX_SINGLE_COLUMN, r)
         return true
