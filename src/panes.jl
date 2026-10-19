@@ -104,9 +104,7 @@ end
 
 function _apply_pane!(ws::Worksheet, kind::PaneKind, nrows::Int, ncols::Int)
 
-    if !get_xlsxfile(ws).is_writable
-        throw(XLSXError("Cannot apply pane: `XLSXFile` is not writable."))
-    end
+    _require_writable(ws, "apply pane")
 
     (nrows < 0 || ncols < 0) && throw(XLSXError("nrows and ncols must be non-negative."))
 

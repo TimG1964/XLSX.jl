@@ -7,8 +7,7 @@ function throws_with(f, substrings...)
     return false
 end
 
-
-@testset "Tables Helpers" begin
+@testset "readtable" begin
 
     test_data = Vector{Any}(undef, 3)
     test_data[1] = [missing, missing, "B5"]
@@ -267,9 +266,33 @@ end
 
     end
 
+
+    # ===========================================================================
+    # Source-not-found and bad-argument paths on the public read entry points
+    # ===========================================================================
+
+    @testset "readtable - file not found, every arity" begin
+        missing_file = "definitely_not_a_file_12345.xlsx"
+        @test !isfile(missing_file)
+
+        @test_throws XLSX.XLSXError XLSX.readtable(missing_file)
+        @test_throws XLSX.XLSXError XLSX.readtable(missing_file, "Sheet1")
+        @test_throws XLSX.XLSXError XLSX.readtable(missing_file, "Sheet1", XLSX.ColumnRange("A:B"))
+    end
+
+    @testset "readtable - columns argument is not a valid column range" begin
+        outfile = "read_badrange.xlsx"
+        XLSX.writetable(outfile, [[1, 2], [3, 4]], ["a", "b"]; overwrite=true)
+        SAVE_FILES && save_outfile(outfile)
+
+        @test_throws XLSX.XLSXError XLSX.readtable(outfile, 1, "not a range")
+        @test_throws XLSX.XLSXError XLSX.readtable(outfile, 1, "A1:B2")  # cell range, not columns
+
+        isfile(outfile) && rm(outfile)
+    end
 end
 
-@testset "Table" begin
+@testset "DataTable and gettable(sheet)" begin
 
     @test Tables.istable(XLSX.DataTable)
 
@@ -602,6 +625,7 @@ end
 
     @testset "Consecutive passes" begin
         # Consecutive passes should yield the same results
+        test_data = Any[[10, 20, 30], ["name1", "name2", "name3"], [100, 200, 300]]
         XLSX.openxlsx(joinpath(data_directory, "general.xlsx")) do f
             sl = f["lookup"]
             dtable = XLSX.gettable(sl)
@@ -717,6 +741,53 @@ end
         check_test_data(data, test_data)
         SAVE_FILES && save_outfile(f)
 
+    end
+
+    @testset "TableRow getindex with a vector or range of columns" begin
+        f = XLSX.newxlsx()
+        sh = f[1]
+        sh["A1"] = "a"; sh["B1"] = "b"; sh["C1"] = "c"
+        sh["A2"] = 1;   sh["B2"] = 2;   sh["C2"] = 3
+
+        r = first(XLSX.eachtablerow(sh))
+        @test r[1:2] == [1, 2]
+        @test r[[1, 3]] == [1, 3]
+        @test r[1:3] == [1, 2, 3]
+        SAVE_FILES && save_outfile(f)
+    end
+
+    @testset "eachtablerow(sheet) - leading row whose cells all read missing" begin
+        # Covers the `isnothing(ci)` skip: row 1 has cells present in the XML but
+        # every value reads back as `missing`, so it can't anchor the table.
+        f = XLSX.newxlsx()
+        sh = f[1]
+        sh["A1"] = 1; sh["B1"] = 2
+        sh["A1"] = missing; sh["B1"] = missing
+        sh["A2"] = "a"; sh["B2"] = "b"
+        sh["A3"] = 1;   sh["B3"] = 2
+
+        dt = XLSX.gettable(sh)
+        @test dt.column_labels == [:a, :b]
+        @test dt.data[1] == [1]
+        SAVE_FILES && save_outfile(f)
+    end
+
+    @testset "readtransposedtable - file not found, every arity" begin
+        missing_file = "definitely_not_a_file_12345.xlsx"
+
+        @test_throws XLSX.XLSXError XLSX.readtransposedtable(missing_file)
+        @test_throws XLSX.XLSXError XLSX.readtransposedtable(missing_file, "Sheet1")
+        @test_throws XLSX.XLSXError XLSX.readtransposedtable(missing_file, "Sheet1", "1:3")
+    end
+
+    @testset "unknown column names, and sheets with no dimension" begin
+        dt = XLSX.DataTable(Any[[1, 2]], [:a])
+        @test_throws XLSX.XLSXError Tables.getcolumn(dt, :nope)
+
+        sh = XLSX.newxlsx()[1]                     # nothing written: no dimension
+        @test occursin("Sheet1", sprint(show, sh))
+        # was an UndefVarError (`ws` in the message)
+        @test_throws XLSX.XLSXError XLSX.ordinal_sheet_number(XLSX.get_workbook(sh), "nope")
     end
 end
 
@@ -871,8 +942,8 @@ end
         @test f[1]["C1:C4"] == Any["String"; "abc"; "DeF"; "gHi";;]
         @test f[1]["D1"] == "Bool"
         @test f[1]["D1:D4"] == Any["Bool"; true; true; false;;]
-        @test f[1]["E1"] == "CellRef"
-        @test f[1]["E1:E4"] == Any["CellRef"; "A1"; "B2"; "CCC34000";;]
+        @test f[1]["E1"] == cols[5]   # "CellRef" or "XLSX.CellRef", depending on what Main imports
+        @test f[1]["E1:E4"] == Any[cols[5]; "A1"; "B2"; "CCC34000";;]
         @test f[1]["F1"] == "enums"
         @test f[1]["F1:F4"] == Any["enums"; "enum1"; "enum2"; "enum3";;]
     end
@@ -911,6 +982,118 @@ end
         df=XLSX.readto("mytest.xlsx", DataFrames.DataFrame)
         @test all(isequal.(df.Floats, ["-Inf", "Inf", missing, "NaN"]))
 
+    end
+
+    @testset "writetable shape hints" begin
+
+        df = DataFrames.DataFrame(a=[1, 2], b=["x", "y"])
+        cols = [[1, 2], ["x", "y"]]
+        colnames = ["a", "b"]
+
+        # --- tuple-vector shapes, now accepted via the `#4` fallback branch ---
+
+        XLSX.writetable("hint.xlsx", [(:REPORT, cols, colnames)]; overwrite=true)
+        SAVE_FILES && save_outfile("hint.xlsx")
+        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT"]
+
+        XLSX.writetable("hint.xlsx", [("REPORT", DataFrames.eachcol(df), colnames)]; overwrite=true)
+        SAVE_FILES && save_outfile("hint.xlsx")
+        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT"]
+
+        XLSX.writetable("hint.xlsx", Any[("REPORT", cols, colnames)]; overwrite=true)
+        SAVE_FILES && save_outfile("hint.xlsx")
+        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT"]
+
+        XLSX.writetable("hint.xlsx", [(:A, cols, colnames), ("B", cols, colnames)]; overwrite=true)
+        SAVE_FILES && save_outfile("hint.xlsx")
+        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["A", "B"]
+
+        # non-string column labels are stringified, matching `writetable!`
+        XLSX.writetable("hint.xlsx", [("REPORT", cols, [1, 2])]; overwrite=true)
+        SAVE_FILES && save_outfile("hint.xlsx")
+        XLSX.openxlsx("hint.xlsx") do xf
+            @test xf[1]["A1"] == "1" && xf[1]["B1"] == "2"
+        end
+
+        # the normalized vector must be concretely typed or `#4` would re-enter itself
+        @test XLSX._normalize_sheet_specs([(:A, cols, colnames)]) isa
+            Vector{Tuple{String,Vector{Any},Vector{String}}}
+
+        # --- pair forms, both key types ---
+
+        XLSX.writetable("hint.xlsx", :REPORT => df; overwrite=true)
+        SAVE_FILES && save_outfile("hint.xlsx")
+        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT"]
+
+        XLSX.writetable("hint.xlsx", ["REPORT_A" => df, :REPORT_B => df]; overwrite=true)
+        SAVE_FILES && save_outfile("hint.xlsx")
+        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT_A", "REPORT_B"]
+
+        XLSX.writetable("hint.xlsx", "REPORT_A" => df, :REPORT_B => df; overwrite=true)
+        SAVE_FILES && save_outfile("hint.xlsx")
+        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT_A", "REPORT_B"]
+
+        XLSX.writetable("hint.xlsx", split("REPORT_A REPORT_B")[1] => df; overwrite=true)
+        SAVE_FILES && save_outfile("hint.xlsx")
+        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT_A"]
+
+        # --- still rejected, with a hint naming the actual problem ---
+
+        @test throws_with(() -> XLSX.writetable("hint.xlsx", [("REPORT", cols)]),
+                        "(sheetname, data, columnnames)", "2-tuple")
+
+        @test throws_with(() -> XLSX.writetable("hint.xlsx", Any[("REPORT", cols, colnames), 42]),
+                        "(sheetname, data, columnnames)", "element 2", "not a tuple")
+
+        @test throws_with(() -> XLSX.writetable("hint.xlsx", [(1, cols, colnames)]),
+                        "(sheetname, data, columnnames)", "neither `AbstractString` nor `Symbol`")
+
+        @test throws_with(() -> XLSX.writetable("hint.xlsx", [1 => df]),
+                        "Sheet name must be an `AbstractString` or `Symbol`", string(Int))
+
+        @test throws_with(() -> XLSX.writetable("hint.xlsx", 1 => df),
+                        "name => table", string(Int))
+
+        # `writetable!` writes into an existing sheet, so a pair is never valid there
+        XLSX.openxlsx("hint.xlsx", mode="w") do xf
+            @test throws_with(() -> XLSX.writetable!(xf[1], :REPORT => df),
+                            "name => table", "Symbol")
+        end
+        SAVE_FILES && save_outfile("hint.xlsx")
+
+        # --- no hint appended where none applies ---
+
+        @test throws_with(() -> XLSX.writetable("hint.xlsx", 42),
+                        "does not implement Tables.jl interface")
+        @test XLSX._shape_hint(Any[]) == ""
+        @test XLSX._shape_hint(42) == ""
+        @test XLSX._shape_hint([1, 2, 3]) == ""
+
+        # --- dispatch pins: the typed methods must keep winning over the fallback ---
+
+        m_fallback = which(XLSX.writetable, Tuple{String,Int})
+
+        # `#3` still owns its own shape; the fallback is a fallback
+        @test which(XLSX.writetable,
+                    Tuple{String,Vector{Tuple{String,Vector{Any},Vector{String}}}}) !== m_fallback
+
+        # `#6` wins over `#4` for a single pair, and over `#1` for two
+        @test which(XLSX.writetable, Tuple{String,Pair{String,Any}}) !== m_fallback
+        @test which(XLSX.writetable, Tuple{String,Pair{Symbol,Any}}) !== m_fallback
+        @test which(XLSX.writetable, Tuple{String,Pair{String,Any},Pair{String,Any}}) !==
+            which(XLSX.writetable, Tuple{String,Vector{Any},Vector{String}})
+
+        @test throws_with(() -> XLSX.writetable("hint.xlsx"; Sales=df),
+                      "must be a `(data, columnnames)` tuple", "writetable(filename, :Sales => table)")
+
+        @test throws_with(() -> XLSX.writetable("hint.xlsx"; Sales=(cols, colnames, 42)),
+                      "must be a `(data, columnnames)` tuple")
+        # valid form unaffected
+        XLSX.writetable("hint.xlsx"; overwrite=true, REPORT_A=(cols, colnames), REPORT_B=(cols, colnames))
+        SAVE_FILES && save_outfile("hint.xlsx")
+        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT_A", "REPORT_B"]
+
+        isfile("hint.xlsx") && rm("hint.xlsx")
     end
 
     # delete files created by this testset
@@ -1021,13 +1204,15 @@ end
         @test df[!, "Column D"] == collect(Date(2018, 4, 21):Dates.Day(1):Date(2018, 4, 28))
         @test all(ismissing.(df[!, "Column G"]))
 
-        file = joinpath(@__DIR__, "test_report.xlsx")
+        file = "test_report.xlsx"
 
         try
             df1 = DataFrames.DataFrame(COL1=[10, 20, 30], COL2=["Fist", "Sec", "Third"])
             df2 = DataFrames.DataFrame(AA=["aa", "bb"], AB=[10.1, 10.2])
             XLSX.writetable(file, "REPORT_A" => df1, "REPORT_B" => df2, overwrite=true)
             SAVE_FILES && save_outfile(file)
+            @test isequal(XLSX.readto(file, "REPORT_A", DataFrames.DataFrame), df1)
+            @test isequal(XLSX.readto(file, "REPORT_B", DataFrames.DataFrame), df2)
         finally
             isfile(file) && rm(file)
         end
@@ -1065,119 +1250,6 @@ end
         @test eltype.(eachcol(df)) == [Int64, String, Int64, Any, Int64, String, Any, Int64, Int64]
     end
 
-
-    @testset "writetable shape hints" begin
-        
-        df = DataFrames.DataFrame(a=[1, 2], b=["x", "y"])
-        cols = [[1, 2], ["x", "y"]]
-        colnames = ["a", "b"]
-
-        # --- tuple-vector shapes, now accepted via the `#4` fallback branch ---
-
-        XLSX.writetable("hint.xlsx", [(:REPORT, cols, colnames)]; overwrite=true)
-        SAVE_FILES && save_outfile("hint.xlsx")
-        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT"]
-
-        XLSX.writetable("hint.xlsx", [("REPORT", DataFrames.eachcol(df), colnames)]; overwrite=true)
-        SAVE_FILES && save_outfile("hint.xlsx")
-        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT"]
-
-        XLSX.writetable("hint.xlsx", Any[("REPORT", cols, colnames)]; overwrite=true)
-        SAVE_FILES && save_outfile("hint.xlsx")
-        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT"]
-
-        XLSX.writetable("hint.xlsx", [(:A, cols, colnames), ("B", cols, colnames)]; overwrite=true)
-        SAVE_FILES && save_outfile("hint.xlsx")
-        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["A", "B"]
-
-        # non-string column labels are stringified, matching `writetable!`
-        XLSX.writetable("hint.xlsx", [("REPORT", cols, [1, 2])]; overwrite=true)
-        SAVE_FILES && save_outfile("hint.xlsx")
-        XLSX.openxlsx("hint.xlsx") do xf
-            @test xf[1]["A1"] == "1" && xf[1]["B1"] == "2"
-        end
-
-        # the normalized vector must be concretely typed or `#4` would re-enter itself
-        @test XLSX._normalize_sheet_specs([(:A, cols, colnames)]) isa
-            Vector{Tuple{String,Vector{Any},Vector{String}}}
-
-        # --- pair forms, both key types ---
-
-        XLSX.writetable("hint.xlsx", :REPORT => df; overwrite=true)
-        SAVE_FILES && save_outfile("hint.xlsx")
-        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT"]
-
-        XLSX.writetable("hint.xlsx", ["REPORT_A" => df, :REPORT_B => df]; overwrite=true)
-        SAVE_FILES && save_outfile("hint.xlsx")
-        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT_A", "REPORT_B"]
-
-        XLSX.writetable("hint.xlsx", "REPORT_A" => df, :REPORT_B => df; overwrite=true)
-        SAVE_FILES && save_outfile("hint.xlsx")
-        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT_A", "REPORT_B"]
-
-        XLSX.writetable("hint.xlsx", split("REPORT_A REPORT_B")[1] => df; overwrite=true)
-        SAVE_FILES && save_outfile("hint.xlsx")
-        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT_A"]
-
-        # --- still rejected, with a hint naming the actual problem ---
-
-        @test throws_with(() -> XLSX.writetable("hint.xlsx", [("REPORT", cols)]),
-                        "(sheetname, data, columnnames)", "2-tuple")
-
-        @test throws_with(() -> XLSX.writetable("hint.xlsx", Any[("REPORT", cols, colnames), 42]),
-                        "(sheetname, data, columnnames)", "element 2", "not a tuple")
-
-        @test throws_with(() -> XLSX.writetable("hint.xlsx", [(1, cols, colnames)]),
-                        "(sheetname, data, columnnames)", "neither `AbstractString` nor `Symbol`")
-
-        @test throws_with(() -> XLSX.writetable("hint.xlsx", [1 => df]),
-                        "Sheet name must be an `AbstractString` or `Symbol`", string(Int))
-
-        @test throws_with(() -> XLSX.writetable("hint.xlsx", 1 => df),
-                        "name => table", string(Int))
-
-        # `writetable!` writes into an existing sheet, so a pair is never valid there
-        XLSX.openxlsx("hint.xlsx", mode="w") do xf
-            @test throws_with(() -> XLSX.writetable!(xf[1], :REPORT => df),
-                            "name => table", "Symbol")
-        end
-        SAVE_FILES && save_outfile("hint.xlsx")
-
-        # --- no hint appended where none applies ---
-
-        @test throws_with(() -> XLSX.writetable("hint.xlsx", 42),
-                        "does not implement Tables.jl interface")
-        @test XLSX._shape_hint(Any[]) == ""
-        @test XLSX._shape_hint(42) == ""
-        @test XLSX._shape_hint([1, 2, 3]) == ""
-
-        # --- dispatch pins: the typed methods must keep winning over the fallback ---
-
-        m_fallback = which(XLSX.writetable, Tuple{String,Int})
-
-        # `#3` still owns its own shape; the fallback is a fallback
-        @test which(XLSX.writetable,
-                    Tuple{String,Vector{Tuple{String,Vector{Any},Vector{String}}}}) !== m_fallback
-
-        # `#6` wins over `#4` for a single pair, and over `#1` for two
-        @test which(XLSX.writetable, Tuple{String,Pair{String,Any}}) !== m_fallback
-        @test which(XLSX.writetable, Tuple{String,Pair{Symbol,Any}}) !== m_fallback
-        @test which(XLSX.writetable, Tuple{String,Pair{String,Any},Pair{String,Any}}) !==
-            which(XLSX.writetable, Tuple{String,Vector{Any},Vector{String}})
-
-        @test throws_with(() -> XLSX.writetable("hint.xlsx"; Sales=df),
-                      "must be a `(data, columnnames)` tuple", "writetable(filename, :Sales => table)")
-
-        @test throws_with(() -> XLSX.writetable("hint.xlsx"; Sales=(cols, colnames, 42)),
-                      "must be a `(data, columnnames)` tuple")
-        # valid form unaffected
-        XLSX.writetable("hint.xlsx"; overwrite=true, REPORT_A=(cols, colnames), REPORT_B=(cols, colnames))
-        SAVE_FILES && save_outfile("hint.xlsx")
-        @test XLSX.sheetnames(XLSX.readxlsx("hint.xlsx")) == ["REPORT_A", "REPORT_B"]
-        
-        isfile("hint.xlsx") && rm("hint.xlsx")
-    end
-
     @testset "empty shared strings read as missing (issue 460 follow-up)" begin
         f = joinpath(data_directory, "empty_sst_numeric.xlsx")
 
@@ -1203,258 +1275,5 @@ end
             @test ismissing(xf["Numbers"]["A5"])
             @test ismissing(xf["Numbers"]["A7"])
         end
-    end
-end
-
-
-#=
-#462 Stage 4: `iterate(::TableRowIterator)` and `gettable` now share one row-stepping
-function, and `gettable` writes values straight into columns. The table-row iterator
-and `gettable` as they were before are kept below as the reference: the new code must
-give exactly the same rows, values, types and `stop_in_row_function` calls.
-=#
-
-# The pre-#462 `iterate(::TableRowIterator)`, verbatim apart from qualified names.
-function _old_handle_gap(itr, table_row_index, col_count, expected_row, actual_row, sheet_row, sheet_row_iterator_state)
-    itr.stop_in_empty_row && return nothing
-    itr.keep_empty_rows || return :skip
-    table_row = XLSX.TableRow(table_row_index, itr.index, fill(missing, col_count))
-    XLSX._should_stop(itr, table_row) && return nothing
-    newstate = XLSX.TableRowIteratorState(table_row_index, expected_row, sheet_row_iterator_state,
-                                          actual_row - expected_row - 1, sheet_row)
-    return table_row, newstate
-end
-
-function _old_return_table_row(itr, table_row_index, actual_row, sheet_row, sheet_row_iterator_state)
-    table_row = XLSX.TableRow(table_row_index, itr.index, sheet_row, itr.missing_strings)
-    XLSX._should_stop(itr, table_row) && return nothing
-    newstate = XLSX.TableRowIteratorState(table_row_index, actual_row, sheet_row_iterator_state, 0, nothing)
-    return table_row, newstate
-end
-
-function _old_iterate(itr, state)
-    table_row_index = state.table_row_index + 1
-    col_count = length(XLSX.sheet_column_numbers(itr.index))
-    if state.missing_rows > 0
-        table_row = XLSX.TableRow(table_row_index, itr.index, fill(missing, col_count))
-        XLSX._should_stop(itr, table_row) && return nothing
-        newstate = XLSX.TableRowIteratorState(table_row_index, state.sheet_row_index + 1,
-            state.sheet_row_iterator_state, state.missing_rows - 1, state.row_pending)
-        return table_row, newstate
-    end
-    local sheet_row, sheet_row_iterator_state
-    if !isnothing(state.row_pending)
-        sheet_row = state.row_pending
-        sheet_row_iterator_state = state.sheet_row_iterator_state
-    else
-        next = iterate(itr.itr, state.sheet_row_iterator_state)
-        isnothing(next) && return nothing
-        sheet_row, sheet_row_iterator_state = next
-    end
-    actual_row = XLSX.row_number(sheet_row)
-    expected_row = state.sheet_row_index + 1
-    if actual_row > expected_row
-        result = _old_handle_gap(itr, table_row_index, col_count, expected_row, actual_row, sheet_row, sheet_row_iterator_state)
-        result === :skip || return result
-    end
-    result = XLSX._skip_empty_rows(itr, sheet_row, sheet_row_iterator_state)
-    isnothing(result) && return nothing
-    sheet_row, sheet_row_iterator_state = result
-    return _old_return_table_row(itr, table_row_index, XLSX.row_number(sheet_row), sheet_row, sheet_row_iterator_state)
-end
-
-# All rows the old iterator gives, as (table row, values).
-function _old_tablerows(itr)
-    out = Tuple{Int,Vector{Any}}[]
-    next = isnothing(itr.resume) ? iterate(itr.itr) : itr.resume
-    while !isnothing(next) && XLSX.row_number(next[1]) < itr.first_data_row
-        next = iterate(itr.itr, next[2])
-    end
-    isnothing(next) && return out
-    sheet_row, sheet_row_state = next
-    state = XLSX.TableRowIteratorState(0, itr.first_data_row - 1, sheet_row_state, 0, sheet_row)
-    while true
-        r = _old_iterate(itr, state)
-        isnothing(r) && break
-        row, state = r
-        push!(out, (row.row, Any[row.cell_values...]))
-    end
-    return out
-end
-
-# The pre-#462 `gettable(::TableRowIterator)`, over the old iterator's rows.
-function _old_gettable(itr; infer_eltypes::Bool = true)
-    n = XLSX.table_columns_count(itr)
-    data = Any[Any[] for _ in 1:n]
-    for (_, values) in _old_tablerows(itr), ci in 1:n
-        push!(data[ci], values[ci])
-    end
-    if infer_eltypes
-        for i in eachindex(data)
-            T = XLSX.infer_eltype(data[i])
-            T !== Any && (data[i] = convert(Vector{T}, data[i]))
-        end
-    end
-    return XLSX.DataTable(data, XLSX.get_column_labels(itr))
-end
-
-_same_values(a, b) = length(a) == length(b) &&
-    all(isequal(x, y) && typeof(x) == typeof(y) for (x, y) in zip(a, b))
-
-# Old vs new for one sheet and keyword set: iteration and `gettable`, with the
-# callback calls compared too. Returns a mismatch description or `nothing`.
-function _stage4_check(ws, cols, kw::NamedTuple, stop_kind::Symbol, infer_eltypes::Bool)
-    mk(log) = isnothing(cols) ?
-        XLSX.eachtablerow(ws; kw..., stop_in_row_function = _diff_stop_fn(stop_kind, log)) :
-        XLSX.eachtablerow(ws, cols; kw..., stop_in_row_function = _diff_stop_fn(stop_kind, log))
-    probe = _diff_run(() -> mk(_DiffCall[]))
-    probe isa Exception && return nothing          # construction is unchanged code
-
-    # iteration
-    la, lb = _DiffCall[], _DiffCall[]
-    old_rows = _diff_run(() -> _old_tablerows(mk(la)))
-    new_rows = _diff_run(() -> [(r.row, Any[r.cell_values...]) for r in mk(lb)])
-    if old_rows isa Exception || new_rows isa Exception
-        (old_rows isa Exception && new_rows isa Exception && typeof(old_rows) == typeof(new_rows)) ||
-            return "iteration: $(_diff_describe(old_rows)) vs $(_diff_describe(new_rows))"
-    else
-        length(old_rows) == length(new_rows) || return "iteration: $(length(old_rows)) vs $(length(new_rows)) rows"
-        for (i, (a, b)) in enumerate(zip(old_rows, new_rows))
-            (a[1] == b[1] && _same_values(a[2], b[2])) || return "iteration row $i: $a vs $b"
-        end
-    end
-    m = _diff_compare_calls(la, lb)
-    m === nothing || return "iteration: " * m
-
-    # gettable
-    la, lb = _DiffCall[], _DiffCall[]
-    old_t = _diff_run(() -> _old_gettable(mk(la); infer_eltypes))
-    new_t = _diff_run(() -> XLSX.gettable(mk(lb); infer_eltypes))
-    m = _diff_compare(old_t, new_t)
-    m === nothing || return "gettable: " * m
-    m = _diff_compare_calls(la, lb)
-    m === nothing || return "gettable: " * m
-    return nothing
-end
-
-@testset "table rows and gettable unchanged (#462 Stage 4)" begin
-    stops = (:none, :at2, :col1missing, :always, :never)
-
-    @testset "empty-row corpus" begin
-        mismatches = String[]
-        n = 0
-        sheets = Pair{String,Vector{UInt8}}[]
-        for len in 0:3, states in Iterators.product(ntuple(_ -> _DIFF_ROW_STATES, len)...)
-            push!(sheets, "corpus $(collect(states))" => _diff_corpus_sheet(collect(states)))
-        end
-        append!(sheets, ["special \"$k\"" => v for (k, v) in _diff_special_sheets()])
-        for (label, bytes) in sheets
-            ws = XLSX.readxlsx(IOBuffer(bytes))[1]
-            for header in (true, false), stop_in_empty_row in (true, false), keep_empty_rows in (true, false),
-                first_row in (nothing, 1, 2, 3, 5), cols in _DIFF_COLUMNS
-                n += 1
-                kw = (; header, stop_in_empty_row, keep_empty_rows, first_row,
-                        missing_strings = _DIFF_MS_OPTIONS[mod1(n, 4)])
-                m = _stage4_check(ws, cols, kw, stops[mod1(n, 5)], isodd(n ÷ 5))
-                m === nothing || push!(mismatches, "$label cols=$(repr(cols)) $kw: $m")
-            end
-        end
-        foreach(println, first(mismatches, 20))
-        @test isempty(mismatches)
-        @test n > 100_000
-    end
-
-    @testset "test/data workbooks" begin
-        mismatches = String[]
-        n = 0
-        for file in sort(readdir(data_directory))
-            any(ext -> endswith(lowercase(file), ext), (".xlsx", ".xlsm", ".xltx", ".xltm")) || continue
-            xf = try XLSX.readxlsx(joinpath(data_directory, file)) catch; continue end
-            wb = XLSX.get_workbook(xf)
-            for ws in wb.sheets
-                XLSX.is_chartsheet(wb, ws.name) && continue
-                dim = _diff_run(() -> XLSX.get_dimension(ws))
-                columns, first_rows = Any[nothing], Any[nothing, 1, 2]
-                if dim isa XLSX.CellRange
-                    c1, c2 = XLSX.column_number(dim.start), XLSX.column_number(dim.stop)
-                    col(i) = XLSX.encode_column_number(i)
-                    append!(columns, ["$(col(c1)):$(col(c2))", "$(col(c1)):$(col(c1))", "$(col(c1)):$(col(c2 + 2))"])
-                    push!(first_rows, XLSX.row_number(dim.stop))
-                end
-                for header in (true, false), stop_in_empty_row in (true, false), keep_empty_rows in (true, false),
-                    first_row in first_rows, cols in columns
-                    n += 1
-                    kw = (; header, stop_in_empty_row, keep_empty_rows, first_row,
-                            missing_strings = _DIFF_MS_OPTIONS[mod1(n, 4)])
-                    m = _stage4_check(ws, cols, kw, stops[mod1(n, 5)], isodd(n ÷ 5))
-                    m === nothing || push!(mismatches, "$file $(ws.name) cols=$(repr(cols)) $kw: $m")
-                end
-            end
-        end
-        foreach(println, first(mismatches, 20))
-        @test isempty(mismatches)
-        @test n > 10_000
-    end
-
-    fixtures = get(ENV, "XLSX_DIFF_FIXTURES", "")
-    if !isempty(fixtures)
-        @testset "bench fixtures" begin
-            for file in sort(readdir(fixtures))
-                startswith(file, "xl_") || continue
-                ws = XLSX.readxlsx(joinpath(fixtures, file))["Data"]
-                for stop_in_empty_row in (true, false), keep_empty_rows in (true, false)
-                    kw = (; first_row = 5, stop_in_empty_row, keep_empty_rows)
-                    m = _stage4_check(ws, "A:CF", kw, :none, true)
-                    m === nothing || println("$file $kw: $m")
-                    @test m === nothing
-                end
-            end
-        end
-    end
-
-    @testset "column types" begin
-        # cells for B2:B4, and the column eltype `gettable` should infer
-        cases = [
-            ("<c r=\"B2\"><v>1</v></c>", "<c r=\"B3\"><v>2.5</v></c>", "<c r=\"B4\"><v>3</v></c>") => Float64,
-            ("<c r=\"B2\"><v>1</v></c>", "<c r=\"B3\"><v>2</v></c>", "<c r=\"B4\"><v>3</v></c>") => Int64,
-            ("<c r=\"B2\" s=\"1\"><v>45000</v></c>", "<c r=\"B3\" s=\"1\"><v>45000.5</v></c>", "<c r=\"B4\" s=\"1\"><v>45001</v></c>") => Dates.DateTime,
-            ("<c r=\"B2\" t=\"inlineStr\"><is><t>x</t></is></c>", "<c r=\"B3\"><v>2</v></c>", "<c r=\"B4\"><v>3</v></c>") => Any,
-            ("<c r=\"B2\" t=\"b\"><v>1</v></c>", "<c r=\"B3\" s=\"2\"/>", "<c r=\"B4\" t=\"b\"><v>0</v></c>") => Union{Missing, Bool},
-            ("<c r=\"B2\" s=\"2\"/>", "<c r=\"B3\" s=\"2\"/>", "<c r=\"B4\"><v>1</v></c>") => Union{Missing, Int64},
-        ]
-        for ((b2, b3, b4), T) in cases
-            rows = "<row r=\"1\"><c r=\"B1\" t=\"inlineStr\"><is><t>h</t></is></c><c r=\"C1\" t=\"inlineStr\"><is><t>k</t></is></c></row>" *
-                   "<row r=\"2\">$(b2)<c r=\"C2\"><v>1</v></c></row><row r=\"3\">$(b3)<c r=\"C3\"><v>1</v></c></row>" *
-                   "<row r=\"4\">$(b4)<c r=\"C4\"><v>1</v></c></row>"
-            ws = XLSX.readxlsx(IOBuffer(_diff_build_xlsx(rows, String[])))[1]
-            for infer_eltypes in (true, false)
-                @test _stage4_check(ws, "B:C", (;), :none, infer_eltypes) === nothing
-            end
-            @test eltype(XLSX.gettable(ws, "B:C").data[1]) == T
-            @test eltype(XLSX.gettable(ws, "B:C"; infer_eltypes = false).data[1]) == Any
-        end
-        # all missing, and no data rows at all
-        rows = "<row r=\"1\"><c r=\"B1\" t=\"inlineStr\"><is><t>h</t></is></c></row><row r=\"2\"><c r=\"B2\" s=\"2\"/></row><row r=\"3\"><c r=\"C3\"><v>1</v></c></row>"
-        ws = XLSX.readxlsx(IOBuffer(_diff_build_xlsx(rows, String[])))[1]
-        kw = (; stop_in_empty_row = false, keep_empty_rows = true)
-        @test _stage4_check(ws, "B:B", kw, :none, true) === nothing
-        @test eltype(XLSX.gettable(ws, "B:B"; kw...).data[1]) == Any
-        rows = "<row r=\"1\"><c r=\"B1\" t=\"inlineStr\"><is><t>h</t></is></c></row>"
-        ws = XLSX.readxlsx(IOBuffer(_diff_build_xlsx(rows, String[])))[1]
-        @test _stage4_check(ws, "B:B", (;), :none, true) === nothing
-        @test isempty(XLSX.gettable(ws, "B:B").data[1])
-    end
-
-    @testset "TableRow length and collect" begin
-        ws = XLSX.readxlsx(joinpath(data_directory, "general.xlsx"))["table"]
-        nrows = 0
-        for r in XLSX.eachtablerow(ws)
-            nrows += 1
-            n = length(XLSX.get_column_labels(r))
-            @test length(r) == n
-            @test isequal(collect(r), Any[r[i] for i in 1:n])
-            @test eltype(collect(r)) == XLSX.CellConcreteType
-        end
-        @test nrows > 0
     end
 end

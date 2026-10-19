@@ -16,7 +16,8 @@ function create_new_sst(wb::Workbook, sst::SharedStringTable)
 
         # add Content Type <Override ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml" PartName="/xl/sharedStrings.xml"/>
         ctype_root = xml_root_element(xmlroot(get_xlsxfile(wb), "[Content_Types].xml"))
-        XML.tag(ctype_root) != "Types" && throw(XLSXError("Something wrong here!"))
+        XML.tag(ctype_root) != "Types" &&
+            throw(XLSXError("Malformed `[Content_Types].xml`: its root element is `$(XML.tag(ctype_root))`, not `Types`."))
         override_node = XML.Element("Override";
             ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",
             PartName = "/xl/sharedStrings.xml"
@@ -237,7 +238,11 @@ function richTextRunToXML!(io::IO, run::RichTextRun, pfx)
             write(props, "<$(pfx)strike/>")
         end
         if (v = get(atts, :color, nothing)) !== nothing
-            write(props, "<$(pfx)color rgb=\"", get_color(v), "\"/>")
+            write(props, "<$(pfx)color")
+            for (k, a) in _color_atts(v)
+                write(props, " ", k, "=\"", a, "\"")
+            end
+            write(props, "/>")
         end
         if (v = get(atts, :size, nothing)) !== nothing
             write(props, "<$(pfx)sz val=\"", string(v), "\"/>") # size read as a float, output rounded to nearest half point.
@@ -323,21 +328,10 @@ function Base.show(io::IO, rts::RichTextString)
             # Convert pairs to "key=value"
             parts = (":"*string(k) * " => " * sprint(show, v) for (k,v) in sort(collect(run.atts), by=first))
 
-            s = join(parts, ", ")
-
-            # Truncate if too long
-#            if length(s) > maxlen_atts
-#                s = s[1:prevind(s, maxlen_atts)] * "…"
-#            end
-            s = truncate_len(s, maxlen_atts)
+            s = truncate_len(join(parts, ", "), maxlen_atts)
         end
 
         t = truncate_len(run.text, maxlen_txt)
-#        t = if length(run.text) > maxlen_txt
-#            run.text[1:prevind(run.text, maxlen_txt)] * "…"
-#        else
-#            run.text
-#        end
 
         @printf(io, " %-24s %-66s\n", "\""*t*"\"", "["*s*"]")
     end
@@ -350,32 +344,28 @@ end
 
 # Take a substring from a RichTextString as another RichTextString
 Base.getindex(rts::RichTextString, i::Int) = getindex(rts, i:i)
+# Indices are those of `rts.text`, as for a String: `r` selects the characters
+# starting at indices in `r`, which must be valid ones.
 function Base.getindex(rts::RichTextString, r::UnitRange{Int})::RichTextString
     substr = rts.text[r]
 
     new_runs = RichTextRun[]
-    global_char_pos = 1
+    pos = 1                                   # index in `rts.text` of the run's first byte
 
     for run in rts.runs
         run_text = run.text
-        run_chars = length(run_text)
-        run_range = global_char_pos:(global_char_pos + run_chars - 1)
+        run_first = pos
+        run_last  = pos - 1 + lastindex(run_text)   # start of the run's last character
 
-        overlap_start = max(first(r), first(run_range))
-        overlap_end   = min(last(r), last(run_range))
+        overlap_start = max(first(r), run_first)
+        overlap_end   = min(last(r), run_last)
 
         if overlap_start <= overlap_end
-            # Convert global character indices to local character indices
-            local_start = overlap_start - global_char_pos + 1
-            local_end   = overlap_end   - global_char_pos + 1
-
-            # Slice using character indexing
-            sliced_text = run_text[local_start:local_end]
-
+            sliced_text = run_text[(overlap_start - pos + 1):(overlap_end - pos + 1)]
             push!(new_runs, RichTextRun(sliced_text, run.atts))
         end
 
-        global_char_pos += run_chars
+        pos += ncodeunits(run_text)
     end
 
     return RichTextString(substr, new_runs)
@@ -398,7 +388,7 @@ function Base.:(==)(r1::RichTextRun, r2::RichTextRun)
         v1 = a1[k]
         v2 = a2[k]
         if k === :color
-            get_color(v1) == get_color(v2) || return false
+            _cell_color_key(v1) == _cell_color_key(v2) || return false
         else
             v1 == v2 || return false
         end
@@ -416,13 +406,15 @@ function Base.hash(r::RichTextRun, h::UInt)
         return hash(0xdebdceef, h)  # any constant
     end
 
-    # Order‑insensitive hash over attributes
-    # (color values canonicalized via get_color)
+    # Order‑insensitive hash over attributes, as `==` compares them: each pair is
+    # hashed alone and the results combined commutatively, so the Dict's iteration
+    # order cannot matter. (color values canonicalized via _cell_color_key)
+    acc = zero(UInt)
     for (k, v) in atts
-        v′ = (k === :color ? get_color(v) : v)
-        h = hash((k, v′), h)
+        v′ = (k === :color ? _cell_color_key(v) : v)
+        acc ⊻= hash((k, v′))
     end
-    return h
+    return hash(acc, h)
 end
 Base.length(run::RichTextRun) = length(run.text)
 function Base.show(io::IO, run::RichTextRun)
@@ -434,21 +426,10 @@ function Base.show(io::IO, run::RichTextRun)
         s = " "
     else
         parts = (":"*string(k) * " => " * sprint(show, v) for (k,v) in sort(collect(run.atts), by=first))
-        s = join(parts, ", ")
+        s = truncate_len(join(parts, ", "), maxlen_atts)
+    end
 
-            # Truncate if too long
-#            if length(s) > maxlen_atts
-#                s = s[1:prevind(s, maxlen_atts)] * "…"
-#            end
-            s = truncate_len(s, maxlen_atts)
-        end
-
-        t = truncate_len(run.text, maxlen_txt)
-#        t = if length(run.text) > maxlen_txt
-#            run.text[1:prevind(run.text, maxlen_txt)] * "…"
-#        else
-#            run.text
-#        end
+    t = truncate_len(run.text, maxlen_txt)
 
     print(io,"RichTextRun (","\""*t*"\"  [", s,"])")
 end
@@ -572,6 +553,7 @@ getRichTextString(xl::XLSXFile, sheetcell::String) = process_get_sheetcell(getRi
 getRichTextString(ws::Worksheet, row::Integer, col::Integer) = getRichTextString(ws, CellRef(row, col))
 function getRichTextString(s::Worksheet, c::CellRef)::Union{RichTextString, Nothing}
     cell = getcell(s, c)
+    cell isa EmptyCell && return nothing
     cell.datatype == CT_STRING || return nothing
     sst_load!(get_workbook(s))
     uss = get_sst(get_workbook(s)).shared_strings[reinterpret(Int64, cell.value)+1]
@@ -614,18 +596,21 @@ function getRichTextString(wb::Workbook, xml_string::String)::Union{RichTextStri
             bold = italic = strike = under = false
             size_val = color_val = name_val = vertAlign_val = nothing
 
+            # `<b val="0"/>` and `<u val="none"/>` switch a property off.
+            flag_on(c) = !(get(something(XML.attributes(c), Dict{String,String}()), "val", "1") in ("0", "false", "none"))
             for c in XML.children(rpr_child)
                 ln = localname(c)
                 if ln == "b"
-                    bold = true
+                    bold = flag_on(c)
                 elseif ln == "i"
-                    italic = true
+                    italic = flag_on(c)
                 elseif ln == "strike"
-                    strike = true
+                    strike = flag_on(c)
                 elseif ln == "u"
-                    under = true
+                    under = flag_on(c)
                 elseif ln == "sz" && isnothing(size_val)
-                    size_val = parse(Int, XML.attributes(c)["val"])
+                    sz = parse(Float64, XML.attributes(c)["val"])     # half points are common (10.5)
+                    size_val = isinteger(sz) ? Int(sz) : sz
                 elseif ln == "color" && isnothing(color_val)
                     color_val = resolveColor(wb, XML.attributes(c))
                 elseif ln == "rFont" && isnothing(name_val)

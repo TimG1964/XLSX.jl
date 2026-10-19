@@ -4,6 +4,7 @@ module StyledStringsSstsExt
 
     using XLSX
     import XLSX: setdata!, RichTextString, RichTextRun
+    import XLSX: Charts
 
     import StyledStrings: StyledStrings, AnnotatedString
     import StyledStrings: load_customisations!, getface, Face, FACES, SimpleColor
@@ -15,13 +16,29 @@ module StyledStringsSstsExt
 const _AnnStr = Union{AnnotatedString, SubString{<:AnnotatedString}}
 
 # Bounds chains of faces whose foreground names another face (as StyledStrings'
-# MAX_COLOR_FORWARDS does), so a cycle gives no colour rather than a stack overflow.
+# MAX_COLOR_FORWARDS does), so a cycle gives no color rather than a stack overflow.
 const _SS_MAX_COLOR_FORWARDS = 12
 
 function setdata!(sheet::Worksheet, ref::CellRef, ss::_AnnStr)
     isempty(ss) && return setdata!(sheet, ref, "")
     return setdata!(sheet, ref, RichTextString(_ssToRuns(ss)))
 end
+
+# Chart text: a styled string is written as the RichTextString it converts to, so
+# its formatting is kept as it is in a cell. Empty text has no runs to convert.
+_ss_rich(ss::_AnnStr) = isempty(ss) ? "" : RichTextString(_ssToRuns(ss))
+
+Charts.setChartTitleText(c::Charts.Chart, ss::_AnnStr) =
+    Charts.setChartTitleText(c, _ss_rich(ss))
+Charts.setAxisTitleText(c::Charts.Chart, ax::Charts.ChartAxis, ss::_AnnStr) =
+    Charts.setAxisTitleText(c, ax, _ss_rich(ss))
+Charts.setLabelText(c::Charts.Chart, i::Integer, point::Integer, ss::_AnnStr) =
+    Charts.setLabelText(c, i, point, _ss_rich(ss))
+Charts.setChartTitleText(c::Charts.ChartEx, ss::_AnnStr) =
+    Charts.setChartTitleText(c, _ss_rich(ss))
+Charts.setAxisTitleText(c::Charts.ChartEx, id::Integer, ss::_AnnStr) =
+    Charts.setAxisTitleText(c, id, _ss_rich(ss))
+Charts._chart_title(ss::_AnnStr) = _ss_rich(ss)
 
 """
     _ssToRuns(s::Union{<:AnnotatedString, SubString{<:AnnotatedString}}) -> Vector{XLSX.RichTextRun}

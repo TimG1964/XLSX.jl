@@ -1,4 +1,4 @@
-@testset "Defined Names" begin # Issue #148 
+@testset "Defined Names" begin # Issue #148
     @test XLSX.is_defined_name_value_a_reference(XLSX.SheetCellRef("Sheet1!A1"))
     @test XLSX.is_defined_name_value_a_reference(XLSX.SheetCellRange("Sheet1!A1:B2"))
     @test !XLSX.is_defined_name_value_a_reference(1)
@@ -133,8 +133,8 @@
     XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
     SAVE_FILES && save_outfile("mytest.xlsx")
     f = XLSX.readxlsx("mytest.xlsx")
-    @test s["MyCell"] == true
-    @test s["YourCells"] == Any[false false; false false]
+    @test f[1]["MyCell"] == true
+    @test f[1]["YourCells"] == Any[false false; false false]
 
     @test_throws XLSX.XLSXError XLSX.addDefinedName(f, "A1", "Sheet1!B1")
     @test_throws XLSX.XLSXError XLSX.addDefinedName(f, "A1:A3", "Sheet1!B2:B3")
@@ -160,14 +160,15 @@
 
     ff = XLSX.openxlsx("mytest.xlsx", mode="rw")
 
-    @test XLSX.hassheet(f, "Tim's Sheet")
-    @test XLSX.hassheet(f, "Ano'ther She'et")
-    @test f[2]["A1"] == "tim"
-    @test f[3]["A1"] == "another"
-    @test f["mine"] == "tim"
-    @test f["yours"] == "another"
+    @test XLSX.hassheet(ff, "Tim's Sheet")
+    @test XLSX.hassheet(ff, "Ano'ther She'et")
+    @test ff[2]["A1"] == "tim"
+    @test ff[3]["A1"] == "another"
+    @test ff["mine"] == "tim"
+    @test ff["yours"] == "another"
     @test string(XLSX.get_defined_name_value(XLSX.get_workbook(ff), "mine")) == "'Tim''s Sheet'!A1"
     @test string(XLSX.get_defined_name_value(XLSX.get_workbook(ff), "yours")) == "'Ano''ther She''et'!A1"
+    SAVE_FILES && save_outfile(ff)
 
     isfile("mytest.xlsx") && rm("mytest.xlsx")
 
@@ -212,7 +213,6 @@
 
         SAVE_FILES && save_outfile(f)
     end
-
 
     @testset "deleteDefinedName" begin
 
@@ -400,8 +400,6 @@
         end
     end
 
-
-
     @testset "Rename sheet updates defined names" begin
         f = XLSX.opentemplate(joinpath(data_directory, "general.xlsx"))
         wb = XLSX.get_workbook(f)
@@ -503,7 +501,109 @@
         @test occursin("…", out)
         SAVE_FILES && save_outfile(f)
     end
-    SAVE_FILES && save_outfile(ff)
+
+    @testset "parse_defined_name_value" begin
+        @testset "parse_defined_name_value - relative sheet cell reference" begin
+            v, isabs = XLSX.parse_defined_name_value("Sheet1!A1")
+            @test v == XLSX.SheetCellRef("Sheet1!A1")
+            @test isabs == false
+        end
+
+        @testset "parse_defined_name_value - relative sheet cell range" begin
+            v, isabs = XLSX.parse_defined_name_value("Sheet1!A1:B2")
+            @test v == XLSX.SheetCellRange("Sheet1!A1:B2")
+            @test isabs == false
+        end
+
+        @testset "parse_defined_name_value - absolute forms" begin
+            v, isabs = XLSX.parse_defined_name_value("Sheet1!\$A\$1")
+            @test v == XLSX.SheetCellRef("Sheet1!A1")
+            @test isabs == true
+
+            v2, isabs2 = XLSX.parse_defined_name_value("Sheet1!\$A\$1:\$B\$2")
+            @test v2 == XLSX.SheetCellRange("Sheet1!A1:B2")
+            @test isabs2 == true
+        end
+
+        @testset "parse_defined_name_value - empty string" begin
+            v, isabs = XLSX.parse_defined_name_value("")
+            @test ismissing(v)
+            @test isabs == false
+        end
+
+        @testset "parse_defined_name_value - quoted, numeric and fallback strings" begin
+            @test XLSX.parse_defined_name_value("\"hello\"") == ("hello", false)
+            @test ismissing(first(XLSX.parse_defined_name_value("\"\"")))
+            @test XLSX.parse_defined_name_value("42") == (42, false)
+            @test XLSX.parse_defined_name_value("3.5") == (3.5, false)
+            # any other expression is formula text, held with a leading `=`
+            @test XLSX.parse_defined_name_value("SomethingElse") == ("=SomethingElse", false)
+        end
+    end
+
+    @testset "invalid, duplicate and R1C1-style names are rejected" begin
+        xf = XLSX.newxlsx()
+        sh = xf[1]
+        wb = XLSX.get_workbook(xf)
+        @test_throws XLSX.XLSXError XLSX.get_defined_name_value(wb, "missing_name")
+        @test_throws XLSX.XLSXError XLSX.get_defined_name_value(sh, "missing_name")
+        @test !XLSX.is_valid_defined_name("")
+        @test !XLSX.is_valid_defined_name("1abc")
+        @test !XLSX.is_valid_defined_name("a-b")
+        # Excel refuses a file with an R1C1-style defined name, or one that is just R or C,
+        # in any case. (A1-style names such as R5 were already rejected.)
+        for n in ("R1C1", "RC", "rc", "R12C", "RC3", "R", "C", "r", "c")
+            @test !XLSX.is_valid_defined_name(n)
+        end
+        for n in ("XFE1", "A0", "A1B", "RCX", "Rate", "Col")
+            @test XLSX.is_valid_defined_name(n)
+        end
+        err = try XLSX.addDefinedName(xf, "R1C1", 1); nothing catch e; e end
+        @test err isa XLSX.XLSXError && occursin("cell address", err.msg)
+        @test_throws XLSX.XLSXError XLSX.addDefinedName(sh, "rc", 1)
+        @test_throws XLSX.XLSXError XLSX.addDefName(xf, "", 1)
+
+        XLSX.addDefinedName(xf, "dup", 1)
+        @test_throws XLSX.XLSXError XLSX.addDefinedName(xf, "dup", 2)
+        @test_throws XLSX.XLSXError XLSX.addDefinedName(xf, "empty", "")
+        @test_throws XLSX.XLSXError XLSX.addDefinedName(sh, "empty", "")
+        @test_throws XLSX.XLSXError XLSX.addDefinedName(xf, "nosheet", "A1")
+        XLSX.addDefinedName(xf, "wb_nc", "Sheet1!A1,Sheet1!B2")
+        @test XLSX.get_defined_name_value(wb, "wb_nc") isa XLSX.NonContiguousRange
+        SAVE_FILES && save_outfile(xf)
+    end
+
+    @testset "Integer values, hashing and show of defined names" begin
+        xf = XLSX.newxlsx()
+        sh = xf[1]
+        wb = XLSX.get_workbook(xf)
+
+        # Integer values that aren't Int64 go through the Integer forwarding methods
+        XLSX.addDefName(xf, "wb_int", Int32(5))
+        XLSX.addDefName(sh, "ws_int", Int32(6))
+        @test XLSX.get_defined_name_value(wb, "wb_int") === Int64(5)
+        @test XLSX.get_defined_name_value(sh, "ws_int") === Int64(6)
+        @test !isnothing(XLSX.find_workbook_defined_name(xf, "wb_int"))
+        @test !isnothing(XLSX.find_worksheet_defined_name(sh, "ws_int"))
+        @test XLSX.is_worksheet_defined_name(wb, sh.name, "ws_int")
+        @test !XLSX.is_defined_name_value_a_reference(Int32(1))
+        @test XLSX.is_defined_name_value_a_constant(Int32(1))
+
+        dnv = XLSX.DefinedNameValue(Int64(1), false)
+        @test dnv.hidden == false && dnv.isabs == false
+
+        dns = XLSX.getDefinedNames(xf)
+        dn = only(filter(d -> d.name == "wb_int", dns))
+        @test hash(dn) == hash(only(filter(d -> d.name == "wb_int", XLSX.getDefinedNames(xf))))
+        s = sprint(show, MIME("text/plain"), dn)
+        @test occursin("DefinedName: wb_int", s) && occursin("scope: Workbook", s) && occursin("value: 5", s)
+
+        # a non-contiguous defined name follows its sheet when the sheet is renamed
+        XLSX.addDefName(sh, "nc", XLSX.NonContiguousRange("Sheet1!A1:A2,Sheet1!C1"))
+        XLSX.renamesheet!(sh, "Renamed")
+        @test XLSX.get_defined_name_value(sh, "nc").sheet == "Renamed"
+        SAVE_FILES && save_outfile(xf)
+    end
 end
 @testset "system defined names" begin
 
@@ -513,7 +613,7 @@ end
         @test length(before) == 9
         @test all(dn -> dn.hidden, before)
 
-        g = XLSX.writexlsx("myfile.xlsx", f, overwrite=true)   # your usual save_outfile helper
+        g = XLSX.writexlsx("myfile.xlsx", f, overwrite=true)
         h = XLSX.readxlsx(g)
         after = XLSX.getAllDefinedNames(h; include_system=true)
         isfile("myfile.xlsx") && rm("myfile.xlsx")
@@ -642,27 +742,87 @@ end
         isfile("mytest.xlsx") && rm("mytest.xlsx")
         SAVE_FILES && save_outfile(f)
     end
-    @testset "copysheet! clones chart defined names" begin
-        f = XLSX.opentemplate(joinpath(data_directory, "chart_ex.xlsx"))
-        before = XLSX.getAllDefinedNames(f; include_system=true)
-        XLSX.copysheet!(f["Data"], "Copy")
-        after = XLSX.getAllDefinedNames(f; include_system=true)
+end
 
-        # A chartEx chart's sources are hidden defined names, so the copy needs
-        # its own set pointing at the copied sheet.
-        @test length(before) == 9
-        @test length(after) == 11
-        @test all(dn -> isnothing(dn.scope), after)   # all workbook-scoped
-        @test all(dn -> dn.hidden, after)             # and all still hidden
-        @test isempty(XLSX.getDefinedNames(f))        # none user-visible
-
-        # The originals are unchanged; the new ones point at the copy.
-        added = setdiff(Set(dn.name for dn in after), Set(dn.name for dn in before))
-        @test added == Set(["_xlchart.v2.0", "_xlchart.v2.1"])
-        @test all(dn -> startswith(string(dn.value), "Copy!"),
-            filter(dn -> dn.name in added, after))
-        @test all(dn -> startswith(string(dn.value), "Data!"),
-            filter(dn -> dn.name ∉ added, after))
+@testset "review fixes: defined names" begin
+    @testset "string constants and formulas" begin
+        f = XLSX.newxlsx("S")
+        XLSX.addDefinedName(f, "greeting", "Say \"hi\"")
+        XLSX.addDefinedName(f, "rows", "=COUNTA(S!\$A:\$A)")
+        XLSX.update_workbook_xml!(f)
+        texts = Dict(n["name"] => XLSX.text_value(n) for n in XLSX.elements_with_tag(XLSX.first_element_with_tag(XLSX.xml_root_element(XLSX.xmlroot(f, "xl/workbook.xml")), "definedNames"), "definedName"))
+        @test texts["greeting"] == "\"Say \"\"hi\"\"\""
+        @test texts["rows"] == "COUNTA(S!\$A:\$A)"
+        XLSX.writexlsx("dn_consts.xlsx", f; overwrite=true)
+        f2 = XLSX.readxlsx("dn_consts.xlsx")
+        @test f2["greeting"] == "Say \"hi\""
+        @test XLSX.get_defined_name_value(f2.workbook, "rows") == "=COUNTA(S!\$A:\$A)"
+        @test XLSX.parse_defined_name_value("\"a\"&\"b\"") == ("=\"a\"&\"b\"", false)
+        SAVE_FILES && save_outfile("dn_consts.xlsx")
+    end
+    @testset "names on sheets whose names need quoting" begin
+        f = XLSX.newxlsx("2024"); f[1]["A1"] = 42
+        a1 = XLSX.addsheet!(f, "A1"); a1["A1"] = 7
+        XLSX.addDefinedName(f, "fromDigit", "'2024'!A1")
+        XLSX.addDefinedName(f, "fromA1", "'A1'!A1")
+        XLSX.update_workbook_xml!(f)
+        texts = Dict(n["name"] => XLSX.text_value(n) for n in XLSX.elements_with_tag(XLSX.first_element_with_tag(XLSX.xml_root_element(XLSX.xmlroot(f, "xl/workbook.xml")), "definedNames"), "definedName"))
+        @test texts["fromDigit"] == "'2024'!\$A\$1"
+        @test texts["fromA1"] == "'A1'!\$A\$1"
         SAVE_FILES && save_outfile(f)
+    end
+    @testset "names that are cell addresses in any case are refused" begin
+        @test !XLSX.is_valid_defined_name("a1")
+        @test !XLSX.is_valid_defined_name("xfd100")
+    end
+    @testset "a non-contiguous name recreated from getDefinedNames" begin
+        f = XLSX.newxlsx("S")
+        XLSX.addDefinedName(f, "nc", "S!A1,S!B2"; absolute=false)
+        dn = only(XLSX.getDefinedNames(f))
+        XLSX.deleteDefinedName(f, "nc")
+        XLSX.addDefinedName(f, dn.name, dn.value; absolute=dn.absolute)
+        @test only(XLSX.getDefinedNames(f)) == dn
+        @test_throws XLSX.XLSXError XLSX.addDefinedName(f, "nc2", dn.value; absolute=[true])
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "copysheet! repoints the copy's names" begin
+        f = XLSX.newxlsx("S")
+        XLSX.addDefinedName(f[1], "cell", "B2")
+        XLSX.addDefinedName(f[1], "nc", "A1,B2")
+        t = XLSX.copysheet!(f[1], "T")
+        @test Dict(dn.name => dn.value for dn in XLSX.getDefinedNames(t)) ==
+              Dict("cell" => XLSX.SheetCellRef("T!B2"), "nc" => XLSX.NonContiguousRange("T!A1,T!B2"))
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "deletesheet! sets names that refer to it to #REF!" begin
+        f = XLSX.newxlsx("S1"); s2 = XLSX.addsheet!(f, "S2")
+        XLSX.addDefinedName(s2, "pt", XLSX.SheetCellRef("S1!A1"))
+        XLSX.addDefinedName(f, "wb", "S1!A1:B2")
+        XLSX.addDefinedName(f, "keep", "S2!A1")
+        XLSX.addDefinedName(f[1], "own", "A1")
+        # addDefinedName refuses _xlchart names, so add one directly
+        wb = XLSX.get_workbook(f)
+        wb.workbook_names["_xlchart.v1.0"] = XLSX.DefinedNameValue(XLSX.SheetCellRange("S1!A1:A3"), true, true)
+        XLSX.deletesheet!(f, "S1")
+        @test only(XLSX.getDefinedNames(s2)).value == "=#REF!"
+        @test Dict(dn.name => dn.value for dn in XLSX.getDefinedNames(f)) ==
+              Dict("wb" => "=#REF!", "keep" => XLSX.SheetCellRef("S2!A1"))
+        @test !haskey(wb.workbook_names, "_xlchart.v1.0")
+        @test !any(k -> last(k) == "own", keys(wb.worksheet_names))
+
+        mktempdir() do dir
+            p = joinpath(dir, "deleted.xlsx")
+            XLSX.writexlsx(p, f)
+            g = XLSX.readxlsx(p)
+            @test only(XLSX.getDefinedNames(g[1])).value == "=#REF!"
+            @test Dict(dn.name => dn.value for dn in XLSX.getDefinedNames(g))["wb"] == "=#REF!"
+        end
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "quoteit" begin
+        @test XLSX.quoteit("2024") == "'2024'"
+        @test XLSX.quoteit("A1") == "'A1'"
+        @test XLSX.quoteit("rc") == "'rc'"
+        @test XLSX.quoteit("Sheet1") == "Sheet1"
     end
 end

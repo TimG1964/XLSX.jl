@@ -47,15 +47,38 @@ function process_cf_vecint(f::Function, ws::Worksheet, row, col; kw...)
 end
 function process_cf_veccolon(f::Function, ws::Worksheet, row, col; kw...)
     dim = get_dimension(ws)
-    @assert isnothing(row) || isnothing(col) "Something wrong here!"
-    if isnothing(col)
-        col = dim.start.column_number:dim.stop.column_number
-    else
-        row = dim.start.row_number:dim.stop.row_number
-    end
+    row, col = _expand_colon(dim, row, col)
     isInDim(ws, dim, row, col)
     cells = [CellRef(a, b) for a in row for b in col]
     return f(ws, NonContiguousRange(ws.name, _compress(cells)); kw...)
+end
+
+# Each `setCf*` setter is written by hand for a `CfRange`. This defines every
+# other way of naming the target, each reducing to that one, so that all the
+# setters accept the same forms.
+function define_cf_address_methods(F::Symbol)
+    @eval begin
+        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw...) = process_colon($F, ws, row, nothing; kw...)
+        $F(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon($F, ws, nothing, col; kw...)
+        $F(ws::Worksheet, ::Colon, ::Colon; kw...) = process_colon($F, ws, nothing, nothing; kw...)
+        $F(ws::Worksheet, ::Colon; kw...) = process_colon($F, ws, nothing, nothing; kw...)
+        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = $F(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
+        $F(ws::Worksheet, cell::CellRef; kw...) = $F(ws, CellRange(cell, cell); kw...)
+        $F(ws::Worksheet, cell::SheetCellRef; kw...) = do_sheet_names_match(ws, cell) && $F(ws, CellRange(cell.cellref, cell.cellref); kw...)
+        $F(ws::Worksheet, rng::SheetCellRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.rng; kw...)
+        $F(ws::Worksheet, rng::SheetColumnRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.colrng; kw...)
+        $F(ws::Worksheet, rng::SheetRowRange; kw...) = do_sheet_names_match(ws, rng) && $F(ws, rng.rowrng; kw...)
+        $F(ws::Worksheet, rng::RowRange; kw...) = process_rowranges($F, ws, rng; kw...)
+        $F(ws::Worksheet, rng::ColumnRange; kw...) = process_columnranges($F, ws, rng; kw...)
+        $F(xl::XLSXFile, sheetcell::AbstractString; kw...)::Int = process_sheetcell($F, xl, sheetcell; kw...)
+        $F(ws::Worksheet, ref_or_rng::AbstractString; kw...)::Int = process_ranges($F, ws, ref_or_rng; kw...)
+        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, ::Colon; kw...) = process_cf_veccolon($F, ws, row, nothing; kw...)
+        $F(ws::Worksheet, ::Colon, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_veccolon($F, ws, nothing, col; kw...)
+        $F(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint($F, ws, row, col; kw...)
+        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_cf_vecint($F, ws, row, col; kw...)
+        $F(ws::Worksheet, row::Union{Vector{Int},StepRange{<:Integer}}, col::Union{Vector{Int},StepRange{<:Integer}}; kw...) = process_cf_vecint($F, ws, row, col; kw...)
+    end
+    return nothing
 end
 
 function allCfs(ws::Worksheet)::Vector{XML.Node}
@@ -243,6 +266,19 @@ function _normalise_cfvo_val(ws, val)
     end
     return uppercase_unquoted(val)
 end
+
+# Check one threshold (`cfvo`) of a color scale, data bar or icon set: its type must be
+# one of `types` (or, if `optional`, absent), and its value, unless the type is
+# `formula`, a fixed cell reference or a number. `name` is the keywords' prefix
+# (`min`, `mid`, ...), so errors name the keyword at fault.
+function _check_cfvo(name::AbstractString, type, val, types; optional::Bool=true)
+    (optional && isnothing(type)) || type in types ||
+        throw(XLSXError("Invalid $(name)_type: $type. Valid options are: $(join(types, ", "))."))
+    (!isnothing(type) && type == "formula") || isnothing(val) || is_valid_fixed_cellname(val) ||
+        is_valid_fixed_sheet_cellname(val) || !isnothing(tryparse(Float64, val)) ||
+        throw(XLSXError("Invalid $(name)_val: `$val`. Valid options (unless $(name)_type is `formula`) are a CellRef (e.g. `\$A\$1`) or a number."))
+    return nothing
+end
 #
 # ---- Formatting (styles) definitions for conditional formats
 #
@@ -281,15 +317,15 @@ function Add_Cf_Dx(wb::Workbook, new_dx::XML.Node)::DxFormat
     return DxFormat(existing_dxf_elements_count) # turns out this is the new index (because it's zero-based)
 
 end
-function get_dx(dxStyle::Union{Nothing,String}, format::Union{Nothing,Vector{Pair{String,String}}}, font::Union{Nothing,Vector{Pair{String,String}}}, border::Union{Nothing,Vector{Pair{String,String}}}, fill::Union{Nothing,Vector{Pair{String,String}}})::Dict{String,Dict{String,String}}
+function get_dx(dxStyle::Union{Nothing,String}, format::Union{Nothing,Vector{<:Pair{String}}}, font::Union{Nothing,Vector{<:Pair{String}}}, border::Union{Nothing,Vector{<:Pair{String}}}, fill::Union{Nothing,Vector{<:Pair{String}}})::AbstractDict{String,<:AbstractDict{String}}
     if isnothing(dxStyle)
         if all(isnothing.([border, fill, font, format]))
             dx = highlights["redfilltext"]
         else
-            dx = Dict{String,Dict{String,String}}()
+            dx = Dict{String,Dict{String,Any}}()
             for att in ["font" => font, "fill" => fill, "border" => border, "format" => format]
                 if !isnothing(last(att))
-                    dxx = Dict{String,String}()
+                    dxx = Dict{String,Any}()
                     for i in last(att)
                         push!(dxx, first(i) => last(i))
                     end
@@ -304,7 +340,7 @@ function get_dx(dxStyle::Union{Nothing,String}, format::Union{Nothing,Vector{Pai
     end
     return dx
 end
-function get_new_dx(wb::Workbook, dx::Dict{String,Dict{String,String}})::XML.Node
+function get_new_dx(wb::Workbook, dx::AbstractDict{String,<:AbstractDict{String}})::XML.Node
     new_dx = XML.Element("dxf")
 
     for k in ["font", "format", "fill", "border"]
@@ -317,7 +353,7 @@ function get_new_dx(wb::Workbook, dx::Dict{String,Dict{String,String}})::XML.Nod
             for (y, z) in v
                 y in ["pattern", "bgColor", "fgColor"] || throw(XLSXError("Invalid fill attribute: $y. Valid options are: `pattern`, `bgColor`, `fgColor`."))
                 if y in ["fgColor", "bgColor"]
-                    push!(patterndx, XML.Element(y, rgb=get_color(z)))
+                    push!(patterndx, _color_element(y, z))
                 elseif y == "pattern" && z != "none"
                     patterndx["patternType"] = z
                 end
@@ -329,10 +365,13 @@ function get_new_dx(wb::Workbook, dx::Dict{String,Dict{String,String}})::XML.Nod
             fontdx = XML.Element("font")
             for (y, z) in v
                 y in ["color", "bold", "italic", "under", "strike"] || throw(XLSXError("Invalid font attribute: $y. Valid options are: `color`, `bold`, `italic`, `under`, `strike`."))
-                if     y == "color"                  ; push!(fontdx, XML.Element(y, rgb=get_color(z)))
-                elseif y == "bold"   && z == "true"  ; push!(fontdx, XML.Element("b", val="0"))
-                elseif y == "italic" && z == "true"  ; push!(fontdx, XML.Element("i", val="0"))
-                elseif y == "under"  && z != "none"  ; push!(fontdx, XML.Element("u"; val="v"))
+                if     y == "color"                  ; push!(fontdx, _color_element(y, z))
+                elseif y == "bold"   && z == "true"  ; push!(fontdx, XML.Element("b"))   # `val="0"` would mean not bold
+                elseif y == "italic" && z == "true"  ; push!(fontdx, XML.Element("i"))
+                elseif y == "under"
+                    z ∈ ("none", "single", "double") || throw(XLSXError("Invalid font attribute value: under=$z. Valid options are: `none`, `single`, `double`."))
+                    z == "single" && push!(fontdx, XML.Element("u"))
+                    z == "double" && push!(fontdx, XML.Element("u"; val="double"))
                 elseif y == "strike" && z == "true"  ; push!(fontdx, XML.Element(y))
                 end
             end
@@ -341,7 +380,7 @@ function get_new_dx(wb::Workbook, dx::Dict{String,Dict{String,String}})::XML.Nod
         elseif k == "border"
             all(y in ["color", "style"] for y in keys(v)) || throw(XLSXError("Invalid border attribute. Valid options are: `color`, `style`."))
             borderdx = XML.Element("border")
-            cdx = haskey(v, "color") ? XML.Element("color", rgb=get_color(v["color"])) : nothing
+            cdx = haskey(v, "color") ? _color_element("color", v["color"]) : nothing
             sdx = get(v, "style", nothing)
             for side in ["left", "right", "top", "bottom"]
                 el = XML.Element(side)
@@ -407,7 +446,7 @@ function _check_cf_range(ws::Worksheet, ncr::NonContiguousRange)
 end
 
 # ---------------------------------------------------------------------------
-# Colour bands
+# Color bands
 # ---------------------------------------------------------------------------
 
 # "FFRRGGBB" -> Colorant, for interpolation. `get_color` guarantees 8 hex digits,
@@ -424,13 +463,18 @@ end
 
 # Interpolation is done in LCHab rather than RGB: an RGB path from green to red
 # passes through a muddy olive, which defeats the point of visually ordered bands.
-function _band_colors(spec, n::Int)::Vector{String}
-    cols = get_color.(spec isa Union{AbstractString,Symbol} ? [spec] : collect(spec))
+# RGB colors come back as "AARRGGBB"; theme colors are kept as given, so they stay
+# theme colors, but cannot be interpolated between.
+function _band_colors(spec, n::Int)::Vector
+    cols = [_is_theme_color(c) ? (_check_color(c); c) : get_color(c)
+            for c in (spec isa CellColor ? [spec] : spec)]
 
     if length(cols) == n
         return cols
     elseif length(cols) == 2
         n == 1 && return [cols[1]]
+        any(_is_theme_color, cols) && throw(XLSXError(
+            "Theme colors cannot be interpolated between. Give RGB colors, or one color per band."))
         c1, c2 = convert.(Colors.LCHab, _to_colorant.(cols))
         return _from_colorant.(range(c1, c2; length=n))
     end

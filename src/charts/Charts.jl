@@ -7,6 +7,18 @@ Reading, formatting and creating Excel charts, in both chart schemas: the `c:` s
 
 `using XLSX.Charts` brings the chart functions into scope. The handle and value types are
 public but not exported; refer to them as `XLSX.Charts.ChartSeries` and so on.
+
+Conventions shared by the functions:
+
+- `i` is a series' position, counting from 1 in [`getChartSeries`](@ref) order, and
+  `point` a data point's position in the series, also from 1.
+- `ax` is a `ChartAxis` from [`getChartAxes`](@ref) or [`getChartAxis`](@ref), and `g` a
+  `ChartGroup` from [`getChartGroups`](@ref). On a `ChartEx`, an axis is named by its `id`
+  from [`getChartAxisIds`](@ref).
+- Setters return the chart. Most take `:inherit` to remove a setting so it is inherited
+  from the chart style; each docstring says where it does.
+- Color values are listed at [`setSeriesFill`](@ref), line keywords at
+  [`setSeriesLine`](@ref), and text-property fields at [`setChartTitleTextProp`](@ref).
 """
 module Charts
 
@@ -49,9 +61,9 @@ module Charts
 # the exported API.
 #
 # Two senses of "resolve" are kept apart. `resolve_color_base` and
-# `apply_drawingml_transforms` resolve a colour to RGB. The `get<Subject>`
+# `apply_drawingml_transforms` resolve a color to RGB. The `get<Subject>`
 # accessors that return an `Effective` resolve a property up the inheritance
-# cascade. A cascade-resolved fill may still hold a scheme colour, which is then
+# cascade. A cascade-resolved fill may still hold a scheme color, which is then
 # a separate step.
 # ---------------------------------------------------------------------------
 
@@ -66,7 +78,7 @@ using ..XLSX:
     XLSXFile, Workbook, Worksheet, XLSXError, DataTable,
     CellRef, CellRange, NonContiguousRange,
     SheetCellRef, SheetCellRange, SheetColumnRange, SheetRowRange,
-    XL_REF, CellErrorType,
+    XL_REF, CellErrorType, RichTextString, RichTextRun,
     # package parts and relationships
     REL_CHART, REL_CHARTEX, REL_CHARTSHEET, MIME_CHART, MIME_CHARTEX, MIME_CHARTSHEET,
     parts_with_content_type, register_content_type!, add_part_rel!,
@@ -75,12 +87,12 @@ using ..XLSX:
     # drawings
     ensure_drawing!, _drawing_path_for_sheet, build_two_cell_anchor, _next_shape_id,
     # XML helpers
-    NS_A, NS_R, _attr, _pct, child_text, child_val, elements_with_tag,
+    NS_A, NS_R, NS_XDR, _attr, _pct, child_text, child_val, elements_with_tag,
     first_element_with_tag, get_attr, get_prefixed_attr, has_localname, localname,
     ns_prefixes, prefixed_tag, with_attribute, xml_root_element, truncate_len,
     # workbook, sheets and cells
     get_workbook, get_xlsxfile, get_xml_data, get_worksheet_internal_file,
-    getsheet, getdata, is_chartsheet, isdate1904, date_to_excel_value, time_to_excel_value,
+    getsheet, getdata, getRichTextString, is_chartsheet, isdate1904, date_to_excel_value, time_to_excel_value,
     # references and defined names
     abscell, mkabs, quoteit, ref_chooser, row_number, column_number, _parse_cell_marker,
     get_defined_name_value, is_defined_name_value_a_reference, is_workbook_defined_name,
@@ -93,8 +105,9 @@ using ..XLSX:
     is_valid_fixed_sheet_column_range, is_valid_fixed_sheet_row_range,
     # cell errors
     ERROR_STRING_TO_CODE, get_error_string,
-    # theme and colours (xlsx-colors.jl)
+    # theme and colors (xlsx-colors.jl)
     get_color, get_colorant, _linear_to_srgb,
+    SchemeColor, SCHEME_TOKENS, COLOR_TRANSFORMS, SCHEME_ALIASES, canonical_token,
     get_theme_color_map, get_theme_fonts, resolve_theme_font, apply_drawingml_transforms
 
 export
@@ -111,7 +124,8 @@ export
     getPlotAreaShapeProps, getChartSpaceShapeProps, getChartSpaceTextProps,
     getChartLegend, getLegendPos, getLegendOverlay, getLegendShapeProps, getLegendTextProps,
     setChartTitleText, setChartTitleTextProp, setChartSpaceTextProp, setLegendTextProp,
-    setLegendEntryDeleted, getLegendEntryDeleted, setPlotAreaLine,
+    setLegendEntryDeleted, getLegendEntryDeleted, setLegendPos, setLegendOverlay,
+    setPlotAreaLine,
     # Series
     getSeriesName, getSeriesNameRange, getSeriesData, getSeriesHidden,
     getSeriesGroup, getSeriesAxes, getSeriesAxisIds, getSeriesLayout,
@@ -130,7 +144,8 @@ export
     getGroupSeriesLines, getGroupUpDownBars, getUpBarShapeProps, getDownBarShapeProps,
     setGroupLabelTextProp, getGroupGapWidth, setGroupGapWidth, getGroupOverlap, setGroupOverlap,
     # Axes
-    getAxisShapeProps, getAxisTextProps, getAxisTitleText, getAxisTitleRef,
+    getAxisShapeProps, getAxisTextProps, getAxisTitle, getAxisTitleText, getAxisTitleRef,
+    getAxisTitleRange,
     getAxisTitleTextProps, getAxisGridlines, getAxisPartner,
     getAxisNumberFormatCode, getAxisNumberFormatLinked,
     getAxisMajorTickMark, getAxisMinorTickMark, getAxisTickLabelPos, getAxisOrientation,
@@ -140,7 +155,6 @@ export
     setAxisTitleText, setAxisTitleTextProp, setAxisTickLabelPos, 
     setAxisScaling, setAxisMin, setAxisMax, setAxisOrientation, 
     setAxisCrosses, setAxisCrossesAt, setAxisNumberFormatCode, setAxisNumberFormatLinked, 
-    setAxisTitleText, getGapWidth, setGapWidth, getOverlap, setOverlap,
     setAxisMajorTickMark, setAxisMinorTickMark, setAxisGridlines, setAxisTextProp, setAxisLine,
     setAxisMajorUnit, setAxisMinorUnit,
     # Data points, markers and labels

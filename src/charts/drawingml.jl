@@ -4,8 +4,8 @@
 # Shared DrawingML parsing: the `a:` namespace elements that appear throughout
 # chart parts, drawings and themes.
 #
-# Colours first. Every fill, line and text run in DrawingML resolves to one of
-# six colour elements, optionally modified by transforms. Parsing this once and
+# Colors first. Every fill, line and text run in DrawingML resolves to one of
+# six color elements, optionally modified by transforms. Parsing this once and
 # reusing it is what keeps the chart formatting work tractable: `spPr` alone
 # appears on the chart space, plot area, every series, every data point, every
 # axis, the legend, the title, data labels, gridlines, trendlines and error
@@ -15,7 +15,7 @@
 # images or other drawing objects need it, it can move to the core or become a
 # sub-module of its own.
 
-# The six colour elements. All carry a `val` attribute except `scrgbClr`, which
+# The six color elements. All carry a `val` attribute except `scrgbClr`, which
 # uses separate r/g/b percentage attributes.
 const DML_COLOR_TAGS = ("srgbClr", "schemeClr", "sysClr", "prstClr", "hslClr", "scrgbClr")
 
@@ -30,13 +30,13 @@ const DML_COLOR_KIND = Dict(
 
 # Transforms we resolve. Others (hueMod, red, green, blue, gamma, inv, gray,
 # comp) are recorded but not applied: they are vanishingly rare in chart parts,
-# and applying them wrongly would be worse than leaving the base colour.
+# and applying them wrongly would be worse than leaving the base color.
 const DML_APPLIED_TRANSFORMS = (:lumMod, :lumOff, :satMod, :shade, :tint, :alpha)
 
 """
-The DrawingML colour element among the children of `node`, or `nothing`.
+The DrawingML color element among the children of `node`, or `nothing`.
 
-A fill, line or run-property element holds at most one colour child, so this
+A fill, line or run-property element holds at most one color child, so this
 returns the first match rather than a list.
 """
 function color_element(node::Union{Nothing,XML.Node})::Union{Nothing,XML.Node}
@@ -48,11 +48,11 @@ function color_element(node::Union{Nothing,XML.Node})::Union{Nothing,XML.Node}
 end
 
 """
-Resolve a colour reference to `"RRGGBB"`, before any transforms are applied.
+Resolve a color reference to `"RRGGBB"`, before any transforms are applied.
 
 `schemeClr` goes through the workbook theme; `sysClr` prefers the `lastClr`
-attribute Excel writes alongside the system colour name, since the name itself
-depends on OS settings; `prstClr` goes through the Colors.jl named colours.
+attribute Excel writes alongside the system color name, since the name itself
+depends on OS settings; `prstClr` goes through the Colors.jl named colors.
 """
 function resolve_color_base(wb::Workbook, node::XML.Node)::String
     tag = localname(node)
@@ -115,11 +115,11 @@ end
 """
     parse_drawing_color(wb, node) -> Union{Nothing,DrawingColor}
 
-Parse the DrawingML colour held by `node` - a fill, a line, a run property -
+Parse the DrawingML color held by `node` - a fill, a line, a run property -
 into a [`DrawingColor`](@ref), or `nothing` where it holds none.
 
-Pass the colour element itself, or its parent: a parent is searched for its
-colour child.
+Pass the color element itself, or its parent: a parent is searched for its
+color child.
 """
 function parse_drawing_color(wb::Workbook, node::Union{Nothing,XML.Node})::Union{Nothing,DrawingColor}
     isnothing(node) && return nothing
@@ -703,7 +703,7 @@ text_runs(t::DrawingText) = [r for p in t.paragraphs for r in p.runs]
 # differing only by spellcheck language are the same formatting.
 #
 # Two conventions shared with `Base.:(==)(::RichTextRun, ::RichTextRun)`:
-# colours compare on their resolved value rather than how they were written
+# colors compare on their resolved value rather than how they were written
 # (as that does via `get_color`), and an absent property is distinct from one
 # set to a default (as that does by comparing key sets).
 _color_key(c) = c === nothing ? nothing : (c.rgb, c.alpha)
@@ -841,11 +841,24 @@ resolves it.
 """
 function _sp_with_fill(sp::XML.Node, key::SchemaKey, color, pfx::Dict{String,String})
     color === :inherit && return remove_choice(sp, key, FILL_GROUP)
-    fill = color === :none       ? XML.Element(prefixed_tag(pfx[NS_A], "noFill")) :
-           color isa SchemeColor ? _solid_fill_node(_scheme_color_node(color, pfx), pfx) :
-                                   _solid_fill_node(_srgb_color_node(color, pfx), pfx)
+    fill = color === :none ? XML.Element(prefixed_tag(pfx[NS_A], "noFill")) :
+                             _solid_fill_node(_color_node(color, pfx), pfx)
     return insert_child(remove_choice(sp, key, FILL_GROUP), key, fill)
 end
+
+"""
+    _color_node(color, pfx) -> XML.Node
+
+The color element for any color value the setters take. A [`SchemeColor`](@ref),
+or the name of a theme color slot as a string or Symbol (`"accent2"`, `:tx1`),
+becomes an `a:schemeClr`; anything else — a color name, hex string or
+`Colors.Colorant` — an `a:srgbClr`.
+"""
+_color_node(color::SchemeColor, pfx::Dict{String,String}) = _scheme_color_node(color, pfx)
+_color_node(color::Union{AbstractString,Symbol}, pfx::Dict{String,String}) =
+    Symbol(color) in SCHEME_TOKENS ? _scheme_color_node(SchemeColor(Symbol(color)), pfx) :
+                                     _srgb_color_node(color, pfx)
+_color_node(color, pfx::Dict{String,String}) = _srgb_color_node(color, pfx)
 
 """
     _sp_with_line(sp, key, f, pfx) -> XML.Node
@@ -947,9 +960,8 @@ end
 
 function _ln_with_color(ln, color, pfx)
     color === :inherit && return remove_choice(ln, (NS_A, "ln"), FILL_GROUP)
-    fill = color === :none      ? XML.Element(prefixed_tag(pfx[NS_A], "noFill")) :
-           color isa SchemeColor ? _solid_fill_node(_scheme_color_node(color, pfx), pfx) :
-                                   _solid_fill_node(_srgb_color_node(color, pfx), pfx)
+    fill = color === :none ? XML.Element(prefixed_tag(pfx[NS_A], "noFill")) :
+                             _solid_fill_node(_color_node(color, pfx), pfx)
     return insert_child(remove_choice(ln, (NS_A, "ln"), FILL_GROUP), (NS_A, "ln"), fill)
 end
 
@@ -963,6 +975,39 @@ const CAP_VALUES  = (:rnd, :sq, :flat)
 const CMPD_VALUES = (:sng, :dbl, :thickThin, :thinThick, :tri)
 
 const JOIN_VALUES = (:round, :bevel, :miter)
+
+# ST_TextUnderlineType, ST_TextStrikeType and ST_TextCapsType (dml-main.xsd), the
+# run-property values written as attributes. Written unchecked, another string
+# makes a part Excel refuses to open.
+const UNDER_VALUES  = (:none, :words, :sng, :dbl, :heavy, :dotted, :dottedHeavy,
+                       :dash, :dashHeavy, :dashLong, :dashLongHeavy, :dotDash,
+                       :dotDashHeavy, :dotDotDash, :dotDotDashHeavy,
+                       :wavy, :wavyHeavy, :wavyDbl)
+const STRIKE_VALUES = (:noStrike, :sngStrike, :dblStrike)
+const CAPS_VALUES   = (:none, :small, :all)
+
+# Excel's Font dialog names for the commonest of them.
+const UNDER_ALIASES  = Dict{Symbol,Symbol}(:single => :sng, :double => :dbl)
+const STRIKE_ALIASES = Dict{Symbol,Symbol}(:none => :noStrike, :single => :sngStrike,
+                                           :double => :dblStrike)
+
+# Docstring fragments, built from the vocabularies the setters check so that a
+# value added to one appears in the other. Defined here, ahead of creation.jl
+# and the property files whose docstrings interpolate them.
+_doc_syms(xs) = join(("`:$x`" for x in xs), ", ")
+_doc_aliases(d) = join(("`:$k` (= `:$v`)" for (k, v) in sort!(collect(d); by = string ∘ first)), ", ")
+
+# The `color` argument of every color setter.
+const _DOC_COLOR_ARG = """
+`color` is a color name (`"red"` or `:red`), a hex string (`"FF0000"`,
+`"#FF0000"` or `"80FF0000"` with alpha), a `Colors.Colorant`, a theme color
+named as a String or Symbol (`"accent2"`, `:tx1`), a [`SchemeColor`](@ref), or
+`:none` or `:inherit` — see [`setSeriesFill`](@ref)."""
+
+# The keywords of every multi-property line setter.
+const _DOC_LINE_KWS = """
+Keywords are `color`, `width`, `dash`, `cap`, `compound`, `join` and
+`miterLimit`, each taking the values listed at [`setSeriesLine`](@ref)."""
 
 """
     _ln_with_join(ln, join, pfx) -> XML.Node
@@ -1024,7 +1069,7 @@ function _color_node_from(dc::DrawingColor, pfx::Dict{String,String})
     return _el(pfx, tag, kids...; val = dc.val)
 end
 _color_node_from(sc::SchemeColor, pfx::Dict{String,String}) = _scheme_color_node(sc, pfx)
-_color_node_from(s::AbstractString, pfx::Dict{String,String}) = _srgb_color_node(s, pfx)
+_color_node_from(s::AbstractString, pfx::Dict{String,String}) = _color_node(s, pfx)
 
 """
     _fill_node_from(fill::DrawingFill, pfx) -> XML.Node
@@ -1077,7 +1122,6 @@ end
 # which is what makes a constructed DrawingText say only what the caller asked.
 
 _el(pfx, tag, kids...; attrs...) = XML.Element(prefixed_tag(pfx[NS_A], tag), kids...; attrs...)
-#_el(pfx, tag; kw...) = XML.Element(prefixed_tag(pfx[NS_A], tag); kw...)
 
 
 _emu(points) = round(Int, points * EMU_PER_POINT)
@@ -1087,13 +1131,24 @@ const _RUN_PROP_ATTRS = (
     :size     => ("sz",       v -> string(round(Int, v * 100))),
     :bold     => ("b",        v -> v ? "1" : "0"),
     :italic   => ("i",        v -> v ? "1" : "0"),
-    :under    => ("u",        string),
-    :strike   => ("strike",   string),
-    :caps     => ("cap",      string),
+    :under    => ("u",        v -> _run_enum(v, UNDER_VALUES, "underline", UNDER_ALIASES, (:sng, :none))),
+    :strike   => ("strike",   v -> _run_enum(v, STRIKE_VALUES, "strike", STRIKE_ALIASES, (:sngStrike, :noStrike))),
+    :caps     => ("cap",      v -> _run_enum(v, CAPS_VALUES, "caps")),
     :baseline => ("baseline", v -> string(round(Int, v * 100000))),
     :kern     => ("kern",     v -> string(round(Int, v * 100))),
     :spacing  => ("spc",      v -> string(round(Int, v * 100))),
 )
+
+# One of `allowed` (or an alias) as a String, from a Symbol or String. Where
+# `onoff` is given, `true` and `false` stand for its two values, as a rich-text
+# cell's `:under` and `:strike` flags do.
+function _run_enum(v, allowed, what, aliases = Dict{Symbol,Symbol}(), onoff = nothing)
+    v isa Bool && !isnothing(onoff) && return String(v ? onoff[1] : onoff[2])
+    v isa Union{Symbol,AbstractString} || throw(XLSXError(
+        "A $what value is a Symbol or String" * (isnothing(onoff) ? "" : ", or a Bool") *
+        "; got $(repr(v))."))
+    return String(_check(v, allowed, what, aliases))
+end
 
 # Field -> typeface element tag.
 const _RUN_PROP_FONTS = Dict{Symbol,String}(

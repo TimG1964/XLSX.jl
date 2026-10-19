@@ -112,6 +112,30 @@ It needs no fixtures and no BenchmarkTools, so it is a quick repro for read-path
 
     julia --project=envs/dev --check-bounds=yes worksheet_read.jl
 
+### Maintainability check
+
+`maintainability.jl` measures maintainability signals over `src/` and compares them
+with `maintainability_baseline.toml`, exiting with status 1 if any has risen. Lower
+is better for every metric:
+
+- `duplicated_lines` — lines in an 8-line block that also occurs elsewhere. A
+  method defined in short form has its own name blanked first, so a family of
+  methods copied from one function to the next counts as duplicated
+- `bare_catch`, `something_wrong`, `asserts` — error handling that hides or fails
+  to explain errors
+- `commented_out_code` — comments holding statements
+- `inline_guards` — writability or cache checks written out rather than through
+  `_require_writable`/`_require_cache`
+- `functions_over_100`, `largest_file_lines` — size
+
+It needs only the standard library and takes a few seconds:
+
+    julia bench/maintainability.jl            # report; exit 1 if any metric rose
+    julia bench/maintainability.jl --update   # report and store the new baseline
+
+Run it before committing. When a metric falls, store the new baseline with
+`--update`, so it can't creep back up.
+
 ### Fixture descriptions
 
 Written through XLSX.jl by `generate_fixtures.jl` (pretty-printed XML):

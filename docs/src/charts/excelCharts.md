@@ -179,7 +179,7 @@ something off is a setting in its own right:
 
 | You want | You write | Reads back as |
 | --- | --- | --- |
-| this colour | `setSeriesFill(c, 1, "FF0000")` | a fill with that colour |
+| this color | `setSeriesFill(c, 1, "FF0000")` | a fill with that color |
 | deliberately invisible | `setSeriesFill(c, 1, :none)` | a fill with `kind === :none` |
 | let the style decide | `setSeriesFill(c, 1, :inherit)` | `nothing` |
 
@@ -209,7 +209,7 @@ full.
 ## Created charts follow the workbook's theme
 
 Charts made by [`addChart`](@ref) and [`addChartEx`](@ref) start from Excel's own
-default chart parts, with the colours written as theme references. So a new
+default chart parts, with the colors written as theme references. So a new
 chart looks like one Excel would have made in that workbook — which means a
 chart created in a workbook from `XLSX.newxlsx()` shows that template's older
-Office colours rather than current Excel's.
+Office colors rather than current Excel's.

@@ -1,5 +1,4 @@
 @testset "Conditional Formats" begin
-
     @testset "DataBar" begin
 
         f = XLSX.newxlsx()
@@ -410,6 +409,39 @@
             @test XLSX.setConditionalFormat(s, :, j, :colorScale; colorscale=k) == 0
         end
         SAVE_FILES && save_outfile(f)
+
+        @testset "colorScale numeric bounds and mid_col default" begin
+            xf = XLSX.newxlsx()
+            s = xf[1]
+            for i in 1:10, j in 1:3
+                s[i, j] = i * j
+            end
+
+            # explicit colours
+            @test XLSX.setConditionalFormat(s, "A1:C10", :colorScale;
+                min_type="num", min_val="2", min_col="tomato",
+                mid_type="num", mid_val="6", mid_col="lawngreen",
+                max_type="num", max_val="10", max_col="cadetblue") == 0
+
+            # mid_col omitted: defaults to white rather than throwing
+            @test XLSX.setConditionalFormat(s, "A1:C10", :colorScale;
+                min_type="num", min_val="2",
+                mid_type="num", mid_val="6",
+                max_type="num", max_val="10") == 0
+
+            f = "cf_colorscale_numeric_bounds_and.xlsx"
+            XLSX.writexlsx(f, xf; overwrite=true)
+            x = ZipArchives.zip_readentry(ZipArchives.ZipReader(read(f)),
+                "xl/worksheets/sheet1.xml", String)
+
+            # "num" types mean the values survive the `== "min"` / `== "max"` guards
+            @test occursin("<cfvo type=\"num\" val=\"2\"/>", x)
+            @test occursin("<cfvo type=\"num\" val=\"6\"/>", x)
+            @test occursin("<cfvo type=\"num\" val=\"10\"/>", x)
+            @test occursin("rgb=\"FFFCFCFF\"", x)
+            SAVE_FILES && save_outfile(xf)
+            isfile(f) && rm(f)
+        end
     end
 
     @testset "iconSet" begin
@@ -633,21 +665,20 @@
             icon_list=[1, 13, 26, 39],
             min_type="percent", max_type="percent",
             min_val="25"
-        ) == 0
+        )
         @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet;
             iconset="Custom",
             icon_list=[1, 13, 26, 39],
             min_type="percent",
             min_val="25", max_val="75"
-        ) == 0
+        )
         @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet;
             iconset="Custom",
             icon_list=[1, 13, 26, 39]
-        ) == 0
+        )
         @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1:4, 1, :iconSet;
             iconset="10ThousandManiacs",
-        ) == 0
-
+        )
 
         @test sort!(XLSX.getConditionalFormats(s), by=x -> x.second.priority) == [
             XLSX.CellRange("A1:A4") => (type="iconSet", priority=1),
@@ -672,7 +703,7 @@
         XLSX.addDefinedName(s, "myRange", "A1:B2")
         XLSX.addDefinedName(s, "myNCRange", "C1:C5,D1:D5")
         @test XLSX.setConditionalFormat(s, "myRange", :iconSet) == 0
-        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "myNCRange", :iconSet)
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "myNCRange", :iconSet) # C5 and D5 lie outside the 4-row sheet
         SAVE_FILES && save_outfile(f)
 
         f = XLSX.newxlsx()
@@ -737,7 +768,7 @@
             s[i, j] = i + j
         end
         @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A5", :cellIs; notAKeyword="x")
-        @test XLSX.setConditionalFormat(s, "A1,A3", :cellIs) == 0 # Non-contiguous ranges not allowed
+        @test XLSX.setConditionalFormat(s, "A1,A3", :cellIs) == 0 # Non-contiguous ranges are allowed
         @test XLSX.setConditionalFormat(s, [1], 1, :cellIs) == 0 # Vectors may be non-contiguous
         @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, 1, 1:3:7, :cellIs) # out of range
         @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A3", :cellIs; dxStyle="madeUp") # dxStyle invalid
@@ -840,7 +871,7 @@
         XLSX.setConditionalFormat(s, "A1:A5", :cellIs)
         XLSX.setConditionalFormat(s, :, 2, :cellIs; dxStyle="redborder")
         XLSX.setConditionalFormat(s, "Sheet1!E:E", :cellIs; dxStyle="redfilltext")
-        XLSX.setConditionalFormat(s, 1:5, 3:4, :cellIs;
+        @test XLSX.setConditionalFormat(s, 1:5, 3:4, :cellIs;
             operator="between",
             value="2",
             value2="4",
@@ -889,7 +920,7 @@
             border=["style" => "hair", "color" => "cyan"]
         ) == 0
         XLSX.addDefinedName(s, "myNCRange", "C1:C5,D1:D5")
-        @test XLSX.setConditionalFormat(s, "myNCRange", :cellIs; # Non-contiguous ranges not allowed
+        @test XLSX.setConditionalFormat(s, "myNCRange", :cellIs; # Non-contiguous ranges are allowed
             operator="lessThan",
             value="2",
             fill=["pattern" => "none", "bgColor" => "yellow"],
@@ -909,7 +940,6 @@
         end
         SAVE_FILES && save_outfile(f)
     end
-
 
     @testset "containsText" begin
         f = XLSX.newxlsx()
@@ -1017,7 +1047,7 @@
         XLSX.setConditionalFormat(s, "A1:A5", :containsText; value="a")
         XLSX.setConditionalFormat(s, :, 2, :containsText; value="a", dxStyle="redborder")
         XLSX.setConditionalFormat(s, "Sheet1!E:E", :containsText; value="a", dxStyle="redfilltext")
-        XLSX.setConditionalFormat(s, 1:5, 3:4, :containsText;
+        @test XLSX.setConditionalFormat(s, 1:5, 3:4, :containsText;
             operator="endsWith",
             value="a",
             fill=["pattern" => "none", "bgColor" => "yellow"],
@@ -1076,7 +1106,7 @@
             format=["format" => "0.0"],
             font=["color" => "green"],
             border=["style" => "hair", "color" => "cyan"]
-        ) == 0
+        )
         XLSX.addDefinedName(s, "myNCRange", "C1:C5,D1:D5")
         @test XLSX.setConditionalFormat(s, "myNCRange", :containsText;
             operator="beginsWith",
@@ -1146,7 +1176,6 @@
             XLSX.CellRange("A1:J10") => (type="top10", priority=9)
         ]
 
-
         @test XLSX.setConditionalFormat(s, "A1", :top10) == 0
         @test XLSX.setConditionalFormat(s, "A1:C3", :top10) == 0
         @test XLSX.setConditionalFormat(s, "Sheet1!A1", :top10) == 0
@@ -1206,7 +1235,7 @@
         XLSX.setConditionalFormat(s, "A1:A5", :top10)
         XLSX.setConditionalFormat(s, :, 2, :top10; dxStyle="redborder")
         XLSX.setConditionalFormat(s, "Sheet1!E:E", :top10; dxStyle="redfilltext")
-        XLSX.setConditionalFormat(s, 1:5, 3:4, :top10;
+        @test XLSX.setConditionalFormat(s, 1:5, 3:4, :top10;
             operator="topN%",
             value="20",
             fill=["pattern" => "none", "bgColor" => "yellow"],
@@ -1408,7 +1437,6 @@
             XLSX.CellRange("A1:C1001") => (type="aboveAverage", priority=29)
         ]
 
-
         SAVE_FILES && save_outfile(f)
 
         f = XLSX.newxlsx()
@@ -1434,7 +1462,7 @@
             format=["format" => "0.0"],
             font=["color" => "green"],
             border=["style" => "thick", "color" => "coral"]
-        ) == 0
+        )
 
         @test sort!(XLSX.getConditionalFormats(s), by=x -> x.second.priority, rev=true) == [
             XLSX.CellRange("C1:D5") => (type="aboveAverage", priority=4),
@@ -1580,7 +1608,6 @@
             XLSX.CellRange("A1:C10") => (type="timePeriod", priority=12)
         ]
 
-
         @test XLSX.setConditionalFormat(s, "A1", :timePeriod) == 0
         @test XLSX.setConditionalFormat(s, "A1:C3", :timePeriod) == 0
         @test XLSX.setConditionalFormat(s, "Sheet1!A1", :timePeriod) == 0
@@ -1631,8 +1658,6 @@
             XLSX.CellRange("A1:J10") => (type="timePeriod", priority=29)
         ]
 
-
-
         SAVE_FILES && save_outfile(f)
 
         f = XLSX.newxlsx()
@@ -1650,7 +1675,7 @@
         XLSX.setConditionalFormat(s, "A1:A5", :timePeriod)
         XLSX.setConditionalFormat(s, :, 2, :timePeriod; dxStyle="redborder")
         XLSX.setConditionalFormat(s, "Sheet1!E:E", :timePeriod; dxStyle="redfilltext")
-        XLSX.setConditionalFormat(s, 1:5, 3:4, :timePeriod;
+        @test XLSX.setConditionalFormat(s, 1:5, 3:4, :timePeriod;
             operator="lastWeek",
             fill=["pattern" => "none", "bgColor" => "yellow"],
             format=["format" => "0.0"],
@@ -1709,7 +1734,7 @@
             border=["style" => "medium", "color" => "cyan"]
         ) == 0
         XLSX.addDefinedName(s, "myNCRange", "C1:C5,D1:D5")
-        @test XLSX.setConditionalFormat(s, "myNCRange", :timePeriod; # Non-contiguous ranges not allowed
+        @test XLSX.setConditionalFormat(s, "myNCRange", :timePeriod; # Non-contiguous ranges are allowed
             operator="lastWeek",
             fill=["pattern" => "none", "bgColor" => "yellow"],
             format=["format" => "0.0"],
@@ -1740,7 +1765,7 @@
             fill=["pattern" => "none", "bgColor" => "FFFFC7CE"],
             border=["style" => "thick", "color" => "coral"],
             font=["color" => "blue", "bold" => "true", "strike" => "true"]
-        ) == 0
+        )
         @test XLSX.setConditionalFormat(s, 1:10, 1:3, :expression;
             formula="A1 > 15",
             stopIfTrue="true",
@@ -1780,7 +1805,6 @@
             XLSX.CellRange("A1:C10") => (type="expression", priority=8),
             XLSX.CellRange("A1:C10") => (type="expression", priority=9)
         ]
-
 
         @test XLSX.setConditionalFormat(s, "A1", :expression; formula="iseven(A1)") == 0
         @test XLSX.setConditionalFormat(s, "A1:C3", :expression; formula="iseven(A1)") == 0
@@ -1841,7 +1865,7 @@
         XLSX.setConditionalFormat(s, "A1:A5", :expression; formula="A1=1")
         XLSX.setConditionalFormat(s, :, 2, :expression; formula="A1=1", dxStyle="redborder")
         XLSX.setConditionalFormat(s, "Sheet1!E:E", :expression; formula="A1=1", dxStyle="redfilltext")
-        XLSX.setConditionalFormat(s, 1:5, 3:4, :expression;
+        @test XLSX.setConditionalFormat(s, 1:5, 3:4, :expression;
             formula="A1=1",
             fill=["pattern" => "none", "bgColor" => "yellow"],
             format=["format" => "0.0"],
@@ -1892,7 +1916,7 @@
             border=["style" => "medium", "color" => "cyan"]
         ) == 0
         XLSX.addDefinedName(s, "myNCRange", "C1:C5,D1:D5")
-        @test XLSX.setConditionalFormat(s, "myNCRange", :expression; # Non-contiguous ranges not allowed
+        @test XLSX.setConditionalFormat(s, "myNCRange", :expression; # Non-contiguous ranges are allowed
             formula="C4 < myTest",
             fill=["pattern" => "none", "bgColor" => "yellow"],
             format=["format" => "0.0"],
@@ -1903,7 +1927,7 @@
 
     end
 
-    @testset "containsErrors" begin
+    @testset "errors, blanks, unique and duplicate values" begin
         f = XLSX.newxlsx()
         s = f[1]
         for i = 1:10
@@ -1968,7 +1992,6 @@
             XLSX.CellRange("A1:C10") => (type="duplicateValues", priority=11)
         ]
 
-
         @test XLSX.setConditionalFormat(s, "A1", :containsErrors) == 0
         @test XLSX.setConditionalFormat(s, "A1:C3", :notContainsErrors) == 0
         @test XLSX.setConditionalFormat(s, "Sheet1!A1", :containsBlanks) == 0
@@ -2030,7 +2053,7 @@
         XLSX.setConditionalFormat(s, "A1:A5", :containsErrors)
         XLSX.setConditionalFormat(s, :, 2, :notContainsErrors; dxStyle="redborder")
         XLSX.setConditionalFormat(s, "Sheet1!E:E", :containsBlanks; dxStyle="redfilltext")
-        XLSX.setConditionalFormat(s, 1:5, 3:4, :uniqueValues;
+        @test XLSX.setConditionalFormat(s, 1:5, 3:4, :uniqueValues;
             fill=["pattern" => "none", "bgColor" => "yellow"],
             format=["format" => "0.0"],
             font=["color" => "green"],
@@ -2076,7 +2099,7 @@
             border=["style" => "medium", "color" => "cyan"]
         ) == 0
         XLSX.addDefinedName(s, "myNCRange", "C1:C5,D1:D5")
-        @test XLSX.setConditionalFormat(s, "myNCRange", :containsErrors; # Non-contiguous ranges not allowed
+        @test XLSX.setConditionalFormat(s, "myNCRange", :containsErrors; # Non-contiguous ranges are allowed
             fill=["pattern" => "none", "bgColor" => "yellow"],
             format=["format" => "0.0"],
             font=["color" => "green"],
@@ -2086,115 +2109,270 @@
 
     end
 
-    @testset "getConditionalFormats does not break subsequent cell reads (issue #425)" begin
-
-        function build_cf_workbook()
-            path = "cf_getconditionalformats_does_not.xlsx"
-            f = XLSX.newxlsx()
-            s = f[1]
-            for i in 1:5, j in 1:5
-                s[i, j] = i + j
+    @testset "every conditional format type" begin
+        @testset "invalid keyword arguments" begin
+            xf = XLSX.newxlsx()
+            s = xf[1]
+            for i in 1:5, j in 1:3
+                s[i, j] = i * j
             end
-            XLSX.setConditionalFormat(s, "A1:E1", :dataBar)
-            XLSX.writexlsx(path, f; overwrite=true)
-            SAVE_FILES && save_outfile(f)
-            return path
+
+            for (t, kw) in ((:cellIs, (operator="greaterThan", value="1")),
+                (:containsText, (value="a",)),
+                (:top10, ()),
+                (:aboveAverage, ()),
+                (:timePeriod, ()),
+                (:containsErrors, ()),
+                (:expression, (formula="A1>1",)),
+                (:colorScale, ()),
+                (:iconSet, ()),
+                (:dataBar, ()))
+                @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:C5", t; kw..., notAKeyword="x")
+            end
+            SAVE_FILES && save_outfile(xf)
         end
 
-        @testset "getConditionalFormats then getdata (originally-failing order)" begin
-            path = build_cf_workbook()
-            XLSX.openxlsx(path) do xf
-                ws = xf[1]
-                cfs = XLSX.getConditionalFormats(ws)
-                @test length(cfs) == 1
-
-                data = XLSX.getdata(ws)
-                @test data[1, 1] == 2
-                @test size(data) == (5, 5)
+        @testset "vector dispatch across all CF types" begin
+            for (t, kw) in ((:dataBar, ()), (:cellIs, (operator="greaterThan", value="1")),
+                (:colorScale, ()), (:iconSet, ()), (:top10, ()),
+                (:aboveAverage, ()), (:expression, (formula="A1>1",)),
+                (:containsErrors, ()), (:containsText, (value="a",)),
+                (:timePeriod, ()))
+                xf = XLSX.newxlsx()
+                s = xf[1]
+                for i in 1:4, j in 1:4; s[i, j] = i*j; end
+                @test XLSX.setConditionalFormat(s, [1, 3], :, t; kw...) == 0
+                @test XLSX.setConditionalFormat(s, :, [1, 3], t; kw...) == 0
+                @test XLSX.setConditionalFormat(s, [1, 3], [1, 3], t; kw...) == 0
+                SAVE_FILES && save_outfile(xf)
             end
-            isfile(path) && rm(path)
         end
-
-        @testset "getdata then getConditionalFormats (originally-working order, must not regress)" begin
-            path = build_cf_workbook()
-            XLSX.openxlsx(path) do xf
-                ws = xf[1]
-                data = XLSX.getdata(ws)
-                @test data[1, 1] == 2
-
-                cfs = XLSX.getConditionalFormats(ws)
-                @test length(cfs) == 1
-            end
-            isfile(path) && rm(path)
-        end
-
-        @testset "getConditionalFormats then eachrow" begin
-            path = build_cf_workbook()
-            XLSX.openxlsx(path) do xf
-                ws = xf[1]
-                XLSX.getConditionalFormats(ws)
-
-                rows = collect(XLSX.eachrow(ws))
-                @test length(rows) == 5
-                @test XLSX.getdata(rows[1], 1) == 2
-            end
-            isfile(path) && rm(path)
-        end
-
-        @testset "getConditionalFormats then readtable" begin
-            path = build_cf_workbook()
-            XLSX.openxlsx(path) do xf
-                ws = xf[1]
-                XLSX.getConditionalFormats(ws)
-
-                tbl = XLSX.readtable(path, ws.name; header=false)
-                @test length(tbl.data) == 5          # 5 columns
-                @test length(tbl.data[1]) == 5       # 5 rows
-            end
-            isfile(path) && rm(path)
-        end
-
-        @testset "readxlsx: getConditionalFormats then getdata" begin
-            path = build_cf_workbook()
-            xf = XLSX.readxlsx(path)
-            ws = xf[1]
-            cfs = XLSX.getConditionalFormats(ws)
-            @test length(cfs) == 1
-            data = XLSX.getdata(ws)
-            @test data[1, 1] == 2
-            isfile(path) && rm(path)
-        end
-
-        @testset "getConditionalExtFormats (allExtCfs) does not break subsequent reads" begin
-            path = "cf_getconditionalextformats.xlsx"
-            f = XLSX.newxlsx()
-            s = f[1]
-            for i in 1:5, j in 1:5
-                s[i, j] = i + j
-            end
-            # icon sets / top10 / etc. route through the x14 extension block —
-            # use whichever of these your API exposes as the ext-format path.
-            XLSX.setConditionalFormat(s, "A1:E1", :iconSet; iconset="5Boxes")
-            XLSX.writexlsx(path, f; overwrite=true)
-
-            XLSX.openxlsx(path) do xf2
-                ws = xf2[1]
-                XLSX.getConditionalFormats(ws)
-                data = XLSX.getdata(ws)
-                @test data[1, 1] == 2
-            end
-            isfile(path) && rm(path)
-            SAVE_FILES && save_outfile(f)
-        end
-
     end
 
-    @testset "Non-contiguous conditional formats" begin
+    @testset "non-contiguous ranges" begin
+        @testset "_cf_sqref" begin
+            @test XLSX._cf_sqref(XLSX.CellRange("A1:B2")) == "A1:B2"
+            xf = XLSX.newxlsx()
+            s = xf[1]
+            s["A1"] = 1
+            s["A3"] = 3
+            @test XLSX._cf_sqref(XLSX.NonContiguousRange(s, "A1,A3")) == "A1 A3"
+            SAVE_FILES && save_outfile(xf)
+        end
 
-        C(r, c) = XLSX.CellRef(r, c)
-        expand(areas) = Set(vcat([a isa XLSX.CellRef ? [a] : collect(a) for a in areas]...))
+        @testset "setConditionalFormat on a non-contiguous range" begin
+            xf = XLSX.newxlsx()
+            s = xf[1]
+            s["A1"] = 1
+            s["A2"] = 2
+            s["A3"] = 3
 
+            @test XLSX.setConditionalFormat(s, "A1,A3", :dataBar) == 0
+            @test XLSX.setConditionalFormat(s, "A1,A3", :cellIs; operator="greaterThan", value="1") == 0
+            @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "myNCRange", :cellIs; operator="greaterThan", value="1") # no such defined name
+
+            cfs = XLSX.getConditionalFormats(s)
+            rng = first(first(cfs))
+            @test rng isa XLSX.NonContiguousRange
+            @test XLSX._cf_sqref(rng) == "A1 A3"
+
+            # a second rule on the same range joins the existing block
+            XLSX.setConditionalFormat(s, "A1,A3", :cellIs; operator="greaterThan", value="1", fill=["pattern" => "solid", "bgColor" => "FFFFC7CE"])
+            @test length(XLSX.getConditionalFormats(s)) == 3   # 2007 x2 + ext databar
+
+            f = "cf_setconditionalformat_on_a_non.xlsx"
+            XLSX.writexlsx(f, xf; overwrite=true)
+            xf2 = XLSX.opentemplate(f)
+            rng2 = first(first(XLSX.getConditionalFormats(xf2[1])))
+            @test rng2 isa XLSX.NonContiguousRange
+            @test XLSX._cf_sqref(rng2) == "A1 A3"
+            SAVE_FILES && save_outfile(xf2)
+            SAVE_FILES && save_outfile(xf)
+            isfile(f) && rm(f)
+        end
+
+        @testset "vector and step-range dispatch" begin
+            xf = XLSX.newxlsx()
+            s = xf[1]
+            for i in 1:6, j in 1:3
+                s[i, j] = i * j
+            end
+
+            sq(ws) = XLSX._cf_sqref(first(first(XLSX.getConditionalFormats(ws))))
+
+            # rows as a vector, single column
+            xf1 = XLSX.newxlsx()
+            s1 = xf1[1]
+            for i in 1:6; s1[i, 1] = i; end
+            @test XLSX.setConditionalFormat(s1, [1, 3, 5], 1, :dataBar) == 0
+            @test sq(s1) == "A1 A3 A5"
+
+            # contiguous StepRange collapses to a single area
+            xf2 = XLSX.newxlsx()
+            s2 = xf2[1]
+            for i in 1:6; s2[i, 1] = i; end
+            @test XLSX.setConditionalFormat(s2, 1:1:6, 1, :dataBar) == 0
+            @test sq(s2) == "A1:A6"
+
+            # vector of columns, contiguous rows -> merges into per-column blocks
+            xf3 = XLSX.newxlsx()
+            s3 = xf3[1]
+            for i in 1:3, j in 1:3; s3[i, j] = i; end
+            @test XLSX.setConditionalFormat(s3, 1:3, [1, 3], :dataBar) == 0
+            @test sq(s3) == "A1:A3 C1:C3"
+
+            # both vectors
+            xf4 = XLSX.newxlsx()
+            s4 = xf4[1]
+            for i in 1:3, j in 1:3; s4[i, j] = i; end
+            @test XLSX.setConditionalFormat(s4, [1, 3], [1, 3], :dataBar) == 0
+            @test sq(s4) == "A1 A3 C1 C3"
+
+            # colon forms
+            xf5 = XLSX.newxlsx()
+            s5 = xf5[1]
+            for i in 1:4, j in 1:2; s5[i, j] = i; end
+            @test XLSX.setConditionalFormat(s5, [1, 3], :, :dataBar) == 0
+            @test sq(s5) == "A1:B1 A3:B3"
+
+            xf6 = XLSX.newxlsx()
+            s6 = xf6[1]
+            for i in 1:2, j in 1:4; s6[i, j] = i; end
+            @test XLSX.setConditionalFormat(s6, :, [1, 3], :dataBar) == 0
+            @test sq(s6) == "A1:A2 C1:C2"
+
+            # blanks inside the range stay in the sqref (unlike the style setters)
+            xf7 = XLSX.newxlsx()
+            s7 = xf7[1]
+            s7["A1"] = 1
+            s7["A3"] = 3
+            s7["A5"] = 5   # A2, A4 empty
+            @test XLSX.setConditionalFormat(s7, 1:5, 1, :dataBar) == 0
+            @test sq(s7) == "A1:A5"
+
+            # works for a dxf-bearing type too, not just dataBar
+            xf8 = XLSX.newxlsx()
+            s8 = xf8[1]
+            for i in 1:5; s8[i, 1] = i; end
+            @test XLSX.setConditionalFormat(s8, [1, 3, 5], 1, :cellIs;
+                operator="greaterThan", value="1") == 0
+            @test sq(s8) == "A1 A3 A5"
+
+            # cells absent from sheetData are still covered: CF applies to a region,
+            # so the veccolon path must not filter on cell existence
+            xf9 = XLSX.newxlsx()
+            s9 = xf9[1]
+            s9["C3"] = 1                       # dimension A1:C3; A1..C2 absent
+            @test XLSX.setConditionalFormat(s9, [1, 3], :, :dataBar) == 0
+            @test sq(s9) == "A1:C1 A3:C3"
+            SAVE_FILES && save_outfile(xf9)
+            SAVE_FILES && save_outfile(xf8)
+            SAVE_FILES && save_outfile(xf7)
+            SAVE_FILES && save_outfile(xf6)
+            SAVE_FILES && save_outfile(xf5)
+            SAVE_FILES && save_outfile(xf4)
+            SAVE_FILES && save_outfile(xf3)
+            SAVE_FILES && save_outfile(xf2)
+            SAVE_FILES && save_outfile(xf1)
+            SAVE_FILES && save_outfile(xf)
+
+        end
+
+        @testset "formula anchoring on a non-contiguous range" begin
+            xf = XLSX.newxlsx()
+            s = xf[1]
+            for i in 1:9, j in 1:3
+                s[i, j] = "x"
+            end
+
+            # __CR__ anchors to the first area's top-left, not the lowest cell
+            @test XLSX.setConditionalFormat(s, "C5:C9,A1:A3", :containsText; value="a") == 0
+
+            f = "cf_formula_anchoring_on_a_non.xlsx"
+            XLSX.writexlsx(f, xf; overwrite=true)
+            x = ZipArchives.zip_readentry(ZipArchives.ZipReader(read(f)),
+                "xl/worksheets/sheet1.xml", String)
+            @test occursin(r"<formula>[^<]*,C5\)\)\)</formula>", x)   # formula is relative to C5
+            @test occursin(r"sqref=\"C5:C9 A1:A3\"", x)
+            SAVE_FILES && save_outfile(xf)
+            isfile(f) && rm(f)
+        end
+
+        @testset "_check_cf_range errors" begin
+            xf = XLSX.newxlsx()
+            s = xf[1]
+            s["A1"] = 1
+            s["A3"] = 3
+            XLSX.addsheet!(xf, "Other")
+            other = xf["Other"]
+            other["A1"] = 1
+
+            ncr = XLSX.NonContiguousRange(s, "A1,A3")
+
+            # range belongs to a different sheet
+            @test_throws XLSX.XLSXError XLSX.setCfDataBar(other, ncr; allkws=Dict{Symbol,Any}())
+
+            # an area outside the worksheet dimension
+            @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1,Z99", :dataBar)
+
+            # sqref too long: many scattered single cells, uncompressed
+            xf2 = XLSX.newxlsx()
+            s2 = xf2[1]
+            for i in 1:1200; s2[i, 1] = i; end
+            cells = [XLSX.CellRef(i, 1) for i in 1:2:1200]
+            big = XLSX.NonContiguousRange(s2.name, XLSX.NCArea[c for c in cells])
+            @test_throws XLSX.XLSXError XLSX.setCfDataBar(s2, big; allkws=Dict{Symbol,Any}())
+            SAVE_FILES && save_outfile(xf2)
+            SAVE_FILES && save_outfile(xf)
+        end
+
+        @testset "defined names resolve to one rule" begin
+            xf = XLSX.newxlsx()
+            s = xf[1]
+            for i in 1:5; s[i, 1] = i; end
+            XLSX.addDefinedName(xf, "ncr", "Sheet1!\$A\$1,Sheet1!\$A\$3")
+
+            @test XLSX.setConditionalFormat(s, "ncr", :dataBar) == 0
+            @test XLSX.setConditionalFormat(s, "A1,A3", :dataBar) == 0
+
+            f = "cf_defined_names_resolve_to_one.xlsx"
+            XLSX.writexlsx(f, xf; overwrite=true)
+            x = ZipArchives.zip_readentry(ZipArchives.ZipReader(read(f)),
+                "xl/worksheets/sheet1.xml", String)
+
+            # named and literal spellings produce the same sqref, one block each
+            @test count("sqref=\"A1 A3\"", x) == 1   # both rules join one block
+            @test count("<cfRule ", x) == 2
+            SAVE_FILES && save_outfile(xf)
+            isfile(f) && rm(f)
+        end
+
+        @testset "cellIs default value averages the cells of a non-contiguous range" begin
+            xf = XLSX.newxlsx()
+            s = xf[1]
+            s["A1"] = 2
+            s["A2"] = 100
+            s["A3"] = 4
+            s["A4"] = "text"
+            XLSX.setConditionalFormat(s, "A1,A3", :cellIs)            # the average of A1 and A3 only
+            XLSX.setConditionalFormat(s, "A1:A4", :cellIs)            # contiguous, with a text cell
+            f = "cf_cellis_default_value_averages.xlsx"
+            XLSX.writexlsx(f, xf; overwrite=true)
+            r = XLSX.ZipArchives.ZipReader(read(f))
+            xml = XLSX.ZipArchives.zip_readentry(r, "xl/worksheets/sheet1.xml", String)
+            fmls = [m[1] for m in eachmatch(r"<formula>([^<]*)</formula>", xml)]
+            @test "3.0" in fmls                                       # (2 + 4) / 2
+            @test any(x -> parse(Float64, x) ≈ 106 / 3, fmls)         # (2 + 100 + 4) / 3; text ignored
+            @test !any(x -> occursin(r"\[|;;", x), fmls)              # never a printed array
+            isfile(f) && rm(f)
+            SAVE_FILES && save_outfile(xf)
+        end
+    end
+
+    @testset "colored data bars" begin
         @testset "_compress" begin
+            C(r, c) = XLSX.CellRef(r, c)
+            expand(areas) = Set(vcat([a isa XLSX.CellRef ? [a] : collect(a) for a in areas]...))
             a = XLSX._compress([C(1, 1)])
             @test length(a) == 1 && a[1] isa XLSX.CellRef
 
@@ -2223,6 +2401,7 @@
             @test length(XLSX._band_colors(["green", "red"], 5)) == 5
             @test XLSX._band_colors(["green", "red"], 2) == ["FF008000", "FFFF0000"]
             @test XLSX._band_colors("red", 1) == ["FFFF0000"]
+            @test XLSX._band_colors(["green", "red"], 1) == ["FF008000"]
             @test XLSX._band_colors(:red, 1) == ["FFFF0000"]
 
             interp = XLSX._band_colors(["FF008000", "FFFF0000"], 5)
@@ -2231,16 +2410,6 @@
 
             @test_throws XLSX.XLSXError XLSX._band_colors(["red", "green", "blue"], 5)
             @test_throws XLSX.XLSXError XLSX._band_colors(["notacolour", "red"], 3)
-        end
-
-        @testset "_cf_sqref" begin
-            @test XLSX._cf_sqref(XLSX.CellRange("A1:B2")) == "A1:B2"
-            xf = XLSX.newxlsx()
-            s = xf[1]
-            s["A1"] = 1
-            s["A3"] = 3
-            @test XLSX._cf_sqref(XLSX.NonContiguousRange(s, "A1,A3")) == "A1 A3"
-            SAVE_FILES && save_outfile(xf)
         end
 
         @testset "partition" begin
@@ -2284,37 +2453,6 @@
             @test_throws XLSX.XLSXError XLSX.partition(s, "A1:A10", [3, 7]; labels=[:a, :b, :a])
             @test_throws XLSX.XLSXError XLSX.partition(s, "A1:A10", [3, 7]; gte=[true])
             SAVE_FILES && save_outfile(xf)
-        end
-
-        @testset "setConditionalFormat on a non-contiguous range" begin
-            xf = XLSX.newxlsx()
-            s = xf[1]
-            s["A1"] = 1
-            s["A2"] = 2
-            s["A3"] = 3
-
-            @test XLSX.setConditionalFormat(s, "A1,A3", :dataBar) == 0
-            @test XLSX.setConditionalFormat(s, "A1,A3", :cellIs; operator="greaterThan", value="1") == 0
-            @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "myNCRange", :cellIs; operator="greaterThan", value="1") # out of range
-
-            cfs = XLSX.getConditionalFormats(s)
-            rng = first(first(cfs))
-            @test rng isa XLSX.NonContiguousRange
-            @test XLSX._cf_sqref(rng) == "A1 A3"
-
-            # a second rule on the same range joins the existing block
-            XLSX.setConditionalFormat(s, "A1,A3", :cellIs; operator="greaterThan", value="1", fill=["pattern" => "solid", "bgColor" => "FFFFC7CE"])
-            @test length(XLSX.getConditionalFormats(s)) == 3   # 2007 x2 + ext databar
-
-            f = "cf_setconditionalformat_on_a_non.xlsx"
-            XLSX.writexlsx(f, xf; overwrite=true)
-            xf2 = XLSX.opentemplate(f)
-            rng2 = first(first(XLSX.getConditionalFormats(xf2[1])))
-            @test rng2 isa XLSX.NonContiguousRange
-            @test XLSX._cf_sqref(rng2) == "A1 A3"
-            SAVE_FILES && save_outfile(xf2)
-            SAVE_FILES && save_outfile(xf)
-            isfile(f) && rm(f)
         end
 
         @testset "setColoredDataBars" begin
@@ -2408,175 +2546,186 @@
             @test_throws XLSX.XLSXError XLSX.setColoredDataBars(s, "A1:A1000")       # outside dimension
             SAVE_FILES && save_outfile(xf)
         end
-        @testset "vector and step-range dispatch" begin
+
+        @testset "setColoredDataBars CellRef form" begin
             xf = XLSX.newxlsx()
             s = xf[1]
-            for i in 1:6, j in 1:3
-                s[i, j] = i * j
-            end
-
-            sq(ws) = XLSX._cf_sqref(first(first(XLSX.getConditionalFormats(ws))))
-
-            # rows as a vector, single column
-            xf1 = XLSX.newxlsx()
-            s1 = xf1[1]
-            for i in 1:6; s1[i, 1] = i; end
-            @test XLSX.setConditionalFormat(s1, [1, 3, 5], 1, :dataBar) == 0
-            @test sq(s1) == "A1 A3 A5"
-
-            # contiguous StepRange collapses to a single area
-            xf2 = XLSX.newxlsx()
-            s2 = xf2[1]
-            for i in 1:6; s2[i, 1] = i; end
-            @test XLSX.setConditionalFormat(s2, 1:1:6, 1, :dataBar) == 0
-            @test sq(s2) == "A1:A6"
-
-            # vector of columns, contiguous rows -> merges into per-column blocks
-            xf3 = XLSX.newxlsx()
-            s3 = xf3[1]
-            for i in 1:3, j in 1:3; s3[i, j] = i; end
-            @test XLSX.setConditionalFormat(s3, 1:3, [1, 3], :dataBar) == 0
-            @test sq(s3) == "A1:A3 C1:C3"
-
-            # both vectors
-            xf4 = XLSX.newxlsx()
-            s4 = xf4[1]
-            for i in 1:3, j in 1:3; s4[i, j] = i; end
-            @test XLSX.setConditionalFormat(s4, [1, 3], [1, 3], :dataBar) == 0
-            @test sq(s4) == "A1 A3 C1 C3"
-
-            # colon forms
-            xf5 = XLSX.newxlsx()
-            s5 = xf5[1]
-            for i in 1:4, j in 1:2; s5[i, j] = i; end
-            @test XLSX.setConditionalFormat(s5, [1, 3], :, :dataBar) == 0
-            @test sq(s5) == "A1:B1 A3:B3"
-
-            xf6 = XLSX.newxlsx()
-            s6 = xf6[1]
-            for i in 1:2, j in 1:4; s6[i, j] = i; end
-            @test XLSX.setConditionalFormat(s6, :, [1, 3], :dataBar) == 0
-            @test sq(s6) == "A1:A2 C1:C2"
-
-            # blanks inside the range stay in the sqref (unlike the style setters)
-            xf7 = XLSX.newxlsx()
-            s7 = xf7[1]
-            s7["A1"] = 1
-            s7["A3"] = 3
-            s7["A5"] = 5   # A2, A4 empty
-            @test XLSX.setConditionalFormat(s7, 1:5, 1, :dataBar) == 0
-            @test sq(s7) == "A1:A5"
-
-            # works for a dxf-bearing type too, not just dataBar
-            xf8 = XLSX.newxlsx()
-            s8 = xf8[1]
-            for i in 1:5; s8[i, 1] = i; end
-            @test XLSX.setConditionalFormat(s8, [1, 3, 5], 1, :cellIs;
-                operator="greaterThan", value="1") == 0
-            @test sq(s8) == "A1 A3 A5"
-
-            # cells absent from sheetData are still covered: CF applies to a region,
-            # so the veccolon path must not filter on cell existence
-            xf9 = XLSX.newxlsx()
-            s9 = xf9[1]
-            s9["C3"] = 1                       # dimension A1:C3; A1..C2 absent
-            @test XLSX.setConditionalFormat(s9, [1, 3], :, :dataBar) == 0
-            @test sq(s9) == "A1:C1 A3:C3"
-            SAVE_FILES && save_outfile(xf9)
-            SAVE_FILES && save_outfile(xf8)
-            SAVE_FILES && save_outfile(xf7)
-            SAVE_FILES && save_outfile(xf6)
-            SAVE_FILES && save_outfile(xf5)
-            SAVE_FILES && save_outfile(xf4)
-            SAVE_FILES && save_outfile(xf3)
-            SAVE_FILES && save_outfile(xf2)
-            SAVE_FILES && save_outfile(xf1)
-            SAVE_FILES && save_outfile(xf)
-
-        end
-
-        @testset "vector dispatch across all CF types" begin
-            for (t, kw) in ((:dataBar, ()), (:cellIs, (operator="greaterThan", value="1")),
-                (:colorScale, ()), (:iconSet, ()), (:top10, ()),
-                (:aboveAverage, ()), (:expression, (formula="A1>1",)),
-                (:containsErrors, ()), (:containsText, (value="a",)),
-                (:timePeriod, ()))
-                xf = XLSX.newxlsx()
-                s = xf[1]
-                for i in 1:4, j in 1:4; s[i, j] = i*j; end
-                @test XLSX.setConditionalFormat(s, [1, 3], :, t; kw...) == 0
-                @test XLSX.setConditionalFormat(s, :, [1, 3], t; kw...) == 0
-                @test XLSX.setConditionalFormat(s, [1, 3], [1, 3], t; kw...) == 0
-                SAVE_FILES && save_outfile(xf)
-            end
-        end
-        @testset "formula anchoring on a non-contiguous range" begin
-            xf = XLSX.newxlsx()
-            s = xf[1]
-            for i in 1:9, j in 1:3
-                s[i, j] = "x"
-            end
-
-            # __CR__ anchors to the first area's top-left, not the lowest cell
-            @test XLSX.setConditionalFormat(s, "C5:C9,A1:A3", :containsText; value="a") == 0
-
-            f = "cf_formula_anchoring_on_a_non.xlsx"
-            XLSX.writexlsx(f, xf; overwrite=true)
-            x = ZipArchives.zip_readentry(ZipArchives.ZipReader(read(f)),
-                "xl/worksheets/sheet1.xml", String)
-            @test occursin("C5", x)
-            @test occursin(r"sqref=\"C5:C9 A1:A3\"", x)
-            SAVE_FILES && save_outfile(xf)
-            isfile(f) && rm(f)
-        end
-
-        @testset "_check_cf_range errors" begin
-            xf = XLSX.newxlsx()
-            s = xf[1]
-            s["A1"] = 1
-            s["A3"] = 3
-            XLSX.addsheet!(xf, "Other")
-            other = xf["Other"]
-            other["A1"] = 1
-
-            ncr = XLSX.NonContiguousRange(s, "A1,A3")
-
-            # range belongs to a different sheet
-            @test_throws XLSX.XLSXError XLSX.setCfDataBar(other, ncr; allkws=Dict{Symbol,Any}())
-
-            # an area outside the worksheet dimension
-            @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1,Z99", :dataBar)
-
-            # sqref too long: many scattered single cells, uncompressed
-            xf2 = XLSX.newxlsx()
-            s2 = xf2[1]
-            for i in 1:1200; s2[i, 1] = i; end
-            cells = [XLSX.CellRef(i, 1) for i in 1:2:1200]
-            big = XLSX.NonContiguousRange(s2.name, XLSX.NCArea[c for c in cells])
-            @test_throws XLSX.XLSXError XLSX.setCfDataBar(s2, big; allkws=Dict{Symbol,Any}())
-            SAVE_FILES && save_outfile(xf2)
+            s["A1"] = 5
+            p = XLSX.setColoredDataBars(s, XLSX.CellRef("A1"); bands=1)
+            @test first.(p) == [1]
+            @test length(p) == 1
             SAVE_FILES && save_outfile(xf)
         end
 
-        @testset "defined names resolve to one rule" begin
+        @testset "setColoredDataBars clear replaces previous bands" begin
             xf = XLSX.newxlsx()
             s = xf[1]
-            for i in 1:5; s[i, 1] = i; end
-            XLSX.addDefinedName(xf, "ncr", "Sheet1!\$A\$1,Sheet1!\$A\$3")
+            for i in 1:10; s[i, 1] = i; end
 
-            @test XLSX.setConditionalFormat(s, "ncr", :dataBar) == 0
-            @test XLSX.setConditionalFormat(s, "A1,A3", :dataBar) == 0
+            XLSX.setColoredDataBars(s, "A1:A10"; bands=1, colors="steelblue")
+            XLSX.setColoredDataBars(s, "A1:A10"; bands=3)
 
-            f = "cf_defined_names_resolve_to_one.xlsx"
+            f = "cf_clear_replaces_previous_bands.xlsx"
             XLSX.writexlsx(f, xf; overwrite=true)
             x = ZipArchives.zip_readentry(ZipArchives.ZipReader(read(f)),
                 "xl/worksheets/sheet1.xml", String)
 
-            # named and literal spellings produce the same sqref, one block each
-            @test count("sqref=\"A1 A3\"", x) == 1   # both rules join one block
-            @test count("<cfRule ", x) == 2
+            @test count("<conditionalFormatting ", x) == 3
+            @test count("<x14:cfRule ", x) == 3
+            @test count("<x14:conditionalFormattings", x) == 1   # no empty stray block
+
+            # re-banding after the data changes drops empty bands and leaves no orphans
+            xf2 = XLSX.newxlsx()
+            s2 = xf2[1]
+            for i in 1:20; s2[i, 1] = i; end
+            XLSX.setColoredDataBars(s2, "A1:A20"; bands=5)
+            for i in 1:20; s2[i, 1] = 1 + (i % 2); end
+            p = XLSX.setColoredDataBars(s2, "A1:A20"; bands=5)
+
+            @test length(p) == 2
+            @test first.(p) == [1, 5]                     # labels keep their place on the scale
+            @test length(XLSX.getConditionalFormats(s2)) == length(p)
+
+            # clear=false layers instead
+            XLSX.setColoredDataBars(s2, "A1:A20"; bands=5, clear=false)
+            @test length(XLSX.getConditionalFormats(s2)) == 2 * length(p)
+            SAVE_FILES && save_outfile(xf2)
             SAVE_FILES && save_outfile(xf)
             isfile(f) && rm(f)
+        end
+    end
+
+    @testset "clearConditionalFormats" begin
+        @testset "with a string range" begin
+            xf = XLSX.newxlsx()
+            ws = xf[1]
+            ws["A1:A5"] = reshape(collect(1:5), 5, 1)
+            XLSX.setConditionalFormat(ws, "A1:A5", :colorScale)
+            @test !isempty(XLSX.getConditionalFormats(ws))
+            XLSX.clearConditionalFormats(ws, "A1:A5")
+            @test isempty(XLSX.getConditionalFormats(ws))
+            SAVE_FILES && save_outfile(xf)
+        end
+
+        @testset "clearing every x14 rule leaves no empty conditionalFormattings" begin
+            # Excel refuses to open a file with an empty `<x14:conditionalFormattings/>`.
+            xf = XLSX.newxlsx()
+            xf[1]["A1:B3"] = 1
+            XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
+            XLSX.setConditionalFormat(xf[1], "B1:B3", :dataBar)
+            XLSX.clearConditionalFormats(xf[1], "A1:A3")
+            @test !isnothing(XLSX._x14_cf_block(XLSX.xmlroot(XLSX.get_workbook(xf), xf[1].relationship_id)))   # B1:B3 remains
+            XLSX.clearConditionalFormats(xf[1], "B1:B3")
+            XLSX.writexlsx("cleared.xlsx", xf; overwrite=true)
+            SAVE_FILES && save_outfile("cleared.xlsx")
+            sheet = String(XLSX.ZipArchives.zip_readentry(XLSX.ZipArchives.ZipReader(read("cleared.xlsx")), "xl/worksheets/sheet1.xml"))
+            @test !occursin("conditionalFormattings", sheet)
+            @test isempty(XLSX.getConditionalFormats(XLSX.readxlsx("cleared.xlsx")[1]))
+            rm("cleared.xlsx")
+        end
+    end
+
+    @testset "reading back and round trips" begin
+        @testset "getConditionalFormats does not break subsequent cell reads (issue #425)" begin
+
+            function build_cf_workbook()
+                path = "cf_getconditionalformats_does_not.xlsx"
+                f = XLSX.newxlsx()
+                s = f[1]
+                for i in 1:5, j in 1:5
+                    s[i, j] = i + j
+                end
+                XLSX.setConditionalFormat(s, "A1:E1", :dataBar)
+                XLSX.writexlsx(path, f; overwrite=true)
+                SAVE_FILES && save_outfile(f)
+                return path
+            end
+
+            @testset "getConditionalFormats then getdata (originally-failing order)" begin
+                path = build_cf_workbook()
+                XLSX.openxlsx(path) do xf
+                    ws = xf[1]
+                    cfs = XLSX.getConditionalFormats(ws)
+                    @test length(cfs) == 1
+
+                    data = XLSX.getdata(ws)
+                    @test data[1, 1] == 2
+                    @test size(data) == (5, 5)
+                end
+                isfile(path) && rm(path)
+            end
+
+            @testset "getdata then getConditionalFormats (originally-working order, must not regress)" begin
+                path = build_cf_workbook()
+                XLSX.openxlsx(path) do xf
+                    ws = xf[1]
+                    data = XLSX.getdata(ws)
+                    @test data[1, 1] == 2
+
+                    cfs = XLSX.getConditionalFormats(ws)
+                    @test length(cfs) == 1
+                end
+                isfile(path) && rm(path)
+            end
+
+            @testset "getConditionalFormats then eachrow" begin
+                path = build_cf_workbook()
+                XLSX.openxlsx(path) do xf
+                    ws = xf[1]
+                    XLSX.getConditionalFormats(ws)
+
+                    rows = collect(XLSX.eachrow(ws))
+                    @test length(rows) == 5
+                    @test XLSX.getdata(rows[1], 1) == 2
+                end
+                isfile(path) && rm(path)
+            end
+
+            @testset "getConditionalFormats then readtable" begin
+                path = build_cf_workbook()
+                XLSX.openxlsx(path) do xf
+                    ws = xf[1]
+                    XLSX.getConditionalFormats(ws)
+
+                    tbl = XLSX.readtable(path, ws.name; header=false)
+                    @test length(tbl.data) == 5          # 5 columns
+                    @test length(tbl.data[1]) == 5       # 5 rows
+                end
+                isfile(path) && rm(path)
+            end
+
+            @testset "readxlsx: getConditionalFormats then getdata" begin
+                path = build_cf_workbook()
+                xf = XLSX.readxlsx(path)
+                ws = xf[1]
+                cfs = XLSX.getConditionalFormats(ws)
+                @test length(cfs) == 1
+                data = XLSX.getdata(ws)
+                @test data[1, 1] == 2
+                isfile(path) && rm(path)
+            end
+
+            @testset "x14 (ext) rules do not break subsequent reads" begin
+                path = "cf_getconditionalextformats.xlsx"
+                f = XLSX.newxlsx()
+                s = f[1]
+                for i in 1:5, j in 1:5
+                    s[i, j] = i + j
+                end
+                # this icon set is written to the x14 extension block
+                XLSX.setConditionalFormat(s, "A1:E1", :iconSet; iconset="5Boxes")
+                XLSX.writexlsx(path, f; overwrite=true)
+
+                XLSX.openxlsx(path) do xf2
+                    ws = xf2[1]
+                    XLSX.getConditionalFormats(ws)
+                    data = XLSX.getdata(ws)
+                    @test data[1, 1] == 2
+                end
+                isfile(path) && rm(path)
+                SAVE_FILES && save_outfile(f)
+            end
+
         end
 
         @testset "single-cell sqref round-trips" begin
@@ -2595,247 +2744,229 @@
             isfile(f) && rm(f)
         end
 
-        @testset "setColoredDataBars CellRef form" begin
+        @testset "x14 block with whitespace after xm:sqref" begin
+            # Written files are indented, so a reopened x14 block has a text node after `xm:sqref`.
             xf = XLSX.newxlsx()
-            s = xf[1]
-            s["A1"] = 5
-            p = XLSX.setColoredDataBars(s, XLSX.CellRef("A1"); bands=1)
-            @test XLSX._band_colors(["green", "red"], 1) == ["FF008000"]
-            @test length(p) == 1
+            xf[1]["A1:A3"] = 1
+            XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
+            XLSX.writexlsx("x14_ws.xlsx", xf; overwrite=true)
+            xf = XLSX.openxlsx("x14_ws.xlsx"; mode="rw")
+            XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
+            XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
+            @test length(XLSX.getConditionalFormats(xf[1])) == 3
+            XLSX.writexlsx("x14_ws.xlsx", xf; overwrite=true)
+            SAVE_FILES && save_outfile("x14_ws.xlsx")
+            sheet = String(XLSX.ZipArchives.zip_readentry(XLSX.ZipArchives.ZipReader(read("x14_ws.xlsx")), "xl/worksheets/sheet1.xml"))
+            @test count("<xm:sqref>A1:A3</xm:sqref>", sheet) == 1
+            @test count("<x14:cfRule ", sheet) == 3
+            rm("x14_ws.xlsx")
+        end
+
+        @testset "x14 rules go in the conditional-format ext, not the first ext" begin
+            # One sparkline in C1 plotting A1:A3, as Excel writes it.
+            spark() = XML.Element("ext",
+                XML.Element("x14:sparklineGroups",
+                    XML.Element("x14:sparklineGroup",
+                        XML.Element("x14:colorSeries"; rgb="FF376092"),
+                        XML.Element("x14:sparklines",
+                            XML.Element("x14:sparkline", XML.Element("xm:f", XML.Text("Sheet1!A1:A3")), XML.Element("xm:sqref", XML.Text("C1")))));
+                    var"xmlns:xm"="http://schemas.microsoft.com/office/excel/2006/main");
+                uri="{05C60535-1F16-4fd2-B633-F4F36F0B64E0}", var"xmlns:x14"="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main")
+            wsroot(xf) = XLSX.xml_root_element(XLSX.xmlroot(XLSX.get_workbook(xf), xf[1].relationship_id))
+            extlst(xf) = only(c for c in XLSX.xml_elements(wsroot(xf)) if XLSX.localname(c) == "extLst")
+            exts(xf) = XLSX.xml_elements(extlst(xf))
+            sqrefs(e) = [XML.simple_value(s) for b in XLSX.xml_elements(e) for c in XLSX.xml_elements(b) for s in XLSX.xml_elements(c) if XLSX.localname(s) == "sqref"]
+
+            # No conditional-format ext yet: one is added after the sparkline ext.
+            xf = XLSX.newxlsx()
+            xf[1]["A1:B3"] = 1
+            push!(wsroot(xf), XML.Element("extLst", spark()))
+            XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
+            e = exts(xf)
+            @test length(e) == 2
+            @test isempty(sqrefs(e[1]))
+            @test e[2]["uri"] == XLSX.X14_CF_EXT_URI && sqrefs(e[2]) == ["A1:A3"]
+
+            # Sparkline ext ahead of an existing conditional-format ext.
+            xf = XLSX.newxlsx()
+            xf[1]["A1:B3"] = 1
+            XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
+            pushfirst!(extlst(xf), spark())
+            XLSX.setConditionalFormat(xf[1], "B1:B3", :dataBar)
+            XLSX.setConditionalFormat(xf[1], "A1:A3", :iconSet; iconset="3Stars")
+            e = exts(xf)
+            @test length(e) == 2 && isempty(sqrefs(e[1]))
+            @test sqrefs(e[2]) == ["A1:A3", "B1:B3"]
+            ids = [r["id"] for b in XLSX._extcfs_in(XLSX.xmlroot(XLSX.get_workbook(xf), xf[1].relationship_id)) for r in XLSX.xml_elements(b) if XLSX.localname(r) == "cfRule"]
+            @test length(ids) == 3 && allunique(ids)
+            @test XLSX._x14_cf_ids(xf[1]) == Set(ids)
+            XLSX.clearConditionalFormats(xf[1], "A1:B3")
+            @test isempty(XLSX.getConditionalFormats(xf[1]))
+            @test isnothing(XLSX._x14_cf_block(XLSX.xmlroot(XLSX.get_workbook(xf), xf[1].relationship_id)))   # no empty block left
+            @test length(exts(xf)) == 2   # the sparkline ext is untouched
             SAVE_FILES && save_outfile(xf)
         end
-        @testset "invalid keyword arguments" begin
+
+        @testset "x14 rule ids stay unique, and deterministic, after reopening" begin
+            cfids(f) = [m[1] for m in eachmatch(r"<x14:cfRule [^>]*id=\"(\{[^\"]+\})\"",
+                        String(XLSX.ZipArchives.zip_readentry(XLSX.ZipArchives.ZipReader(read(f)), "xl/worksheets/sheet1.xml")))]
             xf = XLSX.newxlsx()
-            s = xf[1]
-            for i in 1:5, j in 1:3
-                s[i, j] = i * j
+            xf[1]["A1:B3"] = 1
+            XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
+            XLSX.setConditionalFormat(xf[1], "A1:A3", :iconSet; iconset="3Stars")
+            XLSX.writexlsx("ids.xlsx", xf; overwrite=true)
+            for out in ("ids2.xlsx", "ids3.xlsx")
+                xf = XLSX.openxlsx("ids.xlsx"; mode="rw")
+                XLSX.setConditionalFormat(xf[1], "B1:B3", :dataBar)
+                XLSX.setConditionalFormat(xf[1], "B1:B3", :iconSet; iconset="3Stars")
+                XLSX.writexlsx(out, xf; overwrite=true)
             end
-
-            for (t, kw) in ((:cellIs, (operator="greaterThan", value="1")),
-                (:containsText, (value="a",)),
-                (:top10, ()),
-                (:aboveAverage, ()),
-                (:timePeriod, ()),
-                (:containsErrors, ()),
-                (:expression, (formula="A1>1",)),
-                (:colorScale, ()),
-                (:iconSet, ()),
-                (:dataBar, ()))
-                @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:C5", t; kw..., notAKeyword="x")
-            end
-            SAVE_FILES && save_outfile(xf)
+            SAVE_FILES && save_outfile("ids2.xlsx")
+            @test length(cfids("ids2.xlsx")) == 4 && allunique(cfids("ids2.xlsx"))
+            @test cfids("ids2.xlsx") == cfids("ids3.xlsx")   # same steps, same ids
+            foreach(rm, ("ids.xlsx", "ids2.xlsx", "ids3.xlsx"))
         end
 
-        @testset "colorScale numeric bounds and mid_col default" begin
+        @testset "first rule added to an existing range of a reopened file is kept" begin
+            # The sheet is still a raw string on reopening, so `allCfs` parses a throwaway copy;
+            # the new rule must go into the live tree.
             xf = XLSX.newxlsx()
-            s = xf[1]
-            for i in 1:10, j in 1:3
-                s[i, j] = i * j
-            end
-
-            # explicit colours
-            @test XLSX.setConditionalFormat(s, "A1:C10", :colorScale;
-                min_type="num", min_val="2", min_col="tomato",
-                mid_type="num", mid_val="6", mid_col="lawngreen",
-                max_type="num", max_val="10", max_col="cadetblue") == 0
-
-            # mid_col omitted: defaults to white rather than throwing
-            @test XLSX.setConditionalFormat(s, "A1:C10", :colorScale;
-                min_type="num", min_val="2",
-                mid_type="num", mid_val="6",
-                max_type="num", max_val="10") == 0
-
-            f = "cf_colorscale_numeric_bounds_and.xlsx"
-            XLSX.writexlsx(f, xf; overwrite=true)
-            x = ZipArchives.zip_readentry(ZipArchives.ZipReader(read(f)),
-                "xl/worksheets/sheet1.xml", String)
-
-            # "num" types mean the values survive the `== "min"` / `== "max"` guards
-            @test occursin("<cfvo type=\"num\" val=\"2\"/>", x)
-            @test occursin("<cfvo type=\"num\" val=\"6\"/>", x)
-            @test occursin("<cfvo type=\"num\" val=\"10\"/>", x)
-            @test occursin("rgb=\"FFFCFCFF\"", x)
-            SAVE_FILES && save_outfile(xf)
-            isfile(f) && rm(f)
+            xf[1]["A1:A3"] = 1
+            XLSX.setConditionalFormat(xf[1], "A1:A3", :cellIs)
+            XLSX.writexlsx("reopen_cf.xlsx", xf; overwrite=true)
+            xf = XLSX.openxlsx("reopen_cf.xlsx"; mode="rw")
+            XLSX.setConditionalFormat(xf[1], "A1:A3", :cellIs)
+            @test length(XLSX.getConditionalFormats(xf[1])) == 2
+            XLSX.writexlsx("reopen_cf.xlsx", xf; overwrite=true)
+            SAVE_FILES && save_outfile("reopen_cf.xlsx")
+            @test length(XLSX.getConditionalFormats(XLSX.readxlsx("reopen_cf.xlsx")[1])) == 2
+            rm("reopen_cf.xlsx")
         end
-
-        @testset "cellIs default value averages the cells of a non-contiguous range" begin
-            xf = XLSX.newxlsx()
-            s = xf[1]
-            s["A1"] = 2
-            s["A2"] = 100
-            s["A3"] = 4
-            s["A4"] = "text"
-            XLSX.setConditionalFormat(s, "A1,A3", :cellIs)            # the average of A1 and A3 only
-            XLSX.setConditionalFormat(s, "A1:A4", :cellIs)            # contiguous, with a text cell
-            f = "cf_cellis_default_value_averages.xlsx"
-            XLSX.writexlsx(f, xf; overwrite=true)
-            r = XLSX.ZipArchives.ZipReader(read(f))
-            xml = XLSX.ZipArchives.zip_readentry(r, "xl/worksheets/sheet1.xml", String)
-            fmls = [m[1] for m in eachmatch(r"<formula>([^<]*)</formula>", xml)]
-            @test "3.0" in fmls                                       # (2 + 4) / 2
-            @test any(x -> parse(Float64, x) ≈ 106 / 3, fmls)         # (2 + 100 + 4) / 3; text ignored
-            @test !any(x -> occursin(r"\[|;;", x), fmls)              # never a printed array
-            isfile(f) && rm(f)
-            SAVE_FILES && save_outfile(xf)
-        end
-
     end
-    @testset "clear replaces previous bands" begin
+
+    @testset "every color form in conditional formats" begin
         xf = XLSX.newxlsx()
         s = xf[1]
-        for i in 1:10; s[i, 1] = i; end
-
-        XLSX.setColoredDataBars(s, "A1:A10"; bands=1, colors="steelblue")
-        XLSX.setColoredDataBars(s, "A1:A10"; bands=3)
-
-        f = "cf_clear_replaces_previous_bands.xlsx"
-        XLSX.writexlsx(f, xf; overwrite=true)
-        x = ZipArchives.zip_readentry(ZipArchives.ZipReader(read(f)),
-            "xl/worksheets/sheet1.xml", String)
-
-        @test count("<conditionalFormatting ", x) == 3
-        @test count("<x14:cfRule ", x) == 3
-        @test count("<x14:conditionalFormattings", x) == 1   # no empty stray block
-
-        # re-banding after the data changes drops empty bands and leaves no orphans
-        xf2 = XLSX.newxlsx()
-        s2 = xf2[1]
-        for i in 1:20; s2[i, 1] = i; end
-        XLSX.setColoredDataBars(s2, "A1:A20"; bands=5)
-        for i in 1:20; s2[i, 1] = 1 + (i % 2); end
-        p = XLSX.setColoredDataBars(s2, "A1:A20"; bands=5)
-
-        @test length(p) == 2
-        @test first.(p) == [1, 5]                     # labels keep their place on the scale
-        @test length(XLSX.getConditionalFormats(s2)) == length(p)
-
-        # clear=false layers instead
-        XLSX.setColoredDataBars(s2, "A1:A20"; bands=5, clear=false)
-        @test length(XLSX.getConditionalFormats(s2)) == 2 * length(p)
-        SAVE_FILES && save_outfile(xf2)
-        SAVE_FILES && save_outfile(xf)
-        isfile(f) && rm(f)
-    end
-    @testset "coverage: clearConditionalFormats with a string range" begin
-        xf = XLSX.newxlsx()
-        ws = xf[1]
-        ws["A1:A5"] = reshape(collect(1:5), 5, 1)
-        XLSX.setConditionalFormat(ws, "A1:A5", :colorScale)
-        @test !isempty(XLSX.getConditionalFormats(ws))
-        XLSX.clearConditionalFormats(ws, "A1:A5")
-        @test isempty(XLSX.getConditionalFormats(ws))
-        SAVE_FILES && save_outfile(xf)
-    end
-    @testset "x14 block with whitespace after xm:sqref" begin
-        # Written files are indented, so a reopened x14 block has a text node after `xm:sqref`.
-        xf = XLSX.newxlsx()
-        xf[1]["A1:A3"] = 1
-        XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
-        XLSX.writexlsx("x14_ws.xlsx", xf; overwrite=true)
-        xf = XLSX.openxlsx("x14_ws.xlsx"; mode="rw")
-        XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
-        XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
-        @test length(XLSX.getConditionalFormats(xf[1])) == 3
-        XLSX.writexlsx("x14_ws.xlsx", xf; overwrite=true)
-        SAVE_FILES && save_outfile("x14_ws.xlsx")
-        sheet = String(XLSX.ZipArchives.zip_readentry(XLSX.ZipArchives.ZipReader(read("x14_ws.xlsx")), "xl/worksheets/sheet1.xml"))
-        @test count("<xm:sqref>A1:A3</xm:sqref>", sheet) == 1
-        @test count("<x14:cfRule ", sheet) == 3
-        rm("x14_ws.xlsx")
-    end
-    @testset "x14 rules go in the conditional-format ext, not the first ext" begin
-        # One sparkline in C1 plotting A1:A3, as Excel writes it.
-        spark() = XML.Element("ext",
-            XML.Element("x14:sparklineGroups",
-                XML.Element("x14:sparklineGroup",
-                    XML.Element("x14:colorSeries"; rgb="FF376092"),
-                    XML.Element("x14:sparklines",
-                        XML.Element("x14:sparkline", XML.Element("xm:f", XML.Text("Sheet1!A1:A3")), XML.Element("xm:sqref", XML.Text("C1")))));
-                var"xmlns:xm"="http://schemas.microsoft.com/office/excel/2006/main");
-            uri="{05C60535-1F16-4fd2-B633-F4F36F0B64E0}", var"xmlns:x14"="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main")
-        wsroot(xf) = XLSX.xml_root_element(XLSX.xmlroot(XLSX.get_workbook(xf), xf[1].relationship_id))
-        extlst(xf) = only(c for c in XLSX.xml_elements(wsroot(xf)) if XLSX.localname(c) == "extLst")
-        exts(xf) = XLSX.xml_elements(extlst(xf))
-        sqrefs(e) = [XML.simple_value(s) for b in XLSX.xml_elements(e) for c in XLSX.xml_elements(b) for s in XLSX.xml_elements(c) if XLSX.localname(s) == "sqref"]
-
-        # No conditional-format ext yet: one is added after the sparkline ext.
-        xf = XLSX.newxlsx()
-        xf[1]["A1:B3"] = 1
-        push!(wsroot(xf), XML.Element("extLst", spark()))
-        XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
-        e = exts(xf)
-        @test length(e) == 2
-        @test isempty(sqrefs(e[1]))
-        @test e[2]["uri"] == XLSX.X14_CF_EXT_URI && sqrefs(e[2]) == ["A1:A3"]
-
-        # Sparkline ext ahead of an existing conditional-format ext.
-        xf = XLSX.newxlsx()
-        xf[1]["A1:B3"] = 1
-        XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
-        pushfirst!(extlst(xf), spark())
-        XLSX.setConditionalFormat(xf[1], "B1:B3", :dataBar)
-        XLSX.setConditionalFormat(xf[1], "A1:A3", :iconSet; iconset="3Stars")
-        e = exts(xf)
-        @test length(e) == 2 && isempty(sqrefs(e[1]))
-        @test sqrefs(e[2]) == ["A1:A3", "B1:B3"]
-        ids = [r["id"] for b in XLSX._extcfs_in(XLSX.xmlroot(XLSX.get_workbook(xf), xf[1].relationship_id)) for r in XLSX.xml_elements(b) if XLSX.localname(r) == "cfRule"]
-        @test length(ids) == 3 && allunique(ids)
-        @test XLSX._x14_cf_ids(xf[1]) == Set(ids)
-        XLSX.clearConditionalFormats(xf[1], "A1:B3")
-        @test isempty(XLSX.getConditionalFormats(xf[1]))
-        @test isnothing(XLSX._x14_cf_block(XLSX.xmlroot(XLSX.get_workbook(xf), xf[1].relationship_id)))   # no empty block left
-        @test length(exts(xf)) == 2   # the sparkline ext is untouched
-        SAVE_FILES && save_outfile(xf)
-    end
-    @testset "clearing every x14 rule leaves no empty conditionalFormattings" begin
-        # Excel refuses to open a file with an empty `<x14:conditionalFormattings/>`.
-        xf = XLSX.newxlsx()
-        xf[1]["A1:B3"] = 1
-        XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
-        XLSX.setConditionalFormat(xf[1], "B1:B3", :dataBar)
-        XLSX.clearConditionalFormats(xf[1], "A1:A3")
-        @test !isnothing(XLSX._x14_cf_block(XLSX.xmlroot(XLSX.get_workbook(xf), xf[1].relationship_id)))   # B1:B3 remains
-        XLSX.clearConditionalFormats(xf[1], "B1:B3")
-        XLSX.writexlsx("cleared.xlsx", xf; overwrite=true)
-        SAVE_FILES && save_outfile("cleared.xlsx")
-        sheet = String(XLSX.ZipArchives.zip_readentry(XLSX.ZipArchives.ZipReader(read("cleared.xlsx")), "xl/worksheets/sheet1.xml"))
-        @test !occursin("conditionalFormattings", sheet)
-        @test isempty(XLSX.getConditionalFormats(XLSX.readxlsx("cleared.xlsx")[1]))
-        rm("cleared.xlsx")
-    end
-    @testset "x14 rule ids stay unique, and deterministic, after reopening" begin
-        cfids(f) = [m[1] for m in eachmatch(r"<x14:cfRule [^>]*id=\"(\{[^\"]+\})\"",
-                    String(XLSX.ZipArchives.zip_readentry(XLSX.ZipArchives.ZipReader(read(f)), "xl/worksheets/sheet1.xml")))]
-        xf = XLSX.newxlsx()
-        xf[1]["A1:B3"] = 1
-        XLSX.setConditionalFormat(xf[1], "A1:A3", :dataBar)
-        XLSX.setConditionalFormat(xf[1], "A1:A3", :iconSet; iconset="3Stars")
-        XLSX.writexlsx("ids.xlsx", xf; overwrite=true)
-        for out in ("ids2.xlsx", "ids3.xlsx")
-            xf = XLSX.openxlsx("ids.xlsx"; mode="rw")
-            XLSX.setConditionalFormat(xf[1], "B1:B3", :dataBar)
-            XLSX.setConditionalFormat(xf[1], "B1:B3", :iconSet; iconset="3Stars")
-            XLSX.writexlsx(out, xf; overwrite=true)
+        for r in 1:10, c in 1:6
+            s[r, c] = r * c - 20
         end
-        SAVE_FILES && save_outfile("ids2.xlsx")
-        @test length(cfids("ids2.xlsx")) == 4 && allunique(cfids("ids2.xlsx"))
-        @test cfids("ids2.xlsx") == cfids("ids3.xlsx")   # same steps, same ids
-        foreach(rm, ("ids.xlsx", "ids2.xlsx", "ids3.xlsx"))
+
+        XLSX.setConditionalFormat(s, "A1:A10", :colorScale;
+            min_type="min", min_col=:coral,
+            mid_type="percentile", mid_val="50", mid_col=XLSX.SchemeColor(:accent1; lumMod=60, lumOff=40),
+            max_type="max", max_col=colorant"seagreen")
+        XLSX.setConditionalFormat(s, "B1:B10", :dataBar;
+            fill_col=XLSX.SchemeColor(:accent2), border_col=:accent3,
+            neg_fill_col=colorant"red", neg_border_col="tx2", axis_col=:black)
+        XLSX.setConditionalFormat(s, "C1:C10", :cellIs; operator="greaterThan", value="0",
+            font=["color" => :accent4, "bold" => "true"],
+            fill=["pattern" => "solid", "bgColor" => XLSX.SchemeColor(:accent5; lumMod=75)],
+            border=["style" => "thin", "color" => colorant"blue"])
+        XLSX.setConditionalFormat(s, "D1:D10", :cellIs; operator="lessThan", value="0",
+            font=["color" => "red"])      # all-String pairs still work
+        XLSX.setColoredDataBars(s, "E1:E10"; bands=2, colors=[:accent1, XLSX.SchemeColor(:accent6)])
+        XLSX.setColoredDataBars(s, "F1:F10"; bands=3, colors=[:green, colorant"red"])
+
+        io = IOBuffer()
+        XLSX.writexlsx(io, xf)
+        zr = ZipArchives.ZipReader(take!(io))
+        sheet  = ZipArchives.zip_readentry(zr, "xl/worksheets/sheet1.xml", String)
+        styles = ZipArchives.zip_readentry(zr, "xl/styles.xml", String)
+
+        # color scale
+        @test occursin(r"<color rgb=\"FFFF7F50\"/>\s*<color theme=\"4\" tint=\"0.4\"/>\s*<color rgb=\"FF2E8B57\"/>", sheet)
+        # data bar, main and x14 parts
+        @test occursin("<color theme=\"5\"/>", sheet)
+        @test occursin("<x14:borderColor theme=\"6\"/>", sheet)
+        @test occursin("<x14:negativeFillColor rgb=\"FFFF0000\"/>", sheet)
+        @test occursin("<x14:negativeBorderColor theme=\"3\"/>", sheet)
+        @test occursin("<x14:axisColor rgb=\"FF000000\"/>", sheet)
+        # dxf font, fill and border
+        @test occursin("<color theme=\"7\"/>", styles)
+        @test occursin("<bgColor theme=\"8\" tint=\"-0.25\"/>", styles)
+        @test occursin("<color rgb=\"FF0000FF\"/>", styles)
+        @test occursin("<color rgb=\"FFFF0000\"/>", styles)
+        # colored data bars: one theme color per band
+        @test occursin("<color theme=\"4\"/>", sheet) && occursin("<color theme=\"9\"/>", sheet)
+
+        # Errors
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A10", :colorScale; min_col="notacolor")
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A10", :colorScale;
+            min_col=XLSX.SchemeColor(:accent1; shade=50))
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "C1:C10", :cellIs; operator="greaterThan", value="0",
+            font=["color" => 42])
+        # theme colors cannot be interpolated between
+        @test_throws XLSX.XLSXError XLSX.setColoredDataBars(s, "E1:E10"; bands=3, colors=[:accent1, :red])
+        @test XLSX._band_colors([:accent1, colorant"red"], 2) == [:accent1, "FFFF0000"]
+        SAVE_FILES && save_outfile(xf)
     end
-    @testset "first rule added to an existing range of a reopened file is kept" begin
-        # The sheet is still a raw string on reopening, so `allCfs` parses a throwaway copy;
-        # the new rule must go into the live tree.
+
+    # Thresholds are checked by one helper; the icon set's own copies had drifted.
+    @testset "icon set thresholds are checked like every other" begin
         xf = XLSX.newxlsx()
-        xf[1]["A1:A3"] = 1
-        XLSX.setConditionalFormat(xf[1], "A1:A3", :cellIs)
-        XLSX.writexlsx("reopen_cf.xlsx", xf; overwrite=true)
-        xf = XLSX.openxlsx("reopen_cf.xlsx"; mode="rw")
-        XLSX.setConditionalFormat(xf[1], "A1:A3", :cellIs)
-        @test length(XLSX.getConditionalFormats(xf[1])) == 2
-        XLSX.writexlsx("reopen_cf.xlsx", xf; overwrite=true)
-        SAVE_FILES && save_outfile("reopen_cf.xlsx")
-        @test length(XLSX.getConditionalFormats(XLSX.readxlsx("reopen_cf.xlsx")[1])) == 2
-        rm("reopen_cf.xlsx")
+        s = xf[1]
+        s["A1:A5"] = collect(1:5)
+        msg(f) = try f(); "" catch e; sprint(showerror, e) end
+
+        # `mid_val` was accepted whatever it held
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A5", :iconSet; iconset="4Arrows",
+            min_type="num", min_val="1", mid_type="num", mid_val="notanumber", max_type="num", max_val="5")
+        # `mid2_*` errors named the wrong keyword
+        @test occursin("mid2_type", msg(() -> XLSX.setConditionalFormat(s, "A1:A5", :iconSet; iconset="5Arrows", mid2_type="bogus")))
+        @test occursin("mid2_val", msg(() -> XLSX.setConditionalFormat(s, "A1:A5", :iconSet; iconset="5Arrows",
+            mid2_type="num", mid2_val="notanumber")))
+
+        # `reverse` reversed the caller's own `icon_list`
+        icons = [1, 2, 3]
+        XLSX.setConditionalFormat(s, "A1:A5", :iconSet; iconset="Custom", reverse="true",
+            min_type="num", min_val="1", max_type="num", max_val="5", icon_list=icons)
+        @test icons == [1, 2, 3]
     end
+
+    # The rule-based setters read their keywords the same way.
+    @testset "rule keywords take strings or Symbols" begin
+        xf = XLSX.newxlsx()
+        s = xf[1]
+        s["A1:A5"] = collect(1:5)
+        XLSX.setConditionalFormat(s, "A1:A5", :cellIs; operator=:between, value="2", value2="4")
+        XLSX.setConditionalFormat(s, "A1:A5", :top10; operator=:bottomN, value="2")
+        @test length(XLSX.getConditionalFormats(s)) == 2
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A5", :cellIs; value=3)
+        @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A5", :timePeriod; operator=7)
+    end
+
+    @testset "every setCf* setter accepts the same target forms" begin
+        targets(f) = Set(Base.tuple_type_tail(m.sig) for m in methods(f))
+        for f in (XLSX.setCfContainsText, XLSX.setCfTop10, XLSX.setCfAboveAverage, XLSX.setCfTimePeriod,
+                  XLSX.setCfContainsBlankErrorUniqDup, XLSX.setCfFormula, XLSX.setCfColorScale,
+                  XLSX.setCfIconSet, XLSX.setCfDataBar)
+            @test targets(f) == targets(XLSX.setCfCellIs)
+        end
+    end
+end
+
+@testset "review fixes: dxf fonts and text rules" begin
+    f = XLSX.newxlsx(); s = f[1]; s["A1:A3"] = 1
+    XLSX.setConditionalFormat(s, "A1:A3", :cellIs; value="0", font=["bold"=>"true", "italic"=>"true", "under"=>"double"])
+    xroot = XLSX.styles_xmlroot(f.workbook)
+    i, j = XLSX.get_idces(xroot, "styleSheet", "dxfs")
+    font = XLSX.first_element_with_tag(last(XLSX.xml_elements(xroot[i][j])), "font")
+    @test Set((XLSX.localname(n), XLSX.get_attr(n, "val")) for n in XLSX.xml_elements(font)) == Set([("b", ""), ("i", ""), ("u", "double")])
+    @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "A1:A3", :cellIs; value="0", font=["under"=>"wavy"])
+
+    s["B1:B3"] = "x"
+    XLSX.setConditionalFormat(s, "B1:B3", :containsText; value="say \"hi\"")
+    XLSX.setConditionalFormat(s, "B1:B3", :beginsWith; value="\$C\$1")
+    rules = [r for cf in XLSX.allCfs(s) for r in XLSX.xml_elements(cf) if cf["sqref"] == "B1:B3"]
+    formulas = [XLSX.child_text(r, "formula") for r in rules]
+    @test "NOT(ISERROR(SEARCH(\"say \"\"hi\"\"\",B1)))" in formulas
+    @test "LEFT(B1,LEN(\$C\$1))=\$C\$1" in formulas
+
+    # the type alone chooses the rule; a conflicting operator is refused
+    s["C1:C3"] = "x"
+    XLSX.setConditionalFormat(s, "C1:C3", :endsWith; value="z")
+    rule = only(r for cf in XLSX.allCfs(s) for r in XLSX.xml_elements(cf) if cf["sqref"] == "C1:C3")
+    @test rule["type"] == "endsWith"
+    @test_throws XLSX.XLSXError XLSX.setConditionalFormat(s, "C1:C3", :endsWith; value="z", operator="beginsWith")
+    SAVE_FILES && save_outfile(f)
 end

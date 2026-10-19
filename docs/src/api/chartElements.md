@@ -13,8 +13,10 @@ getAxisPartner
 getAxisShapeProps
 getAxisTextProps
 getAxisGridlines
+getAxisTitle
 getAxisTitleText
 getAxisTitleRef
+getAxisTitleRange
 getAxisTitleTextProps
 setAxisTitleText
 setAxisTitleTextProp

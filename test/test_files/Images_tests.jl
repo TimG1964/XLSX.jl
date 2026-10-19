@@ -30,6 +30,13 @@
         @test startswith(info.media_name, "image")
         @test xf.binary_data["xl/media/" * info.media_name] == bytes
         @test haskey(xf.data, "xl/drawings/drawing1.xml")
+
+        # A writable buffer is left unchanged
+        buf = IOBuffer(); write(buf, bytes); pos = position(buf)
+        info2 = XLSX.addImage(s, "H2", buf)
+        @test xf.binary_data["xl/media/" * info2.media_name] == bytes
+        @test position(buf) == pos
+        @test take!(buf) == bytes
         SAVE_FILES && save_outfile(xf)
     end
 
@@ -180,11 +187,19 @@
         @test imgs2[1].sheet == "Sheet1"
         isfile(tmp) && rm(tmp)
     end
-    @testset "prefixed attribute lookup" begin
-        blip = parse("""<a:blip xmlns:rel="$(XLSX.NS_R)" rel:embed="rId7" cstate="print"/>""", XML.Node)[end]
-        @test XLSX.get_prefixed_attr(blip, "embed") == "rId7"
-        @test XLSX.get_prefixed_attr(blip, "cstate") === nothing   # unprefixed: skipped by design
-        @test XLSX.get_prefixed_attr(blip, "id") === nothing
-    end
     
+end
+
+@testset "review fixes: a new image never reuses a taken media name" begin
+    png = read(joinpath(data_directory, "track_start.png"))
+    jpg = read(joinpath(data_directory, "track_start.jpg"))
+    f = XLSX.newxlsx("S1"); s2 = XLSX.addsheet!(f, "S2")
+    XLSX.addImage(f[1], "A1", IOBuffer(png))                 # image1.png
+    i2 = XLSX.addImage(s2, "A1", IOBuffer(jpg))               # used by S2
+    XLSX.deletesheet!(f, "S1")                                 # image1.png goes
+    i3 = XLSX.addImage(s2, "D1", IOBuffer(png))
+    @test i3.media_name != i2.media_name
+    @test f.binary_data["xl/media/$(i2.media_name)"] == jpg
+    @test f.binary_data["xl/media/$(i3.media_name)"] == png
+    SAVE_FILES && save_outfile(f)
 end

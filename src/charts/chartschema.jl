@@ -169,7 +169,7 @@ const CHILD_ORDER = Dict{Tuple{String,String},Vector{Union{String,Vector{String}
     # above: the four cx element names shared by two complex types (title,
     # visibility, lvl, pt) have identical child orders in both. cx:spPr, cx:txPr
     # and cx:rich are DrawingML types and use the NS_A entries.
-    # Omitted: region-map geography, value colours and print settings.
+    # Omitted: region-map geography, value colors and print settings.
     (NS_CX, "chartSpace")     => ["chartData","chart","spPr","txPr","clrMapOvr","fmtOvrs",
                                   "printSettings","extLst"],
     (NS_CX, "chartData")      => ["externalData","data","extLst"],
@@ -487,8 +487,11 @@ function _slot(order, tag::AbstractString)
     return nothing
 end
 
+# Where a child in slot `pos` goes among `kids`. Only elements have a slot: the
+# whitespace text an indented part carries between them is passed over.
 function _schema_position(order, kids, pos::Integer)
     for (i, k) in enumerate(kids)
+        XML.nodetype(k) == XML.Element || continue
         p = _slot(order, localname(k))
         isnothing(p) && continue
         p > pos && return i

@@ -101,4 +101,12 @@ end # module ChartImportCheck
     @test isempty(unseen)
     # Visible in Charts but a different object from XLSX's.
     @test isempty(shadowed)
+
+    @testset "XLSX-level chart names" begin
+        for n in (:AbstractChart, :Chart, :ChartEx, :ChartRef, :ChartSeries,
+            :getChartSchema, :getChartType, :getCharts, :getChart, :getChartData, :getChartRanges)
+            @test getglobal(XLSX, n) === getglobal(XLSX.Charts, n)
+            VERSION >= v"1.11" && @test Base.ispublic(XLSX, n)
+        end
+    end
 end

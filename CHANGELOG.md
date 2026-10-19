@@ -6,6 +6,91 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [v0.13.2](https://github.com/JuliaData/XLSX.jl/tree/v0.13.2) - 2026-10-17
+
+This release is largely a bug fixing release. There are a lot of small changes, mainly addressing edge cases. Some of these introduce minor behaviour changes. There is quite a long list under the fold.
+
+<details>
+<summary>Consolidated maintainability and bug fixing changes</summary>
+
+- **Behavior change:** `openxlsx(f, source; mode="rw")` (and `mode="w"`) no longer writes `source` when the do block throws, so a failure part-way through cannot overwrite the original file with a half-edited workbook
+- **Behavior change:** defined names holding a formula (or any expression that is not a reference or constant) are now read with a leading `=`, as Excel's Name Manager shows them, e.g. `"=COUNTA(Sheet1!\$A:\$A)"`. A plain string is a text constant and is written quoted; it was written unquoted, so Excel read it as a formula, and a constant read from a file was written back as a reference to a name. Pass a string starting with `=` to `addDefinedName` to define a name by a formula
+- **Behavior change:** a negative number in a date-formatted cell is read as the number, rather than throwing and failing the read of the whole sheet
+- Shifted cell references in shared formulas are correct: `getFormula` on a shared-formula cell could return `=A2+A20` for `=A1+A10` shifted one row, and shifted function names such as `LOG10` and `ATAN2` as if they were references
+- `addImage` no longer empties a writable `IOBuffer` passed as the image. The buffer's contents and position are left as they were
+- `openxlsx(io; mode="rw") do … end` and `savexlsx` on a workbook opened from an `IO` now replace the `IO`'s content with the saved workbook. They previously threw an `ArgumentError` from ZipArchives, because the workbook was written after the bytes already read. An `IO` that can't be overwritten, such as a read-only `IOBuffer`, gives an `XLSXError`
+- Renaming a sheet no longer rewrites references to other sheets whose names contain it (renaming `Sheet1` turned `MySheet1!A1` into `MyData!A1` and lost that sheet's formulas). Deleting a sheet likewise no longer deletes or breaks formulas on such sheets, no longer throws when the deleted sheet has a shared formula, and replaces references to a sheet whose name contains characters such as `(` with `#REF!`
+- Hidden and very hidden sheets stay hidden when the workbook is saved
+- Writing a cell above or left of the sheet's range that is also below or right of it now extends the recorded dimension on every side, so `ws[:]` and the written `<dimension>` include it
+- Sheet names that start with a digit or look like a cell address (`2024`, `A1`) are quoted in the references XLSX.jl writes
+- A new custom number format takes an id not already in use, and an existing identical format is reused under its own id; ids were derived from positions, which collided or pointed at the wrong format when a file's custom ids were not contiguous from 164. `setFormat` accepts built-in format names in any case (`"percentage"`)
+- `addImage` no longer overwrites an image still in use after another sheet's images were deleted
+- `setColumnWidth` splits a column definition spanning several columns rather than writing an overlapping one, and writes column definitions in order; `getColumnWidth` reads a width from a spanning definition
+- `mergeCells` inserts `<mergeCells>` where the schema requires it (after `autoFilter`, `sheetProtection` and the like)
+- Conditional formats with `font=["bold"=>"true"]` or `["italic"=>"true"]` make text bold or italic; they wrote `val="0"`, which turns it off. `"under"` writes the requested underline (`single` or `double`) and rejects other values
+- `setConditionalFormat(…, :notContainsText / :beginsWith / :endsWith; …)` makes the rule named; all three made a `containsText` rule. A text rule's `value` may contain `"`, and a cell reference is used as one, as documented
+- Overwriting the first cell of a shared formula at least three columns wide and two rows high no longer throws a `KeyError`, and leaves the other cells' cached values unchanged
+- `copysheet!` points the copy's sheet-scoped defined names at the copy (a non-contiguous one threw), and gives formulas set on the copy shared-formula ids of their own
+- **Behavior change:** `deletesheet!` keeps defined names that refer to the deleted sheet with the value `"=#REF!"`, as Excel does. Workbook-scoped ones were deleted, and ones scoped to other sheets were left pointing at a sheet that no longer exists
+- `setFormula` no longer throws for a two-argument `IF` or an `OFFSET` whose size is not a literal number; a `GROUPBY` or `PIVOTBY` call inside a longer formula keeps the rest of the formula; `raw` and `spill` apply to every cell of a range
+- Worksheet parts not named `sheetN.xml` (e.g. `Sheet1.xml`, as some tools write) can be read and written
+- A single-run `RichTextString` with no attributes, `:under => true` or a fractional `:size` can be written to a cell; `setFont` takes a fractional `size`. `getRichTextString` reads fractional sizes and `<b val="0"/>` / `<u val="none"/>` as off, and `setFont` no longer turns an explicit `<b val="0"/>` into bold
+- Slicing a `RichTextString` uses the indices of its text, as for a `String`, so non-ASCII text slices correctly. Equal `RichTextRun`s hash equally
+- `resolveColor` resolves `indexed="64"` and `"65"` (system foreground and background colors)
+- Datetimes that round up to midnight move to the next day rather than back to the start of the same day
+- Defined names that are cell addresses in lower case (`a1`) are refused, as Excel refuses them; sheet, table and table column names are compared ignoring case, as Excel does
+- Totals-row formulas escape table column names containing `[`, `]`, `#` or `'`
+- **Behavior change:** an unrecognized keyword argument to `setFont`, `setFill`, `setAlignment`, `setFormat`, `setBorder` or their `setUniform*` versions is an `XLSXError` naming the function, the keyword and the valid keywords, rather than a `MethodError`. `outside` given to `setBorder` for a single cell, or to `setUniformBorder`, is likewise an `XLSXError`
+- The formatting setters (`setFont`, `setFill`, `setAlignment`, `setFormat`, `setBorder` and their `setUniform*` versions) compile once rather than again for each new combination of keywords, so a first call with keywords not used before takes tens of milliseconds rather than about half a second
+- The precompile workload covers the common read and write paths (`writetable`, editing and saving a file, `readtable`, `readxlsx`, `eachrow`, `readdata`, Excel Tables, cell formatting), for file names as well as `IO`, so their first call in a session is much faster (about 1 s in all rather than about 5.5 s). It no longer precompiles conditional formats. Set the PrecompileTools preference `precompile_workload = false` to turn it off
+- Faster: `getFormula` on shared-formula cells no longer re-reads the whole sheet for each call; reading an Excel Table without the cache reads the sheet once rather than once per cell; writing strings skips the illegal-character pass for clean text; filling each sheet's cache no longer scans every formula in the workbook
+- Reading a workbook on several threads no longer reads and writes the style lookup tables at the same time
+- An empty or truncated file, or a sheet index beyond the last sheet, gives an `XLSXError` rather than a `BoundsError`. A misnamed column of an Excel Table row gives an `XLSXError`
+- `partition` with `breaks` excludes `Inf` and booleans, as documented
+- The rule-based conditional formats (`:cellIs`, `:containsText`, `:top10`, `:aboveAverage`, `:timePeriod`, `:expression` and the blanks, errors, unique and duplicate rules) accept a Symbol for any string keyword, as `:containsText` already did, and a value of another type gives an `XLSXError` rather than a `MethodError`. An invalid `operator` no longer adds an unused format to the workbook's styles before the error
+- `ws[row, col] = v` with a vector `v` now writes it across from that cell, as `ws["B2"] = v` does. Most other two-index vector assignments, such as `ws[1:2, 1:2] = v` or `ws[1, [1, 3]] = v`, threw an "ambiguous" `MethodError`; they now throw an `XLSXError` saying a vector is written along one row or column, or across from one cell
+- Removed `getGapWidth`, `setGapWidth`, `getOverlap` and `setOverlap` from the `XLSX.Charts` export list. They were never defined: the functions are `getGroupGapWidth`, `setGroupGapWidth`, `getGroupOverlap` and `setGroupOverlap`
+- `SheetCellRef`, `TableStyleInfo` and `Workbook` now have docstrings
+- `setConditionalFormat(...; :iconSet)` now rejects an invalid `mid_val` (one that is neither a number nor a fixed cell reference, unless `mid_type="formula"`), as it does every other threshold value; any `mid_val` was previously accepted. Errors for `mid2_type` and `mid2_val` now name those keywords rather than `mid_type` and `mid2_type`
+- `setConditionalFormat(...; :iconSet, iconset="Custom", reverse="true")` no longer reverses the caller's `icon_list` vector in place
+- Errors that said only "Something wrong here!" now say what is wrong, e.g. which part of a malformed file is unexpected. A file part that fails to parse now reports the parser's own error alongside the part's name, and failing to save back to a source `IO` says why. Interrupting (Ctrl-C) while a file is read or saved is no longer reported as a parse or save error
+- Rich-text cells now take `vertAlign` like any other font property: `setFont(...; vertAlign)` removes the runs' own superscript/subscript so the cell's shows, where it previously had no effect on those runs, and `setUniformFont(...; vertAlign)` no longer throws a `MethodError`
+- `setUniformStyle` over rich-text cells no longer throws when the first cell's font has `vertAlign`, a fractional size, or font details that Excel writes but XLSX.jl can't set (such as the font family and scheme)
+- Formatting a rich-text cell keeps the run properties XLSX.jl can't set but which files written by Excel or other tools may contain (such as a character set or outline). Every run property not on a fixed list was previously dropped
+- `setUniformAlignment(ws, :, cols)` with a vector or step range of columns aligned every column of the sheet rather than only `cols`
+- Errors for an operation on a file that isn't writable, or whose cell cache isn't enabled, now share one wording that names the operation and says how to open the file (`mode="rw"` or `enable_cache=true`)
+- `copysheet!` gives the copy its own cells. The copy shared the original's cell cache, so a value, format, row height or formula set on either sheet also appeared in the other, and a formula set on the copy left the original with a cell that `getFormula` couldn't read
+- `getdata` (and `ws[range]`) over a range of a writable sheet whose rows were written out of order could return wrong values, or write outside its result and corrupt memory, crashing Julia later in the garbage collector. The written rows are now sorted before the range is read
+- `setUniformFont`, `setUniformBorder`, `setUniformFill`, `setUniformAlignment` and `setUniformFormat` given a whole row or column as `(ws, row, :)` or `(ws, :, col)` now apply one attribute to every cell, as the other target forms do. They previously applied the per-cell setter (`setFont` etc.), so cells that started with different formatting kept their differences
+- Chart titles, axis titles and data labels set from a `RichTextString` keep each run's formatting (bold, italic, underline, strikethrough, superscript/subscript, size, font and color), with newlines handled as for plain strings. Previously this threw an `ArgumentError`. `addChart(...; title = rt)` keeps the run formatting on top of the new title's own
+- On Julia 1.11+, the same chart text setters and `addChart`'s `title` keyword accept a StyledStrings `styled"…"` string, converted to a `RichTextString` as for cells (in the StyledStrings extension)
+- `setChartTitleText` and `setAxisTitleText` accept a `CellRef` or `SheetCellRef`, binding the title to that cell (`c:tx/c:strRef`, with the cell's text cached). `addChart`'s `title` keyword accepts the same. A bound title has one style, so a typed title's formatting is moved into `c:txPr` and a rich-text cell lends the formatting its runs share; per-run formatting can't be kept, as Excel's file format doesn't allow it
+- `ChartEx` titles: `setChartTitleText(c::ChartEx, …)` accepts a `RichTextString`, a styled string or a cell reference, and the new `setAxisTitleText(c::ChartEx, id, …)` sets an axis title's text the same ways. Run formatting is written to `cx:txPr`, which Excel renders; a newline now starts a new paragraph rather than being written inside one run. `addChartEx`'s `title` keyword accepts the same values
+- `addChart(...; title = "A\nB")` now writes one paragraph per line, as `setChartTitleText` does, rather than a newline inside one run
+- `addChart` and `addChartEx` resolve a cell-reference title before adding anything, so a bad reference leaves the workbook unchanged
+- `getRichTextString` returns `nothing` for an empty cell, as documented, rather than throwing a `FieldError`
+- Cell getters treat a cell outside the sheet's dimension as empty, as `ws[ref]` does, rather than throwing: `getFont`, `getBorder`, `getFill`, `getAlignment`, `getFormat`, `getRichTextString`, `getFormula` and `getMergedBaseCell` return `nothing`, and `isMergedCell` returns `false`. `getColumnWidth` and `getRowHeight` still throw, since a row or column beyond the dimension can't have a size
+- Fixed a missing space in `setLabelText`'s error for a deleted label, and a typo in the `RichTextRun` docstring
+- Title getters for both chart schemas: new `getAxisTitle` (plain text) and `getAxisTitleRange` (the resolved cell of a bound axis title) for `Chart` and `ChartEx`; `getAxisTitleRef` and `getChartTitleRef` now have `ChartEx` methods, and `getChartTitleRange` a `Chart` method
+- `addSeries` and cell-bound titles now write elements in the chart part's own namespace prefixes rather than assuming Excel's `c:` and `a:`; a new chart's anchor likewise takes the drawing part's prefixes
+- `addSeries(...; name_ref)` pointing at a number cell now writes the series name as a `c:strRef`; it wrote a `c:numRef`, which the schema doesn't allow there, and Excel refused to open the file
+- Chart setters work on a chart part indented with whitespace between elements, as some tools other than Excel write; they previously threw a `MethodError`
+- An empty `ChartEx` title, axis title or series name reads as `nothing`, as for a `c:` chart, rather than `""`
+- `getAxisTitleTextProps` now has a method for `c:` charts, `getAxisTitleTextProps(c::Chart, ax::ChartAxis)`, reading the axis title's `c:txPr`. It previously existed only for `ChartEx`
+- `SheetCellRef` is now exported
+- `addChart` no longer writes `lang="en-US"` on a typed title's run
+- Removed a duplicate `setAxisTitleText` from the `XLSX.Charts` export list
+- New `setLegendPos` and `setLegendOverlay` for `Chart` and `ChartEx`: place the legend at Excel's five positions (`:b`, `:t`, `:l`, `:r`, `:tr`, or `:bottom`, `:top`, `:left`, `:right`, `:topRight`), drawn over the plot area or beside it. Both create the legend if the chart has none. On a `Chart`, setting a position removes any manual legend layout, as Excel does. `getLegendPos` and `getLegendOverlay` now have `ChartEx` methods, reading `cx:legend`'s `pos`, `align` and `overlay`
+- Every chart color setter — `setSeriesFill`, the line and marker setters, and the text `:fill` and `:line` fields — accepts a theme color named as a String or Symbol (`"accent2"`, `:tx1`), as `addSeries(...; color)` already did. It is written as `a:schemeClr`, as `SchemeColor(:accent2)` is
+- `setLabelTextProp(c::ChartEx, …)` accepts Excel's field names `:font`, `:color`, `:underline` and `:strikethrough`, as the other text-property setters do; it threw an error
+- The text-property setters check `:under`, `:strike` and `:caps` values against the DrawingML vocabularies, and throw on any other word rather than writing a file Excel refuses to open. `:under` and `:strike` also take a `Bool`, and Excel's names `:single`/`:double` (and `:none` for `:strike`)
+- Chart setter docstrings state the values each argument and keyword accepts. The color values, line keywords and text-property fields are each listed in full once — at `setSeriesFill`, `setSeriesLine` and `setChartTitleTextProp` — and the `ChartEx` single-property line setters and `addSeries(c::ChartEx, …)` have docstrings. The Charts API page gains a Conventions section
+- Cell formatting (`setFont`, `setFill`, `setBorder`, their `Uniform` forms and `setOutsideBorder`), conditional formats (color scales, data bars, `setColoredDataBars` and the `font`/`fill`/`border` keywords) and `RichTextRun` colors accept every color form charts do: a hex or Colors.jl name as a String or Symbol, a Colors.jl `Colorant`, or a theme color (`"accent1"`, `:tx1` or a `SchemeColor`). A theme color is written as `<color theme="N" tint="t"/>`, so it follows the workbook's theme. Outside charts, a `SchemeColor` can be lightened or darkened (`lumMod`, or `lumMod` with `lumOff` adding to 100, as Excel's own palette does); other transforms throw. Existing String arguments behave as before. A new "Specifying colors" section in the formatting guide covers all of this
+- `SchemeColor` is now defined in `XLSX` (and is `public` there), and is the same type as `XLSX.Charts.SchemeColor`
+- A `RichTextRun` with an invalid `:color` now throws when it is created, not when it is written
+
+</details>
+
 ## [v0.13.1](https://github.com/JuliaData/XLSX.jl/tree/v0.13.1) - 2026-10-07
 
 - Fix [#462](https://github.com/JuliaData/XLSX.jl/issues/462) (Read-performance regression vs v0.10.4 on large worksheets)

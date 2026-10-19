@@ -62,7 +62,7 @@ export
     addsheet!, renamesheet!, copysheet!, deletesheet!,
     addImage,
     # Cells & data
-    CellRef, row_number, column_number, eachtablerow,
+    CellRef, SheetCellRef, row_number, column_number, eachtablerow,
     readdata, getdata, gettable, readtable, readto,
     iserror, geterror,
     gettransposedtable, readtransposedtable,
@@ -87,7 +87,7 @@ export
            getFormat, getFont, getBorder, getFill, getAlignment,
            DataTable, Table, TableStyleInfo, table, tables,
            getDefinedNames, getAllDefinedNames,
-           Workbook, XLSXError, 
+           Workbook, XLSXError, SchemeColor,
            CellErrorType, XL_NULL, XL_DIV0, XL_VALUE, XL_REF, 
            XL_NAME, XL_NUM, XL_NA, XL_SPILL
     """))
@@ -99,6 +99,7 @@ const EXCEL_MAX_COLS = 16_384           # total columns supported by Excel per s
 const EXCEL_MAX_ROWS = 1_048_576           # total rows supported by Excel per sheet (including headers)
 const ROW_CHUNKSIZE = 1_000           # number of rows to be processed in each thread
 
+include("scheme-color.jl") # must load before types.jl (`CellColor`)
 include("types.jl")
 include("xmlutil.jl")
 include("xlsx-colors.jl") # must load before sst.jl and cellformat-helpers.jl
@@ -115,11 +116,25 @@ include("workbook.jl")
 include("worksheet.jl")
 include("cell.jl")
 include("styles.jl")
-include("cellformat-helpers.jl") # must load before cellformats.jl
-include("cellformats.jl")
+include("cellformat-helpers.jl") # must load before cellformats/
+include("cellformats/font.jl")
+include("cellformats/border.jl")
+include("cellformats/fill.jl")
+include("cellformats/alignment.jl")
+include("cellformats/numberformat.jl")
+include("cellformats/uniformstyle.jl")
+include("cellformats/widthheight.jl")
+include("cellformats/mergedcells.jl")
 include("panes.jl")
-include("conditional-format-helpers.jl") # must load before conditional-formats.jl
-include("conditional-formats.jl")
+include("conditional-format-helpers.jl") # must load before conditionalformats/
+include("conditionalformats/presets.jl")
+include("conditionalformats/read.jl")
+include("conditionalformats/setconditionalformat.jl")
+include("conditionalformats/rules.jl")
+include("conditionalformats/colorscale.jl")
+include("conditionalformats/iconset.jl")
+include("conditionalformats/databar.jl")
+include("conditionalformats/clear.jl")
 include("images.jl")
 include("write.jl")
 include("fileArray.jl")
@@ -141,28 +156,93 @@ using .Charts: AbstractChart, Chart, ChartEx, ChartRef, ChartSeries,
     """))
 end
 
+# Writes one small workbook holding each common cell type, then reads it back through
+# every read path. Compile cost grows with the number of distinct methods and types
+# run, not with the number of cells, so the data stays tiny. Paths are exercised
+# with a file name (`String`) as well as an `IOBuffer`: the entry points specialize
+# on each. Niche features (charts, images, conditional formats) are left out — they
+# cost seconds of precompile time each, paid by every user.
+# Users can turn this off with the PrecompileTools preference `precompile_workload = false`.
 PCT.@setup_workload begin
     let
-        # Putting some things in `@setup_workload` instead of `@compile_workload` can reduce the size of the
-        # precompile file and potentially make loading faster.
-        s=IOBuffer()
-        t=IOBuffer()
-        PCT.@compile_workload begin
-            # all calls in this block will be precompiled, regardless of whether
-            # they belong to your package or not (on Julia 1.8 and higher)
-            f=openxlsx(joinpath(@__DIR__, "data", "blank.xlsx"), mode="rw")
-            f[1]["A1:Z26"] = "hello World"
-            openxlsx(s, mode="w") do xf
-                xf[1][1:26, 1:26] = pi
+        dir = mktempdir()
+        path = joinpath(dir, "precompile.xlsx")
+        io = IOBuffer()
+        nt = (i = [1, 2, 3], f = [1.5, 2.5, 3.5], s = ["a", "b", "c"], b = [true, false, true],
+              d = [Dates.Date(2024, 1, 1), Dates.Date(2024, 1, 2), Dates.Date(2024, 1, 3)],
+              dt = [Dates.DateTime(2024, 1, 1, 12), Dates.DateTime(2024, 1, 2, 12), Dates.DateTime(2024, 1, 3, 12)],
+              m = Union{Missing,Int}[1, missing, 3])
+        try
+            PCT.@compile_workload begin
+                # Writing
+                writetable(path, nt; overwrite=true)
+                writetable(path, "A" => nt, "B" => nt; overwrite=true)
+                xf = openxlsx(path, mode="rw")
+                sh = xf["A"]
+                # Cell assignment compiles once per value type and reference form.
+                vals = Any[1, 2.5, "x", true, Dates.Date(2024, 1, 1), Dates.DateTime(2024, 1, 1, 12), missing]
+                for (c, v) in enumerate(vals)
+                    sh[string("J", c)] = v
+                    sh[CellRef(2, 9 + c)] = v
+                    sh[3, 9 + c] = v
+                end
+                sh[5, :] = vals
+                sh["J6:K7"] = "y"
+                writetable!(addsheet!(xf, "C"), Any[nt.i, nt.s], [:i, :s])
+                setFont(sh, "A1"; bold=true, color="red")
+                setFill(sh, "A2"; pattern="solid", fgColor="yellow")
+                setAlignment(sh, "A3"; horizontal="center", wrapText=true)
+                setFormat(sh, "B2"; format="0.00")
+                setBorder(sh, "A1:C3"; allsides=["style" => "thin", "color" => "black"])
+                setBorder(sh, "A1:C3"; outside=["style" => "thick"])
+                # The formatting setters take their keywords as one spec (see `FontSpec`),
+                # so each call here covers every set of keywords that setter is given.
+                setUniformFont(sh, "A2:C3"; italic=true)
+                setUniformFill(sh, "A2:C3"; pattern="solid", fgColor="yellow")
+                setUniformAlignment(sh, "A2:C3"; horizontal="center")
+                setUniformFormat(sh, "B2:B3"; format="0.00")
+                setUniformBorder(sh, "A2:C3"; bottom=["style" => "thin"])
+                setColumnWidth(sh, 1; width=12)
+                mergeCells(sh, "J6:K7")
+                savexlsx(xf)
+                writexlsx(io, xf)
+                openxlsx(IOBuffer(), mode="w") do xf
+                    xf[1]["A1:B2"] = 1.5
+                end
+
+                # Reading
+                dt = readtable(path, 1)
+                Tables.columns(dt)
+                Tables.schema(dt)
+                readtable(path, "A", "A:C")
+                readtable(seekstart(io), 1)
+                xf = readxlsx(path)
+                sheetnames(xf)
+                sh = xf["A"]
+                sh["A1:C4"]
+                getdata(sh)
+                sh[2, 1]
+                getcell(sh, "B2")
+                openxlsx(path) do xf
+                    gettable(xf[1])
+                    for r in eachtablerow(xf[1])
+                        r[1]
+                    end
+                end
+                openxlsx(path; enable_cache=false) do xf
+                    for r in eachrow(xf[1])
+                        r[1]
+                    end
+                end
+                readdata(path, 1, "A1:C3")
+                readdata(path, "A!A1:B2")
+
+                # Excel Tables
+                writetable(path, nt; overwrite=true, as_table=true, table_name="T")
+                readtable(path, 1; table_name="T")
             end
-            _ = readtable(seekstart(s), 1, "A:Z")
-            f = openxlsx(seekstart(s), mode="rw")
-            f[1][1:26, 1:26] = pi
-            setConditionalFormat(f[1], :, :cellIs)
-            setConditionalFormat(f[1], "A1:Z26", :colorScale)
-            setBorder(f[1], collect(1:26), 1:26, allsides=["style"=>"thin", "color"=>"black"])
-            _ = getdata(f[1], "A1:A20")
-            writexlsx(t, f)
+        finally
+            rm(dir; recursive=true, force=true)
         end
     end
 end

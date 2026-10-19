@@ -670,6 +670,58 @@ const _TABLE_KWARGS = """
 """
 
 
+# Keyword documentation shared by `gettable` and `readtable`, which find and read a
+# table the same way. Interpolated into both docstrings so the two can't drift apart.
+const TABLE_READ_KEYWORDS_DOC = """
+Use `first_row` to indicate the first row of the table.
+`first_row=5` will look for a table starting at sheet row `5`.
+If `first_row` is not given, the algorithm will look for the first
+non-empty row in the spreadsheet.
+
+`header` is a `Bool` indicating if the first row is a header.
+If `header=true` and `column_labels` is not specified, the column labels
+for the table will be read from the first row of the table.
+If `header=false` and `column_labels` is not specified, the algorithm
+will generate column labels. The default value is `header=true`.
+
+Use `column_labels` to specify names for the header of the table, as a vector
+of `Symbol`s or strings.
+
+Use `normalizenames=true` to normalize column names to valid Julia identifiers.
+
+Use `missing_strings` to specify strings that should be interpreted as
+`missing` values in the resulting table. `missing_strings` can be a single
+string (e.g. `"N/A"`) or a vector of strings (e.g. `["N/A", "NULL"]`).
+The default value is `missing_strings=nothing`.
+
+Use `infer_eltypes=true` to get `data` as a `Vector{Any}` of typed vectors.
+The default value is `infer_eltypes=true`.
+
+`stop_in_empty_row` is a boolean indicating whether an empty row marks the
+end of the table. If `stop_in_empty_row=false`, the `TableRowIterator` will
+continue to fetch rows until there's no more rows in the Worksheet or range.
+The default behavior is `stop_in_empty_row=true`.
+
+`stop_in_row_function` is a Function that receives a `TableRow` and returns
+a `Bool` indicating if the end of the table was reached. For example:
+
+```julia
+function stop_function(r)
+    v = r[:col_label]
+    return !ismissing(v) && v == "unwanted value"
+end
+```
+
+`keep_empty_rows` determines whether rows where all column values are equal
+to `missing` are kept (`true`) or dropped (`false`) from the resulting table.
+`keep_empty_rows` never affects the *bounds* of the table; the number of
+rows read from a sheet is only affected by `first_row`, `stop_in_empty_row`
+and `stop_in_row_function` (if specified).
+`keep_empty_rows` is only checked once the first and last row of the table
+have been determined, to see whether to keep or drop empty rows between the
+first and the last row.
+The default behavior is `keep_empty_rows=false`."""
+
 """
     gettable(
         sheet,
@@ -694,46 +746,7 @@ For example, `"B:D"` will select columns `B`, `C` and `D`.
 If `columns` is not given, the algorithm will find the first sequence
 of consecutive non-empty cells.
 
-Use `first_row` to indicate the first row from the table.
-`first_row=5` will look for a table starting at sheet row `5`.
-If `first_row` is not given, the algorithm will look for the first
-non-empty row in the spreadsheet.
-
-`header` is a `Bool` indicating if the first row is a header.
-If `header=true` and `column_labels` is not specified, the column labels
-for the table will be read from the first row of the table.
-If `header=false` and `column_labels` is not specified, the algorithm
-will generate column labels. The default value is `header=true`.
-
-Use `column_labels` as a vector of symbols to specify names for the header of the table.
-
-Use `normalizenames=true` to normalize column names to valid Julia identifiers.
-
-Use `missing_strings` to specify strings that should be interpreted as `missing` 
-values in the resulting table. `missing_strings` can be a single string or a 
-vector of strings. The default value is `missing_strings=nothing`.
-
-Use `infer_eltypes=true` to get `data` as a `Vector{Any}` of typed vectors.
-The default value is `infer_eltypes=true`.
-
-`stop_in_empty_row` is a boolean indicating whether an empty row marks the end of the table.
-If `stop_in_empty_row=false`, the `TableRowIterator` will continue to fetch rows until there's no more rows in the Worksheet.
-The default behavior is `stop_in_empty_row=true`.
-
-`stop_in_row_function` is a Function that receives a `TableRow` and returns a `Bool` indicating if the end of the table was reached.
-
-# Example for `stop_in_row_function`
-
-```julia
-function stop_function(r)
-    v = r[:col_label]
-    return !ismissing(v) && v == "unwanted value"
-end
-```
-
-`keep_empty_rows` determines whether rows where all column values are equal to `missing` are kept (`true`) or dropped (`false`) from the resulting table.
-`keep_empty_rows` never affects the *bounds* of the table; the number of rows read from a sheet is only affected by `first_row`, `stop_in_empty_row` and `stop_in_row_function` (if specified).
-`keep_empty_rows` is only checked once the first and last row of the table have been determined, to see whether to keep or drop empty rows between the first and the last row.
+$TABLE_READ_KEYWORDS_DOC
 
 # Example
 
@@ -1535,29 +1548,29 @@ function addtable!(sheet::Worksheet, ref::CellRange;
                     has_totals_row::Bool=false)::Table
 
     xf = get_xlsxfile(sheet)
-    !is_writable(xf) && throw(XLSXError("XLSXFile instance is not writable. Open Excel file with `mode=\"rw\"` instead"))
+    _require_writable(xf, "add a table")
     wb = get_workbook(sheet)
 
-    # --- name uniqueness (unchanged) ---
+    # --- name uniqueness: Excel compares table names case-insensitively ---
     existing_names = Set{String}()
     for ws in wb.sheets
         is_chartsheet(wb, ws.name) && continue
         for t in tables(ws)
-            push!(existing_names, t.name)
+            push!(existing_names, uppercase(t.name))
         end
     end
 
     if name == ""
         i = 1
         candidate = "Table$i"
-        while candidate ∈ existing_names ||
+        while uppercase(candidate) ∈ existing_names ||
               is_workbook_defined_name(wb, candidate) || is_worksheet_defined_name(sheet, candidate)
             i += 1
             candidate = "Table$i"
         end
         name = candidate
     else
-        name ∈ existing_names && throw(XLSXError("Table name `$name` is already in use."))
+        uppercase(name) ∈ existing_names && throw(XLSXError("Table name `$name` is already in use."))
         (is_workbook_defined_name(wb, name) || is_worksheet_defined_name(sheet, name)) &&
             throw(XLSXError("Table name `$name` collides with an existing defined name."))
     end
@@ -1580,7 +1593,7 @@ function addtable!(sheet::Worksheet, ref::CellRange;
             throw(XLSXError("Table header cell $(CellRef(header_row, c)) is empty; every column needs a header value before calling `addtable!`."))
         push!(columns, string(v))
     end
-    length(unique(columns)) != length(columns) &&
+    length(unique(uppercase.(columns))) != length(columns) &&   # case-insensitive, as in Excel
         throw(XLSXError("Table header row contains duplicate column names."))
 
     # --- totals row: last row of `ref`, when requested, which must be empty —
@@ -1664,6 +1677,11 @@ function _check_table_overlap(sheet::Worksheet, ref::CellRange, name::AbstractSt
     return nothing
 end
 
+# `Table[Column]` as a formula writes it: `[`, `]`, `#` and `'` in a column name are
+# escaped with `'`, so `Price [USD]` gives `Sales[Price '[USD']]`.
+_structured_ref(table::AbstractString, column::AbstractString) =
+    table * "[" * replace(column, r"(['\[\]#])" => s"'\1") * "]"
+
 """
     deletetable!(t::Table)
     deletetable!(sheet::Worksheet, name::AbstractString)
@@ -1707,7 +1725,7 @@ function _deletetable!(t::Table)
     sheet = t.sheet
     name = t.name
     xf = get_xlsxfile(sheet)
-    !is_writable(xf) && throw(XLSXError("XLSXFile instance is not writable. Open Excel file with `mode=\"rw\"` instead"))
+    _require_writable(xf, "delete a table")
 
     t=table(sheet, name)  # throws KeyError if not found — fail fast
 
@@ -1741,7 +1759,7 @@ function _deletetable!(t::Table)
             for (j, other) in enumerate(t.columns)
                 other_letter = encode_column_number(col0 + j - 1)
                 other_range = "$(qsheet)!\$$(other_letter)\$$(first_data):\$$(other_letter)\$$(last_data)"
-                new_f = replace(new_f, "$(name)[$(other)]" => other_range)
+                new_f = replace(new_f, _structured_ref(name, other) => other_range)
             end
 
             setFormula(sheet, cell_ref; val=lstrip(new_f, '='))
@@ -1882,7 +1900,7 @@ function _settotals!(t::Table, settings::Pair...)
     sheet = t.sheet
     name = t.name
     xf = get_xlsxfile(sheet)
-    !is_writable(xf) && throw(XLSXError("XLSXFile instance is not writable. Open Excel file with `mode=\"rw\"` instead"))
+    _require_writable(xf, "set a totals row")
 
     sheet = t.sheet 
     name = t.name
@@ -1940,7 +1958,7 @@ function _settotals!(t::Table, settings::Pair...)
                 throw(XLSXError("Unknown totals function `:$value`. Supported: $(join(sort(string.(keys(TOTALS_ROW_FUNCTIONS))), ", ")), or pass `(:custom, \"formula\")` for a custom function."))
             func_name, subtotal_code = TOTALS_ROW_FUNCTIONS[value]
             col_node["totalsRowFunction"] = func_name
-            setFormula(sheet, cell_ref; val="SUBTOTAL($subtotal_code,$(name)[$col_name])")
+            setFormula(sheet, cell_ref; val="SUBTOTAL($subtotal_code,$(_structured_ref(name, col_name)))")
 
         elseif value isa Tuple{Symbol,S} where {S<:AbstractString}
             fn, formula_str = value
@@ -2074,9 +2092,8 @@ function _removetotals!(t::Table)
     sheet = t.sheet
     name = t.name
     xf = get_xlsxfile(sheet)
-    !is_writable(xf) && throw(XLSXError("XLSXFile instance is not writable. Open Excel file with `mode=\"rw\"` instead"))
+    _require_writable(xf, "remove a totals row")
 
-#    t = table(sheet, name)
     t.has_totals_row || return t
 
     table_path = _table_part_path(sheet, name)
@@ -2158,12 +2175,11 @@ function gettable(t::Table;
     missing_set = missing_strings === nothing ? nothing :
                   missing_strings isa AbstractString ? Set([missing_strings]) : Set(missing_strings)
 
-    row_range = _first_data_row(t):_last_data_row(t)
-    col0 = _col_start(t)
+    m = _table_data_matrix(t)
 
     data = Vector{Any}(undef, length(t.columns))
     for i in eachindex(t.columns)
-        col = Any[getdata(t.sheet, CellRef(r, col0 + i - 1)) for r in row_range]
+        col = Vector{Any}(m[:, i])
         if !isnothing(missing_set)
             col = Any[(x isa AbstractString && x in missing_set) ? missing : x for x in col]
         end
@@ -2211,12 +2227,10 @@ function _appendtable!(t::Table, data; check_empty::Bool=true, kw... )
     sheet = t.sheet 
     name = t.name
     xf = get_xlsxfile(sheet)
-    !is_writable(xf) && throw(XLSXError("XLSXFile instance is not writable. Open Excel file with `mode=\"rw\"` instead"))
+    _require_writable(xf, "append to a table")
 
-#    t = table(sheet, name)
     ncols = length(t.columns)
     rows = _normalize_append_rows(data, t, name)
-#    rows = _normalize_append_rows(data, ncols, name)
     n = length(rows)
     n == 0 && return t
 
@@ -2302,12 +2316,9 @@ function _normalize_append_rows(data, t::Table, name::AbstractString)
         else
             # Some Tables.jl sources expose names via columnnames without
             # implementing schema (e.g. anything relying on the column-access
-            # interface alone). Try that before giving up and going positional.
-            try
-                Tables.columnnames(Tables.columns(data))
-            catch
-                nothing
-            end
+            # interface alone). Ask a source that offers column access before
+            # giving up and going positional; asking any other is an error.
+            Tables.columnaccess(data) ? Tables.columnnames(Tables.columns(data)) : nothing
         end
         if isnothing(src_names)
             # Unnamed Tables.jl source — fall back to positional matching.

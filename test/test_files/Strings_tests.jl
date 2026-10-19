@@ -1,22 +1,3 @@
-# Rewrite a single entry of an xlsx zip into a new file in the working directory. Used to inject XML that
-# Excel itself never produces (inlineStr cells), so the `_rewrite_node` path in
-# cell.jl actually gets exercised.
-function patch_xlsx_entry(src::AbstractString, entry::AbstractString, patch::Function)
-    r = ZipReader(read(src))
-    names = zip_names(r)
-    entry in names || error("no `$entry` in $src")
-    dst = "patched_" * basename(src)
-    ZipWriter(dst) do w
-        for n in names
-            bytes = zip_readentry(r, n)
-            n == entry && (bytes = Vector{UInt8}(patch(String(bytes))))
-            zip_newfile(w, n; compress=true)
-            write(w, bytes)
-        end
-    end
-    return dst
-end
-
 # `xl/sharedStrings.xml` must be well-formed and must decode back to the original text.
 function check_sst(path::AbstractString)
     sst = String(zip_readentry(ZipReader(read(path)), "xl/sharedStrings.xml"))
@@ -87,44 +68,45 @@ end
     @test ismissing(sheet["J2"])
     isfile("mydata.xlsx") && rm("mydata.xlsx")
 
-# (issue #447)
-    src = joinpath(data_directory, "one_and_two_start.xlsx")
-    sheetxml = "xl/worksheets/sheet1.xml"
+    @testset "markup in inline strings is escaped on write (issue #447)" begin
+        src = joinpath(data_directory, "one_and_two_start.xlsx")
+        sheetxml = "xl/worksheets/sheet1.xml"
 
-    # (text written into <is>, expected value after round-trip)
-    cases = [
-        ("<t>one &amp; two</t>",        "one & two"),
-        ("<t>a &lt;b&gt; c</t>",        "a <b> c"),
-        ("<t><![CDATA[x & y]]></t>",    "x & y"),
-        ("<t>quote \" and &apos;</t>",  "quote \" and '"),
-        # Multiple runs: exercises the recursive branch of `_rewrite_node` and the
-        # attribute path (`rFont val`), which the single-<t> cases never reach.
-        ("""<r><rPr><b/><rFont val="A &amp; B"/></rPr><t>one &amp; two</t></r>""" *
-         """<r><t xml:space="preserve"> &lt;then&gt; </t></r>""" *
-         """<r><rPr><i/></rPr><t>three</t></r>""",
-         "one & two <then> three"),
-    ]
+        # (text written into <is>, expected value after round-trip)
+        cases = [
+            ("<t>one &amp; two</t>",        "one & two"),
+            ("<t>a &lt;b&gt; c</t>",        "a <b> c"),
+            ("<t><![CDATA[x & y]]></t>",    "x & y"),
+            ("<t>quote \" and &apos;</t>",  "quote \" and '"),
+            # Multiple runs: exercises the recursive branch of `_rewrite_node` and the
+            # attribute path (`rFont val`), which the single-<t> cases never reach.
+            ("""<r><rPr><b/><rFont val="A &amp; B"/></rPr><t>one &amp; two</t></r>""" *
+             """<r><t xml:space="preserve"> &lt;then&gt; </t></r>""" *
+             """<r><rPr><i/></rPr><t>three</t></r>""",
+             "one & two <then> three"),
+        ]
 
-    for (inner, expected) in cases
-        f = patch_xlsx_entry(src, sheetxml, s -> set_a1_inline(s, inner))
-        xf = XLSX.openxlsx(f, mode="rw")
-        @test xf[1]["A1"] == expected          # read decodes correctly (passes pre-fix)
+        for (inner, expected) in cases
+            f = patch_xlsx_entry(src, sheetxml, s -> set_a1_inline(s, inner))
+            xf = XLSX.openxlsx(f, mode="rw")
+            @test xf[1]["A1"] == expected          # read decodes correctly (passes pre-fix)
 
-        out = "strings_inline_escape_out.xlsx"
-        XLSX.writexlsx(out, xf, overwrite=true)
+            out = "strings_inline_escape_out.xlsx"
+            XLSX.writexlsx(out, xf, overwrite=true)
 
-        sst = check_sst(out)                   # throws pre-fix
-        @test !occursin(r"&(?!amp;|lt;|gt;|apos;|quot;|#)", sst)
-        @test XLSX.readxlsx(out)[1]["A1"] == expected
+            sst = check_sst(out)                   # throws pre-fix
+            @test !occursin(r"&(?!amp;|lt;|gt;|apos;|quot;|#)", sst)
+            @test XLSX.readxlsx(out)[1]["A1"] == expected
 
-        SAVE_FILES && save_outfile(xf)
-        isfile(f) && rm(f)
-        isfile(out) && rm(out)
+            SAVE_FILES && save_outfile(xf)
+            isfile(f) && rm(f)
+            isfile(out) && rm(out)
+        end
     end
 end
 
 @testset "rich text formats" begin
-    @testset "setAttributes" begin
+    @testset "setFont, setUniformFont and setUniformStyle on rich text" begin
         xf = XLSX.readxlsx(joinpath(data_directory, "is.xlsx"))
         sh = xf["Sheet1"]
         @test_throws XLSX.XLSXError XLSX.setFont(sh, "A1"; name="Palatino") # Must be in write mode for rich text formats
@@ -138,7 +120,11 @@ end
         @test r.runs[4].atts == Dict(:bold => true, :color => "FF000000", :size => 11)
         @test r.runs[6].text == "ty"
         @test r.runs[6].atts == Dict(:color => "FFFF0000", :size => 11)
-        @test XLSX.getFont(sh, "A1").font == Dict("name" => Dict("val" => "Palatino"), "sz" => Dict("val" => "11"), "color" => Dict("theme" => "1"))
+        # An empty cell holds no rich text, so nothing rather than an error.
+        @test isnothing(XLSX.getRichTextString(sh, "Z99"))
+        @test isnothing(XLSX.getRichTextString(sh, 99, 26))
+        @test isnothing(XLSX.getRichTextString(xf, "Sheet1!Z99"))     # outside the dimension too
+        @test XLSX.getFont(sh, "A1").font ==Dict("name" => Dict("val" => "Palatino"), "sz" => Dict("val" => "11"), "color" => Dict("theme" => "1"))
         XLSX.setFont(sh, "A1:F2"; name="Palatino")
         r = XLSX.getRichTextString(sh, "B2")
         @test r.runs[4].text == "k"
@@ -222,6 +208,56 @@ end
         @test haskey(XLSX.getFont(sh, "B2").font, "b") == true
         @test haskey(XLSX.getFont(sh, "B2").font, "i") == true
         @test haskey(XLSX.getFont(sh, "B2").font, "strike") == true
+        SAVE_FILES && save_outfile(xf)
+    end
+
+    # A run's own properties override the cell font, so a font change removes the ones
+    # it sets from every run. `vertAlign` was missed, and a uniform style threw on it.
+    @testset "every font property reaches the runs of rich text" begin
+        function rich_sheet()
+            xf = XLSX.newxlsx()
+            sh = xf[1]
+            sh["A1"] = XLSX.RichTextString([XLSX.RichTextRun("ab", [:bold => true]),
+                                            XLSX.RichTextRun("cd", [:italic => true, :vertAlign => "subscript"])])
+            sh["A2"] = XLSX.RichTextString([XLSX.RichTextRun("ef", [:bold => true]),
+                                            XLSX.RichTextRun("gh", [:vertAlign => "subscript"])])
+            return xf, sh
+        end
+        run_atts(sh, ref) = [r.atts for r in XLSX.getRichTextString(sh, ref).runs]
+
+        xf, sh = rich_sheet()
+        XLSX.setFont(sh, "A1"; vertAlign="superscript")
+        @test run_atts(sh, "A1") == [Dict(:bold => true), Dict(:italic => true)]
+        @test XLSX.getFont(sh, "A1").font["vertAlign"] == Dict("val" => "superscript")
+
+        xf, sh = rich_sheet()
+        XLSX.setUniformFont(sh, "A1:A2"; vertAlign="superscript")
+        @test run_atts(sh, "A1") == [Dict(:bold => true), Dict(:italic => true)]
+        @test run_atts(sh, "A2")[2] === nothing || isempty(run_atts(sh, "A2")[2])
+
+        xf, sh = rich_sheet()
+        XLSX.setFont(sh, "A1"; vertAlign="superscript")
+        XLSX.setUniformStyle(sh, "A1:A2")
+        @test XLSX.getFont(sh, "A2").font["vertAlign"] == Dict("val" => "superscript")
+        @test all(a -> isnothing(a) || !haskey(a, :vertAlign), run_atts(sh, "A2"))
+
+        # A font size Excel wrote as a fraction is a tag like any other.
+        xf, sh = rich_sheet()
+        cell = XLSX.getcell(sh, "A1")
+        font = XLSX.CellFont(0, Dict{String,Union{Dict{String,String},Nothing}}("sz" => Dict("val" => "10.5")), "1")
+        @test XLSX.update_sharedString_font(sh, cell, font) isa Integer
+
+        # Run properties the new font doesn't set are kept, including ones XLSX.jl
+        # doesn't otherwise read, such as `charset` and `outline`.
+        xf, sh = rich_sheet()
+        wb = XLSX.get_workbook(sh)
+        si = "<si><r><rPr><b/><charset val=\"0\"/></rPr><t>ab</t></r><r><rPr><i/><outline/></rPr><t>cd</t></r></si>"
+        cell = XLSX.getcell(sh, "A1")
+        cell.value = reinterpret(UInt64, Int64(XLSX.add_formatted_string!(wb, si)))
+        XLSX.setFont(sh, "A1"; bold=true)
+        s = XLSX.get_sst(wb).shared_strings[reinterpret(Int64, XLSX.getcell(sh, "A1").value) + 1]
+        @test occursin("charset", s) && occursin("outline", s) && occursin("<i", s)
+        @test !occursin("<b/>", s)
         SAVE_FILES && save_outfile(xf)
     end
 
@@ -467,4 +503,99 @@ end
         SAVE_FILES && save_outfile(f)
 
     end
+
+    @testset "RichTextRun and RichTextString as strings" begin
+        run = XLSX.RichTextRun("ab", nothing)
+        @test length(run) == 2
+        @test hash(run) == hash(XLSX.RichTextRun("ab"))
+        rts = XLSX.RichTextString("ab", [run])
+        @test String(rts) == "ab" && ncodeunits(rts) == 2
+        @test codeunit(rts) == UInt8 && codeunit(rts, 1) == UInt8('a')
+        @test isvalid(rts, 1) && rts[1] == XLSX.RichTextString("a", [XLSX.RichTextRun("a")])
+        @test hash(rts) == hash(XLSX.RichTextString("ab", [XLSX.RichTextRun("ab")]))
+
+        xf = XLSX.opentemplate(joinpath(data_directory, "is.xlsx"))
+        sh = xf["Sheet1"]
+        XLSX.setFont(sh, "A1"; name="Palatino")
+        @test XLSX.getRichTextString(sh, 1, 1) == XLSX.getRichTextString(sh, "A1")
+        @test XLSX.getRichTextString(xf, "Sheet1!A1") == XLSX.getRichTextString(sh, "A1")
+        @test XLSX.get_sst(xf) === XLSX.get_sst(XLSX.get_workbook(xf))
+        SAVE_FILES && save_outfile(xf)
+    end
+
+    @testset "rich text: every color form" begin
+        xf = XLSX.newxlsx()
+        s = xf[1]
+        sst(ref) = XLSX.get_workbook(s).sst.shared_strings[Int(XLSX.getcell(s, ref).value)+1]
+
+        runs = [XLSX.RichTextRun("a", [:color => :coral]),
+                XLSX.RichTextRun("b", [:color => colorant"seagreen"]),
+                XLSX.RichTextRun("c", [:color => XLSX.SchemeColor(:accent1; lumMod = 60, lumOff = 40)]),
+                XLSX.RichTextRun("d", [:color => "accent2"]),
+                XLSX.RichTextRun("e", [:color => :tx1])]
+        s["A1"] = XLSX.RichTextString(runs)
+        @test sst("A1") == "<si><r><rPr><color rgb=\"FFFF7F50\"/></rPr><t>a</t></r>" *
+                           "<r><rPr><color rgb=\"FF2E8B57\"/></rPr><t>b</t></r>" *
+                           "<r><rPr><color theme=\"4\" tint=\"0.4\"/></rPr><t>c</t></r>" *
+                           "<r><rPr><color theme=\"5\"/></rPr><t>d</t></r>" *
+                           "<r><rPr><color theme=\"1\"/></rPr><t>e</t></r></si>"
+
+        # Reading resolves theme colors to RGB, as before
+        rts = XLSX.getRichTextString(s, "A1")
+        @test rts.runs[1].atts[:color] == "FFFF7F50"
+        @test rts.runs[3].atts[:color] isa String
+
+        # Equality and hashing treat every spelling of one color alike
+        r(c) = XLSX.RichTextRun("x", [:color => c])
+        @test r("red") == r(:red) == r(colorant"red") == r("FFFF0000")
+        @test hash(r("red")) == hash(r(colorant"red"))
+        @test r(:accent1) == r(XLSX.SchemeColor(:accent1)) == r("accent1")
+        @test hash(r(:accent1)) == hash(r(XLSX.SchemeColor(:accent1)))
+        @test r(:tx1) == r(:dk1)
+        @test r(:accent1) != r("red")
+
+        # A chart-only theme color (shade) is a valid run color: comparing it does not throw,
+        # but a cell cannot hold it
+        shaded = r(XLSX.SchemeColor(:accent1; shade = 50))
+        @test shaded == r(XLSX.SchemeColor(:accent1; shade = 50))
+        @test shaded != r(:accent1)
+        @test_throws XLSX.XLSXError (s["A2"] = XLSX.RichTextString([shaded, XLSX.RichTextRun("y")]))
+
+        # An invalid color is caught when the run is built
+        @test_throws XLSX.XLSXError XLSX.RichTextRun("x", [:color => "notacolor"])
+        @test_throws XLSX.XLSXError XLSX.RichTextRun("x", [:color => 42])
+
+        # A single run is applied to the whole cell with setFont
+        s["A3"] = XLSX.RichTextString([XLSX.RichTextRun("one", [:color => XLSX.SchemeColor(:accent3; lumMod = 75)])])
+        @test XLSX.getFont(s, "A3").font["color"] == Dict("theme" => "6", "tint" => "-0.25")
+
+        # In chart text, theme colors stay theme colors
+        @test XLSX.Charts._rich_run_props(Dict(:color => :accent1)).fill.fgcolor == XLSX.SchemeColor(:accent1)
+        @test XLSX.Charts._rich_run_props(Dict(:color => XLSX.SchemeColor(:accent1; shade = 50))).fill.fgcolor ==
+              XLSX.SchemeColor(:accent1; shade = 50)
+        @test XLSX.Charts._rich_run_props(Dict(:color => colorant"red")).fill.fgcolor == "FFFF0000"
+        SAVE_FILES && save_outfile(xf)
+    end
+end
+
+@testset "review fixes: rich text" begin
+    f = XLSX.newxlsx(); s = f[1]
+    s["A1"] = XLSX.RichTextString(XLSX.RichTextRun("plain"))
+    s["A2"] = XLSX.RichTextString(XLSX.RichTextRun("u", [:under => true, :size => 12.5]))
+    @test s["A1"] == "plain" && s["A2"] == "u"
+    @test XLSX.getFont(s, "A2").font["u"] === nothing
+    @test XLSX.getFont(s, "A2").font["sz"]["val"] == "12.5"
+    SAVE_FILES && save_outfile(f)
+
+    rt = XLSX.getRichTextString(f.workbook, "<si><r><rPr><sz val=\"10.5\"/><b val=\"0\"/><u val=\"none\"/></rPr><t>ab</t></r><r><rPr><b/></rPr><t>cd</t></r></si>")
+    @test rt.runs[1].atts == Dict{Symbol,Any}(:size => 10.5)
+    @test rt.runs[2].atts == Dict{Symbol,Any}(:bold => true)
+
+    r = XLSX.RichTextString(XLSX.RichTextRun("é"), XLSX.RichTextRun("ab", [:bold => true]))
+    @test r[3:4] == XLSX.RichTextString(XLSX.RichTextRun("ab", [:bold => true]))
+    @test r[1:3].runs == [XLSX.RichTextRun("é"), XLSX.RichTextRun("a", [:bold => true])]
+
+    a = XLSX.RichTextRun("x", [:bold => true, :size => 12, :italic => true, :name => "Arial", :color => "red", :under => true, :strike => true, :vertAlign => "subscript"])
+    b = XLSX.RichTextRun("x", [:vertAlign => "subscript", :strike => true, :under => true, :color => "red", :name => "Arial", :italic => true, :size => 12, :bold => true])
+    @test a == b && hash(a) == hash(b)
 end

@@ -32,6 +32,21 @@ Writable XLSXFile instances are opened with `XLSX.open_xlsx_template` method.
 =#
 is_writable(xl::XLSXFile) = xl.is_writable
 
+# Preconditions shared by every function that edits a file or reads its cell cache.
+# `x` is an `XLSXFile`, `Workbook` or `Worksheet`; `action` completes "Cannot ...",
+# e.g. `_require_writable(ws, "set font")`.
+function _require_writable(x, action::AbstractString)
+    is_writable(get_xlsxfile(x)) ||
+        throw(XLSXError("Cannot $action: the XLSXFile is not writable. Open it with `mode=\"rw\"`."))
+    return nothing
+end
+
+function _require_cache(x, action::AbstractString)
+    is_cache_enabled(get_xlsxfile(x)) ||
+        throw(XLSXError("Cannot $action: the XLSXFile's cell cache is not enabled. Open it with `enable_cache=true`."))
+    return nothing
+end
+
 """
     sheetnames(xl::XLSXFile)
     sheetnames(wb::Workbook)
@@ -82,7 +97,11 @@ function getsheet(wb::Workbook, sheetname::String)::Worksheet
     throw(XLSXError("$(get_xlsxfile(wb).source) does not have a Worksheet named `$sheetname`."))
 end
 
-@inline getsheet(wb::Workbook, sheet_index::Int)::Worksheet = wb.sheets[sheet_index]
+function getsheet(wb::Workbook, sheet_index::Int)::Worksheet
+    1 <= sheet_index <= length(wb.sheets) ||
+        throw(XLSXError("$(get_xlsxfile(wb).source) has no sheet $sheet_index: it has $(length(wb.sheets)) sheet(s)."))
+    return wb.sheets[sheet_index]
+end
 @inline getsheet(xl::XLSXFile, sheetname::String)::Worksheet = getsheet(xl.workbook, sheetname)
 @inline getsheet(xl::XLSXFile, sheet_index::Int)::Worksheet = getsheet(xl.workbook, sheet_index)
 
@@ -91,7 +110,6 @@ function _print_sheet_table(io::IO, wb::Workbook)
     println(io, "-"^(21 + 1 + 13 + 1 + 13))
 
     for s in wb.sheets
-#        sheetname = length(s.name) > 20 ? first(s.name, 20) * "…" : s.name
         sheetname = truncate_len(s.name, 20)
         if s.dimension !== nothing
             rg = s.dimension
@@ -304,8 +322,10 @@ function Base.show(io::IO, ::MIME"text/plain", v::AbstractVector{DefinedName})
 end
  
 
+# A sheet name as a formula writes it: quoted when it holds anything but word
+# characters, starts with a digit, or could be read as a cell address (`A1`, `R1C1`).
 function quoteit(x::AbstractString)
-    if occursin(r"[^\w]|\s", x)
+    if occursin(r"[^\w]|\s", x) || (!isempty(x) && isdigit(first(x))) || _is_cell_address_like(x)
         escaped = replace(x, "'" => "''")
         return "'$escaped'"
     else
@@ -391,7 +411,8 @@ function is_valid_defined_name(name::AbstractString)::Bool
     if isempty(name)
         return false
     end
-    if is_valid_cellname(name) || is_valid_cellrange(name) || is_valid_non_contiguous_cellrange(name)
+    u = uppercase(name)   # names are case-insensitive: `a1` is a cell address too
+    if is_valid_cellname(u) || is_valid_cellrange(u) || is_valid_non_contiguous_cellrange(u)
         return false
     end
     _is_r1c1_address_like(name) && return false   # Excel refuses a file with such a name
@@ -409,6 +430,20 @@ function is_valid_defined_name(name::AbstractString)::Bool
     return true
 end
 
+# The `isabs` stored for `value`: one flag per part of a non-contiguous range. A
+# vector, as `getDefinedNames` returns for one, is taken as given.
+function _absolute_flags(value, absolute::Union{Bool,AbstractVector{Bool}})
+    if value isa NonContiguousRange
+        absolute isa Bool && return fill(absolute, length(value.rng))
+        length(absolute) == length(value.rng) ||
+            throw(XLSXError("`absolute` has $(length(absolute)) entries, but the range has $(length(value.rng)) parts."))
+        return collect(Bool, absolute)
+    end
+    absolute isa Bool && return absolute
+    length(absolute) == 1 || throw(XLSXError("`absolute` must be a single Bool for a value that is not a non-contiguous range."))
+    return only(absolute)
+end
+
 function addDefName(xf::XLSXFile, name::AbstractString, value::DefinedNameValueTypes; absolute=true, hidden::Bool=false)
     if is_system_like_defined_name(name)
         throw(XLSXError("`$name` is reserved for names Excel generates for its own use " *
@@ -420,11 +455,7 @@ function addDefName(xf::XLSXFile, name::AbstractString, value::DefinedNameValueT
     if is_workbook_defined_name(xf, name)
         throw(XLSXError("Workbook already has a defined name called `$name`."))
     end
-    if value isa NonContiguousRange
-        abs = absolute ? fill(true, length(value.rng)) : fill(false, length(value.rng))
-    else
-        abs = absolute ? true : false
-    end
+    abs = _absolute_flags(value, absolute)
     xf.workbook.workbook_names[name] = DefinedNameValue(value, abs, hidden)
 end
 addDefName(xf::XLSXFile, name::AbstractString, value::Integer; absolute=true, hidden::Bool=false) = 
@@ -441,11 +472,7 @@ function addDefName(ws::Worksheet, name::AbstractString, value::DefinedNameValue
     if value isa NonContiguousRange || value isa SheetCellRange
         value.sheet != ws.name && throw(XLSXError("Range $value is not in the given worksheet ($(ws.name))."))
     end
-    if value isa NonContiguousRange
-        abs = absolute ? fill(true, length(value.rng)) : fill(false, length(value.rng))
-    else
-        abs = absolute ? true : false
-    end
+    abs = _absolute_flags(value, absolute)
     wb.worksheet_names[(ws.sheetId, name)] = DefinedNameValue(value, abs, hidden)
 end
 addDefName(ws::Worksheet, name::AbstractString, value::Integer; absolute=true, hidden::Bool=false) = 
@@ -637,8 +664,14 @@ name (e.g. `Sheet1!A1:B2`).
 
 If the new `definedName` is a cell reference or range, by default, it will be an absolute 
 reference (e.g. `\$A\$1:\$C\$6`). If `absolute=false` is specified, the new `definedName` will be 
-a relative reference (e.g. `A1:C6`). Any `absolute` argument specified is ignored if the 
+a relative reference (e.g. `A1:C6`). Any `absolute` argument specified is ignored if the
 `definedName` is not a cell reference or range.
+
+A string `value` that is not a cell reference or range is a text constant, written to the
+file as `"..."`. To define a name by a formula instead, start `value` with `=`, as in Excel's
+Name Manager (e.g. `"=COUNTA(Sheet1!\$A:\$A)"`). Names read from a file that hold a formula
+(or any other expression that is not a reference or constant) are returned the same way, with
+a leading `=`.
 
 In the context of `XLSX.jl` there is no difference between an absolute reference and a relative 
 reference. However, Excel treats them differently. When `definedNames` are read in as part of 
@@ -664,6 +697,8 @@ julia> XLSX.addDefinedName(xf, "New", "'Mock-up'!A1:B2")
 julia> XLSX.addDefinedName(xf, "Life_the_universe_and_everything", 42)
 
 julia> XLSX.addDefinedName(xf, "first_name", "Hello World")
+
+julia> XLSX.addDefinedName(xf, "last_row", "=COUNTA(Sheet1!\$A:\$A)")
 
 ```
 

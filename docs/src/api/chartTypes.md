@@ -33,7 +33,7 @@ FormatSite
 Effective
 ```
 
-## Colours and DrawingML
+## Colors and DrawingML
 
 ```@docs
 SchemeColor

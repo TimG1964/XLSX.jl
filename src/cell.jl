@@ -96,9 +96,9 @@ If there is no error, returns an empty string.
 
 The return type depends on the type of `ref` and is the same shape as the return 
 type of `getcell` for the same `ref`:
-- If `ref` or (`row`, `col`) refers to a single cell, returns a single Bool.
-- If `ref` or (`rows`, `cols`) refers to a range of cells, returns a matrix of Bools.
-- If `ref` or (`rows`, `cols`) refers to a non-contiguous range of cells, returns a vector of matrices of Bools.
+- If `ref` or (`row`, `col`) refers to a single cell, returns a single String.
+- If `ref` or (`rows`, `cols`) refers to a range of cells, returns a matrix of Strings.
+- If `ref` or (`rows`, `cols`) refers to a non-contiguous range of cells, returns a vector of matrices of Strings.
 
 # Examples
 ```julia
@@ -250,7 +250,7 @@ end
 function _record_formula!(wb::Workbook, ws::Worksheet, ref::CellRef, f_node::XML.LazyNode,
                           local_formulas::Union{Nothing, Dict{SheetCellRef, AbstractFormula}})
     f = parse_formula_from_element(wb, f_node)
-    key = SheetCellRef(combine_sheet_ref(ws, ref))
+    key = SheetCellRef(ws.name, ref)
     if isnothing(local_formulas)
         lock(wb.formulas_lock) do
             wb.formulas[key] = f
@@ -367,17 +367,17 @@ end
 
 # Returns (raw_value::UInt64, datatype::CellValueType) for datetime strings,
 # keeping the value in its Excel numeric form for storage in Cell.
+# A negative value is no date (Excel shows `####`) but the file is valid, so it is
+# read as the plain number it is rather than failing the whole sheet.
 function _parse_excel_datetime_raw(v::AbstractString)
     isempty(v) && throw(XLSXError("Cannot convert an empty string into a datetime value."))
-    if occursin('.', v) || v == "0"
+    if occursin('.', v) || occursin('E', v) || occursin('e', v) || v == "0"
         time_value = _parse_cell_float(v)
-        time_value >= 0 || throw(XLSXError("Cannot have a datetime value < 0. Got $time_value"))
-        datatype = time_value < 1.0 ? CT_TIME : CT_DATETIME
+        datatype = time_value < 0.0 ? CT_FLOAT : time_value < 1.0 ? CT_TIME : CT_DATETIME
         return reinterpret(UInt64, time_value), datatype
     else
         date_value = parse(Int64, v)
-        date_value >= 0 || throw(XLSXError("Cannot have a datetime value < 0. Got $date_value"))
-        return reinterpret(UInt64, date_value), CT_DATE
+        return reinterpret(UInt64, date_value), (date_value < 0 ? CT_INT : CT_DATE)
     end
 end
 
@@ -497,9 +497,10 @@ end
 function excel_value_to_datetime(x::Float64, is1904::Bool)::Dates.DateTime
     x >= 0 || throw(XLSXError("Cannot have a datetime value < 0. Got $x"))
     dt_part = trunc(Int64, x)
-    # Round to nearest second to absorb float precision drift
-    hr_ns = round(Int64, (x - dt_part) * NANOSECONDS_PER_DAY / 1_000_000_000) * 1_000_000_000
-    return excel_value_to_date(dt_part, is1904) + Dates.Time(Dates.Nanosecond(hr_ns))
+    # Round to nearest second to absorb float precision drift. Added as a period, not
+    # a `Time`, so a value that rounds up to midnight moves on to the next day.
+    secs = round(Int64, (x - dt_part) * 86_400)
+    return Dates.DateTime(excel_value_to_date(dt_part, is1904)) + Dates.Second(secs)
 end
 
 function datetime_to_excel_value(dt::Dates.DateTime, is1904::Bool)::Float64

@@ -1,3 +1,5 @@
+_root_of(s::AbstractString) = XLSX.xml_root_element(parse(s, XLSX.XML.Node))
+
 @testset "no default namespace" begin
     # issues #380, #362, #267, #170
     
@@ -41,8 +43,8 @@
     @test XLSX.getFormula(f2[2], "B16") == "=sum(B2:B15)"
     @test XLSX.getFormula(f2[2], "M16") == "=sum(M2:M15)"
 
-    @test XLSX.hassheet(f, "newSheet")
-    @test XLSX.getImages(f["newSheet"]) == [(sheet = "newSheet", media_name = "image1.jpg", from = "B17", to = "E27")]
+    @test XLSX.hassheet(f2, "newSheet")
+    @test XLSX.getImages(f2["newSheet"]) == [(sheet = "newSheet", media_name = "image1.jpg", from = "B17", to = "E27")]
 
     for row = 1:16
         for col = 1:14
@@ -85,7 +87,6 @@
 
     XLSX.writexlsx("mytest.xlsx", f, overwrite=true)
     SAVE_FILES && save_outfile("mytest.xlsx")
-    SAVE_FILES && save_outfile(f2)
     f2 = XLSX.readxlsx("mytest.xlsx")
     @test XLSX.get_dimension(f2[1])==XLSX.CellRange("A1:R1001")
 
@@ -133,4 +134,76 @@
         end
     end
     isfile("mytest.xlsx") && rm("mytest.xlsx")
+end
+
+@testset "namespace resolution" begin
+    @testset "get_default_namespace - single prefixed namespace" begin
+        r = _root_of("""<x:workbook xmlns:x="$_TRANS_MAIN"/>""")
+        @test XLSX.get_default_namespace(r) == _TRANS_MAIN
+    end
+
+    @testset "get_default_namespace - unprefixed default preferred" begin
+        r = _root_of("""<workbook xmlns="$_TRANS_MAIN" xmlns:r="http://example.com/r"/>""")
+        @test XLSX.get_default_namespace(r) == _TRANS_MAIN
+    end
+
+    @testset "get_default_namespace - prefixed spreadsheet ns as fallback" begin
+        # No unprefixed default (issues #380/#362/#267/#170)
+        r = _root_of("""<x:workbook xmlns:x="$_TRANS_MAIN" xmlns:r="http://example.com/r"/>""")
+        @test XLSX.get_default_namespace(r) == _TRANS_MAIN
+    end
+
+    @testset "get_default_namespace - none found errors" begin
+        r = _root_of("""<thing xmlns:a="http://example.com/a" xmlns:b="http://example.com/b"/>""")
+        @test_throws XLSX.XLSXError XLSX.get_default_namespace(r)
+    end
+
+    @testset "get_default_namespace_prefix - no namespaces at all" begin
+        r = _root_of("<thing/>")
+        @test isnothing(XLSX.get_default_namespace_prefix(r))
+
+        r2 = _root_of("""<thing xmlns:a="http://example.com/a" xmlns:b="http://example.com/b"/>""")
+        @test isnothing(XLSX.get_default_namespace_prefix(r2))
+    end
+
+    @testset "build_ns_dict! - part still held as a raw String" begin
+        # Covers the `val isa String` branch: a read part whose data hasn't been
+        # parsed yet has its prefix sniffed from the raw text instead.
+        xf = XLSX.newxlsx()
+        f = "xl/styles.xml"
+        @test haskey(xf.files, f)
+
+        xf.data[f] = """<x:styleSheet xmlns:x="$_TRANS_MAIN"/>"""
+        delete!(xf.namespace, f)
+
+        XLSX.build_ns_dict!(xf)
+        @test xf.namespace[f] == "x"
+        @test xf.data[f] isa String   # left unparsed by build_ns_dict!
+    end
+
+    @testset "_get_ns_prefix_from_string - default vs prefixed vs absent" begin
+        @test isnothing(XLSX._get_ns_prefix_from_string(nothing))
+        @test isnothing(XLSX._get_ns_prefix_from_string("""<worksheet xmlns="$_TRANS_MAIN"/>"""))
+        @test XLSX._get_ns_prefix_from_string("""<x:worksheet xmlns:x="$_TRANS_MAIN"/>""") == "x"
+        @test isnothing(XLSX._get_ns_prefix_from_string("""<worksheet xmlns="http://example.com/other"/>"""))
+    end
+
+    @testset "get_sst_prefix - prefixed shared strings namespace" begin
+        xf = XLSX.newxlsx()
+        sh = xf[1]
+
+        xf.namespace["xl/sharedStrings.xml"] = "x"
+        @test XLSX.get_sst_prefix(sh) == "x:"
+
+        xf.namespace["xl/sharedStrings.xml"] = nothing
+        @test XLSX.get_sst_prefix(sh) == ""
+        SAVE_FILES && save_outfile(xf)
+    end
+
+    @testset "prefixed attribute lookup" begin
+        blip = parse("""<a:blip xmlns:rel="$(XLSX.NS_R)" rel:embed="rId7" cstate="print"/>""", XML.Node)[end]
+        @test XLSX.get_prefixed_attr(blip, "embed") == "rId7"
+        @test XLSX.get_prefixed_attr(blip, "cstate") === nothing   # unprefixed: skipped by design
+        @test XLSX.get_prefixed_attr(blip, "id") === nothing
+    end
 end

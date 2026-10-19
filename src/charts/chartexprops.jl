@@ -60,15 +60,13 @@ end
 
 # cx:tx holds typed text or a cell binding. Excel writes both as cx:txData:
 # a bound one has cx:f and a cached cx:v, a typed one only cx:v. cx:rich is
-# allowed by the schema and read if present.
+# allowed by the schema and read if present. Empty text is no text, as for a c:
+# title: a title bound to an empty cell caches an empty cx:v and reads as nothing.
 function _cx_tx_text(tx)::Union{Nothing,String}
     isnothing(tx) && return nothing
     rich = first_element_with_tag(tx, "rich")
-    if !isnothing(rich)
-        t = text_content(rich)
-        return isempty(t) ? nothing : t
-    end
-    return child_text(first_element_with_tag(tx, "txData"), "v")
+    t = isnothing(rich) ? child_text(first_element_with_tag(tx, "txData"), "v") : text_content(rich)
+    return isnothing(t) || isempty(t) ? nothing : t
 end
 
 function _cx_tx_range(xf::XLSXFile, tx)::ChartRange
@@ -191,10 +189,25 @@ getSeriesNameRange(c::ChartEx, i::Integer; pareto::Bool = false) =
 
 """
     getChartTitleRange(c::ChartEx) -> ChartRange
+    getChartTitleRange(c::Chart) -> ChartRange
 
-The cell the chart title is bound to. `nothing` if the title is typed or absent.
+The cell the chart title is bound to, resolved — through a defined name where
+the formula is one. `nothing` if the title is typed or absent. See
+[`getChartTitleRef`](@ref) for the formula as written.
 """
 getChartTitleRange(c::ChartEx) = _cx_tx_range(c.package, _cx_title_tx(c))
+
+getChartTitleRef(c::ChartEx) = _cx_tx_ref(_cx_title_tx(c))
+
+# The cx:f text of a cx:tx, as written; `nothing` for typed text.
+_cx_tx_ref(tx) = isnothing(tx) ? nothing : child_text(first_element_with_tag(tx, "txData"), "f")
+
+_cx_axis_title_tx(c::ChartEx, id::Integer) =
+    first_element_with_tag(first_element_with_tag(_cx_axis_node(c, id), "title"), "tx")
+
+getAxisTitle(c::ChartEx, id::Integer)      = _cx_tx_text(_cx_axis_title_tx(c, id))
+getAxisTitleRef(c::ChartEx, id::Integer)   = _cx_tx_ref(_cx_axis_title_tx(c, id))
+getAxisTitleRange(c::ChartEx, id::Integer) = _cx_tx_range(c.package, _cx_axis_title_tx(c, id))
 
 getChartTitleTextProps(c::ChartEx) =
     parse_drawing_text(_wb(c), first_element_with_tag(_cx_chart(c), "title"))
@@ -454,11 +467,9 @@ _cx_datapt_in(ser, point) =
 """
     setSeriesFill(c::ChartEx, i, color; point=nothing, pareto=false) -> ChartEx
 
-Set the fill of series `i`, or of one data point of it. `color` may be a colour
-string or Symbol, a `Colors.Colorant`, a [`SchemeColor`](@ref), `:none` for an
-explicit `<a:noFill/>`, or `:inherit` to remove the fill so the chart style
-applies. With `pareto = true`, series `i`'s Pareto line instead; an error if it
-has none.
+Set the fill of series `i`, or of data point `point` of it, counting from 1.
+$(_DOC_COLOR_ARG) With `pareto = true`, series `i`'s Pareto line instead; an
+error if it has none.
 
 Setting a point's fill creates its `cx:dataPt` if Excel never formatted that
 point. `:inherit` never creates anything.
@@ -492,10 +503,10 @@ _cx_set_line!(c::ChartEx, i::Integer, point, f; create::Bool = true, pareto::Boo
     setSeriesLine(c::ChartEx, i, :none; point=nothing, pareto=false)
     setSeriesLine(c::ChartEx, i, :inherit; point=nothing, pareto=false)
 
-Set several outline properties of series `i`, or of one data point of it, in one
-rebuild of the chart part. A keyword left unspecified is left alone; pass
-`:inherit` to remove one that is set. With `pareto = true`, series `i`'s Pareto
-line instead; an error if it has none.
+Set several outline properties of series `i`, or of data point `point` of it,
+in one rebuild of the chart part. $(_DOC_LINE_KWS) A keyword left unspecified
+is left alone; pass `:inherit` to remove one that is set. With `pareto = true`,
+series `i`'s Pareto line instead; an error if it has none.
 
 The symbol form acts on the whole outline: `:none` writes an `a:ln` whose fill is
 `<a:noFill/>`, and `:inherit` removes the `a:ln` so the chart style supplies it.
@@ -523,35 +534,78 @@ end
 """
     setSeriesLineColor(c::ChartEx, i, color; point=nothing, pareto=false) -> ChartEx
 
-Set the colour of series `i`'s outline, or of one data point of it. `color` takes
-the same values as [`setSeriesFill`](@ref): `:none` writes an outline with
-`<a:noFill/>`, `:inherit` removes the colour and leaves the rest of the `a:ln`.
-With `pareto = true`, series `i`'s Pareto line instead; an error if it has none.
+Set the color of series `i`'s outline, or of data point `point` of it.
+$(_DOC_COLOR_ARG) `:none` writes an outline with `<a:noFill/>`; `:inherit`
+removes the color and leaves the rest of the `a:ln`. With `pareto = true`,
+series `i`'s Pareto line instead; an error if it has none.
 """
 setSeriesLineColor(c::ChartEx, i::Integer, color; point::Union{Nothing,Integer} = nothing,
                    pareto::Bool = false) =
     _cx_set_line!(c, i, point, (ln, pfx) -> _ln_with_color(ln, color, pfx); pareto)
 
+"""
+    setSeriesLineWidth(c::ChartEx, i, points; point=nothing, pareto=false) -> ChartEx
+
+Set the width of series `i`'s outline, or of data point `point`'s, in points —
+a `Real` from 0 to 1584 — or `:inherit` to remove it. With `pareto = true`,
+series `i`'s Pareto line instead.
+"""
 setSeriesLineWidth(c::ChartEx, i::Integer, pts; point::Union{Nothing,Integer} = nothing,
                    pareto::Bool = false) =
     _cx_set_line!(c, i, point, (ln, _) -> _ln_with_width(ln, pts); pareto)
 
+"""
+    setSeriesLineDash(c::ChartEx, i, dash; point=nothing, pareto=false) -> ChartEx
+
+Set the dash pattern of series `i`'s outline, or of data point `point`'s:
+$(_doc_syms(DASH_VALUES)), or Excel's names $(_doc_aliases(DASH_ALIASES)); or
+`:inherit` to remove it. With `pareto = true`, series `i`'s Pareto line instead.
+"""
 setSeriesLineDash(c::ChartEx, i::Integer, dash; point::Union{Nothing,Integer} = nothing,
                   pareto::Bool = false) =
     _cx_set_line!(c, i, point, (ln, pfx) -> _ln_with_dash(ln, dash, pfx); pareto)
 
+"""
+    setSeriesLineCap(c::ChartEx, i, cap; point=nothing, pareto=false) -> ChartEx
+
+Set how series `i`'s outline ends, or data point `point`'s:
+$(_doc_syms(CAP_VALUES)), or Excel's names $(_doc_aliases(CAP_ALIASES)); or
+`:inherit` to remove it. With `pareto = true`, series `i`'s Pareto line instead.
+"""
 setSeriesLineCap(c::ChartEx, i::Integer, cap; point::Union{Nothing,Integer} = nothing,
                  pareto::Bool = false) =
     _cx_set_line!(c, i, point, (ln, _) -> _ln_with_cap(ln, cap); pareto)
 
+"""
+    setSeriesLineCompound(c::ChartEx, i, cmpd; point=nothing, pareto=false) -> ChartEx
+
+Set the compound line type of series `i`'s outline, or data point `point`'s:
+$(_doc_syms(CMPD_VALUES)), or Excel's names $(_doc_aliases(CMPD_ALIASES)); or
+`:inherit` to remove it. With `pareto = true`, series `i`'s Pareto line instead.
+"""
 setSeriesLineCompound(c::ChartEx, i::Integer, cmpd; point::Union{Nothing,Integer} = nothing,
                       pareto::Bool = false) =
     _cx_set_line!(c, i, point, (ln, _) -> _ln_with_compound(ln, cmpd); pareto)
 
+"""
+    setSeriesLineJoin(c::ChartEx, i, join; point=nothing, pareto=false) -> ChartEx
+
+Set how the segments of series `i`'s outline meet, or data point `point`'s:
+$(_doc_syms(JOIN_VALUES)); or `:inherit` to remove it. Changing the join discards
+any miter limit. With `pareto = true`, series `i`'s Pareto line instead.
+"""
 setSeriesLineJoin(c::ChartEx, i::Integer, join; point::Union{Nothing,Integer} = nothing,
                   pareto::Bool = false) =
     _cx_set_line!(c, i, point, (ln, pfx) -> _ln_with_join(ln, join, pfx); pareto)
 
+"""
+    setSeriesLineMiterLimit(c::ChartEx, i, limit; point=nothing, pareto=false) -> ChartEx
+
+Set the miter limit of series `i`'s outline, or data point `point`'s, as a
+`Real` multiple of the line width; or `:inherit` to remove it. The outline must
+already have a miter join ([`setSeriesLineJoin`](@ref)). With `pareto = true`,
+series `i`'s Pareto line instead.
+"""
 setSeriesLineMiterLimit(c::ChartEx, i::Integer, lim; point::Union{Nothing,Integer} = nothing,
                         pareto::Bool = false) =
     _cx_set_line!(c, i, point, (ln, _) -> _ln_with_miter_limit(ln, lim); pareto)
@@ -572,10 +626,10 @@ end
     setLabelTextProp(c::ChartEx, i, field, value; pareto=false) -> ChartEx
 
 Set one field of the data-label text formatting for series `i`, writing it on the
-series' `cx:dataLabels/cx:txPr`. `field` is a field of `DrawingRunProps`; `:fill`
-and `:line` are composite and take a colour or a named tuple of line properties.
-Pass `:inherit` to remove a field so the cascade resolves it. With
-`pareto = true`, series `i`'s Pareto line instead; an error if it has none.
+series' `cx:dataLabels/cx:txPr`. With `pareto = true`, series `i`'s Pareto line
+instead; an error if it has none.
+
+$(_DOC_TEXT_FIELD_ARG)
 
 Creating a `cx:dataLabels` to hold formatting writes `cx:visibility` with all
 three flags off, since one that names no flags shows labels with Excel's
@@ -584,9 +638,10 @@ defaults rather than none.
 Returns `c`, which remains valid.
 """
 function setLabelTextProp(c::ChartEx, i::Integer, field::Symbol, value; pareto::Bool = false)
-    field in _RUN_PROP_FIELDS || throw(XLSXError(
-        "`$field` is not a resolvable text property. Valid fields: " *
-        join(_RUN_PROP_FIELDS, ", ") * "."))
+    get(_RUN_PROP_ALIASES, field, field) in _RUN_PROP_FIELDS || throw(XLSXError(
+        "`$field` is not a text property. Valid fields: " *
+        join(_RUN_PROP_FIELDS, ", ") * "; or Excel's names " *
+        join(("$k (= $v)" for (k, v) in _RUN_PROP_ALIASES), ", ") * "."))
     return _cx_edit_series!(c, i, (ser, pfx) ->
         rebuild_path(ser, [(NS_CX, "dataLabels") => "dataLabels"],
                      lbl -> _cx_label_transform(lbl, field, value, pfx);
@@ -623,6 +678,8 @@ end
 
 Set one field of the chart title's text formatting, on `cx:title/cx:txPr`.
 Creates the title if the chart has none. Returns `c`, which remains valid.
+
+$(_DOC_TEXT_FIELD_ARG)
 """
 setChartTitleTextProp(c::ChartEx, field::Symbol, value) =
     _cx_edit_at!(c, [(NS_CX, "chart") => "chart",
@@ -634,11 +691,50 @@ setChartTitleTextProp(c::ChartEx, field::Symbol, value) =
 
 Set one field of the legend's text formatting, on `cx:legend/cx:txPr`.
 Creates the legend if the chart has none. Returns `c`, which remains valid.
+
+$(_DOC_TEXT_FIELD_ARG)
 """
 setLegendTextProp(c::ChartEx, field::Symbol, value) =
     _cx_edit_at!(c, [(NS_CX, "chart")  => "chart",
                      (NS_CX, "legend") => "legend"],
                  (lg, pfx) -> _txpr_with_run_prop(lg, (NS_CX, "legend"), field, value, pfx; ns = NS_CX))
+
+# cx:legend positions by `pos` and `align`. Top-right is the right side,
+# aligned to its start, as Excel writes it.
+const _CX_LEGEND_POS = Dict("b" => ("b", "ctr"), "t" => ("t", "ctr"), "l" => ("l", "ctr"),
+                            "r" => ("r", "ctr"), "tr" => ("r", "min"))
+
+_cx_legend(c::ChartEx) = first_element_with_tag(_cx_chart(c), "legend")
+
+function getLegendPos(c::ChartEx)
+    lg  = _cx_legend(c)
+    pos = _cx_attr(lg, "pos")
+    isnothing(pos) && return nothing
+    return pos == "r" && _cx_attr(lg, "align") == "min" ? :tr : Symbol(pos)
+end
+
+getLegendOverlay(c::ChartEx) = _cx_bool(_cx_legend(c), "overlay")
+
+_cx_with_overlay(lg, o) = with_attribute(lg, "overlay", o === :inherit ? nothing : o)
+
+function setLegendPos(c::ChartEx, pos::Symbol; overlay = nothing)
+    p = _legend_pos(pos)
+    o = isnothing(overlay) ? nothing : _legend_overlay(overlay)
+    pa, al = p === :inherit ? (nothing, nothing) : _CX_LEGEND_POS[p]
+    return _cx_edit_at!(c, [(NS_CX, "chart")  => "chart",
+                            (NS_CX, "legend") => "legend"],
+                        (lg, pfx) -> begin
+        lg = with_attribute(with_attribute(lg, "pos", pa), "align", al)
+        isnothing(o) ? lg : _cx_with_overlay(lg, o)
+    end)
+end
+
+function setLegendOverlay(c::ChartEx, overlay::Union{Bool,Symbol})
+    o = _legend_overlay(overlay)
+    return _cx_edit_at!(c, [(NS_CX, "chart")  => "chart",
+                            (NS_CX, "legend") => "legend"],
+                        (lg, pfx) -> _cx_with_overlay(lg, o))
+end
 
 """
     getChartAxisIds(c::ChartEx) -> Vector{Int}
@@ -667,6 +763,8 @@ Set one field of an axis title's text formatting, on `cx:axis/cx:title/cx:txPr`.
 `id` is the axis' `id` attribute, as [`getChartAxisIds`](@ref) reports it, not a
 position. Creates the title if the axis has none. Returns `c`, which remains
 valid.
+
+$(_DOC_TEXT_FIELD_ARG)
 """
 setAxisTitleTextProp(c::ChartEx, id::Integer, field::Symbol, value) =
     _cx_edit_at!(c, [_cx_axis_path(c, id)...; (NS_CX, "title") => "title"],
@@ -699,50 +797,141 @@ function _cx_tx_typed(tx::XML.Node, text::AbstractString, pfx::Dict{String,Strin
 end
 
 # Excel writes a title's text twice: in cx:txData/cx:v and as runs in the sibling
-# cx:txPr, which is what it renders. Collapse the body to a single run carrying
-# `text`, keeping the first run's formatting where there was one, so the words
-# change and the appearance does not.
+# cx:txPr, which is what it renders. Rewrite the body's runs, one paragraph per
+# line, each copying the first paragraph's pPr and endParaRPr. Every run starts
+# from the old first run's a:rPr, so the words change and the appearance does
+# not; a RichTextString's runs then lay their own formatting over it. Plain text
+# on a title with no cx:txPr leaves it without one; rich text creates it.
 function _cx_txpr_retext(el::XML.Node, text::AbstractString, pfx::Dict{String,String})
     tx = first_element_with_tag(el, "txPr")
-    isnothing(tx) && return el
-    isnothing(tx.children) && return el
-    kids = map(tx.children) do p
-        localname(p) != "p" && return p
-        old  = first_element_with_tag(p, "r")
-        rpr  = isnothing(old) ? nothing : first_element_with_tag(old, "rPr")
-        run  = XML.Element(prefixed_tag(pfx[NS_A], "r"),
-                           filter(!isnothing, [rpr,
-                               XML.Element(prefixed_tag(pfx[NS_A], "t"), XML.Text(text))])...)
-        keep = filter(n -> localname(n) in ("pPr", "endParaRPr"),
-                      isnothing(p.children) ? XML.Node[] : p.children)
-        ppr  = filter(n -> localname(n) == "pPr", keep)
-        epr  = filter(n -> localname(n) == "endParaRPr", keep)
-        return _with_children(p, [ppr; run; epr])
+    if isnothing(tx)
+        text isa RichTextString || return el
+        tx = _new_text_body("txPr", pfx, NS_CX)
     end
-    return replace_child(el, tx, _with_children(tx, kids))
+    kids = isnothing(tx.children) ? XML.Node[] : collect(XML.Node, tx.children)
+    i    = findfirst(k -> localname(k) == "p", kids)
+    p    = isnothing(i) ? XML.Element(prefixed_tag(pfx[NS_A], "p")) : kids[i]
+    pk   = isnothing(p.children) ? XML.Node[] : p.children
+    ppr  = filter(n -> localname(n) == "pPr", pk)
+    epr  = filter(n -> localname(n) == "endParaRPr", pk)
+    old  = first_element_with_tag(p, "r")
+    base = isnothing(old) ? nothing : first_element_with_tag(old, "rPr")
+    paras = map(_cx_lines(text)) do line
+        runs = XML.Node[_cx_run(piece, props, base, pfx) for (piece, props) in line]
+        _with_children(p, XML.Node[ppr; runs; epr])
+    end
+    body = XML.Node[k for k in kids if localname(k) != "p"]
+    tx   = _with_children(tx, vcat(body, paras))
+    return insert_child(el, (NS_CX, String(localname(el))), tx)
+end
+
+# `text` as lines of (piece, props) runs. A plain string's runs carry no props.
+_cx_lines(text::AbstractString) =
+    [isempty(l) ? Tuple{String,Any}[] : Tuple{String,Any}[(String(l), nothing)]
+     for l in split(text, _NEWLINE)]
+_cx_lines(text::RichTextString) =
+    [Tuple{String,Any}[(r.text, r.props) for r in p.runs] for p in _as_paragraphs(text)]
+
+# One a:r: `base` (the old first run's a:rPr, or none) with `props` laid over it.
+function _cx_run(piece::AbstractString, props, base, pfx::Dict{String,String})
+    rpr = base
+    for (field, value) in _run_prop_pairs(props)
+        rpr = _rpr_with_prop(something(rpr, XML.Element(prefixed_tag(pfx[NS_A], "rPr"))),
+                             field, value, pfx)
+    end
+    t = XML.Element(prefixed_tag(pfx[NS_A], "t"), XML.Text(piece))
+    return XML.Element(prefixed_tag(pfx[NS_A], "r"), (isnothing(rpr) ? (t,) : (rpr, t))...)
+end
+
+# A typed cx: title or axis title: cx:txData/cx:v holds the plain text, and
+# cx:txPr the runs Excel renders.
+function _cx_title_with_text(t::XML.Node, text::AbstractString, pfx)
+    t = rebuild_path(t, [(NS_CX, "tx") => "tx"],
+                     tx -> _cx_tx_typed(tx, String(text), pfx);
+                     prefixes = pfx, parent_key = (NS_CX, "title"))
+    return _cx_txpr_retext(t, text, pfx)
+end
+
+# A cx: title bound to a cell: cx:txData with the reference and its cached text,
+# as Excel writes it. Excel writes no cx:txPr on a bound title; one already there
+# loses its runs, so stale typed text cannot render, and keeps their formatting
+# in the paragraph default, with whatever a rich-text cell's runs all share
+# laid over it — as for a c: title.
+function _cx_title_with_ref(t::XML.Node, f::AbstractString, vals::Vector, cellrich,
+                            wb::Workbook, pfx)
+    v   = only(vals)
+    txt = ismissing(v) ? "" : string(v)
+    td  = XML.Element(prefixed_tag(pfx[NS_CX], "txData"),
+                      XML.Element(prefixed_tag(pfx[NS_CX], "f"), XML.Text(f)),
+                      XML.Element(prefixed_tag(pfx[NS_CX], "v"), XML.Text(txt)))
+    t   = rebuild_path(t, [(NS_CX, "tx") => "tx"], tx -> _with_children(tx, [td]);
+                       prefixes = pfx, parent_key = (NS_CX, "title"))
+    key  = (NS_CX, "title")
+    txpr = first_element_with_tag(t, "txPr")
+    isnothing(first_element_with_tag(txpr, "p")) ||
+        (t = insert_child(t, key, _txpr_from_rich(txpr, nothing, wb, pfx; ns = NS_CX)))
+    for (field, value) in _common_run_props(cellrich)
+        t = _txpr_with_run_prop(t, key, field, value, pfx; ns = NS_CX)
+    end
+    return t
 end
 
 """
-    setChartTitleText(c::ChartEx, text::AbstractString) -> ChartEx
+    setChartTitleText(c::ChartEx, text) -> ChartEx
+    setChartTitleText(c::ChartEx, ref::Union{CellRef,SheetCellRef}) -> ChartEx
 
 Set the chart title to `text`, typed rather than bound to a cell. Creates the
-title if the chart has none, and drops any `cx:f` binding it had.
+title if the chart has none, and drops any `cx:f` binding it had. A newline
+starts a new paragraph.
 
 Excel stores a typed title both as `cx:tx/cx:txData/cx:v` and as runs in the
 title's `cx:txPr`, and renders the latter, so both are updated. Run formatting
-is preserved; use [`setChartTitleTextProp`](@ref) to change it.
+is preserved; use [`setChartTitleTextProp`](@ref) to change it. A
+`RichTextString`, or a styled string from StyledStrings.jl (Julia 1.11 and
+later), lays each run's own formatting over it.
+
+Given a `CellRef` or `SheetCellRef`, the title is bound to that cell
+(`cx:txData` with `cx:f` and the cell's text cached in `cx:v`). A bare `CellRef`
+means the chart's own sheet; a chart on a chartsheet needs a `SheetCellRef`. A
+string is always typed text, never read as a reference.
+
+A bound title can't carry rich text, a limit of Excel's file format. Binding
+keeps the title's formatting in `cx:txPr` — its first run's, folded into the
+paragraph default — and, where the cell holds a `RichTextString`, lays over it
+the formatting all of its runs share.
 
 Returns `c`, which remains valid.
 """
 setChartTitleText(c::ChartEx, text::AbstractString) =
     _cx_edit_at!(c, [(NS_CX, "chart") => "chart",
                      (NS_CX, "title") => "title"],
-                 (t, pfx) -> begin
-                     t = rebuild_path(t, [(NS_CX, "tx") => "tx"],
-                                      tx -> _cx_tx_typed(tx, text, pfx);
-                                      prefixes = pfx, parent_key = (NS_CX, "title"))
-                     return _cx_txpr_retext(t, text, pfx)
-                 end)
+                 (t, pfx) -> _cx_title_with_text(t, text, pfx))
+
+function setChartTitleText(c::ChartEx, ref::Union{CellRef,SheetCellRef})
+    f, vals, cellrich = _title_source(c, ref)
+    return _cx_edit_at!(c, [(NS_CX, "chart") => "chart",
+                            (NS_CX, "title") => "title"],
+                        (t, pfx) -> _cx_title_with_ref(t, f, vals, cellrich, _wb(c), pfx))
+end
+
+"""
+    setAxisTitleText(c::ChartEx, id::Integer, text) -> ChartEx
+    setAxisTitleText(c::ChartEx, id::Integer, ref::Union{CellRef,SheetCellRef}) -> ChartEx
+
+Set an axis title's text, or bind it to a cell, as [`setChartTitleText`](@ref)
+does for the chart title. `id` is the axis' `id` attribute, as
+[`getChartAxisIds`](@ref) reports it, not a position. Creates the title if the
+axis has none. Returns `c`, which remains valid.
+"""
+setAxisTitleText(c::ChartEx, id::Integer, text::AbstractString) =
+    _cx_edit_at!(c, [_cx_axis_path(c, id)...; (NS_CX, "title") => "title"],
+                 (t, pfx) -> _cx_title_with_text(t, text, pfx))
+
+function setAxisTitleText(c::ChartEx, id::Integer, ref::Union{CellRef,SheetCellRef})
+    f, vals, cellrich = _title_source(c, ref)
+    return _cx_edit_at!(c, [_cx_axis_path(c, id)...; (NS_CX, "title") => "title"],
+                        (t, pfx) -> _cx_title_with_ref(t, f, vals, cellrich, _wb(c), pfx))
+end
 
 """
     setSeriesName(c::ChartEx, i, name::AbstractString; pareto=false) -> ChartEx
@@ -898,9 +1087,14 @@ setSeriesAggregation(c::ChartEx, i::Integer, on::Bool) =
 Set histogram binning for series `i` in one rebuild. A keyword left unspecified
 is left alone; pass `:inherit` to remove one that is set.
 
-`intervalClosed` is `:r` (right-closed) or `:l` (left-closed). `underflow` and `overflow` take a number or
-`:auto`. `binSize` and `binCount` are alternatives: setting one removes the
-other. `cx:binning` excludes `cx:aggregation`, which is removed if present.
+- `intervalClosed` — `:r` (right-closed, Excel's default) or `:l` (left-closed).
+- `underflow`, `overflow` — a `Real`: values below or above it are gathered in
+  one end bin. `:auto` lets Excel choose.
+- `binSize` — the width of each bin, a positive `Real`; or `:auto`.
+- `binCount` — the number of bins, a positive `Integer`; or `:auto`.
+
+`binSize` and `binCount` are alternatives: setting one removes the other.
+`cx:binning` excludes `cx:aggregation`, which is removed if present.
 """
 function setSeriesBinning(c::ChartEx, i::Integer;
                           intervalClosed = nothing, underflow = nothing, overflow = nothing,

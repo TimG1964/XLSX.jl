@@ -64,7 +64,8 @@ end
 
 function Worksheet(xf::XLSXFile, sheet_element::XML.Node)
     wb = get_workbook(xf)
-    localname(sheet_element) !=   "sheet" && throw(XLSXError("Something wrong here!"))
+    localname(sheet_element) != "sheet" &&
+        throw(XLSXError("Malformed workbook: an entry in `<sheets>` is `$(localname(sheet_element))`, not `sheet`."))
     a = XML.attributes(sheet_element)
     sheetId = parse(Int, a["sheetId"])
     relationship_id = a["r:id"]
@@ -471,7 +472,7 @@ function getdata(ws::Worksheet, rng::CellRange)::Array{Any,2}
 
     if !isnothing(ws.cache) && is_cache_enabled(ws) && ws.cache.is_full
         cells = ws.cache.cells
-        rows  = ws.cache.rows_in_cache   # sorted Vector{Int} of populated row numbers
+        rows  = ensure_sorted!(ws.cache).rows_in_cache   # sorted Vector{Int} of populated row numbers
 
         # Binary-search the populated-row range instead of hash-probing every
         # integer in top:bottom — cheap for dense sheets (same row count, just
@@ -480,7 +481,7 @@ function getdata(ws::Worksheet, rng::CellRange)::Array{Any,2}
         lo = searchsortedfirst(rows, top)
         hi = searchsortedlast(rows, bottom)
 
-        @inbounds for k in lo:hi
+        for k in lo:hi
             r = rows[k]
             row_dict = cells[r]   # r came from rows_in_cache, so this key must exist
 
@@ -580,19 +581,7 @@ julia> XLSX.getdata(t)
 See also [`XLSX.table`](@ref), [`XLSX.eachtablerow`](@ref).
 """
 function getdata(t::Table)
-    t = _resolve(t)
-    row_range = _first_data_row(t):_last_data_row(t)
-    col0 = _col_start(t)
-    nrows = length(row_range)
-    ncols = length(t.columns)
-
-    m = Matrix{Any}(undef, nrows, ncols)
-    for (ri, r) in enumerate(row_range)
-        for c in 1:ncols
-            m[ri, c] = getdata(t.sheet, CellRef(r, col0 + c - 1))
-        end
-    end
-    return m
+    return _table_data_matrix(_resolve(t))
 end
 # Needed for definedName references
 getdata(ws::Worksheet, s::SheetCellRef) = do_sheet_names_match(ws, s) && getdata(ws, s.cellref)
@@ -920,8 +909,8 @@ each break independently. This follows the `min_gte`, `mid_gte`, `mid2_gte` and
 `max_gte` keywords of [`setConditionalFormat`](@ref), which control the equivalent
 comparison within an icon set rule.
 
-Cells whose value is not a finite Real -- including empty cells, text 
-and NaN -- are excluded from every band.
+Cells whose value is not a finite number -- including empty cells, text,
+booleans, `NaN` and `Inf` -- are excluded from every band.
 
 `labels` supplies one label per band and defaults to `1:length(breaks)+1`. Unlike the
 `key` method, pairs are returned in band order rather than in the order encountered.
@@ -964,7 +953,7 @@ function partition(ws::Worksheet, rng::CellRange, breaks::AbstractVector{<:Real}
         throw(XLSXError("`gte` must be a Bool or have one entry per break ($(length(breaks))), got $(length(g))."))
 
     function k(v)
-        (v isa Real && !isnan(v)) || return nothing
+        (v isa Real && !(v isa Bool) && isfinite(v)) || return nothing   # as documented: finite numbers only
         n = 0
         for i in eachindex(breaks)
             (g[i] ? v >= breaks[i] : v > breaks[i]) || break

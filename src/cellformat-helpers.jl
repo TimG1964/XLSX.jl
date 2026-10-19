@@ -93,8 +93,9 @@ const VALID_BORDER_STYLES = (
 )
 const VALID_DIAGONAL_DIRECTIONS = ("up", "down", "both")
 
-# Shared kwarg type alias for border sides
-const BorderKw = Union{Nothing,Vector{Pair{String,String}}}
+# A Markdown bullet list of `vals`, for docstrings to list the values a setter
+# validates against from the same constant, so the two can't drift apart.
+_doc_list(vals) = join(("- `$v`" for v in vals), "\n")
 
 const VALID_HORIZONTAL_ALIGNMENTS = ("left", "center", "right", "fill", "justify", "centerContinuous", "distributed")
 const VALID_VERTICAL_ALIGNMENTS   = ("top", "center", "bottom", "justify", "distributed")
@@ -112,11 +113,6 @@ const EXCEL_COLUMN_WIDTH_PADDING = 0.7109375
 # -- A bunch of helper functions ...
 #
 
-function copynode(o::XML.Node)
-    attrs = isnothing(o.attributes) ? nothing : copy(o.attributes)
-    children = isnothing(o.children) ? nothing : XML.Node{String}[copynode(x) for x in o.children]
-    return XML.Node{String}(o.nodetype, o.tag, attrs, o.value, children)
-end
 function do_sheet_names_match(ws::Worksheet, rng::T) where {T<:Union{SheetCellRef,AbstractSheetCellRange}}
     if ws.name == rng.sheet
         return true
@@ -220,7 +216,14 @@ end
 # Merges a boolean/flag font tag (e.g. "b", "i", "strike").
 # Returns nothing (present, no attributes) if kept/set, or missing to omit.
 function _merge_flag_tag(tag::String, new_val::Union{Nothing,Bool}, old_atts::Dict)
-    (isnothing(new_val) ? haskey(old_atts, tag) : new_val) ? nothing : missing
+    (isnothing(new_val) ? _flag_set(old_atts, tag) : new_val) ? nothing : missing
+end
+
+# Whether a font's flag tag is on: present, and not `<b val="0"/>` / `val="false"`.
+function _flag_set(atts::Dict, tag::String)::Bool
+    haskey(atts, tag) || return false
+    a = atts[tag]
+    return isnothing(a) || !(get(a, "val", "1") in ("0", "false"))
 end
 
 # Merges a single-value font tag (e.g. "sz", "name", "vertAlign").
@@ -320,12 +323,12 @@ function _merge_alignment_att(
     end
 end
 
-# Coerces a Vector{Pair{String,String}} kwarg to Dict{String,String}, or returns nothing.
-_to_border_dict(v) = isnothing(v) ? nothing : Dict{String,String}(p for p in v)
+# Coerces a border-side kwarg (a vector of `String => value` pairs) to a Dict, or returns nothing.
+_to_border_dict(v) = isnothing(v) ? nothing : Dict{String,Any}(p for p in v)
 
 # Validates that `outside` is not combined with any other border kwargs.
-function _check_outside_conflict(outside, left, right, top, bottom, diagonal, allsides)
-    !isnothing(outside) && !all(isnothing, [left, right, top, bottom, diagonal, allsides]) &&
+function _check_outside_conflict(s::BorderSpec)
+    !isnothing(s.outside) && !all(isnothing, (s.left, s.right, s.top, s.bottom, s.diagonal, s.allsides)) &&
         throw(XLSXError("Keyword `outside` is incompatible with any other keywords."))
 end
 
@@ -333,7 +336,7 @@ end
 # Handles style, color, and (for diagonal) direction.
 function _merge_border_side(
     side::String,
-    new_val::Union{Nothing,Dict{String,String}},
+    new_val::Union{Nothing,AbstractDict{String}},
     old_atts::Union{Nothing,Dict{String,Union{Dict{String,String},Nothing}}}
 )::Dict{String,String}
 
@@ -354,7 +357,7 @@ function _merge_border_side(
 
     # Color: use new if provided, else inherit all non-style keys from old
     if haskey(new_val, "color")
-        result["rgb"] = get_color(new_val["color"])
+        merge!(result, Dict(_color_atts(new_val["color"])))
     elseif !isnothing(old_side)
         for (k, v) in old_side
             k != "style" && (result[k] = v)
@@ -378,32 +381,16 @@ function _merge_border_side(
 end
 
 function get_new_formatId(wb::Workbook, format::String)::Int
-    if haskey(builtinFormatNames, uppercasefirst(format)) # User specified a format by name
-        return builtinFormatNames[format]
-    elseif haskey(builtinFormats, format)                 # User specified a built-in format by ID
+    for (name, id) in builtinFormatNames                  # User specified a format by name
+        lowercase(name) == lowercase(format) && return id
+    end
+    if haskey(builtinFormats, format)                     # User specified a built-in format by ID
         return parse(Int64, format)
     else                                                  # user specified a format code
         if !is_valid_format(format)
             throw(XLSXError("Specified format is not a valid numFmt: $format"))
         end
-
-        xroot = styles_xmlroot(wb)
-        i, j = get_idces(xroot, "styleSheet", "numFmts")
-        if isnothing(j) # There are no existing custom formats
-            return styles_add_numFmt(wb, format)
-        else
-            existing_elements_count = length(xml_elements(xroot[i][j]))
-            if parse(Int, xroot[i][j]["count"]) != existing_elements_count
-                throw(XLSXError("Wrong number of font elements found: $existing_elements_count. Expected $(parse(Int, xroot[i][j]["count"]))."))
-            end
-
-            format_node = XML.Element("numFmt";
-                numFmtId=string(existing_elements_count + PREDEFINED_NUMFMT_COUNT),
-                formatCode=format
-            )
-
-            return styles_add_cell_attribute(wb, format_node, "numFmts") + PREDEFINED_NUMFMT_COUNT
-        end
+        return styles_add_numFmt(wb, format)              # reuses an identical format
     end
 end
 function update_template_xf(ws::Worksheet, existing_style::CellDataFormat, attributes::Vector{String}, vals::Vector{String})::CellDataFormat
@@ -659,19 +646,14 @@ function process_get_sheetcell(f::Function, xl::XLSXFile, sheetcell::String; kw.
     ref = SheetCellRef(sheetcell)
     !hassheet(xl, ref.sheet) && throw(XLSXError("Sheet $(ref.sheet) not found."))
     ws = getsheet(xl, ref.sheet)
-    d = get_dimension(ws)
-    if ref.cellref ∉ d
-        throw(XLSXError("Cell specified is outside sheet dimension \"$d\""))
-    end
     return f(ws, ref.cellref; kw...)
 end
+# A cell outside the sheet's dimension is empty, as `ws[ref]` treats it, so it has
+# no format to get. (getColumnWidth and getRowHeight keep their own check: a row or
+# column beyond the dimension can still have a size.)
 function process_get_cellref(f::Function, ws::Worksheet, cellref::CellRef; kw...)
     wb = get_workbook(ws)
     cell = getcell(ws, cellref)
-    d = get_dimension(ws)
-    if cellref ∉ d
-        throw(XLSXError("Cell specified is outside sheet dimension \"$d\""))
-    end
     if cell isa EmptyCell || cell.style == UInt64(0)
         return nothing
     end
@@ -686,7 +668,6 @@ function process_get_cellname(f::Function, ws::Worksheet, ref_or_rng::AbstractSt
             throw(XLSXError("Can only assign attributes to cells but `$(ref_or_rng)` is a constant: $(ref_or_rng)=$v."))
         elseif is_defined_name_value_a_reference(v)
             new_att = f(get_xlsxfile(wb), unquoteit(string(v)); kw...)
-#            new_att = f(get_xlsxfile(wb), replace(string(v), "'" => ""); kw...)
         else
             throw(XLSXError("Unexpected defined name value: $v."))
         end
@@ -701,31 +682,20 @@ end
 #
 # - Used for indexing `setAttribute` family of functions
 #
-function process_colon(f::Function, ws::Worksheet, row, col; kw...)
-    dim = get_dimension(ws)
-    @assert isnothing(row) || isnothing(col) "Something wrong here!"
-    if isnothing(row) && isnothing(col)
-        return f(ws, dim; kw...)
-    elseif isnothing(col)
-        rng = CellRange(CellRef(first(row), dim.start.column_number), CellRef(last(row), dim.stop.column_number))
-    else
-        rng = CellRange(CellRef(dim.start.row_number, first(col)), CellRef(dim.stop.row_number, last(col)))
-#    else
-#        throw(XLSXError("Something wrong here!"))
-    end
+# In a `(row, col)` target, `nothing` stands for `:`. Expand it to the full extent of
+# the sheet's dimension `dim`. A target with neither a colon is not a colon form,
+# so has no method.
+_expand_colon(dim::CellRange, row, ::Nothing) = (row, dim.start.column_number:dim.stop.column_number)
+_expand_colon(dim::CellRange, ::Nothing, col) = (dim.start.row_number:dim.stop.row_number, col)
+_expand_colon(dim::CellRange, ::Nothing, ::Nothing) = (dim.start.row_number:dim.stop.row_number, dim.start.column_number:dim.stop.column_number)
 
-    return f(ws, rng; kw...)
+function process_colon(f::Function, ws::Worksheet, row, col; kw...)
+    row, col = _expand_colon(get_dimension(ws), row, col)
+    return f(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)
 end
 function process_veccolon(f::Function, ws::Worksheet, row, col; kw...)
     dim = get_dimension(ws)
-    @assert isnothing(row) || isnothing(col) "Something wrong here!"
-    if isnothing(col)
-        col = dim.start.column_number:dim.stop.column_number
-    else
-        row = dim.start.row_number:dim.stop.row_number
-#    else
-#        throw(XLSXError("Something wrong here!"))
-    end
+    row, col = _expand_colon(dim, row, col)
     isInDim(ws, dim, row, col)
     if length(row) == 1 && length(col) == 1
         single = true
@@ -770,11 +740,11 @@ end
 #
 # Most setUniform functions (but not Style or Alignment - see below)
 #
-function maybe_update_font!(f::Function, ws::Worksheet, cell, cellref; kw...)
-    f == setFont || return
+function maybe_update_font!(f::Function, ws::Worksheet, cell, cellref; spec)
+    f === _setFont || return
     cell isa EmptyCell && return
     cell.datatype == CT_STRING || return
-    v = update_sharedString_font(ws, cell; kw...)
+    v = update_sharedString_font(ws, cell, spec)
     cell.value = isnothing(v) ? cell.value : reinterpret(UInt64, Int64(v))
 end
 
@@ -794,7 +764,7 @@ function process_uniform_core(f::Function, ws::Worksheet, allXfNodes::Vector{XML
 end
 
 function process_uniform_attribute(f::Function, ws::Worksheet, rng::CellRange, atts::Vector{String}; kw...)
-    get_xlsxfile(ws).use_cache_for_sheet_data || throw(XLSXError("Cannot set uniform attributes because cache is not enabled."))
+    _require_cache(ws, "set uniform attributes")
     allXfNodes = get_cellXfs_nodes(get_workbook(ws))
     newid, first = nothing, true
     isInDim(ws, get_dimension(ws), rng)
@@ -819,7 +789,6 @@ function process_uniform_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguo
 
     newid, first = nothing, true
     for r in ncrng.rng
-        @assert r isa CellRef || r isa CellRange "Something wrong here"
         if r isa CellRef
             cell = getcell(ws, r)
             if cell isa EmptyCell
@@ -839,11 +808,9 @@ function process_uniform_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguo
 end
 
 function process_uniform_veccolon(f::Function, ws::Worksheet, row, col, atts::Vector{String}; kw...)
-    @assert isnothing(row) || isnothing(col) "Something wrong here!"
     allXfNodes = get_cellXfs_nodes(get_workbook(ws))
     dim = get_dimension(ws)
-    isnothing(col) ? (col = dim.start.column_number:dim.stop.column_number) :
-                     (row = dim.start.row_number:dim.stop.row_number)
+    row, col = _expand_colon(dim, row, col)
     isInDim(ws, dim, row, col)
     newid, first = nothing, true
     for a in row, b in col
@@ -880,7 +847,7 @@ function process_uniform_core(ws::Worksheet, cellref::CellRef, newid::Union{Int,
         return newid, first, firstFont
     end
     if first                           # Get the style of the first cell in the range.
-        if cell.style !== UInt64(0)
+        if cell.style != 0
             newid = Int(cell.style)
         end
         firstFont=getFont(ws, cellref)
@@ -913,7 +880,6 @@ function process_uniform_ncranges(ws::Worksheet, ncrng::NonContiguousRange)
             first = true
             firstFont=nothing
             for r in ncrng.rng
-                @assert r isa CellRef || r isa CellRange "Something wrong here"
                 if r isa CellRef
                     if getcell(ws, r) isa EmptyCell
                         single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
@@ -924,8 +890,6 @@ function process_uniform_ncranges(ws::Worksheet, ncrng::NonContiguousRange)
                     for c in r
                         newid, first, firstFont = process_uniform_core(ws, c, newid, first, firstFont)
                     end
-#                else
-#                    throw(XLSXError("Something wrong here!"))
                 end
             end
             if first
@@ -937,31 +901,10 @@ function process_uniform_ncranges(ws::Worksheet, ncrng::NonContiguousRange)
         throw(XLSXError("Non-contiguous range $ncrng is out of bounds. Worksheet `$(ws.name)` only has dimension `$dim`."))
     end
 end
-function process_colon(ws::Worksheet, row, col)
-    dim = get_dimension(ws)
-    @assert isnothing(row) || isnothing(col) "Something wrong here!"
-    if isnothing(row) && isnothing(col)
-        return setUniformStyle(ws, dim)
-    elseif isnothing(col)
-        rng = CellRange(CellRef(first(row), dim.start.column_number), CellRef(last(row), dim.stop.column_number))
-    else
-        rng = CellRange(CellRef(dim.start.row_number, first(col)), CellRef(dim.stop.row_number, last(col)))
-#    else
-#        throw(XLSXError("Something wrong here!"))
-    end
-
-    return setUniformStyle(ws, rng)
-end
+process_colon(ws::Worksheet, row, col) = process_colon(setUniformStyle, ws, row, col)
 function process_uniform_veccolon(ws::Worksheet, row, col)
     dim = get_dimension(ws)
-    @assert isnothing(row) || isnothing(col) "Something wrong here!"
-    if isnothing(col)
-        col = dim.start.column_number:dim.stop.column_number
-    else
-        row = dim.start.row_number:dim.stop.row_number
-#    else
-#        throw(XLSXError("Something wrong here!"))
-    end
+    row, col = _expand_colon(dim, row, col)
     isInDim(ws, dim, row, col)
     let newid::Union{Int,Nothing}, first::Bool
         newid = nothing
@@ -1025,9 +968,7 @@ function process_uniform_core(f::Function, ws::Worksheet, allXfNodes::Vector{XML
     return newid, first, alignment_node
 end
 function process_uniform_attribute(f::Function, ws::Worksheet, rng::CellRange; kw...)
-    if !get_xlsxfile(ws).use_cache_for_sheet_data
-        throw(XLSXError("Cannot set uniform attributes because cache is not enabled."))
-    end
+    _require_cache(ws, "set uniform attributes")
 allXfNodes = get_cellXfs_nodes(get_workbook(ws))
     let newid::Union{Int,Nothing}, first::Bool, alignment_node::Union{XML.Node,Nothing}
         newid = nothing
@@ -1065,11 +1006,6 @@ function process_uniform_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguo
             first = true
             alignment_node = nothing
             for r in ncrng.rng
-                @assert r isa CellRef || r isa CellRange "Something wrong here"
-                if r isa CellRef && getcell(ws, r) isa EmptyCell
-                    single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
-                    continue
-                end
                 if r isa CellRef
                     if getcell(ws, r) isa EmptyCell
                         single && throw(XLSXError("Cannot set format for an `EmptyCell`: $(cellname(r)). Set the value first."))
@@ -1080,8 +1016,6 @@ function process_uniform_ncranges(f::Function, ws::Worksheet, ncrng::NonContiguo
                     for c in r
                         newid, first, alignment_node = process_uniform_core(f, ws, allXfNodes, c, newid, first, alignment_node; kw...)
                     end
-#                else
-#                    throw(XLSXError("Something wrong here!"))
                 end
             end
             if first
@@ -1098,22 +1032,15 @@ function process_uniform_veccolon(f::Function, ws::Worksheet, row, col; kw...)
     if dim === nothing
         throw(XLSXError("No worksheet dimension found"))
     else
-        @assert isnothing(row) || isnothing(col) "Something wrong here!"
         allXfNodes = get_cellXfs_nodes(get_workbook(ws))
-        if isnothing(col)
-            col = dim.start.column_number:dim.stop.column_number
-        else
-            row = dim.start.row_number:dim.stop.row_number
-#        else
-#            throw(XLSXError("Something wrong here!"))
-        end
+        row, col = _expand_colon(dim, row, col)
         isInDim(ws, dim, row, col)
         let newid::Union{Int,Nothing}, first::Bool, alignment_node::Union{XML.Node,Nothing}
             newid = nothing
             first = true
             alignment_node = nothing
             for a in row
-                for b in dim.start.column_number:dim.stop.column_number
+                for b in col
                     cellref = CellRef(a, b)
                     if getcell(ws, cellref) isa EmptyCell
                         continue
@@ -1154,44 +1081,44 @@ function process_uniform_vecint(f::Function, ws::Worksheet, row, col; kw...)
 end
 
 
+# The run properties (`<rPr>` children) that name a run's typeface. A cell font that
+# sets any of them sets the typeface as a whole, so overrides all of them. XLSX.jl only
+# writes `rFont`, but files from Excel carry `family` and `scheme` beside it (and
+# `charset` for many fonts). `scheme` must go when the name changes, or Excel shows
+# the theme font in place of the new one.
+const RUN_FACE_TAGS = ("rFont", "family", "scheme", "charset")
+
+# A cell font's tags are the run properties it overrides: the same names, except the
+# cell font's `name` (or any other typeface tag) stands for all of `RUN_FACE_TAGS`.
+_run_tags(font_tag::AbstractString) = font_tag in ("name", RUN_FACE_TAGS...) ? RUN_FACE_TAGS : (font_tag,)
+
+# Each cell of a uniform range takes the first cell's font, so a rich-text cell's runs
+# lose every property that font sets.
 function update_sharedString_font(ws::Worksheet, cell::Cell, firstFont::CellFont) :: Union{Nothing,Int64}
-    let bold=nothing, italic=nothing, under=nothing, strike=nothing, size=nothing, color=nothing, name=nothing
-        for (k, v) in firstFont.font
-            if k=="b"
-                bold = true
-            elseif k=="i"
-                italic = true
-            elseif k=="strike"
-                strike = true
-            elseif k=="u"
-                under = v === nothing ? nothing : v["val"]
-            elseif k=="sz"
-                size = v === nothing ? nothing : parse(Int, v["val"])
-            elseif k=="color"
-                color = v
-            elseif k=="name"
-                name = v === nothing ? nothing : v["val"]
-            else
-                throw(XLSXError("Something wrong here!"))
-            end
-        end
-        return update_sharedString_font(ws, cell; bold, italic, under, strike, size, color, name)
+    tags = Set{String}()
+    for k in keys(firstFont.font)
+        union!(tags, _run_tags(k))
     end
+    return _strip_run_props!(ws, cell, tags)
 end
-        
-function update_sharedString_font(ws::Worksheet, cell::Cell;
-    bold::Union{Nothing,Bool}=nothing,
-    italic::Union{Nothing,Bool}=nothing,
-    under::Union{Nothing,String}=nothing,
-    strike::Union{Nothing,Bool}=nothing,
-    size::Union{Nothing,Int}=nothing,
-    color::Union{Nothing,String,Dict{String,String}}=nothing,
-    name::Union{Nothing,String}=nothing
-) :: Union{Nothing,Int64}
-    # <rPr> elements in a sharedString override any font attributes in the cell Style.
-    # If setFont is called, we need to replace any of the attributes it is setting in the <rPr> elements.
-    # When this makes successive <rPr> elements identical, the <r> elements that contain them can be merged.
-    # starting values
+
+# `setFont` and `setUniformFont` give the font as keywords; each one given overrides
+# the matching run properties.
+function update_sharedString_font(ws::Worksheet, cell::Cell, s::FontSpec) :: Union{Nothing,Int64}
+    tags = Set{String}()
+    for (given, font_tag) in ((!isnothing(s.bold), "b"), (!isnothing(s.italic), "i"), (!isnothing(s.strike), "strike"),
+                              (!isnothing(s.under), "u"), (!isnothing(s.size), "sz"), (!isnothing(s.color), "color"),
+                              (!isnothing(s.name), "name"), (!isnothing(s.vertAlign), "vertAlign"))
+        given && union!(tags, _run_tags(font_tag))
+    end
+    return _strip_run_props!(ws, cell, tags)
+end
+
+# <rPr> elements in a sharedString override any font attributes in the cell Style.
+# When the cell's font changes, remove from each run the properties named in `tags`,
+# so the new cell font shows through, and keep every other property. When this makes
+# successive <rPr> elements identical, the <r> elements that contain them are merged.
+function _strip_run_props!(ws::Worksheet, cell::Cell, tags::Set{String}) :: Union{Nothing,Int64}
     wb=get_workbook(ws)
     index=reinterpret(Int64,cell.value)
     sst=get_sst(wb)
@@ -1217,34 +1144,12 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
 
     first_had_rPr = !isnothing(rPrs[1])
 
-    atts = ["b", "i", "strike", "u", "vertAlign", "sz", "color", "rFont", "family", "scheme"]
-
     for rPr in rPrs
         isnothing(rPr) && continue    # nothing to strip from an unattributed run
-
-        new_rPr = fill(XML.Element("DeleteMe"), length(atts))
-        for att in XML.children(rPr)
-            for i in eachindex(atts)
-                XML.tag(att) == atts[i] && (new_rPr[i] = att)
-            end
-        end
-
-        !isnothing(bold)   && (new_rPr[1]  = XML.Element("DeleteMe"))
-        !isnothing(italic) && (new_rPr[2]  = XML.Element("DeleteMe"))
-        !isnothing(strike) && (new_rPr[3]  = XML.Element("DeleteMe"))
-        !isnothing(under)  && (new_rPr[4]  = XML.Element("DeleteMe"))
-        !isnothing(size)   && (new_rPr[6]  = XML.Element("DeleteMe"))
-        !isnothing(color)  && (new_rPr[7]  = XML.Element("DeleteMe"))
-        if !isnothing(name)
-            new_rPr[8] = new_rPr[9] = new_rPr[10] = XML.Element("DeleteMe")
-        end
-
-        if !isnothing(rPr.children)
-            empty!(rPr.children)
-            foreach(new_rPr) do element
-                XML.tag(element) != "DeleteMe" && push!(rPr.children, element)
-            end
-        end
+        # Whitespace between the properties is dropped too, so that a stripped-bare
+        # <rPr> is empty below.
+        isnothing(rPr.children) ||
+            filter!(k -> XML.nodetype(k) == XML.Element && localname(k) ∉ tags, rPr.children)
     end
 
     # An <rPr> stripped down to nothing means the same as no <rPr> at all:
@@ -1274,11 +1179,12 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
 
         new_index = add_shared_string!(wb, t[1])
 
-        if !isnothing(atts1) && !isempty(atts1)
+        kw = _run_font_kwargs(atts1)
+        if !isempty(kw)
             # Point the cell at the plain string first, otherwise the setFont
             # below re-enters this function on the same rich text and recurses.
             cell.value = reinterpret(UInt64, Int64(new_index))
-            setFont(ws, cell.ref; atts1...)
+            setFont(ws, cell.ref; kw...)
         end
     else
         new_r = IOBuffer()
@@ -1301,4 +1207,155 @@ function update_sharedString_font(ws::Worksheet, cell::Cell;
         new_index = add_formatted_string!(wb, sst, str_formatted)
     end
     return new_index
+end
+
+# A rich-text run's attributes as `setFont` keywords: `:under => true` is a single
+# underline, and false or absent flags set nothing.
+function _run_font_kwargs(atts::Union{Nothing,AbstractDict})
+    kw = Pair{Symbol,Any}[]
+    isnothing(atts) && return kw
+    for (k, v) in atts
+        if k in (:bold, :italic, :strike)
+            v in (true, 1) && push!(kw, k => true)
+        elseif k === :under
+            v in (true, 1) ? push!(kw, :under => "single") : v isa AbstractString && push!(kw, :under => String(v))
+        elseif k === :name || k === :vertAlign
+            push!(kw, k => String(v))
+        else                                            # :size, :color
+            push!(kw, k => v)
+        end
+    end
+    return kw
+end
+
+#
+# --- Address forms shared by the formatting setters
+#
+# Each setter is written by hand for one target: a `CellRef` for the per-cell
+# setters, a `CellRange` for the uniform ones. These define every other way of
+# naming the target (sheet-qualified references, strings, rows and columns,
+# colons, vectors and step ranges), each reducing to that one. Generating them
+# keeps each family identical, so a form added or a routing fixed here applies
+# to every setter in it.
+
+# Per-cell setters (`setFont`, `setFill`, ...). A setter that defines the
+# `CellRange`, `ColumnRange`, `RowRange` and `XLSXFile` forms itself, as
+# `setBorder` does for its `outside` keyword, passes `ranges=false`.
+# Each entry is (arguments, body, return type or `nothing`).
+function _percell_address_methods(F::Symbol, ranges::Bool)
+    IntOrUR = :(Union{Integer,UnitRange{<:Integer}})
+    VecOrSR = :(Union{Vector{Int},StepRange{<:Integer}})
+    ms = Any[
+        ((:(ws::Worksheet), :(ref::SheetCellRef)),      :(do_sheet_names_match(ws, ref) && $F(ws, ref.cellref; kw...)), nothing),
+        ((:(ws::Worksheet), :(rng::SheetCellRange)),    :(do_sheet_names_match(ws, rng) && $F(ws, rng.rng; kw...)), nothing),
+        ((:(ws::Worksheet), :(rng::SheetColumnRange)),  :(do_sheet_names_match(ws, rng) && $F(ws, rng.colrng; kw...)), nothing),
+        ((:(ws::Worksheet), :(rng::SheetRowRange)),     :(do_sheet_names_match(ws, rng) && $F(ws, rng.rowrng; kw...)), nothing),
+        ((:(ws::Worksheet), :(ncrng::NonContiguousRange)),   :(process_ncranges($F, ws, ncrng; kw...)), :Int),
+        ((:(ws::Worksheet), :(ref_or_rng::AbstractString)),  :(process_ranges($F, ws, ref_or_rng; kw...)), :Int),
+        ((:(ws::Worksheet), :(row::$IntOrUR), :(c::Colon)),  :(process_colon($F, ws, row, nothing; kw...)), nothing),
+        ((:(ws::Worksheet), :(r::Colon), :(col::$IntOrUR)),  :(process_colon($F, ws, nothing, col; kw...)), nothing),
+        ((:(ws::Worksheet), :(r::Colon), :(c::Colon)),       :(process_colon($F, ws, nothing, nothing; kw...)), nothing),
+        ((:(ws::Worksheet), :(rc::Colon)),                   :(process_colon($F, ws, nothing, nothing; kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$VecOrSR), :(c::Colon)),  :(process_veccolon($F, ws, row, nothing; kw...)), nothing),
+        ((:(ws::Worksheet), :(r::Colon), :(col::$VecOrSR)),  :(process_veccolon($F, ws, nothing, col; kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$IntOrUR), :(col::$VecOrSR)), :(process_vecint($F, ws, row, col; kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$VecOrSR), :(col::$IntOrUR)), :(process_vecint($F, ws, row, col; kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$VecOrSR), :(col::$VecOrSR)), :(process_vecint($F, ws, row, col; kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$IntOrUR), :(col::$IntOrUR)),
+            :($F(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)), nothing),
+    ]
+    ranges && append!(ms, Any[
+        ((:(ws::Worksheet), :(rng::CellRange)),       :(process_cellranges($F, ws, rng; kw...)), :Int),
+        ((:(ws::Worksheet), :(colrng::ColumnRange)),  :(process_columnranges($F, ws, colrng; kw...)), :Int),
+        ((:(ws::Worksheet), :(rowrng::RowRange)),     :(process_rowranges($F, ws, rowrng; kw...)), :Int),
+        ((:(xl::XLSXFile), :(sheetcell::String)),     :(process_sheetcell($F, xl, sheetcell; kw...)), :Int),
+    ])
+    return ms
+end
+
+function define_percell_address_methods(F::Symbol; ranges::Bool=true)
+    for (args, body, T) in _percell_address_methods(F, ranges)
+        sig = :($F($(args...); kw...))
+        isnothing(T) || (sig = :($sig::$T))
+        @eval $sig = $body
+    end
+    return nothing
+end
+
+# Defines the public setter `F` over the internal setter `G`: each method of `F`
+# gathers its keywords into one `S(:F; kw...)` and passes it to the same method
+# of `G` as the keyword `spec`. The methods of `F` are those in `methods`, so its
+# signatures, and the errors for a target it doesn't take, are those of any
+# other setter in its family; but the many helpers behind `G` see only the
+# keyword `spec`, so they compile once, rather than again for every new set of
+# keywords. An unrecognized keyword is an `XLSXError` naming `F`.
+function _define_spec_wrappers(F::Symbol, G::Symbol, S::Symbol, methods)
+    for (args, _, _) in methods
+        names = [a.args[1] for a in args]
+        @eval $F($(args...); kw...) = $G($(names...); spec=$S($(QuoteNode(F)); kw...))
+    end
+    return nothing
+end
+
+# A per-cell setter `F` taking its keywords as an `S` (see `_define_spec_wrappers`).
+# The internal setter `G` defines the `CellRef` method, taking `spec`, and with
+# `ranges=false` the range methods too.
+function define_percell_spec_methods(F::Symbol, G::Symbol, S::Symbol; ranges::Bool=true)
+    define_percell_address_methods(G; ranges)
+    cellref = ((:(ws::Worksheet), :(ref::CellRef)), nothing, nothing)
+    _define_spec_wrappers(F, G, S, [_percell_address_methods(G, true); [cellref]])
+    return nothing
+end
+
+# Uniform setters (`setUniformFont`, ...). `P` is the per-cell setter applied to
+# the first cell, and `atts` the cellXfs attributes then copied to the others
+# (e.g. `["fontId", "applyFont"]`). `setUniformAlignment` copies an alignment
+# node rather than attributes, so passes `atts=nothing`.
+# Each entry is (arguments, body, return type or `nothing`).
+function _uniform_address_methods(F::Symbol, P::Symbol, atts::Union{Nothing,Vector{String}})
+    a = isnothing(atts) ? () : (:([$(atts...)]),)   # a fresh vector literal at each call
+    IntOrUR = :(Union{Integer,UnitRange{<:Integer}})
+    VecOrSR = :(Union{Vector{Int},StepRange{<:Integer}})
+    return Any[
+        ((:(ws::Worksheet), :(rng::SheetCellRange)),    :(do_sheet_names_match(ws, rng) && $F(ws, rng.rng; kw...)), nothing),
+        ((:(ws::Worksheet), :(rng::SheetColumnRange)),  :(do_sheet_names_match(ws, rng) && $F(ws, rng.colrng; kw...)), nothing),
+        ((:(ws::Worksheet), :(rng::SheetRowRange)),     :(do_sheet_names_match(ws, rng) && $F(ws, rng.rowrng; kw...)), nothing),
+        ((:(ws::Worksheet), :(colrng::ColumnRange)),    :(process_columnranges($F, ws, colrng; kw...)), :Int),
+        ((:(ws::Worksheet), :(rowrng::RowRange)),       :(process_rowranges($F, ws, rowrng; kw...)), :Int),
+        ((:(ws::Worksheet), :(ncrng::NonContiguousRange)),     :(process_uniform_ncranges($P, ws, ncrng, $(a...); kw...)), :Int),
+        ((:(xl::XLSXFile), :(sheetcell::AbstractString)),      :(process_sheetcell($F, xl, sheetcell; kw...)), :Int),
+        ((:(ws::Worksheet), :(ref_or_rng::AbstractString)),    :(process_ranges($F, ws, ref_or_rng; kw...)), :Int),
+        ((:(ws::Worksheet), :(row::$IntOrUR), :(c::Colon)),    :(process_colon($F, ws, row, nothing; kw...)), nothing),
+        ((:(ws::Worksheet), :(r::Colon), :(col::$IntOrUR)),    :(process_colon($F, ws, nothing, col; kw...)), nothing),
+        ((:(ws::Worksheet), :(r::Colon), :(c::Colon)),         :(process_colon($F, ws, nothing, nothing; kw...)), nothing),
+        ((:(ws::Worksheet), :(rc::Colon)),                     :(process_colon($F, ws, nothing, nothing; kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$VecOrSR), :(c::Colon)),    :(process_uniform_veccolon($P, ws, row, nothing, $(a...); kw...)), nothing),
+        ((:(ws::Worksheet), :(r::Colon), :(col::$VecOrSR)),    :(process_uniform_veccolon($P, ws, nothing, col, $(a...); kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$IntOrUR), :(col::$VecOrSR)), :(process_uniform_vecint($P, ws, row, col, $(a...); kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$VecOrSR), :(col::$IntOrUR)), :(process_uniform_vecint($P, ws, row, col, $(a...); kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$VecOrSR), :(col::$VecOrSR)), :(process_uniform_vecint($P, ws, row, col, $(a...); kw...)), nothing),
+        ((:(ws::Worksheet), :(row::$IntOrUR), :(col::$IntOrUR)),
+            :($F(ws, CellRange(CellRef(first(row), first(col)), CellRef(last(row), last(col))); kw...)), nothing),
+        ((:(ws::Worksheet), :(rng::CellRange)),         :(process_uniform_attribute($P, ws, rng, $(a...); kw...)), :Int),
+    ]
+end
+
+function define_uniform_address_methods(F::Symbol, P::Symbol, atts::Union{Nothing,Vector{String}})
+    for (args, body, T) in _uniform_address_methods(F, P, atts)
+        sig = :($F($(args...); kw...))
+        isnothing(T) || (sig = :($sig::$T))
+        @eval $sig = $body
+    end
+    return nothing
+end
+
+# A uniform setter `F` taking its keywords as an `S` (see `_define_spec_wrappers`),
+# over the internal uniform setter `G` and internal per-cell setter `P`.
+function define_uniform_spec_methods(F::Symbol, G::Symbol, P::Symbol, S::Symbol, atts::Union{Nothing,Vector{String}})
+    define_uniform_address_methods(G, P, atts)
+    _define_spec_wrappers(F, G, S, _uniform_address_methods(G, P, atts))
+    # A string naming a single cell reaches `G` as a `CellRef`, which a uniform
+    # setter doesn't take: report it against `F`, as for any other target it doesn't take.
+    @eval $G(ws::Worksheet, ref::CellRef; _...) = throw(MethodError($F, (ws, ref)))
+    return nothing
 end

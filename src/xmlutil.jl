@@ -65,7 +65,7 @@ _attr(node::XML.Node, key::AbstractString) = (v = get_attr(node, key); isempty(v
 _attr(::Nothing, ::AbstractString) = nothing
 
 # DrawingML percentage attributes are in thousandths of a percent. Returns a
-# fraction, not a percentage: 60000 -> 0.6. Used for colour transforms
+# fraction, not a percentage: 60000 -> 0.6. Used for color transforms
 # (lumMod, satMod, shade, tint), text baseline, normAutofit scaling and line
 # spacing — anything reading `_attr_pct` or `_attr_pct_opt` lands here.
 @inline _pct(v::Int) = v / 100_000
@@ -136,4 +136,11 @@ function with_attribute(node::XML.Node, name::AbstractString, value)
     return typeof(node)(XML.nodetype(node), XML.tag(node),
                         isempty(attrs) ? nothing : attrs,
                         XML.value(node), node.children)
+end
+
+# ── nodes ──────────────────────────────────────────────────────────────────
+function copynode(o::XML.Node)
+    attrs = isnothing(o.attributes) ? nothing : copy(o.attributes)
+    children = isnothing(o.children) ? nothing : XML.Node{String}[copynode(x) for x in o.children]
+    return XML.Node{String}(o.nodetype, o.tag, attrs, o.value, children)
 end

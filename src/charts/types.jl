@@ -216,8 +216,8 @@ One data dimension of a chartEx data block: a `cx:numDim` or `cx:strDim`.
 # Fields
 - `kind` - `:num` or `:str`.
 - `type` - the dimension's role as written, e.g. `:val` (values), `:cat`
-  (categories), `:size`, `:x`, `:y`, `:colorVal` (numeric-colour), `:colorStr`
-  (text-colour), `:entityId` (region).
+  (categories), `:size`, `:x`, `:y`, `:colorVal` (numeric-color), `:colorStr`
+  (text-color), `:entityId` (region).
 - `formula` - the text of `cx:f`, usually a hidden `_xlchart.*` defined name;
   `nothing` if the dimension has no formula.
 - `range` - the resolved source range; `nothing` if unresolved.
@@ -259,97 +259,13 @@ struct ChartExBinning
     binCount::Union{Nothing,Int,Symbol}
 end
 
-const SCHEME_TOKENS = (:bg1, :tx1, :bg2, :tx2, :accent1, :accent2, :accent3,
-                       :accent4, :accent5, :accent6, :hlink, :folHlink,
-                       :lt1, :dk1, :lt2, :dk2)
-
-const COLOR_TRANSFORMS = (:lumMod, :lumOff, :shade, :tint, :satMod, :alpha)
-
-# bg1/lt1, tx1/dk1, bg2/lt2 and tx2/dk2 name the same slot. The field keeps the
-# token as written so a round trip preserves it; equality and hashing normalize
-# so two spellings of one color compare equal.
-const SCHEME_ALIASES = Dict(:lt1 => :bg1, :dk1 => :tx1, :lt2 => :bg2, :dk2 => :tx2)
-
-"""
-    SchemeColor(token; lumMod = nothing, lumOff = nothing, ...)
-    SchemeColor(token, transforms)
-
-A DrawingML theme color: a token naming a slot in the workbook's color scheme,
-plus any transforms applied to it. Distinct from the spreadsheet
-`<color theme="N"/>` mechanism, which is index-ordered and uses a different
-tint algorithm — see `get_theme_colors` for that.
-
-`token` is one of `:bg1` (background), `:tx1` (text), `:bg2`, `:tx2` (likewise),
-`:accent1` … `:accent6`, `:hlink` (hyperlink), `:folHlink` (visited-hyperlink),
-or the aliases `:lt1` (light), `:dk1` (dark), `:lt2`, `:dk2`.
-
-The `:lt1`, `:dk1`, `:lt2` and `:dk2` aliases are preserved as written, so a
-round trip keeps the spelling the file used, but two spellings of one slot
-compare and hash equal.
-
-Transforms are held in document order, because DrawingML applies them in
-sequence and `lumMod` before `lumOff` is not the same as the reverse. Equality
-is positional for the same reason: two `SchemeColor`s with the same transforms
-in different orders are not equal, because they do not render the same. Values
-are percentages, not the hundredths DrawingML writes: `lumMod = 75` is 75%.
-
-The keyword constructor emits transforms in the conventional order — `lumMod`
-before `lumOff`, shade or tint last. Any other order needs the vector form.
-
-# Examples
-
-    SchemeColor(:accent1)
-    SchemeColor(:accent1; lumMod = 75)                    # 104862 against the Office theme
-    SchemeColor(:tx1; lumMod = 65, lumOff = 35)           # 595959
-    SchemeColor(:accent2, [:shade => 50.0, :alpha => 80.0])
-"""
-struct SchemeColor
-    token::Symbol
-    transforms::Vector{Pair{Symbol,Float64}}
-
-    function SchemeColor(token::Symbol, transforms::Vector{Pair{Symbol,Float64}})
-        token in SCHEME_TOKENS || throw(XLSXError(
-            "`$token` is not a theme color token. Valid tokens: " *
-            join(SCHEME_TOKENS, ", ") * "."))
-        for (name, _) in transforms
-            name in COLOR_TRANSFORMS || throw(XLSXError(
-                "`$name` is not a color transform. Valid transforms: " *
-                join(COLOR_TRANSFORMS, ", ") * "."))
-        end
-        return new(token, transforms)
-    end
-end
-
-function SchemeColor(token::Symbol; lumMod = nothing, lumOff = nothing,
-                     satMod = nothing, shade = nothing, tint = nothing,
-                     alpha = nothing)
-    t = Pair{Symbol,Float64}[]
-    isnothing(lumMod) || push!(t, :lumMod => Float64(lumMod))
-    isnothing(lumOff) || push!(t, :lumOff => Float64(lumOff))
-    isnothing(satMod) || push!(t, :satMod => Float64(satMod))
-    isnothing(shade)  || push!(t, :shade  => Float64(shade))
-    isnothing(tint)   || push!(t, :tint   => Float64(tint))
-    isnothing(alpha)  || push!(t, :alpha  => Float64(alpha))
-    return SchemeColor(token, t)
-end
-
-canonical_token(t::Symbol) = get(SCHEME_ALIASES, t, t)
-
-Base.:(==)(a::SchemeColor, b::SchemeColor) =
-    canonical_token(a.token) == canonical_token(b.token) && a.transforms == b.transforms
-
-Base.hash(c::SchemeColor, h::UInt) =
-    hash(c.transforms, hash(canonical_token(c.token), hash(:SchemeColor, h)))
-
-Base.isequal(a::SchemeColor, b::SchemeColor) = a == b
-
 """
     DrawingColor
 
-A DrawingML colour: the element as written, plus the RGB it resolves to.
+A DrawingML color: the element as written, plus the RGB it resolves to.
 
-`kind` and `val` record the reference as authored - a theme colour stays a
-theme colour - and `transforms` the modifications applied to it, in document
+`kind` and `val` record the reference as authored - a theme color stays a
+theme color - and `transforms` the modifications applied to it, in document
 order. `rgb` and `alpha` give the resolved result for anyone who just wants to
 know what it looks like.
 
@@ -361,7 +277,7 @@ know what it looks like.
   in thousandths of a percent, in the order DrawingML applies them. A
   [`SchemeColor`](@ref) built in code holds the same transforms as percentages,
   so `60000` here is `lumMod = 60` there.
-- `rgb::String` - the resolved colour as `"RRGGBB"`.
+- `rgb::String` - the resolved color as `"RRGGBB"`.
 - `alpha::Float64` - `1.0` unless an `alpha` transform applies.
 
 `rgb` and `alpha` are resolved values, not source, and are not written — the
@@ -393,7 +309,7 @@ const ColorSpec = Union{DrawingColor, SchemeColor, String}
 A DrawingML fill: `<a:solidFill>`, `<a:noFill>`, `<a:gradFill>`, `<a:pattFill>`
 or `<a:blipFill>`.
 
-A solid fill resolves to one colour in `fgcolor`. A pattern fill resolves to
+A solid fill resolves to one color in `fgcolor`. A pattern fill resolves to
 two, `fgcolor` and `bgcolor`, with the pattern itself in `preset` - matching
 how cell fills are exposed. Gradient and picture fills are identified by `kind`
 but not modelled further: `raw` holds the element as read, so nothing is lost
@@ -402,7 +318,7 @@ on write.
 # Fields
 - `kind::Symbol` - `:none`, `:solid`, `:gradient`, `:pattern`, `:blip` (picture)
   or `:group`.
-- `fgcolor` - the colour of a solid fill, or a pattern's foreground.
+- `fgcolor` - the color of a solid fill, or a pattern's foreground.
 - `bgcolor` - a pattern's background; `nothing` otherwise.
 - `preset::Union{Nothing,String}` - a pattern's `prst` attribute, e.g. `"pct25"`,
   `"ltUpDiag"`.
@@ -437,7 +353,7 @@ DrawingFill(kind::Symbol; fgcolor = nothing, bgcolor = nothing, preset = nothing
 
 A DrawingML outline: `<a:ln>`.
 
-The stroke colour lives in `fill`, since a line is filled the same way a shape
+The stroke color lives in `fill`, since a line is filled the same way a shape
 is - solid, gradient, pattern or none.
 
 # Fields
@@ -482,7 +398,7 @@ series, data points, the plot area, the chart area, axis lines, legend, gridline
 |---------------------------------|------------------------|------------------------|
 | no fill element                 | `nothing`              | inherit from the style |
 | `<a:noFill/>`                   | `kind == :none`        | deliberately invisible |
-| `<a:solidFill>…`                | `kind == :solid`       | this colour            |
+| `<a:solidFill>…`                | `kind == :solid`       | this color            |
 
 The same applies to `line.fill`: `<a:ln><a:noFill/></a:ln>` is how Excel writes
 "no border", which is not the same as omitting `a:ln` entirely.
@@ -511,12 +427,27 @@ end
 """
     DrawingRunProps
 
-Character-level properties: `a:rPr`, `a:defRPr` or `a:endParaRPr`.
+Character-level properties: `a:rPr`, `a:defRPr` or `a:endParaRPr`. A field that
+is `nothing` was not written, and is inherited.
 
-Sizes are points (the file stores 1/100 pt), `baseline` is a fraction of the font
-size, and `under` / `strike` / `caps` keep the DrawingML vocabulary as written
-(`"sng"`, `"noStrike"`, `"small"`). Typefaces may be theme references —
-`"+mn-lt"` for the minor latin font, `"+mj-lt"` for major.
+- `lang::String` — language tag, `"en-US"`.
+- `size::Float64` — font size in points (the file stores 1/100 pt).
+- `bold`, `italic::Bool`.
+- `under`, `strike`, `caps::String` — the DrawingML vocabulary as written:
+  `"sng"`, `"noStrike"`, `"small"` and so on.
+- `baseline::Float64` — vertical offset as a fraction of the font size;
+  positive is superscript.
+- `kern::Float64` — smallest font size, in points, at which to kern.
+- `spacing::Float64` — extra space between characters, in points.
+- `fill::DrawingFill` — the text color.
+- `line::DrawingLine` — the text outline.
+- `latin`, `ea`, `cs::String` — typefaces for Latin, East Asian and complex
+  scripts. They may be theme references — `"+mn-lt"` for the minor (body) Latin
+  font, `"+mj-lt"` for major (headings).
+- `raw` — the element this was parsed from.
+
+To set these on a chart, see the table of fields at
+[`setChartTitleTextProp`](@ref), which every text-property setter shares.
 """
 struct DrawingRunProps
     lang::Union{Nothing,String}
@@ -646,6 +577,78 @@ function _as_runs(s::AbstractString)
     end
     return out
 end
+
+# A RichTextString keeps its runs' formatting: each RichTextRun becomes runs
+# carrying its props, split at newlines as a plain string is. In a paragraph a
+# newline is an a:br, itself carrying the props, so the line keeps its height.
+function _as_runs(rts::RichTextString)
+    out = DrawingRun[]
+    for r in rts.runs
+        props = _rich_run_props(r.atts)
+        for (i, piece) in enumerate(split(r.text, _NEWLINE))
+            i > 1 && push!(out, DrawingRun("\n"; kind = :br, props))
+            isempty(piece) || push!(out, DrawingRun(piece; props))
+        end
+    end
+    return out
+end
+
+# In a text body a newline starts a new paragraph. A paragraph left with no text
+# takes the props of the run its newline fell in as its end-of-paragraph props.
+function _as_paragraphs(rts::RichTextString)
+    paras = DrawingParagraph[]
+    runs  = DrawingRun[]
+    props = nothing
+    for r in rts.runs
+        props = _rich_run_props(r.atts)
+        for (i, piece) in enumerate(split(r.text, _NEWLINE))
+            if i > 1
+                push!(paras, DrawingParagraph(nothing, runs, isempty(runs) ? props : nothing, nothing))
+                runs = DrawingRun[]
+            end
+            isempty(piece) || push!(runs, DrawingRun(piece; props))
+        end
+    end
+    push!(paras, DrawingParagraph(nothing, runs, isempty(runs) ? props : nothing, nothing))
+    return paras
+end
+
+_rich_flag(v, name) = v in (true, 1) ? true : v in (false, 0) ? false :
+    throw(XLSXError("Rich text attribute `:$name` is `true` or `false`, not `$(repr(v))`."))
+
+const _VERTALIGN_BASELINE = Dict("superscript" => 0.30, "subscript" => -0.25, "baseline" => 0.0)
+
+"""
+    _rich_run_props(atts) -> Union{Nothing,DrawingRunProps}
+
+The DrawingML run properties for a `RichTextRun`'s attributes. A run with none
+gets `nothing`, so it inherits. `false` is written as an explicit "off", so a
+run reads as written even where the element's default is, say, bold.
+"""
+function _rich_run_props(atts)
+    (isnothing(atts) || isempty(atts)) && return nothing
+    kw = Dict{Symbol,Any}()
+    haskey(atts, :bold)   && (kw[:bold]   = _rich_flag(atts[:bold], :bold))
+    haskey(atts, :italic) && (kw[:italic] = _rich_flag(atts[:italic], :italic))
+    haskey(atts, :under)  && (kw[:under]  = _rich_flag(atts[:under], :under) ? "sng" : "none")
+    haskey(atts, :strike) && (kw[:strike] = _rich_flag(atts[:strike], :strike) ? "sngStrike" : "noStrike")
+    if haskey(atts, :vertAlign)
+        va = string(atts[:vertAlign])
+        haskey(_VERTALIGN_BASELINE, va) || throw(XLSXError(
+            "Rich text attribute `:vertAlign` is \"superscript\", \"subscript\" or \"baseline\", not `$(repr(atts[:vertAlign]))`."))
+        kw[:baseline] = _VERTALIGN_BASELINE[va]
+    end
+    haskey(atts, :size)  && (kw[:size]  = convert(Float64, atts[:size]))
+    haskey(atts, :name)  && (kw[:latin] = string(atts[:name]))
+    haskey(atts, :color) && (kw[:fill]  = DrawingFill(:solid; fgcolor = _rich_fgcolor(atts[:color])))
+    return DrawingRunProps(; kw...)
+end
+
+# A run color as a chart fill color: theme colors stay theme colors.
+_rich_fgcolor(c::SchemeColor) = c
+_rich_fgcolor(c::Union{AbstractString,Symbol}) =
+    Symbol(c) in SCHEME_TOKENS ? SchemeColor(Symbol(c)) : get_color(c)
+_rich_fgcolor(c) = get_color(c)
 
 """
     DrawingBodyProps
@@ -959,6 +962,9 @@ struct Effective{T}
     value::Union{Nothing,T}
     site::Union{Nothing,FormatSite}
     chain::Vector{FormatSite}
+    # Inner constructor only: the default `Effective(value, ...)` cannot bind `T`
+    # when `value` is `nothing`, which Aqua reports as an unbound type parameter.
+    Effective{T}(value, site, chain) where {T} = new{T}(value, site, chain)
 end
 
 """

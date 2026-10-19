@@ -1,3 +1,5 @@
+const _STRICT_MAIN = "http://purl.oclc.org/ooxml/spreadsheetml/main"
+
 @testset "Strict formats" begin
     @testset "Simple" begin
         XLSX.openxlsx(joinpath(data_directory, "strict.xlsx")) do f
@@ -191,5 +193,84 @@
             end
             isfile("mytest.xlsx") && rm("mytest.xlsx")
         end
+    end
+end
+
+@testset "detecting and converting Strict OOXML" begin
+    @testset "is_strict_ooxml - strict namespace without conformance attribute" begin
+        xf = XLSX.newxlsx()
+        xf.data["xl/workbook.xml"] = parse(
+            """<workbook xmlns="$_STRICT_MAIN"/>""", XLSX.XML.Node)
+        @test XLSX.is_strict_ooxml(xf) == true
+    end
+
+    @testset "is_strict_ooxml - conformance attribute" begin
+        xf = XLSX.newxlsx()
+        xf.data["xl/workbook.xml"] = parse(
+            """<workbook xmlns="$_TRANS_MAIN" conformance="strict"/>""", XLSX.XML.Node)
+        @test XLSX.is_strict_ooxml(xf) == true
+    end
+
+    @testset "is_strict_ooxml - falls back to relationship types in _rels/.rels" begin
+        xf = XLSX.newxlsx()
+        # workbook root gives no hint at all
+        xf.data["xl/workbook.xml"] = parse("""<workbook xmlns="$_TRANS_MAIN"/>""", XLSX.XML.Node)
+        xf.data["_rels/.rels"] = parse(
+            """<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+            <Relationship Id="rId1" Target="xl/workbook.xml"
+                Type="http://purl.oclc.org/ooxml/officeDocument/relationships/officeDocument"/>
+            </Relationships>""", XLSX.XML.Node)
+        @test XLSX.is_strict_ooxml(xf) == true
+    end
+
+    @testset "is_strict_ooxml - ordinary transitional file" begin
+        xf = XLSX.newxlsx()
+        @test XLSX.is_strict_ooxml(xf) == false
+        SAVE_FILES && save_outfile(xf)
+    end
+
+    @testset "_strict_to_transitional_node! - remaps and drops conformance" begin
+        node = XLSX.XML.Element("workbook"; xmlns=_STRICT_MAIN, conformance="strict")
+        XLSX._strict_to_transitional_node!(node, "xl/workbook.xml")
+
+        @test XLSX.get_attr(node, "xmlns") == _TRANS_MAIN
+        @test XLSX.get_attr(node, "conformance", "") == ""
+    end
+
+    @testset "_strict_to_transitional_node! - node with no attributes is a no-op" begin
+        node = XLSX.XML.Element("workbook")
+        @test isnothing(XLSX._strict_to_transitional_node!(node, "xl/workbook.xml"))
+    end
+
+    @testset "_strict_to_transitional_node! - unknown purl namespace errors" begin
+        node = XLSX.XML.Element("thing"; xmlns="http://purl.oclc.org/ooxml/notAThing/main")
+        @test_throws XLSX.XLSXError XLSX._strict_to_transitional_node!(node, "xl/thing.xml")
+    end
+
+    @testset "convert_strict_to_transitional! - part held as a raw String is parsed" begin
+        xf = XLSX.newxlsx()
+        f = "xl/styles.xml"
+        xf.data[f] = """<styleSheet xmlns="$_STRICT_MAIN"/>"""
+
+        XLSX.convert_strict_to_transitional!(xf, 1)
+
+        @test xf.data[f] isa XLSX.XML.Node
+        @test XLSX.get_attr(XLSX.xml_root_element(xf.data[f]), "xmlns") == _TRANS_MAIN
+        SAVE_FILES && save_outfile(xf)
+    end
+
+    @testset "convert_strict_to_transitional! - worksheet String substitution (pass 3)" begin
+        xf = XLSX.newxlsx()
+        f = XLSX.get_relationship_target_by_id("xl", XLSX.get_workbook(xf), xf[1].relationship_id)
+        xf.data[f] = """<worksheet xmlns="$_STRICT_MAIN" conformance="strict"><sheetData/></worksheet>"""
+
+        XLSX.convert_strict_to_transitional!(xf, 3)
+
+        data = xf.data[f]
+        @test data isa String
+        @test occursin(_TRANS_MAIN, data)
+        @test !occursin("purl.oclc.org", data)
+        @test !occursin("conformance", data)
+        SAVE_FILES && save_outfile(xf)
     end
 end

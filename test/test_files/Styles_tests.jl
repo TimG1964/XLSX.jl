@@ -8,7 +8,7 @@ end
 
 @testset "Styles" begin
 
-    @testset "Original" begin
+    @testset "low-level styles API and number-format classification" begin
         using XLSX: CellValue, id, getcell, setdata!, CellRef
         xfile = XLSX.open_empty_template()
         wb = XLSX.get_workbook(xfile)
@@ -226,29 +226,6 @@ end
         SAVE_FILES && save_outfile(xfile)
     end
     
-    @testset "number formats" begin
-        XLSX.openxlsx(joinpath(data_directory, "general.xlsx")) do f
-            show(IOBuffer(), f)
-            sheet = f["general"]
-            @test sheet["A1"] == "text"
-            @test sheet["B1"] == "regular text"
-            @test sheet["A2"] == "integer"
-            @test sheet["B2"] == 102
-            @test sheet["A3"] == "float"
-            @test isapprox(sheet["B3"], 102.2)
-            @test sheet["A4"] == "date"
-            @test sheet["B4"] == Date(1983, 4, 16)
-            @test sheet["A5"] == "hour"
-            @test sheet["B5"] == Dates.Time(Dates.Hour(19), Dates.Minute(45))
-            @test sheet["A6"] == "datetime"
-            @test sheet["B6"] == Date(2018, 4, 16) + Dates.Time(Dates.Hour(19), Dates.Minute(19), Dates.Second(51))
-            @test f["general!B7"] == -220.0
-            @test f["general!B8"] == -2000
-            @test f["general!B9"] == 100000000000000
-            @test f["general!B10"] == -100000000000000
-        end
-    end
-
     @testset "setFont" begin
 
         f = XLSX.newxlsx()
@@ -372,7 +349,6 @@ end
         @test XLSX.getFont(xfile, "Sheet1!B1").font == Dict("sz" => Dict("val" => "18"), "name" => Dict("val" => "Arial"), "color" => Dict("rgb" => "FF00FF00"))
         @test XLSX.getFont(xfile, "Sheet1!B2").font == Dict("b" => nothing, "i" => nothing, "sz" => Dict("val" => "18"), "name" => Dict("val" => "Arial"), "color" => Dict("rgb" => "FF00FF00"))
 
-
         XLSX.writexlsx("output.xlsx", xfile, overwrite=true)
         SAVE_FILES && save_outfile("output.xlsx")
         @test isfile("output.xlsx")
@@ -490,7 +466,7 @@ end
         @test XLSX.getBorder(s, "A1").border == Dict("left" => Dict("rgb" => "FF111111", "style" => "hair"), "bottom" => Dict("rgb" => "FF111111", "style" => "hair"), "right" => Dict("rgb" => "FF111111", "style" => "hair"), "top" => Dict("rgb" => "FF111111", "style" => "hair"), "diagonal" => Dict("rgb" => "FF111111", "style" => "hair", "direction" => "both"))
         @test XLSX.getBorder(s, "D10").border == Dict("left" => Dict("rgb" => "FF111111", "style" => "hair"), "bottom" => Dict("rgb" => "FF111111", "style" => "hair"), "right" => Dict("rgb" => "FF111111", "style" => "hair"), "top" => Dict("rgb" => "FF111111", "style" => "hair"), "diagonal" => Dict("rgb" => "FF111111", "style" => "hair", "direction" => "both"))
         @test XLSX.getcell(s, "D11") isa XLSX.EmptyCell
-        @test_throws XLSX.XLSXError XLSX.getBorder(s, "D11") # Cannot get a border outside sheet dimension.
+        @test isnothing(XLSX.getBorder(s, "D11"))  # outside the sheet dimension, so empty
         SAVE_FILES && save_outfile(f)
 
         f = XLSX.newxlsx()
@@ -554,8 +530,8 @@ end
         @test XLSX.getBorder(s, "B4").border == Dict("left" => Dict("rgb" => "FFFF0004", "style" => "thick"), "bottom" => nothing, "right" => nothing, "top" => nothing, "diagonal" => nothing)
         XLSX.setBorder(s, 3:2:5, [2, 3]; left=["color" => "FFFF0005", "style" => "thick"])
         @test XLSX.getBorder(s, "C5").border == Dict("left" => Dict("rgb" => "FFFF0005", "style" => "thick"), "bottom" => nothing, "right" => nothing, "top" => nothing, "diagonal" => nothing)
-        @test_throws XLSX.XLSXError XLSX.setFont(s, "1:10"; left=["color" => "FFFF0005", "style" => "thick"])
-        @test_throws XLSX.XLSXError XLSX.setFont(s, "A:K"; left=["color" => "FFFF0005", "style" => "thick"])
+        @test_throws XLSX.XLSXError XLSX.setBorder(s, "1:10"; left=["color" => "FFFF0005", "style" => "thick"])
+        @test_throws XLSX.XLSXError XLSX.setBorder(s, "A:K"; left=["color" => "FFFF0005", "style" => "thick"])
         SAVE_FILES && save_outfile(f)
 
         f = XLSX.open_xlsx_template(joinpath(data_directory, "Borders.xlsx"))
@@ -604,77 +580,6 @@ end
 
         # Can't get attributes on a range.
         @test_throws XLSX.XLSXError XLSX.getBorder(s, "Contiguous")
-        SAVE_FILES && save_outfile(f)
-
-        f = XLSX.open_empty_template()
-        s = f["Sheet1"]
-        s["A1"] = ""
-        s["F21"] = ""
-        # All these cells are empty.
-        @test XLSX.setUniformFont(s, "A2:B4"; size=12, name="Times New Roman", color="chocolate4") == -1
-        @test XLSX.setUniformBorder(f, "Sheet1!A2:D4"; left=["style" => "dotted", "color" => "chocolate4"],
-            right=["style" => "medium", "color" => "FF765000"],
-            top=["style" => "thick", "color" => "FF230000"],
-            bottom=["style" => "medium", "color" => "chocolate4"],
-            diagonal=["style" => "none"]
-        ) == -1
-        @test XLSX.setUniformFill(s, "B2:D4"; pattern="gray125", bgColor="FF000000") == -1
-        @test XLSX.setFont(s, "A2:F20"; size=18, name="Arial") == -1
-        @test XLSX.setBorder(f, "Sheet1!B2:D4"; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "chocolate4"], diagonal=["style" => "hair"]) == -1
-        @test XLSX.setAlignment(s, "A2:F20"; horizontal="right", wrapText=true) == -1
-        @test XLSX.setUniformFill(s, [2, 4], 2:4; pattern="gray125", bgColor="FF000000") == -1
-        @test XLSX.setFont(s, [2, 4], 2:4; size=18, name="Arial") == -1
-        @test XLSX.setBorder(s, [2, 4], :; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "chocolate4"], diagonal=["style" => "hair"]) == -1
-        @test XLSX.setAlignment(s, [2, 4], 2:4; horizontal="right", wrapText=true) == -1
-        @test XLSX.setUniformFill(s, "B2,C2"; pattern="gray125", bgColor="FF000000") == -1
-        @test XLSX.setFont(s, "A2,A4"; size=18, name="Arial") == -1
-        @test XLSX.setBorder(f, "Sheet1!B2,Sheet1!C2"; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "chocolate4"], diagonal=["style" => "hair"]) == -1
-        @test XLSX.setAlignment(s, "A2,B3:C4"; horizontal="right", wrapText=true) == -1
-        @test XLSX.setUniformAlignment(s, "B2,D2"; horizontal="right", wrapText=true) == -1
-        @test XLSX.setUniformStyle(s, "B2:D2,E3") == -1
-        @test_throws XLSX.XLSXError XLSX.setUniformFill(s, "B2,B2"; pattern="gray125", bgColor="FF000000")
-        @test_throws XLSX.XLSXError XLSX.setFont(s, "A2,A2"; size=18, name="Arial")
-        @test_throws XLSX.XLSXError XLSX.setBorder(f, "Sheet1!B2,Sheet1!B2"; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "chocolate4"], diagonal=["style" => "hair"])
-        @test_throws XLSX.XLSXError XLSX.setAlignment(s, "A2,A2:A2"; horizontal="right", wrapText=true)
-        @test_throws XLSX.XLSXError XLSX.setUniformAlignment(s, "B2,B2"; horizontal="right", wrapText=true)
-        @test_throws XLSX.XLSXError XLSX.setUniformStyle(s, "B2:B2,B2")
-        SAVE_FILES && save_outfile(f)
-
-        f = XLSX.open_empty_template()
-        s = f["Sheet1"]
-        # All these cells are outside the sheet dimension.
-        @test_throws XLSX.XLSXError XLSX.setUniformFont(s, "A1:B4"; size=12, name="Times New Roman", color="chocolate4")
-        @test_throws XLSX.XLSXError XLSX.setUniformBorder(f, "Sheet1!A1:D4"; left=["style" => "dotted", "color" => "chocolate4"],
-            right=["style" => "medium", "color" => "FF765000"],
-            top=["style" => "thick", "color" => "FF230000"],
-            bottom=["style" => "medium", "color" => "chocolate4"],
-            diagonal=["style" => "none"]
-        )
-        @test_throws XLSX.XLSXError XLSX.setUniformFill(s, "B2:D4"; pattern="gray125", bgColor="FF000000")
-        @test_throws XLSX.XLSXError XLSX.setFont(s, "A1:F20"; size=18, name="Arial")
-        @test_throws XLSX.XLSXError XLSX.setBorder(f, "Sheet1!B2:D4"; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "chocolate4"], diagonal=["style" => "hair"])
-        @test_throws XLSX.XLSXError XLSX.setAlignment(s, "A1:F20"; horizontal="right", wrapText=true)
-        @test_throws XLSX.XLSXError XLSX.setFill(f, "Sheet1!A1"; pattern="none", fgColor="88FF8800")
-        @test_throws XLSX.XLSXError XLSX.setFont(s, "A1"; size=18, name="Arial")
-        @test_throws XLSX.XLSXError XLSX.setBorder(f, "Sheet1!B2"; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "FF8B4513"], diagonal=["style" => "hair"])
-        @test_throws XLSX.XLSXError XLSX.setFill(s, "F20"; pattern="none", fgColor="88FF8800")
-        SAVE_FILES && save_outfile(f)
-
-        f = XLSX.open_xlsx_template(joinpath(data_directory, "customXml.xlsx"))
-        s = f["Mock-up"]
-
-        # Can't set a uniform attribute to a single cell.
-        @test_throws MethodError XLSX.setUniformFill(s, "D4"; pattern="gray125", bgColor="FF000000")
-        @test_throws MethodError XLSX.setUniformFill(s, "ID"; pattern="darkTrellis", fgColor="FF222222", bgColor="FFDDDDDD")
-        @test_throws MethodError XLSX.setUniformFont(s, "B4"; size=12, name="Times New Roman", color="FF040404")
-        @test_throws MethodError XLSX.setUniformBorder(f[2], "B4"; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "FF8B4513"], diagonal=["style" => "hair"])
-        @test_throws MethodError XLSX.setUniformStyle(s, "ID")
-        @test_throws MethodError XLSX.setUniformBorder(f, "Mock-up!D4"; left=["style" => "dotted", "color" => "FF000FF0"],
-            right=["style" => "medium", "color" => "FF765000"],
-            top=["style" => "thick", "color" => "FF230000"],
-            bottom=["style" => "medium", "color" => "FF0000FF"],
-            diagonal=["style" => "none"]
-        )
         SAVE_FILES && save_outfile(f)
 
         f = XLSX.newxlsx()
@@ -826,6 +731,15 @@ end
         @test XLSX.getBorder(s, "A2").border == Dict("left" => Dict("rgb" => "FFFFFFF0", "style" => "dotted"), "bottom" => Dict("rgb" => "FFFFFFF0", "style" => "dotted"), "right" => Dict("rgb" => "FFFFFFF0", "style" => "dotted"), "top" => nothing, "diagonal" => nothing)
         SAVE_FILES && save_outfile(f)
 
+
+        @testset "borders through the XLSXFile" begin
+            xf = XLSX.newxlsx()
+            sh = xf[1]
+            sh[1:2, 1:2] = [1 2; 3 4]
+            XLSX.setBorder(xf, "Sheet1!A1:B2"; outside=["style" => "thin", "color" => "black"])
+            @test XLSX.getBorder(sh, "A1").border["top"]["style"] == "thin"
+            SAVE_FILES && save_outfile(xf)
+        end
     end
 
     @testset "setFill" begin
@@ -853,7 +767,7 @@ end
         @test XLSX.getFill(s, "D18").fill == Dict("patternFill" => Dict("bgindexed" => "64", "patternType" => "lightVertical", "fgtint" => "-0.499984740745262", "fgtheme" => "2"))
         @test XLSX.getFill(s, "D20").fill == Dict("patternFill" => Dict("bgindexed" => "64", "patternType" => "lightVertical", "fgtint" => "-0.499984740745262", "fgtheme" => "2"))
         @test XLSX.getFill(s, "J18").fill == Dict("patternFill" => Dict("bgindexed" => "64", "patternType" => "lightVertical", "fgtint" => "-0.499984740745262", "fgtheme" => "2"))
-        @test XLSX.getFill(s, "J18").fill == Dict("patternFill" => Dict("bgindexed" => "64", "patternType" => "lightVertical", "fgtint" => "-0.499984740745262", "fgtheme" => "2"))
+        @test XLSX.getFill(s, "J20").fill == Dict("patternFill" => Dict("bgindexed" => "64", "patternType" => "lightVertical", "fgtint" => "-0.499984740745262", "fgtheme" => "2"))
 
         XLSX.setFill(s, "Contiguous"; pattern="lightVertical")  # Default colors unchanged
         @test XLSX.getFill(s, "D23").fill == Dict("patternFill" => Dict("patternType" => "lightVertical", "bgindexed" => "64", "fgtheme" => "0"))
@@ -1184,7 +1098,6 @@ end
         @test XLSX.getFormat(s, "E2").format == Dict("numFmt" => Dict("numFmtId" => "14", "formatCode" => "m/d/yyyy"))
         @test XLSX.getFormat(s, "F2").format == Dict("numFmt" => Dict("numFmtId" => "14", "formatCode" => "m/d/yyyy"))
 
-
         @test XLSX.setFormat(s, "A2"; format="""_-£* #,##0.00_-;-£* #,##0.00_-;_-£* "-"??_-;_-@_-""") == 164
         @test XLSX.getFormat(s, "A2").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "_-£* #,##0.00_-;-£* #,##0.00_-;_-£* \"-\"??_-;_-@_-"))
         @test XLSX.setFormat(s, "A2"; format="_-£* #,##0.00_-;-£* #,##0.00_-;_-£* \"-\"??_-;_-@_-") == 164
@@ -1200,7 +1113,6 @@ end
         @test XLSX.getFormat(s, "E2").format == Dict("numFmt" => Dict("numFmtId" => "0", "formatCode" => "General"))
         @test XLSX.getFormat(f, "Sheet1!F2").format == Dict("numFmt" => Dict("numFmtId" => "7", "formatCode" => "\$#,##0.00_);(\$#,##0.00)"))
 
-
         @test XLSX.setFormat(f, "Sheet1!E1:F5"; format="#,##0.000") == -1
         @test XLSX.setFormat(s, "F1:F5"; format="#,##0.000") == -1
         @test XLSX.getFormat(s, "E2").format == Dict("numFmt" => Dict("numFmtId" => "165", "formatCode" => "#,##0.000"))
@@ -1209,7 +1121,6 @@ end
         @test_throws XLSX.XLSXError XLSX.setFormat(s, "Sheet1!Z100"; format="Currency")
         @test_throws XLSX.XLSXError XLSX.setFormat(s, "Sheet1!E1:F5,Sheet1!Z100"; format="Currency")
         @test_throws XLSX.XLSXError XLSX.setFormat(s, "E2"; format="ffzz345")
-
 
         XLSX.writexlsx("test.xlsx", f, overwrite=true)
         SAVE_FILES && save_outfile("test.xlsx")
@@ -1322,9 +1233,9 @@ end
         @test XLSX.getcell(s, "E8").style == cell_style
 
         XLSX.setFont(s, "A11:F15"; size=10, name="Times New Roman")
-        cell_style = XLSX.getcell(s, "E6").style
-        @test XLSX.setUniformStyle(s, [6, 7, 8, 9, 10], :) == cell_style
-        @test XLSX.getcell(s, "Z8").style == cell_style
+        cell_style = XLSX.getcell(s, "E11").style
+        @test XLSX.setUniformStyle(s, [11, 12, 13, 14, 15], :) == cell_style
+        @test XLSX.getcell(s, "Z13").style == cell_style
 
         XLSX.setFont(s, "A16"; size=80, name="Ariel")
         cell_style = XLSX.getcell(s, "A16").style
@@ -1545,9 +1456,9 @@ end
 
     end
 
-    @testset "No cache" begin
+    @testset "read-only files reject style getters" begin
         XLSX.openxlsx(joinpath(data_directory, "customXml.xlsx"); mode="r", enable_cache=true) do f
-            @test_throws XLSX.XLSXError XLSX.getRowHeight(f, "Mock-up!B2") ≈ 23.25 # File not writable
+            @test_throws XLSX.XLSXError XLSX.getRowHeight(f, "Mock-up!B2") # File not writable
             @test_throws XLSX.XLSXError XLSX.getColumnWidth(f, "Mock-up!B2") # File not writable
         end
         XLSX.openxlsx(joinpath(data_directory, "customXml.xlsx"); mode="r", enable_cache=false) do f
@@ -1573,7 +1484,7 @@ end
         end
     end
 
-    @testset "indexing setAttribute" begin
+    @testset "setters on every target form" begin
         f = XLSX.newxlsx() # Empty XLSXFile
         s = f[1] #1×1 XLSX.Worksheet: ["Sheet1"](A1:A1)
 
@@ -1595,9 +1506,9 @@ end
         @test XLSX.setFont(s, 2:3, 1:3; color="grey42") == -1
 
         # Outside sheet dimension
-        @test_throws XLSX.XLSXError XLSX.getFont(s, 2, 4)
-        @test_throws XLSX.XLSXError XLSX.getFont(s, 4, 2)
-        @test_throws XLSX.XLSXError XLSX.getFont(s, 4, 4)
+        @test isnothing(XLSX.getFont(s, 2, 4))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getFont(s, 4, 2))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getFont(s, 4, 4))          # outside the dimension: an empty cell
 
         s[1:3, 1:3] = ""
         default_font = XLSX.getDefaultFont(s).font
@@ -1625,10 +1536,10 @@ end
         @test_throws XLSX.XLSXError XLSX.setBorder(s, :, 1; allsides=["color" => "grey42", "style" => "thick"])
         @test_throws XLSX.XLSXError XLSX.setBorder(s, :; allsides=["color" => "grey42", "style" => "thick"])
         @test_throws XLSX.XLSXError XLSX.setBorder(s, :, :; allsides=["color" => "grey42", "style" => "thick"])
-        @test_throws XLSX.XLSXError XLSX.setBorder(s, [2, 3], 1:3; allsides=["color" => "grey42", "style" => "thick"]) == -1
-        @test_throws XLSX.XLSXError XLSX.getBorder(s, 2, 1)
-        @test_throws XLSX.XLSXError XLSX.getBorder(s, 3, 2)
-        @test_throws XLSX.XLSXError XLSX.getBorder(s, 2, 3)
+        @test_throws XLSX.XLSXError XLSX.setBorder(s, [2, 3], 1:3; allsides=["color" => "grey42", "style" => "thick"])
+        @test isnothing(XLSX.getBorder(s, 2, 1))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getBorder(s, 3, 2))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getBorder(s, 2, 3))          # outside the dimension: an empty cell
         s[1:3, 1:3] = ""
         XLSX.setBorder(s, "A1"; allsides=["color" => "grey42", "style" => "thick"])
         @test XLSX.getBorder(s, "A1").border == Dict("left" => Dict("rgb" => "FF6B6B6B", "style" => "thick"), "bottom" => Dict("rgb" => "FF6B6B6B", "style" => "thick"), "right" => Dict("rgb" => "FF6B6B6B", "style" => "thick"), "top" => Dict("rgb" => "FF6B6B6B", "style" => "thick"), "diagonal" => nothing)
@@ -1652,10 +1563,10 @@ end
         @test_throws XLSX.XLSXError XLSX.setFill(s, 1, :; pattern="lightVertical", fgColor="Red", bgColor="blue")
         @test_throws XLSX.XLSXError XLSX.setFill(s, :, :; pattern="lightVertical", fgColor="Red", bgColor="blue")
         @test_throws XLSX.XLSXError XLSX.setFill(s, :; pattern="lightVertical", fgColor="Red", bgColor="blue")
-        @test_throws XLSX.XLSXError XLSX.setFill(s, [2, 3], 1:3; pattern="lightVertical", fgColor="Red", bgColor="blue") == -1
-        @test_throws XLSX.XLSXError XLSX.getFill(s, 2, 1)
-        @test_throws XLSX.XLSXError XLSX.getFill(s, 3, 2)
-        @test_throws XLSX.XLSXError XLSX.getFill(s, 2, 3)
+        @test_throws XLSX.XLSXError XLSX.setFill(s, [2, 3], 1:3; pattern="lightVertical", fgColor="Red", bgColor="blue")
+        @test isnothing(XLSX.getFill(s, 2, 1))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getFill(s, 3, 2))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getFill(s, 2, 3))          # outside the dimension: an empty cell
         s[1:3, 1:3] = ""
         XLSX.setFill(s, "A1"; pattern="lightVertical", fgColor="Red", bgColor="blue")
         @test XLSX.getFill(s, "A1").fill == Dict("patternFill" => Dict("bgrgb" => "FF0000FF", "patternType" => "lightVertical", "fgrgb" => "FFFF0000"))
@@ -1679,10 +1590,10 @@ end
         @test_throws XLSX.XLSXError XLSX.setAlignment(s, 1, :; horizontal="right", vertical="justify", wrapText=true)
         @test_throws XLSX.XLSXError XLSX.setAlignment(s, :, :; horizontal="right", vertical="justify", wrapText=true)
         @test_throws XLSX.XLSXError XLSX.setAlignment(s, :; horizontal="right", vertical="justify", wrapText=true)
-        @test_throws XLSX.XLSXError XLSX.setAlignment(s, [2, 3], 1:3; horizontal="right", vertical="justify", wrapText=true) == -1
-        @test_throws XLSX.XLSXError XLSX.getAlignment(s, 2, 1)
-        @test_throws XLSX.XLSXError XLSX.getAlignment(s, 3, 2)
-        @test_throws XLSX.XLSXError XLSX.getAlignment(s, 2, 3)
+        @test_throws XLSX.XLSXError XLSX.setAlignment(s, [2, 3], 1:3; horizontal="right", vertical="justify", wrapText=true)
+        @test isnothing(XLSX.getAlignment(s, 2, 1))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getAlignment(s, 3, 2))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getAlignment(s, 2, 3))          # outside the dimension: an empty cell
         s[1:3, 1:3] = ""
         XLSX.setAlignment(s, "A1"; horizontal="right", vertical="justify", wrapText=true)
         @test XLSX.getAlignment(s, "A1").alignment == Dict("alignment" => Dict("horizontal" => "right", "vertical" => "justify", "wrapText" => "1"))
@@ -1706,10 +1617,10 @@ end
         @test_throws XLSX.XLSXError XLSX.setFormat(s, 1, :; format="Percentage")
         @test_throws XLSX.XLSXError XLSX.setFormat(s, :, :; format="Percentage")
         @test_throws XLSX.XLSXError XLSX.setFormat(s, :; format="Percentage")
-        @test_throws XLSX.XLSXError XLSX.setFormat(s, [2, 3], 1:3; format="Percentage") == -1
-        @test_throws XLSX.XLSXError XLSX.getFormat(s, 2, 1)
-        @test_throws XLSX.XLSXError XLSX.getFormat(s, 3, 2)
-        @test_throws XLSX.XLSXError XLSX.getFormat(s, 2, 3)
+        @test_throws XLSX.XLSXError XLSX.setFormat(s, [2, 3], 1:3; format="Percentage")
+        @test isnothing(XLSX.getFormat(s, 2, 1))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getFormat(s, 3, 2))          # outside the dimension: an empty cell
+        @test isnothing(XLSX.getFormat(s, 2, 3))          # outside the dimension: an empty cell
         s[1:3, 1:3] = ""
         XLSX.setFormat(s, "A1"; format="#,##0.000;(#,##0.000)")
         @test XLSX.getFormat(s, "A1").format == Dict("numFmt" => Dict("numFmtId" => "164", "formatCode" => "#,##0.000;(#,##0.000)"))
@@ -1783,19 +1694,158 @@ end
         @test XLSX.getBorder(s, 4, 4).border == Dict("left" => Dict("style" => "dotted", "rgb" => "FF9BCD9B"), "bottom" => Dict("style" => "medium", "rgb" => "FF0000FF"), "right" => Dict("style" => "medium", "rgb" => "FF765000"), "top" => Dict("style" => "thick", "rgb" => "FF230000"), "diagonal" => nothing)
         SAVE_FILES && save_outfile(f)
 
+        @testset "empty cells, cells outside the dimension, and single cells" begin
+            f = XLSX.open_empty_template()
+            s = f["Sheet1"]
+            s["A1"] = ""
+            s["F21"] = ""
+            # All these cells are empty.
+            @test XLSX.setUniformFont(s, "A2:B4"; size=12, name="Times New Roman", color="chocolate4") == -1
+            @test XLSX.setUniformBorder(f, "Sheet1!A2:D4"; left=["style" => "dotted", "color" => "chocolate4"],
+                right=["style" => "medium", "color" => "FF765000"],
+                top=["style" => "thick", "color" => "FF230000"],
+                bottom=["style" => "medium", "color" => "chocolate4"],
+                diagonal=["style" => "none"]
+            ) == -1
+            @test XLSX.setUniformFill(s, "B2:D4"; pattern="gray125", bgColor="FF000000") == -1
+            @test XLSX.setFont(s, "A2:F20"; size=18, name="Arial") == -1
+            @test XLSX.setBorder(f, "Sheet1!B2:D4"; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "chocolate4"], diagonal=["style" => "hair"]) == -1
+            @test XLSX.setAlignment(s, "A2:F20"; horizontal="right", wrapText=true) == -1
+            @test XLSX.setUniformFill(s, [2, 4], 2:4; pattern="gray125", bgColor="FF000000") == -1
+            @test XLSX.setFont(s, [2, 4], 2:4; size=18, name="Arial") == -1
+            @test XLSX.setBorder(s, [2, 4], :; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "chocolate4"], diagonal=["style" => "hair"]) == -1
+            @test XLSX.setAlignment(s, [2, 4], 2:4; horizontal="right", wrapText=true) == -1
+            @test XLSX.setUniformFill(s, "B2,C2"; pattern="gray125", bgColor="FF000000") == -1
+            @test XLSX.setFont(s, "A2,A4"; size=18, name="Arial") == -1
+            @test XLSX.setBorder(f, "Sheet1!B2,Sheet1!C2"; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "chocolate4"], diagonal=["style" => "hair"]) == -1
+            @test XLSX.setAlignment(s, "A2,B3:C4"; horizontal="right", wrapText=true) == -1
+            @test XLSX.setUniformAlignment(s, "B2,D2"; horizontal="right", wrapText=true) == -1
+            @test XLSX.setUniformStyle(s, "B2:D2,E3") == -1
+            @test_throws XLSX.XLSXError XLSX.setUniformFill(s, "B2,B2"; pattern="gray125", bgColor="FF000000")
+            @test_throws XLSX.XLSXError XLSX.setFont(s, "A2,A2"; size=18, name="Arial")
+            @test_throws XLSX.XLSXError XLSX.setBorder(f, "Sheet1!B2,Sheet1!B2"; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "chocolate4"], diagonal=["style" => "hair"])
+            @test_throws XLSX.XLSXError XLSX.setAlignment(s, "A2,A2:A2"; horizontal="right", wrapText=true)
+            @test_throws XLSX.XLSXError XLSX.setUniformAlignment(s, "B2,B2"; horizontal="right", wrapText=true)
+            @test_throws XLSX.XLSXError XLSX.setUniformStyle(s, "B2:B2,B2")
+            SAVE_FILES && save_outfile(f)
+
+            f = XLSX.open_empty_template()
+            s = f["Sheet1"]
+            # All these cells are outside the sheet dimension.
+            @test_throws XLSX.XLSXError XLSX.setUniformFont(s, "A1:B4"; size=12, name="Times New Roman", color="chocolate4")
+            @test_throws XLSX.XLSXError XLSX.setUniformBorder(f, "Sheet1!A1:D4"; left=["style" => "dotted", "color" => "chocolate4"],
+                right=["style" => "medium", "color" => "FF765000"],
+                top=["style" => "thick", "color" => "FF230000"],
+                bottom=["style" => "medium", "color" => "chocolate4"],
+                diagonal=["style" => "none"]
+            )
+            @test_throws XLSX.XLSXError XLSX.setUniformFill(s, "B2:D4"; pattern="gray125", bgColor="FF000000")
+            @test_throws XLSX.XLSXError XLSX.setFont(s, "A1:F20"; size=18, name="Arial")
+            @test_throws XLSX.XLSXError XLSX.setBorder(f, "Sheet1!B2:D4"; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "chocolate4"], diagonal=["style" => "hair"])
+            @test_throws XLSX.XLSXError XLSX.setAlignment(s, "A1:F20"; horizontal="right", wrapText=true)
+            @test_throws XLSX.XLSXError XLSX.setFill(f, "Sheet1!A1"; pattern="none", fgColor="88FF8800")
+            @test_throws XLSX.XLSXError XLSX.setFont(s, "A1"; size=18, name="Arial")
+            @test_throws XLSX.XLSXError XLSX.setBorder(f, "Sheet1!B2"; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "FF8B4513"], diagonal=["style" => "hair"])
+            @test_throws XLSX.XLSXError XLSX.setFill(s, "F20"; pattern="none", fgColor="88FF8800")
+            SAVE_FILES && save_outfile(f)
+
+            f = XLSX.open_xlsx_template(joinpath(data_directory, "customXml.xlsx"))
+            s = f["Mock-up"]
+
+            # Can't set a uniform attribute to a single cell.
+            @test_throws MethodError XLSX.setUniformFill(s, "D4"; pattern="gray125", bgColor="FF000000")
+            @test_throws MethodError XLSX.setUniformFill(s, "ID"; pattern="darkTrellis", fgColor="FF222222", bgColor="FFDDDDDD")
+            @test_throws MethodError XLSX.setUniformFont(s, "B4"; size=12, name="Times New Roman", color="FF040404")
+            @test_throws MethodError XLSX.setUniformBorder(f[2], "B4"; left=["style" => "hair"], right=["color" => "FF8B4513"], top=["style" => "hair"], bottom=["color" => "FF8B4513"], diagonal=["style" => "hair"])
+            @test_throws MethodError XLSX.setUniformStyle(s, "ID")
+            @test_throws MethodError XLSX.setUniformBorder(f, "Mock-up!D4"; left=["style" => "dotted", "color" => "FF000FF0"],
+                right=["style" => "medium", "color" => "FF765000"],
+                top=["style" => "thick", "color" => "FF230000"],
+                bottom=["style" => "medium", "color" => "FF0000FF"],
+                diagonal=["style" => "none"]
+            )
+            SAVE_FILES && save_outfile(f)
+        end
+
+        # A range that resolves to a single cell should return that cell's attribute id,
+        # not -1. Multi-cell ranges keep returning -1.
+        @testset "single-cell ranges return an id" begin
+
+             @testset "setFormat - all single-cell spellings agree" begin
+                _, s = onecell()
+                @test XLSX.setFormat(s, XLSX.CellRef("A1"); format="#,##0") == 3   # reference case
+                @test XLSX.setFormat(s, "A1"; format="#,##0") == 3
+                @test XLSX.setFormat(s, "A1:A1"; format="#,##0") == 3              # 1x1 CellRange
+                @test XLSX.setFormat(s, XLSX.CellRange("A1:A1"); format="#,##0") == 3
+                @test XLSX.setFormat(s, 1, 1; format="#,##0") == 3                 # Integer, Integer
+                @test XLSX.setFormat(s, 1:1, 1:1; format="#,##0") == 3             # UnitRange
+                @test XLSX.setFormat(s, "A:A"; format="#,##0") == 3                # column range, 1x1 sheet
+                @test XLSX.setFormat(s, "1:1"; format="#,##0") == 3                # row range, 1x1 sheet
+                @test XLSX.setFormat(s, :, :; format="#,##0") == 3                 # colon, 1x1 sheet
+
+                # single-cell non-contiguous range (process_ncranges)
+                nc = XLSX.NonContiguousRange(s.name, Union{XLSX.CellRef,XLSX.CellRange}[XLSX.CellRef("A1")])
+                @test XLSX.setFormat(s, nc; format="#,##0") == 3
+                SAVE_FILES && save_outfile(XLSX.get_xlsxfile(s))
+            end
+
+            @testset "multi-cell ranges still return -1" begin
+                f = XLSX.newxlsx()
+                s = f[1]
+                s["A1"] = 1
+                s["B1"] = 2
+                @test XLSX.setFormat(s, "A1:B1"; format="#,##0") == -1
+                @test XLSX.setFormat(s, 1, 1:2; format="#,##0") == -1
+                @test XLSX.setFormat(s, "A1,B1"; format="#,##0") == -1
+                # ... but each cell did get the format
+                @test XLSX.getFormat(s, "A1").numFmtId == 3
+                @test XLSX.getFormat(s, "B1").numFmtId == 3
+                SAVE_FILES && save_outfile(f)
+            end
+
+            @testset "other setters agree with the CellRef form" begin
+                _, s = onecell()
+                @test XLSX.setFont(s, "A1:A1"; bold=true) == XLSX.setFont(s, XLSX.CellRef("A1"); bold=true)
+                @test XLSX.setFill(s, "A1:A1"; pattern="solid", fgColor="FFFFFF00") ==
+                    XLSX.setFill(s, XLSX.CellRef("A1"); pattern="solid", fgColor="FFFFFF00")
+                @test XLSX.setAlignment(s, "A1:A1"; horizontal="right") ==
+                    XLSX.setAlignment(s, XLSX.CellRef("A1"); horizontal="right")
+                @test XLSX.setBorder(s, "A1:A1"; allsides=["style" => "thin"]) ==
+                    XLSX.setBorder(s, XLSX.CellRef("A1"); allsides=["style" => "thin"])
+                SAVE_FILES && save_outfile(XLSX.get_xlsxfile(s))
+            end
+
+            @testset "empty cell in a single-cell range still throws" begin
+                f = XLSX.newxlsx()
+                s = f[1]
+                s["A1"] = 1
+                s["C1"] = 3                      # B1 is empty but inside the dimension
+                @test_throws XLSX.XLSXError XLSX.setFormat(s, "B1:B1"; format="#,##0")
+                # a multi-cell range skips empties silently
+                @test XLSX.setFormat(s, "A1:C1"; format="#,##0") == -1
+                SAVE_FILES && save_outfile(f)
+            end
+
+        end
+
+        @testset "vector, step-range and colon targets" begin
+            xf = XLSX.newxlsx()
+            sh = xf[1]
+            sh[1:3, 1:4] = reshape(collect(1:12), 3, 4)
+
+            # formats over vector / step-range columns, and colon rows
+            XLSX.setFormat(sh, 1, [1, 3]; format="0.00")
+            @test XLSX.getFormat(sh, "A1").format["numFmt"]["formatCode"] == XLSX.getFormat(sh, "C1").format["numFmt"]["formatCode"] == "0.00"
+            XLSX.setUniformFormat(sh, 2, 1:2:3; format="0.0")
+            @test XLSX.getcell(sh, "A2").style == XLSX.getcell(sh, "C2").style
+            @test XLSX.getFormat(sh, "C2").format["numFmt"]["formatCode"] == "0.0"
+            XLSX.setUniformFill(sh, 3, :; pattern="solid", fgColor="yellow")
+            @test XLSX.getcell(sh, "A3").style == XLSX.getcell(sh, "D3").style
+            @test XLSX.getFill(sh, "D3").fill["patternFill"]["fgrgb"] == "FFFFFF00"
+            SAVE_FILES && save_outfile(xf)
+        end
     end
 
-    @testset "existing formatting" begin
-        f = XLSX.opentemplate(joinpath(data_directory, "customXml.xlsx"))
-        s = f[1]
-        s["B2"] = pi
-        s["D20"] = "Hello World"
-        s["J45"] = Dates.Date(2025, 01, 24)
-        @test XLSX.getFont(s, "B2").font == Dict("name" => Dict("val" => "Calibri"), "family" => Dict("val" => "2"), "b" => nothing, "sz" => Dict("val" => "18"), "color" => Dict("theme" => "1"), "scheme" => Dict("val" => "minor"))
-        @test XLSX.getFill(s, "D20").fill == Dict("patternFill" => Dict("bgindexed" => "64", "patternType" => "solid", "fgtint" => "-0.499984740745262", "fgtheme" => "2"))
-        @test XLSX.getBorder(s, "J45").border == Dict("left" => Dict("indexed" => "64", "style" => "thin"), "bottom" => Dict("indexed" => "64", "style" => "thin"), "right" => Dict("indexed" => "64", "style" => "thin"), "top" => Dict("indexed" => "64", "style" => "thin"), "diagonal" => nothing)
-        SAVE_FILES && save_outfile(f)
-    end
     @testset "Styles caching (issue #426)" begin
 
         # Builds a workbook with K rows in column 1, each holding a numeric value.
@@ -2081,68 +2131,17 @@ end
             end
         end
     end
-#=
-A range that resolves to a single cell should return that cell's attribute id,
-not -1. Multi-cell ranges keep returning -1.
-=#
 
-    @testset "single-cell ranges return an id" begin
-
-         @testset "setFormat - all single-cell spellings agree" begin
-            _, s = onecell()
-            @test XLSX.setFormat(s, XLSX.CellRef("A1"); format="#,##0") == 3   # reference case
-            @test XLSX.setFormat(s, "A1"; format="#,##0") == 3
-            @test XLSX.setFormat(s, "A1:A1"; format="#,##0") == 3              # 1x1 CellRange
-            @test XLSX.setFormat(s, XLSX.CellRange("A1:A1"); format="#,##0") == 3
-            @test XLSX.setFormat(s, 1, 1; format="#,##0") == 3                 # Integer, Integer
-            @test XLSX.setFormat(s, 1:1, 1:1; format="#,##0") == 3             # UnitRange
-            @test XLSX.setFormat(s, "A:A"; format="#,##0") == 3                # column range, 1x1 sheet
-            @test XLSX.setFormat(s, "1:1"; format="#,##0") == 3                # row range, 1x1 sheet
-            @test XLSX.setFormat(s, :, :; format="#,##0") == 3                 # colon, 1x1 sheet
-
-            # single-cell non-contiguous range (process_ncranges)
-            nc = XLSX.NonContiguousRange(s.name, Union{XLSX.CellRef,XLSX.CellRange}[XLSX.CellRef("A1")])
-            @test XLSX.setFormat(s, nc; format="#,##0") == 3
-            SAVE_FILES && save_outfile(XLSX.get_xlsxfile(s))
-        end
-
-        @testset "multi-cell ranges still return -1" begin
-            f = XLSX.newxlsx()
-            s = f[1]
-            s["A1"] = 1
-            s["B1"] = 2
-            @test XLSX.setFormat(s, "A1:B1"; format="#,##0") == -1
-            @test XLSX.setFormat(s, 1, 1:2; format="#,##0") == -1
-            @test XLSX.setFormat(s, "A1,B1"; format="#,##0") == -1
-            # ... but each cell did get the format
-            @test XLSX.getFormat(s, "A1").numFmtId == 3
-            @test XLSX.getFormat(s, "B1").numFmtId == 3
-            SAVE_FILES && save_outfile(f)
-        end
-
-        @testset "other setters agree with the CellRef form" begin
-            _, s = onecell()
-            @test XLSX.setFont(s, "A1:A1"; bold=true) == XLSX.setFont(s, XLSX.CellRef("A1"); bold=true)
-            @test XLSX.setFill(s, "A1:A1"; pattern="solid", fgColor="FFFFFF00") ==
-                XLSX.setFill(s, XLSX.CellRef("A1"); pattern="solid", fgColor="FFFFFF00")
-            @test XLSX.setAlignment(s, "A1:A1"; horizontal="right") ==
-                XLSX.setAlignment(s, XLSX.CellRef("A1"); horizontal="right")
-            @test XLSX.setBorder(s, "A1:A1"; allsides=["style" => "thin"]) ==
-                XLSX.setBorder(s, XLSX.CellRef("A1"); allsides=["style" => "thin"])
-            SAVE_FILES && save_outfile(XLSX.get_xlsxfile(s))
-        end
-
-        @testset "empty cell in a single-cell range still throws" begin
-            f = XLSX.newxlsx()
-            s = f[1]
-            s["A1"] = 1
-            s["C1"] = 3                      # B1 is empty but inside the dimension
-            @test_throws XLSX.XLSXError XLSX.setFormat(s, "B1:B1"; format="#,##0")
-            # a multi-cell range skips empties silently
-            @test XLSX.setFormat(s, "A1:C1"; format="#,##0") == -1
-            SAVE_FILES && save_outfile(f)
-        end
-
+    @testset "existing formatting" begin
+        f = XLSX.opentemplate(joinpath(data_directory, "customXml.xlsx"))
+        s = f[1]
+        s["B2"] = pi
+        s["D20"] = "Hello World"
+        s["J45"] = Dates.Date(2025, 01, 24)
+        @test XLSX.getFont(s, "B2").font == Dict("name" => Dict("val" => "Calibri"), "family" => Dict("val" => "2"), "b" => nothing, "sz" => Dict("val" => "18"), "color" => Dict("theme" => "1"), "scheme" => Dict("val" => "minor"))
+        @test XLSX.getFill(s, "D20").fill == Dict("patternFill" => Dict("bgindexed" => "64", "patternType" => "solid", "fgtint" => "-0.499984740745262", "fgtheme" => "2"))
+        @test XLSX.getBorder(s, "J45").border == Dict("left" => Dict("indexed" => "64", "style" => "thin"), "bottom" => Dict("indexed" => "64", "style" => "thin"), "right" => Dict("indexed" => "64", "style" => "thin"), "top" => Dict("indexed" => "64", "style" => "thin"), "diagonal" => nothing)
+        SAVE_FILES && save_outfile(f)
     end
 
 #=
@@ -2264,4 +2263,268 @@ writing a number into a cell carrying a date/time format.
 
     end
 
+
+    @testset "formatting through defined names and odd references" begin
+        xf = XLSX.newxlsx()
+        sh = xf[1]
+        sh[1:3, 1:3] = reshape(collect(1:9), 3, 3)
+        XLSX.addDefName(sh, "ws_const", 5)
+        XLSX.addDefName(xf, "wb_const", 6)
+
+        # a constant name is not a cell, whichever way it is reached
+        @test_throws XLSX.XLSXError XLSX.setFont(xf, "wb_const"; bold=true)
+        @test_throws XLSX.XLSXError XLSX.setFont(sh, "ws_const"; bold=true)
+        @test_throws XLSX.XLSXError XLSX.setFont(sh, "wb_const"; bold=true)
+        @test_throws XLSX.XLSXError XLSX.getFont(sh, "wb_const")
+        @test_throws XLSX.XLSXError XLSX.getFont(sh, "A1:B2")       # a getter takes one cell
+        @test isnothing(XLSX.getFont(xf, "Sheet1!Z99"))          # outside the dimension: empty
+        @test isnothing(XLSX.getFormula(xf, "Sheet1!Z99"))
+        @test isnothing(XLSX.getFormula(sh, "Z99"))
+
+        # non-contiguous ranges, with and without the sheet name
+        XLSX.setFont(sh, "A1,C1"; bold=true)
+        @test XLSX.getFont(sh, "A1").font["b"] === nothing && XLSX.getFont(sh, "C1").font["b"] === nothing
+        XLSX.setFont(sh, "Sheet1!A2,Sheet1!C2"; italic=true)
+        @test haskey(XLSX.getFont(sh, "C2").font, "i")
+        @test_throws XLSX.XLSXError XLSX.setFont(sh, XLSX.NonContiguousRange("Sheet1!A1,Sheet1!Z99"); bold=true)
+        SAVE_FILES && save_outfile(xf)
+    end
+
+    @testset "style classification forms, and colorants" begin
+        xf = XLSX.newxlsx()
+        sh = xf[1]
+        wb = XLSX.get_workbook(xf)
+        sh["A1"] = 1.5
+        XLSX.setFormat(sh, "A1"; format="0.00")
+        sid = string(XLSX.getcell(sh, "A1").style)
+        @test XLSX.styles_is_float(sh, sid) == XLSX.styles_is_float(wb, parse(Int, sid))
+        @test XLSX.styles_is_datetime(sh, sid) == XLSX.styles_is_datetime(wb, parse(Int, sid))
+        @test !isempty(XLSX.CellDataFormat(1)) && isempty(XLSX.EmptyCellDataFormat())
+        @test XLSX.get_colorant(:red) == XLSX.get_colorant("red")
+        SAVE_FILES && save_outfile(xf)
+    end
+
+    @testset "every color form in setFont, setFill and setBorder" begin
+        xf = XLSX.newxlsx()
+        sh = xf[1]
+        for r in 1:8, c in 1:3
+            sh[r, c] = "x"
+        end
+
+        # Font
+        XLSX.setFont(sh, "A1"; color = :coral)
+        XLSX.setFont(sh, "A2"; color = colorant"seagreen")
+        XLSX.setFont(sh, "A3"; color = RGBA(1, 0, 0, 0.5))
+        XLSX.setFont(sh, "A4"; color = XLSX.SchemeColor(:accent1; lumMod = 60, lumOff = 40))
+        XLSX.setFont(sh, "A5"; color = "accent2")
+        XLSX.setFont(sh, "A6"; color = :tx1)
+        XLSX.setUniformFont(sh, "A7:A8"; color = XLSX.SchemeColor(:accent3; lumMod = 75))
+        @test XLSX.getFont(sh, "A1").font["color"] == Dict("rgb" => "FFFF7F50")
+        @test XLSX.getFont(sh, "A2").font["color"] == Dict("rgb" => "FF2E8B57")
+        @test XLSX.getFont(sh, "A3").font["color"] == Dict("rgb" => "80FF0000")
+        @test XLSX.getFont(sh, "A4").font["color"] == Dict("theme" => "4", "tint" => "0.4")
+        @test XLSX.getFont(sh, "A5").font["color"] == Dict("theme" => "5")
+        @test XLSX.getFont(sh, "A6").font["color"] == Dict("theme" => "1")
+        @test XLSX.getFont(sh, "A8").font["color"] == Dict("theme" => "6", "tint" => "-0.25")
+
+        # A new color replaces a theme color completely, leaving no stale tint
+        XLSX.setFont(sh, "A4"; color = "red")
+        @test XLSX.getFont(sh, "A4").font["color"] == Dict("rgb" => "FFFF0000")
+
+        # Fill
+        XLSX.setFill(sh, "B1"; pattern = "solid", fgColor = :coral)
+        XLSX.setFill(sh, "B2"; pattern = "solid", fgColor = XLSX.SchemeColor(:accent1; lumMod = 75), bgColor = colorant"blue")
+        XLSX.setUniformFill(sh, "B3:B4"; pattern = "solid", fgColor = :accent6)
+        @test XLSX.getFill(sh, "B1").fill["patternFill"]["fgrgb"] == "FFFF7F50"
+        f2 = XLSX.getFill(sh, "B2").fill["patternFill"]
+        @test f2["fgtheme"] == "4" && f2["fgtint"] == "-0.25" && !haskey(f2, "fgrgb")
+        @test f2["bgrgb"] == "FF0000FF"
+        @test XLSX.getFill(sh, "B4").fill["patternFill"]["fgtheme"] == "9"
+
+        XLSX.setFill(sh, "B2"; fgColor = "yellow")    # replaces theme and tint
+        f2 = XLSX.getFill(sh, "B2").fill["patternFill"]
+        @test f2["fgrgb"] == "FFFFFF00" && !haskey(f2, "fgtheme") && !haskey(f2, "fgtint")
+
+        # Border
+        XLSX.setBorder(sh, "C1"; left = ["style" => "thin", "color" => :coral])
+        XLSX.setBorder(sh, "C2"; allsides = ["style" => "thick", "color" => XLSX.SchemeColor(:accent2)])
+        XLSX.setBorder(sh, "C3"; diagonal = ["style" => "thin", "color" => colorant"red", "direction" => "up"])
+        XLSX.setOutsideBorder(sh, "C5:C6"; outside = ["style" => "medium", "color" => :tx2])
+        XLSX.setUniformBorder(sh, "C7:C8"; top = ["style" => "thin", "color" => "accent4"])
+        @test XLSX.getBorder(sh, "C1").border["left"] == Dict("style" => "thin", "rgb" => "FFFF7F50")
+        @test XLSX.getBorder(sh, "C2").border["bottom"] == Dict("style" => "thick", "theme" => "5")
+        @test XLSX.getBorder(sh, "C3").border["diagonal"]["rgb"] == "FFFF0000"
+        @test XLSX.getBorder(sh, "C5").border["top"] == Dict("style" => "medium", "theme" => "3")
+        @test XLSX.getBorder(sh, "C8").border["top"] == Dict("style" => "thin", "theme" => "7")
+
+        XLSX.setBorder(sh, "C2"; bottom = ["color" => "red"])   # keeps style, replaces theme
+        @test XLSX.getBorder(sh, "C2").border["bottom"] == Dict("style" => "thick", "rgb" => "FFFF0000")
+
+        # Strings still work in a Vector{Pair{String,String}}, and bad values still error
+        XLSX.setBorder(sh, "C4"; right = ["style" => "thin", "color" => "FF00FF00"])
+        @test XLSX.getBorder(sh, "C4").border["right"] == Dict("style" => "thin", "rgb" => "FF00FF00")
+        @test_throws XLSX.XLSXError XLSX.setBorder(sh, "C4"; left = ["style" => :thin])
+        @test_throws XLSX.XLSXError XLSX.setBorder(sh, "C4"; left = ["style" => "thin", "color" => 42])
+        @test_throws XLSX.XLSXError XLSX.setFont(sh, "A1"; color = XLSX.SchemeColor(:accent1; shade = 50))
+        @test_throws XLSX.XLSXError XLSX.setFill(sh, "B1"; fgColor = "notacolor")
+
+        # The theme colors survive a save and reload
+        io = IOBuffer()
+        XLSX.writexlsx(io, xf)
+        xf2 = XLSX.readxlsx(seekstart(io))
+        @test XLSX.getFont(xf2["Sheet1"], "A8").font["color"] == Dict("theme" => "6", "tint" => "-0.25")
+        @test XLSX.getFill(xf2["Sheet1"], "B4").fill["patternFill"]["fgtheme"] == "9"
+        @test XLSX.getBorder(xf2["Sheet1"], "C8").border["top"] == Dict("style" => "thin", "theme" => "7")
+        SAVE_FILES && save_outfile(xf)
+    end
+
+    # A whole row or column given as `(row, :)` or `(:, col)` must take the uniform path,
+    # not the per-cell one. Cells start with different attributes so the two differ.
+    @testset "setUniform* on a whole row or column is uniform" begin
+        cases = (
+            (XLSX.setUniformFont,      XLSX.setFont,      (s, c) -> XLSX.getFont(s, c).fontId,         (; size=14),                         (; bold=true),                   (; italic=true)),
+            (XLSX.setUniformBorder,    XLSX.setBorder,    (s, c) -> XLSX.getBorder(s, c).borderId,     (; top=["style" => "thin"]),         (; left=["style" => "thick"]),   (; right=["style" => "thick"])),
+            (XLSX.setUniformFill,      XLSX.setFill,      (s, c) -> XLSX.getFill(s, c).fillId,         (; pattern="solid", fgColor="red"),  (; pattern="gray125"),           (; pattern="darkGrid")),
+            (XLSX.setUniformAlignment, XLSX.setAlignment, (s, c) -> XLSX.getAlignment(s, c).alignment, (; wrapText=true),                   (; horizontal="left"),           (; horizontal="right")),
+            (XLSX.setUniformFormat,    XLSX.setFormat,    (s, c) -> XLSX.getFormat(s, c).numFmtId,     (; format="Percentage"),             (; format="Currency"),           (; format="0.000")),
+        )
+        for (setuniform, setone, attribute, kws, first_kws, other_kws) in cases, (target, other) in (((1, :), "B1"), ((:, 1), "A2"))
+            f = XLSX.newxlsx()
+            s = f[1]
+            s["A1:B2"] = 1.5
+            setone(s, "A1"; first_kws...)
+            setone(s, other; other_kws...)
+            setuniform(s, target...; kws...)
+            @test attribute(s, "A1") == attribute(s, other)
+        end
+    end
+
+    @testset "setUniformAlignment on a vector of columns aligns only those columns" begin
+        horizontal(s, c) = (a = XLSX.getAlignment(s, c); isnothing(a) ? nothing : get(something(a.alignment["alignment"], Dict()), "horizontal", nothing))
+        f = XLSX.newxlsx()
+        s = f[1]
+        s["A1:C3"] = 1
+        XLSX.setUniformAlignment(s, :, [2]; horizontal="right")
+        @test [horizontal(s, c) for c in ("A1", "B1", "C1", "B3")] == [nothing, "right", nothing, "right"]
+
+        f = XLSX.newxlsx()
+        s = f[1]
+        s["A1:C3"] = 1
+        XLSX.setUniformAlignment(s, [2], :; horizontal="right")
+        @test [horizontal(s, c) for c in ("A1", "A2", "C2", "A3")] == [nothing, "right", "right", nothing]
+    end
+
+    @testset "setters in a family accept the same target forms" begin
+        targets(f) = Set(Base.tuple_type_tail(m.sig) for m in methods(f))
+        for f in (XLSX.setFill, XLSX.setAlignment, XLSX.setFormat, XLSX.setBorder)
+            @test targets(f) == targets(XLSX.setFont)
+        end
+        for f in (XLSX.setUniformBorder, XLSX.setUniformFill, XLSX.setUniformAlignment, XLSX.setUniformFormat)
+            @test targets(f) == targets(XLSX.setUniformFont)
+        end
+    end
+
+    @testset "an unrecognized keyword is an XLSXError naming the setter and the keyword" begin
+        f = XLSX.newxlsx()
+        s = f[1]
+        s["A1:C3"] = 1
+        err(g) = try g(); nothing catch e; e end
+        for (setter, kws) in (
+            (XLSX.setFont,             (; bold=true, colour="red")),
+            (XLSX.setFill,             (; pattern="solid", colour="red")),
+            (XLSX.setAlignment,        (; wrap=true)),
+            (XLSX.setFormat,           (; fmt="0.00")),
+            (XLSX.setBorder,           (; sides=["style" => "thin"])),
+            (XLSX.setUniformFont,      (; colour="red")),
+            (XLSX.setUniformFill,      (; colour="red")),
+            (XLSX.setUniformAlignment, (; wrap=true)),
+            (XLSX.setUniformFormat,    (; fmt="0.00")),
+            (XLSX.setUniformBorder,    (; sides=["style" => "thin"])),
+        )
+            for call in ((g; kw...) -> g(s, "A1:B2"; kw...),
+                         (g; kw...) -> g(s, 1:2, 1:2; kw...),
+                         (g; kw...) -> g(f, "Sheet1!A1:B2"; kw...))
+                e = err(() -> call(setter; kws...))
+                @test e isa XLSX.XLSXError
+                @test occursin("`$(nameof(setter))`", e.msg)
+                bad = filter(k -> k ∉ (:bold, :pattern), keys(kws))
+                @test all(k -> occursin("`$k`", e.msg), bad)
+            end
+        end
+        @test occursin("Unrecognized keyword arguments `a`, `b` for `setFont`", err(() -> XLSX.setFont(s, "A1"; a=1, b=2)).msg)
+    end
+
+    @testset "`outside` needs a range" begin
+        f = XLSX.newxlsx()
+        s = f[1]
+        s["A1:C3"] = 1
+        @test_throws XLSX.XLSXError XLSX.setBorder(s, "A1"; outside=["style" => "thin"])
+        @test_throws XLSX.XLSXError XLSX.setUniformBorder(s, "A1:B2"; outside=["style" => "thin"])
+        @test XLSX.setBorder(s, "A1:C3"; outside=["style" => "thin"]) == -1
+        @test XLSX.getBorder(s, "A1").border["top"]["style"] == "thin"
+    end
+end
+
+@testset "review fixes: number formats and fonts" begin
+    @testset "custom numFmt ids come from the file, not positions" begin
+        f = XLSX.newxlsx(); s = f[1]; wb = f.workbook
+        s["A1"] = 1.5; s["A2"] = 2.5; s["A3"] = 3.5
+        XLSX.setFormat(s, "A1"; format="0.000")
+        xroot = XLSX.styles_xmlroot(wb)
+        i, j = XLSX.get_idces(xroot, "styleSheet", "numFmts")
+        XLSX.xml_elements(xroot[i][j])[1]["numFmtId"] = "170"   # a gap, as files may have
+        wb.numFmt_cache = nothing
+        @test XLSX.setFormat(s, "A2"; format="0.000") == 170
+        @test XLSX.setFormat(s, "A3"; format="0.0000") == 171
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "built-in format names in any case" begin
+        f = XLSX.newxlsx(); s = f[1]; s["A1"] = 0.5
+        @test XLSX.setFormat(s, "A1"; format="percentage") == 9
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "fractional font size" begin
+        f = XLSX.newxlsx(); s = f[1]; s["A1"] = "x"
+        XLSX.setFont(s, "A1"; size=10.5)
+        @test XLSX.getFont(s, "A1").font["sz"]["val"] == "10.5"
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "a font with <b val=\"0\"/> stays not bold" begin
+        @test XLSX._merge_flag_tag("b", nothing, Dict("b" => Dict("val" => "0"))) === missing
+        @test XLSX._merge_flag_tag("b", nothing, Dict("b" => nothing)) === nothing
+    end
+    @testset "column widths split existing spans and stay sorted" begin
+        f = XLSX.newxlsx(); s = f[1]; s["A1:L1"] = 1
+        XLSX.setColumnWidth(s, "A1:E1"; width=20)
+        XLSX.setColumnWidth(s, "C1"; width=8)
+        XLSX.setColumnWidth(s, "K1"; width=5)
+        XLSX.setColumnWidth(s, "H1"; width=5)
+        doc = XLSX.xmlroot(f.workbook, s.relationship_id)
+        i, j = XLSX.get_idces(doc, "worksheet", "cols")
+        spans = [(parse(Int, c["min"]), parse(Int, c["max"])) for c in XLSX.xml_elements(doc[i][j])]
+        @test spans == [(1, 2), (3, 3), (4, 5), (8, 8), (11, 11)]
+        @test XLSX.getColumnWidth(s, "B1") ≈ 20 + XLSX.EXCEL_COLUMN_WIDTH_PADDING
+        @test XLSX.getColumnWidth(s, "C1") ≈ 8 + XLSX.EXCEL_COLUMN_WIDTH_PADDING
+        SAVE_FILES && save_outfile(f)
+    end
+    @testset "a width set inside a spanning <col> read from a file" begin
+        f = XLSX.newxlsx(); f[1]["A1:H3"] = 1
+        XLSX.writexlsx("span_base.xlsx", f; overwrite=true)
+        r = ZipReader(read("span_base.xlsx"))
+        open("span.xlsx", "w") do io                        # one definition for A:E, as Excel writes it
+            ZipWriter(io) do w
+                for n in zip_names(r)
+                    bytes = zip_readentry(r, n)
+                    n == "xl/worksheets/sheet1.xml" && (bytes = Vector{UInt8}(replace(String(bytes),
+                        "<sheetData" => "<cols><col min=\"1\" max=\"5\" width=\"20.7109375\" customWidth=\"1\"/></cols><sheetData"; count=1)))
+                    zip_newfile(w, n); write(w, bytes)
+                end
+            end
+        end
+        f = XLSX.openxlsx("span.xlsx"; mode="rw"); s = f[1]
+        XLSX.setColumnWidth(s, "C1"; width=8)
+        @test [XLSX.getColumnWidth(s, "$(c)1") for c in "ABCDE"] ≈
+              [20.7109375, 20.7109375, 8 + XLSX.EXCEL_COLUMN_WIDTH_PADDING, 20.7109375, 20.7109375]
+        SAVE_FILES && save_outfile(f)
+    end
 end

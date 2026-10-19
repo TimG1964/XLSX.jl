@@ -4,6 +4,7 @@
 
 ```@docs
 XLSX.CellRef
+XLSX.SheetCellRef
 XLSX.row_number
 XLSX.column_number
 XLSX.eachrow

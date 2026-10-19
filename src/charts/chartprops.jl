@@ -1,7 +1,7 @@
 # Appearance accessors for `c:` charts.
 #
 # This file sits above `drawingml.jl` in the layering: that file parses
-# DrawingML — `spPr`, `txPr`, colours, fills, lines, text — for anything that
+# DrawingML — `spPr`, `txPr`, colors, fills, lines, text — for anything that
 # carries it, knowing nothing about charts. This file knows the chart schema and
 # finds the nodes: which element holds a series' fill, which axes a group plots
 # against, where a per-point override lives. Nothing here parses DrawingML
@@ -170,15 +170,41 @@ getAxisTextProps(c::Chart, ax::ChartAxis)  = parse_drawing_text(_wb(c), _axnode(
 
 """
     getAxisTitleRef(c::Chart, ax::ChartAxis) -> Union{Nothing,String}
+    getAxisTitleRef(c::ChartEx, id::Integer) -> Union{Nothing,String}
 
-The formula behind an axis title that references a cell
-(`c:title/c:tx/c:strRef/c:f`). `nothing` for a literal or absent title.
+The formula behind an axis title that references a cell, as written
+(`c:title/c:tx/c:strRef/c:f`, or `cx:txData/cx:f`). `nothing` for a literal or
+absent title. Excel writes a `cx:` formula as a hidden `_xlchart.*` defined
+name; [`getAxisTitleRange`](@ref) resolves it.
 """
 function getAxisTitleRef(c::Chart, ax::ChartAxis)
     tx = first_element_with_tag(first_element_with_tag(_axnode(c, ax), "title"), "tx")
     sr = first_element_with_tag(tx, "strRef")
     return isnothing(sr) ? nothing : child_text(sr, "f")
 end
+
+"""
+    getAxisTitleRange(c::Chart, ax::ChartAxis) -> ChartRange
+    getAxisTitleRange(c::ChartEx, id::Integer) -> ChartRange
+
+The cell an axis title is bound to, resolved — through a defined name where the
+formula is one. `nothing` for a typed or absent title. See
+[`getAxisTitleRef`](@ref) for the formula as written.
+"""
+getAxisTitleRange(c::Chart, ax::ChartAxis) = _title_range(c.package, getAxisTitleRef(c, ax))
+
+# The resolved range of a title's formula, as getChartTitleRange(::ChartEx) does.
+_title_range(xf::XLSXFile, f) = isnothing(f) ? nothing : resolve_chartex_ref(xf, f)
+
+"""
+    getAxisTitle(c::Chart, ax::ChartAxis) -> Union{Nothing,String}
+    getAxisTitle(c::ChartEx, id::Integer) -> Union{Nothing,String}
+
+An axis title's text as plain text, as [`getChartTitle`](@ref) gives the chart
+title's: the typed text, or for a title bound to a cell, the text cached when
+the file was saved. `nothing` where the axis has no title text.
+"""
+getAxisTitle(c::Chart, ax::ChartAxis) = parse_chart_title(_axnode(c, ax))
 
 """
     getAxisTitleText(c::Chart, ax::ChartAxis) -> Union{Nothing,DrawingText}
@@ -191,6 +217,18 @@ function getAxisTitleText(c::Chart, ax::ChartAxis)
     tx = first_element_with_tag(first_element_with_tag(_axnode(c, ax), "title"), "tx")
     return parse_drawing_text(_wb(c), tx; tag="rich")
 end
+
+"""
+    getAxisTitleTextProps(c::Chart, ax::ChartAxis) -> Union{Nothing,DrawingText}
+
+Text body for the axis title (`c:title/c:txPr`) — its formatting, which applies
+whether the title is typed or bound to a cell, and is the only formatting a
+bound title has. `nothing` means the axis has no title, or the title has no
+`c:txPr`. Contrast [`getAxisTitleText`](@ref), the literal text in
+`c:tx/c:rich`, and [`getAxisTextProps`](@ref), the tick labels' formatting.
+"""
+getAxisTitleTextProps(c::Chart, ax::ChartAxis) =
+    parse_drawing_text(_wb(c), first_element_with_tag(_axnode(c, ax), "title"))
 
 # An element whose presence turns a feature on, carrying an optional `c:spPr`.
 #
@@ -406,10 +444,11 @@ getChartLegend(c::Chart) =
 
 """
     getLegendPos(c::Chart) -> Union{Nothing,Symbol}
+    getLegendPos(c::ChartEx) -> Union{Nothing,Symbol}
 
 `:b` (bottom), `:t` (top), `:l` (left), `:r` (right) or `:tr` (top-right) from
-`c:legendPos`. `nothing` means no legend,
-or a legend with no explicit position.
+`c:legendPos`, or from `cx:legend`'s `pos` and `align`. `nothing` means no legend,
+or a legend with no explicit position. Set with [`setLegendPos`](@ref).
 """
 function getLegendPos(c::Chart)
     v = _attr(first_element_with_tag(getChartLegend(c), "legendPos"), "val")
@@ -418,8 +457,9 @@ end
 
 """
     getLegendOverlay(c::Chart) -> Union{Nothing,Bool}
+    getLegendOverlay(c::ChartEx) -> Union{Nothing,Bool}
 
-`c:overlay` — `true` where the legend is drawn on top of the plot area rather
+`c:overlay`, or `cx:legend`'s `overlay` attribute — `true` where the legend is drawn on top of the plot area rather
 than beside it. `nothing` means the chart has no legend, or the element was not
 written, in which case Excel treats it as `false`.
 """
@@ -460,15 +500,20 @@ getChartTitleText(c::Chart) =
 
 """
     getChartTitleRef(c::Chart) -> Union{Nothing,String}
+    getChartTitleRef(c::ChartEx) -> Union{Nothing,String}
 
-The formula behind a title that references a cell (`c:title/c:tx/c:strRef/c:f`).
-`nothing` for a literal or absent title.
+The formula behind a title that references a cell, as written
+(`c:title/c:tx/c:strRef/c:f`, or `cx:txData/cx:f`). `nothing` for a literal or
+absent title. Excel writes a `cx:` formula as a hidden `_xlchart.*` defined
+name; [`getChartTitleRange`](@ref) resolves it.
 """
 function getChartTitleRef(c::Chart)
     tx = first_element_with_tag(getChartTitleNode(c), "tx")
     sr = first_element_with_tag(tx, "strRef")
     return isnothing(sr) ? nothing : child_text(sr, "f")
 end
+
+getChartTitleRange(c::Chart) = _title_range(c.package, getChartTitleRef(c))
 
 """
     getChartTitleShapeProps(c::Chart) -> Union{Nothing,DrawingShapeProps}
@@ -1076,6 +1121,14 @@ const _RUN_PROP_ALIASES = Dict(
     :strikethrough => :strike,
 )
 
+# The `field` argument of every text-property setter. The other docstring
+# fragments are in drawingml.jl.
+const _DOC_TEXT_FIELD_ARG = """
+`field` is one of $(_doc_syms(_RUN_PROP_FIELDS)), or Excel's names
+$(_doc_aliases(_RUN_PROP_ALIASES)). `value` depends on the field — see the
+table at [`setChartTitleTextProp`](@ref) — and `:inherit` removes the field so
+it is inherited."""
+
 """
     _walk_fill(wb, chain) -> Effective{DrawingFill}
 
@@ -1181,7 +1234,9 @@ end
 Resolve one field of the data-label text formatting for series `i`, walking
 `c:txPr` from the series up through the group, plot area and chart space.
 
-`field` is a field of `DrawingRunProps` other than `raw`. Text inherits field by
+`field` is one of $(_doc_syms(_RUN_PROP_FIELDS)) — the DrawingML names in the
+table at [`setChartTitleTextProp`](@ref); unlike the setters, this does not take
+Excel's names. Text inherits field by
 field — a size from one rung and a weight from another both apply — which is
 why this resolves a named field rather than a whole `DrawingRunProps`.
 
@@ -1388,9 +1443,23 @@ end
 """
     setSeriesFill(c, i, color) -> Chart
 
-Set the fill of series `i`'s graphic. `color` may be a color string or Symbol,
-a `Colors.Colorant`, a [`SchemeColor`](@ref), `:none` for an explicit
-`<a:noFill/>`, or `:inherit` to remove it so the chart style applies.
+Set the fill of series `i`'s graphic — its bars, area or pie slices.
+
+# Color values
+
+Every chart setter that takes a color — fills, lines, markers, the text
+`:fill` field and `addSeries`' `color` keyword — accepts the same values:
+
+- a color name from Colors.jl, as a String or Symbol: `"red"`, `:steelblue`;
+- a hex string, `"RRGGBB"` or `"AARRGGBB"`, with or without a leading `#`:
+  `"FF0000"`, `"#FF0000"`, `"80FF0000"` (50% transparent red);
+- a `Colors.Colorant`, such as `colorant"red"` or `RGB(1, 0, 0)`;
+- a theme color, named as a String or Symbol: $(_doc_syms(SCHEME_TOKENS)).
+  It follows the workbook's theme, as Excel's palette colors do;
+- a [`SchemeColor`](@ref), for a theme color with a tint or shade applied:
+  `SchemeColor(:accent1; lumMod = 75)`;
+- `:none`, for an explicit `<a:noFill/>` — deliberately invisible;
+- `:inherit`, to remove the fill so the chart style applies.
 
 `:none` and `:inherit` are different states. An absent fill inherits; `noFill`
 does not.
@@ -1424,9 +1493,8 @@ _set_series_line(c::Chart, i::Integer, f) =
 """
     setSeriesLineColor(c, i, color) -> Chart
 
-Set the color of series `i`'s outline. Takes the same values as
-[`setSeriesFill`](@ref): a color, a [`SchemeColor`](@ref), `:none` for an
-explicit `<a:noFill/>`, or `:inherit` to remove it.
+Set the color of series `i`'s outline — the line itself, on a line or scatter
+chart. $(_DOC_COLOR_ARG)
 
 Note `:none` here leaves the `a:ln` in place with no fill — the line exists and
 draws nothing, which is what Excel writes and is distinct from
@@ -1439,7 +1507,8 @@ setSeriesLineColor(c::Chart, i::Integer, color) =
     setSeriesLineWidth(c, i, points) -> Chart
 
 Set the width of series `i`'s outline, in points — the unit Excel's width box
-uses. `:inherit` removes the width so the chart style supplies it.
+uses — as a `Real` from 0 to 1584. `:inherit` removes the width so the chart
+style supplies it.
 
 DrawingML caps a line width at 1584 pt; a wider one is rejected rather than
 written.
@@ -1454,9 +1523,13 @@ setSeriesLineWidth(c::Chart, i::Integer, points) =
 """
     setSeriesLineDash(c, i, dash) -> Chart
 
-Set the dash pattern of series `i`'s outline: `"solid"`, `"dash"`, `"sysDot"`
-and the other DrawingML presets, or Excel's own names for them. `:inherit`
+Set the dash pattern of series `i`'s outline to one of the DrawingML presets,
+$(_doc_syms(DASH_VALUES)), or Excel's names for them,
+$(_doc_aliases(DASH_ALIASES)). A String works as well as a Symbol. `:inherit`
 removes the pattern.
+
+Excel's "Round Dot" is `:sysDot` and "Square Dot" is `:sysDash`; `:dot` and
+`:dash` are different patterns, which Excel's dropdown does not offer.
 
 One of the single-property line setters; see [`setSeriesLine`](@ref).
 """
@@ -1466,8 +1539,9 @@ setSeriesLineDash(c::Chart, i::Integer, dash) =
 """
     setSeriesLineCap(c, i, cap) -> Chart
 
-Set how series `i`'s outline ends: `"rnd"`, `"sq"` or `"flat"`, or Excel's names
-for them. `:inherit` removes the setting.
+Set how series `i`'s outline ends: $(_doc_syms(CAP_VALUES)), or Excel's names
+$(_doc_aliases(CAP_ALIASES)). A String works as well as a Symbol. `:inherit`
+removes the setting.
 
 One of the single-property line setters; see [`setSeriesLine`](@ref).
 """
@@ -1478,8 +1552,9 @@ setSeriesLineCap(c::Chart, i::Integer, cap) =
     setSeriesLineCompound(c, i, cmpd) -> Chart
 
 Set the compound line type of series `i`'s outline — how many parallel strokes
-it draws: `"sng"`, `"dbl"`, `"thickThin"`, `"thinThick"` or `"tri"`, or Excel's
-names for them. `:inherit` removes the setting.
+it draws: $(_doc_syms(CMPD_VALUES)), or Excel's names
+$(_doc_aliases(CMPD_ALIASES)). A String works as well as a Symbol. `:inherit`
+removes the setting.
 
 One of the single-property line setters; see [`setSeriesLine`](@ref).
 """
@@ -1490,8 +1565,8 @@ setSeriesLineCompound(c::Chart, i::Integer, cmpd) =
     setSeriesLineJoin(c, i, join) -> Chart
 
 Set how the segments of series `i`'s outline meet: `:round`, `:bevel` or
-`:miter`. `:inherit` removes the join. Excel uses the same three words, so there
-are no aliases.
+`:miter` (or the same as a String). `:inherit` removes the join. Excel uses the
+same three words, so there are no aliases.
 
 A miter join takes a limit as well, set separately with
 [`setSeriesLineMiterLimit`](@ref); changing the join afterwards discards it.
@@ -1504,9 +1579,9 @@ setSeriesLineJoin(c::Chart, i::Integer, join) =
 """
     setSeriesLineMiterLimit(c, i, limit) -> Chart
 
-Set the miter limit of series `i`'s outline, as a multiple of the line width:
-how far a sharp corner may extend before the join is cut off. Excel's default is
-8. `:inherit` removes the limit.
+Set the miter limit of series `i`'s outline, as a `Real` multiple of the line
+width: how far a sharp corner may extend before the join is cut off. Excel's
+default is 8. `:inherit` removes the limit.
 
 The limit belongs to the `a:miter` element, so the series' outline must already
 have a miter join ([`setSeriesLineJoin`](@ref)); otherwise this throws.
@@ -1521,8 +1596,28 @@ setSeriesLineMiterLimit(c::Chart, i::Integer, limit) =
     setSeriesLine(c, i, :none)
     setSeriesLine(c, i, :inherit)
 
-Set several line properties at once, in one rebuild of the chart part. A keyword
-left unspecified is left alone; pass `:inherit` to remove one that is set.
+Set several line properties of series `i`'s outline at once, in one rebuild of
+the chart part. A keyword left unspecified is left alone; pass `:inherit` to
+remove one that is set.
+
+# Keywords
+
+These are the line keywords of every multi-property line setter —
+[`setAxisLine`](@ref), [`setPlotAreaLine`](@ref) and the text `:line` field
+take the same. Each matches a single-property setter, whose docstring has more.
+
+| keyword      | value                                                        | setter                              |
+|:-------------|:-------------------------------------------------------------|:------------------------------------|
+| `color`      | any color value (see [`setSeriesFill`](@ref)), or `:none`    | [`setSeriesLineColor`](@ref)        |
+| `width`      | points, a `Real` from 0 to 1584                              | [`setSeriesLineWidth`](@ref)        |
+| `dash`       | $(_doc_syms(DASH_VALUES)); or $(_doc_aliases(DASH_ALIASES)) | [`setSeriesLineDash`](@ref)         |
+| `cap`        | $(_doc_syms(CAP_VALUES)); or $(_doc_aliases(CAP_ALIASES))   | [`setSeriesLineCap`](@ref)          |
+| `compound`   | $(_doc_syms(CMPD_VALUES)); or $(_doc_aliases(CMPD_ALIASES)) | [`setSeriesLineCompound`](@ref)     |
+| `join`       | $(_doc_syms(JOIN_VALUES))                                    | [`setSeriesLineJoin`](@ref)         |
+| `miterLimit` | a `Real` multiple of the line width; Excel's default is 8    | [`setSeriesLineMiterLimit`](@ref)   |
+
+Every keyword also takes `:inherit`. The symbol-valued keywords accept the same
+words as Strings.
 
 `miterLimit` needs a miter join. Passing `join = :miter` and `miterLimit` in one
 call works, since the join is applied first.
@@ -1603,8 +1698,8 @@ end
     setMarkerSymbol(c, i, symbol; point = nothing) -> Chart
  
 Set the marker shape for series `i`, or for one of its data points when `point`
-is given, counting from 1. One of `:circle`, `:dash`, `:diamond`, `:dot`,
-`:none`, `:picture`, `:plus`, `:square`, `:star`, `:triangle`, `:x` or `:auto`.
+is given, counting from 1. `symbol` is one of $(_doc_syms(MARKER_SYMBOLS)), as
+a Symbol or String.
  
 `:none` draws no marker and `:auto` lets Excel choose; both are settings.
 `:inherit` removes the element so the chart style decides.
@@ -1616,8 +1711,9 @@ setMarkerSymbol(c::Chart, i::Integer, symbol; point::Union{Nothing,Integer} = no
     setMarkerSize(c, i, size; point = nothing) -> Chart
  
 Set the marker size for series `i`, or for one of its data points when `point`
-is given, counting from 1. In points, rounded to the nearest whole point.
-DrawingML allows 2 to 72; anything outside that is rejected rather than written.
+is given, counting from 1. `size` is in points, a `Real` rounded to the nearest
+whole point. DrawingML allows 2 to 72; anything outside that is rejected rather
+than written.
 `:inherit` removes the setting so the chart style decides.
  
 One of the single-property marker setters; [`setMarker`](@ref) sets several at
@@ -1637,9 +1733,7 @@ _marker_sp(mk, pfx) = something(first_element_with_tag(mk, "spPr"),
     setMarkerFill(c, i, color; point = nothing) -> Chart
  
 Set the fill of series `i`'s marker, or of one data point's when `point` is
-given, counting from 1. Takes the same values as [`setSeriesFill`](@ref): a
-colour, a [`SchemeColor`](@ref), `:none` for an explicit `<a:noFill/>`, or
-`:inherit` to remove it.
+given, counting from 1. $(_DOC_COLOR_ARG)
  
 One of the single-property marker setters; see [`setMarker`](@ref).
 """
@@ -1658,10 +1752,8 @@ _marker_with_line(mk::XML.Node, f, pfx::Dict{String,String}) =
 """
     setMarkerLineColor(c, i, color; point = nothing) -> Chart
  
-Set the outline colour of series `i`'s marker, or of one data point's when
-`point` is given, counting from 1. Takes the same values as
-[`setSeriesFill`](@ref): a colour, a [`SchemeColor`](@ref), `:none` for an
-explicit `<a:noFill/>`, or `:inherit` to remove it.
+Set the outline color of series `i`'s marker, or of one data point's when
+`point` is given, counting from 1. $(_DOC_COLOR_ARG)
  
 As with [`setSeriesLineColor`](@ref), `:none` leaves the outline in place
 drawing nothing, which is not the same as removing it.
@@ -1676,7 +1768,8 @@ setMarkerLineColor(c::Chart, i::Integer, color; point::Union{Nothing,Integer} = 
     setMarkerLineWidth(c, i, width; point = nothing) -> Chart
  
 Set the outline width of series `i`'s marker, or of one data point's when
-`point` is given, counting from 1. In points. `:inherit` removes the width.
+`point` is given, counting from 1. `width` is in points, a `Real` from 0 to
+1584. `:inherit` removes the width.
  
 DrawingML caps a line width at 1584 pt; a wider one is rejected rather than
 written.
@@ -1696,8 +1789,12 @@ the marker for series `i`, or overrides it for one of its data points when
  
 A keyword left unspecified is left alone; pass `:inherit` to remove one that is
 set. Each keyword takes the values its single-property setter does:
-[`setMarkerSymbol`](@ref), [`setMarkerSize`](@ref), [`setMarkerFill`](@ref),
-[`setMarkerLineColor`](@ref) and [`setMarkerLineWidth`](@ref).
+
+- `symbol` — $(_doc_syms(MARKER_SYMBOLS)) ([`setMarkerSymbol`](@ref));
+- `size` — points, 2 to 72 ([`setMarkerSize`](@ref));
+- `fill` — a color value, as for [`setSeriesFill`](@ref) ([`setMarkerFill`](@ref));
+- `lineColor` — a color value ([`setMarkerLineColor`](@ref));
+- `lineWidth` — points, 0 to 1584 ([`setMarkerLineWidth`](@ref)).
  
 Nothing is written if every property keyword is `nothing`.
  
@@ -1770,9 +1867,10 @@ end
     setLabelTextProp(c, i, field, value) -> Chart
     setLabelTextProp(c, i, point, field, value) -> Chart
 
-Set one text property of series `i`'s data labels, or of one individual label.
-`field` is a field of `DrawingRunProps` other than `raw` — the same vocabulary
-[`getLabelTextProp`](@ref) resolves. `:inherit` removes it.
+Set one text property of series `i`'s data labels, or of the individual label of
+data point `point`, counting from 1.
+
+$(_DOC_TEXT_FIELD_ARG)
 
 Creating a `c:dLbls` where none existed writes every `show*` flag as off, so
 formatting a series' labels does not make them appear. A `c:dLbls` that names no
@@ -1783,11 +1881,6 @@ The per-point form creates the individual `c:dLbl` if the point has none, placed
 in index order and carrying the same `show*` flags as its `c:dLbls`, so it
 displays exactly what its sibling labels display. Formatting one label on a
 series whose labels are off does not make that label appear.
-
-Two fields take compound values. `:fill` accepts anything
-[`setSeriesFill`](@ref) does — a color, a [`SchemeColor`](@ref), `:none` or
-`:inherit`. `:line` accepts a color, or a `NamedTuple` of the
-[`setSeriesLine`](@ref) keywords: `(color = "red", width = 1.5)`.
 
 A label that has been deleted carries only `c:delete` and cannot be formatted —
 undeleting it is a separate operation.
@@ -1823,7 +1916,9 @@ end
     setGroupLabelTextProp(c, g::ChartGroup, field, value) -> Chart
 
 Set one text property of a chart group's data labels — the rung every series in
-the group inherits from.
+the group inherits from. `g` is a group from [`getChartGroups`](@ref).
+
+$(_DOC_TEXT_FIELD_ARG)
 """
 function setGroupLabelTextProp(c::Chart, g::ChartGroup, field::Symbol, value)
     root = chart_root(c)
@@ -1847,6 +1942,9 @@ end
 
 Set one text property on `c:chartSpace/c:txPr` — the bottom rung of the text
 cascade, which every text body in the chart inherits from unless it overrides.
+This is the way to set one font or size for the whole chart.
+
+$(_DOC_TEXT_FIELD_ARG)
 """
 function setChartSpaceTextProp(c::Chart, field::Symbol, value)
     root = chart_root(c)
@@ -1860,17 +1958,33 @@ end
 
 """
     setChartTitleText(c, text) -> Chart
+    setChartTitleText(c, ref::Union{CellRef,SheetCellRef}) -> Chart
 
 Replace the chart title's text and all its formatting. `text` may be a
-`DrawingText` or a string, which becomes a one-run title inheriting its
-formatting from the chart style.
+`DrawingText`, a string, which becomes a one-run title inheriting its formatting
+from the chart style, or a `RichTextString`, whose runs keep their own
+formatting and inherit the rest. A newline starts a new paragraph. A styled
+string from StyledStrings.jl (`styled"…"`, Julia 1.11 and later) is converted to
+a `RichTextString` as it is when written to a cell.
 
 This replaces rather than merges, like writing a `RichTextString` to a cell —
 use [`setChartTitleTextProp`](@ref) to change one property and leave the rest.
 
-A title bound to a cell (`c:tx/c:strRef`) is replaced by literal text; the
-reference is lost. `c:autoTitleDeleted` is not touched, so a chart with the
-title switched off stays that way.
+Given a `CellRef` or `SheetCellRef`, the title is bound to that cell
+(`c:tx/c:strRef`) and shows its text, with the cell's current value cached as
+Excel does. A bare `CellRef` means the chart's own sheet; a chart on a
+chartsheet needs a `SheetCellRef`. A string is always typed text, never read as
+a reference — `"Q1"` is a valid title.
+
+A bound title can't carry rich text: this is a limit of Excel's file format,
+in which `c:tx` holds either a reference or typed runs, never both. Its one
+style is `c:title/c:txPr`. Binding a typed title moves its formatting there —
+the first paragraph's, overlaid by its first run's — and, where the cell holds a
+`RichTextString`, the formatting all of its runs share is laid over that.
+Formatting that varies between the cell's runs is not shown.
+
+Typing text over a bound title replaces the reference. `c:autoTitleDeleted` is
+not touched, so a chart with the title switched off stays that way.
 
 A title created here gets `c:overlay val="0"`, as Excel writes on every title
 it creates, so it sits beside the plot area rather than over it.
@@ -1890,24 +2004,103 @@ end
 setChartTitleText(c::Chart, text::AbstractString) =
     setChartTitleText(c, DrawingText(text))
 
-    # A title with no c:overlay is drawn over the plot area; Excel writes
+function setChartTitleText(c::Chart, ref::Union{CellRef,SheetCellRef})
+    strref, cellrich = _title_ref(c, ref)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    new  = rebuild_path(root,
+               [(NS_C, "chart") => "chart",
+                (NS_C, "title") => "title"],
+               t -> _title_with_ref(t, strref, cellrich, _wb(c), pfx);
+               prefixes = pfx)
+    set_chart_root!(c, new)
+    return c
+end
+
+_title_with_text(t::XML.Node, text::DrawingText, pfx) =
+    _title_with_tx(t, _text_from(text, "rich", pfx), pfx)
+
+# Put `content` — a c:rich or a c:strRef — in the title's c:tx, replacing either.
+# A title with no c:overlay is drawn over the plot area; Excel writes
 # overlay=0 on every title it creates, so a new title gets the same.
-function _title_with_text(t::XML.Node, text::DrawingText, pfx)
+function _title_with_tx(t::XML.Node, content::XML.Node, pfx)
     tkey = (NS_C, "title")
     tx = something(first_element_with_tag(t, "tx"), XML.Element(prefixed_tag(pfx[NS_C], "tx")))
-    tx = insert_child(remove_choice(tx, (NS_C, "tx"), TX_GROUP), (NS_C, "tx"),
-                      _text_from(text, "rich", pfx))
+    tx = insert_child(remove_choice(tx, (NS_C, "tx"), TX_GROUP), (NS_C, "tx"), content)
     t = insert_child(t, tkey, tx)
     return isnothing(first_element_with_tag(t, "overlay")) ?
            insert_child(t, tkey, _val_el(pfx, "overlay", "0")) : t
 end
 
+# A title bound to a cell has one style, c:txPr: c:tx holds c:strRef or c:rich,
+# never both. Typed formatting is kept by moving it into c:txPr; then whatever
+# formatting every run of a rich-text cell shares is laid over it.
+function _title_with_ref(t::XML.Node, strref::XML.Node, cellrich, wb::Workbook, pfx)
+    tkey = (NS_C, "title")
+    rich = first_element_with_tag(first_element_with_tag(t, "tx"), "rich")
+    isnothing(rich) ||
+        (t = insert_child(t, tkey, _txpr_from_rich(rich, first_element_with_tag(t, "txPr"), wb, pfx)))
+    for (field, value) in _common_run_props(cellrich)
+        t = _txpr_with_run_prop(t, tkey, field, value, pfx)
+    end
+    return _title_with_tx(t, strref, pfx)
+end
+
+# A c:txPr carrying a typed body's formatting, laid over the title's existing
+# c:txPr where it has one: one paragraph whose default run props are the old
+# c:txPr's, overlaid by the typed first paragraph's, then by its first run's. A
+# bound title has a single style, so later runs cannot be kept.
+function _txpr_from_rich(rich::XML.Node, txpr::Union{Nothing,XML.Node}, wb::Workbook, pfx;
+                         ns::AbstractString = NS_C)
+    text = parse_drawing_text(wb, rich; tag = String(localname(rich)))
+    old  = parse_drawing_text(wb, txpr)
+    base = something(old, text)
+    p1   = first(text.paragraphs)
+    run1 = findfirst(r -> r.kind === :run, p1.runs)
+    oldp = isnothing(old) || isempty(old.paragraphs) ? nothing : first(old.paragraphs).props
+    pp   = something(oldp, p1.props, DrawingParaProps())
+    def  = _overlay_run_props(isnothing(oldp) ? nothing : oldp.defprops,
+                              isnothing(p1.props) ? nothing : p1.props.defprops)
+    def  = _overlay_run_props(def, isnothing(run1) ? nothing : p1.runs[run1].props)
+    pp   = DrawingParaProps(pp.align, pp.level, pp.marginleft, pp.marginright, pp.indent,
+                            pp.rtl, pp.linespacing, pp.spacebefore, pp.spaceafter, def, nothing)
+    para = DrawingParagraph(pp, DrawingRun[], nothing, nothing)
+    return _text_from(DrawingText(base.body, base.liststyle, [para], nothing), "txPr", pfx, ns)
+end
+
+# Field by field, `top` where it sets a value and `base` elsewhere.
+function _overlay_run_props(base, top)
+    isnothing(top)  && return base
+    isnothing(base) && return top
+    return DrawingRunProps((f === :raw ? nothing :
+                            something(getfield(top, f), Some(getfield(base, f)))
+                            for f in fieldnames(DrawingRunProps))...)
+end
+
+# The (field, value) pairs every run of a RichTextString agrees on, as run-prop
+# setters take them. A run with no attributes agrees on nothing.
+function _common_run_props(rts)
+    isnothing(rts) && return Pair{Symbol,Any}[]
+    ps = [Dict(_run_prop_pairs(_rich_run_props(r.atts))) for r in rts.runs]
+    return Pair{Symbol,Any}[f => v for (f, v) in first(ps) if all(p -> get(p, f, nothing) == v, ps)]
+end
+
+# The fields a RichTextRun's props set, as `field => value` pairs in the form
+# the run-prop setters take: a solid fill is its color.
+_run_prop_pairs(::Nothing) = Pair{Symbol,Any}[]
+_run_prop_pairs(p::DrawingRunProps) =
+    Pair{Symbol,Any}[f => (f === :fill ? p.fill.fgcolor : getfield(p, f))
+                     for f in fieldnames(DrawingRunProps) if f !== :raw && !isnothing(getfield(p, f))]
+
 """
     setAxisTitleText(c, ax::ChartAxis, text) -> Chart
+    setAxisTitleText(c, ax::ChartAxis, ref::Union{CellRef,SheetCellRef}) -> Chart
 
-Replace an axis title's text and all its formatting. As
-[`setChartTitleText`](@ref), including that a cell reference is replaced by
-literal text.
+Replace an axis title's text and all its formatting, or bind it to a cell. `ax`
+is an axis from [`getChartAxes`](@ref) or [`getChartAxis`](@ref). `text` is as
+for [`setChartTitleText`](@ref): a string, a `DrawingText`, or a
+`RichTextString` or styled string, which keeps its run formatting. A `CellRef`
+or `SheetCellRef` binds the title, and a bound title can't carry rich text.
 
 A title created here gets `c:overlay val="0"`, as Excel writes on every title
 it creates, so it sits beside the plot area rather than over it.
@@ -1925,11 +2118,24 @@ end
 setAxisTitleText(c::Chart, ax::ChartAxis, text::AbstractString) =
     setAxisTitleText(c, ax, DrawingText(text))
 
+function setAxisTitleText(c::Chart, ax::ChartAxis, ref::Union{CellRef,SheetCellRef})
+    strref, cellrich = _title_ref(c, ref)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    steps, _, _ = _axis_path(c, root, ax)
+    new = rebuild_path(root, [steps...; (NS_C, "title") => "title"],
+                       t -> _title_with_ref(t, strref, cellrich, _wb(c), pfx); prefixes = pfx)
+    set_chart_root!(c, new)
+    return c
+end
+
 """
     setLabelText(c, i, point, text) -> Chart
 
-Replace one data label's typed-over text and all its formatting, so the label
-shows `text` instead of its value.
+Replace the text of the data label of point `point` (counting from 1) of series
+`i`, and all its formatting, so the label shows `text` instead of its value.
+`text` is a `DrawingText`, a string, or a `RichTextString` or styled string,
+whose runs keep their own formatting.
 
 If the point has no `c:dLbl`, one is created with the same `show*` flags as its
 `c:dLbls`. Typed text is displayed whatever those flags say, so this shows the
@@ -1941,7 +2147,7 @@ function setLabelText(c::Chart, i::Integer, point::Integer, text::DrawingText)
     steps, _, ser = _series_path(c, root, i)
     dl = _dlbl_node(ser, point)
     !isnothing(dl) && _bool_val(dl, "delete") === true && throw(XLSXError(
-        "Label $point of series $i is deleted, so it has no text to set." *
+        "Label $point of series $i is deleted, so it has no text to set. " *
         "Undelete it first with `setLabelDeleted(c, $i, $point, false)`."))
     settx(lbl) = rebuild_path(lbl, [(NS_C, "tx") => "tx"],
                      tx -> insert_child(remove_choice(tx, (NS_C, "tx"), TX_GROUP),
@@ -1960,15 +2166,49 @@ setLabelText(c::Chart, i::Integer, point::Integer, text::AbstractString) =
 """
     setChartTitleTextProp(c, field, value) -> Chart
 
-Set one text property of the chart title. `field` is a field of
-`DrawingRunProps` other than `raw`; `:inherit` removes it.
+Set one text property of the chart title, such as its size or color, leaving
+the others as they are.
+
+# Fields
+
+These are the fields and values of every text-property setter:
+[`setLabelTextProp`](@ref), [`setGroupLabelTextProp`](@ref),
+[`setChartSpaceTextProp`](@ref), [`setAxisTitleTextProp`](@ref),
+[`setAxisTextProp`](@ref) and [`setLegendTextProp`](@ref). Each field is a field
+of [`DrawingRunProps`](@ref), and getters such as [`getLabelTextProp`](@ref)
+report it under that name; the Excel names in brackets are accepted as well.
+
+| field                       | value                                                                   |
+|:----------------------------|:------------------------------------------------------------------------|
+| `:size`                     | font size in points, a `Real`: `11`, `10.5`                             |
+| `:bold`, `:italic`          | `Bool`                                                                  |
+| `:under` (`:underline`)     | $(_doc_syms(UNDER_VALUES)); or $(_doc_aliases(UNDER_ALIASES)); or a `Bool` (`true` = `:sng`, `false` = `:none`) |
+| `:strike` (`:strikethrough`) | $(_doc_syms(STRIKE_VALUES)); or $(_doc_aliases(STRIKE_ALIASES)); or a `Bool` (`true` = `:sngStrike`, `false` = `:noStrike`) |
+| `:caps`                     | $(_doc_syms(CAPS_VALUES))                                              |
+| `:baseline`                 | vertical offset as a fraction of the font size: `0.3` for superscript, `-0.25` for subscript, `0` for none |
+| `:kern`                     | smallest font size, in points, at which to kern; `0` for none           |
+| `:spacing`                  | extra space between characters, in points; negative to condense        |
+| `:fill` (`:color`)          | the text color — any color value accepted by [`setSeriesFill`](@ref)    |
+| `:line`                     | the text outline: a color, or a `NamedTuple` of [`setSeriesLine`](@ref)'s keywords, `(color = "red", width = 0.5)` |
+| `:latin` (`:font`)          | the font name: `"Arial"`, or a theme font, `"+mn-lt"` (body) or `"+mj-lt"` (headings) |
+| `:ea`, `:cs`                | the font for East Asian and complex scripts, named as for `:latin`      |
+| `:lang`                     | the text's language, a tag such as `"en-US"`                            |
+
+Every field also takes `:inherit`, which removes it so it is inherited from the
+next level up — for a title, the chart space, then the chart style. The
+`:under`, `:strike` and `:caps` words may be Strings as well as Symbols; any
+other word is rejected, since Excel will not open a file containing one.
 
 A title carries formatting in `c:title/c:txPr` and, when it holds literal text,
 in `c:title/c:tx/c:rich` as well — Excel renders the `rich` one, so both are
 written. Contrast [`setChartTitleText`](@ref), which replaces the text and all
 its formatting.
 
+# Example
 
+    setChartTitleTextProp(c, :size, 16)
+    setChartTitleTextProp(c, :color, "accent2")
+    setChartTitleTextProp(c, :font, "Georgia")
 """
 function setChartTitleTextProp(c::Chart, field::Symbol, value)
     root = chart_root(c)
@@ -1985,7 +2225,11 @@ end
 """
     setAxisTitleTextProp(c, ax::ChartAxis, field, value) -> Chart
 
-Set one text property of an axis title. As [`setChartTitleTextProp`](@ref).
+Set one text property of an axis title, as [`setChartTitleTextProp`](@ref)
+does for the chart title. `ax` is an axis from [`getChartAxes`](@ref) or
+[`getChartAxis`](@ref).
+
+$(_DOC_TEXT_FIELD_ARG)
 """
 function setAxisTitleTextProp(c::Chart, ax::ChartAxis, field::Symbol, value)
     root = chart_root(c)
@@ -2009,6 +2253,8 @@ end
 Set one text property of the legend (`c:legend/c:txPr`). A legend takes its text
 from the series names, so there is no `c:tx` to replace — only its formatting is
 settable.
+
+$(_DOC_TEXT_FIELD_ARG)
 """
 function setLegendTextProp(c::Chart, field::Symbol, value)
     root = chart_root(c)
@@ -2193,8 +2439,8 @@ Set several `c:scaling` properties in one rebuild. A keyword left unspecified is
 left alone; `:inherit` removes it.
 
 - `orientation` — `:minMax`, or `:maxMin` to plot the axis in reverse order.
-- `min`, `max` — fixed bounds, in the axis's own units. `:inherit` returns a
-  bound to automatic.
+- `min`, `max` — fixed bounds, as finite `Real`s in the axis's own units (on a
+  date axis, Excel date serial numbers). `:inherit` returns a bound to automatic.
 
 Throws if the resulting bounds would have `min ≥ max`. Checking once all
 keywords are applied means a range can be moved in one call past its old
@@ -2225,16 +2471,18 @@ end
 """
     setAxisMin(c, ax, value) -> Chart
 
-Fix the axis's lower bound (`c:scaling/c:min`); `:inherit` returns it to
-automatic. See [`setAxisScaling`](@ref) to set both bounds at once.
+Fix the axis's lower bound (`c:scaling/c:min`) at `value`, a finite `Real` in
+the axis's own units; `:inherit` returns it to automatic. See
+[`setAxisScaling`](@ref) to set both bounds at once.
 """
 setAxisMin(c::Chart, ax::ChartAxis, v) = setAxisScaling(c, ax; min = v)
 
 """
     setAxisMax(c, ax, value) -> Chart
 
-Fix the axis's upper bound (`c:scaling/c:max`); `:inherit` returns it to
-automatic. See [`setAxisScaling`](@ref) to set both bounds at once.
+Fix the axis's upper bound (`c:scaling/c:max`) at `value`, a finite `Real` in
+the axis's own units; `:inherit` returns it to automatic. See
+[`setAxisScaling`](@ref) to set both bounds at once.
 """
 setAxisMax(c::Chart, ax::ChartAxis, v) = setAxisScaling(c, ax; max = v)
 
@@ -2271,7 +2519,8 @@ end
     setAxisCrossesAt(c, ax, value) -> Chart
 
 Set where this axis crosses its partner as a value on the partner's scale
-(`c:crossesAt`). Removes any `c:crosses`. `:inherit` removes `c:crossesAt` only.
+(`c:crossesAt`) — `value` is a finite `Real`. Removes any `c:crosses`.
+`:inherit` removes `c:crossesAt` only.
 """
 function setAxisCrossesAt(c::Chart, ax::ChartAxis, value)
     v = _finite(value, "An axis crossing")
@@ -2285,7 +2534,8 @@ end
 
 Set the axis's number format (`c:numFmt/@formatCode`) and unlink it from the
 source cells (`sourceLinked="0"`), without which Excel ignores the code.
-`:inherit` removes `c:numFmt`.
+`code` is an Excel number format string, as for a cell: `"0.0%"`, `"#,##0"`,
+`"\$#,##0.00"`, `"mmm-yy"`. `:inherit` removes `c:numFmt`.
 
 A two-section code such as `"0%;0%"` shows negative values without a minus sign.
 """
@@ -2362,8 +2612,9 @@ end
 """
     setGroupGapWidth(c, g, percent) -> Chart
 
-Set the group's gap width (0–500, as Excel's "Gap Width" box), or `:inherit`
-to remove it.
+Set the group's gap width, an `Integer` percentage of a bar's width from 0 to
+500, as Excel's "Gap Width" box; or `:inherit` to remove it. `g` is a group
+from [`getChartGroups`](@ref); bar and bar-of-pie groups only.
 """
 function setGroupGapWidth(c::Chart, g::ChartGroup, pct)
     v = _check_pct(pct, 0, 500, "A gap width")
@@ -2389,8 +2640,10 @@ end
 """
     setGroupOverlap(c, g, percent) -> Chart
 
-Set the group's overlap (-100 to 100), or `:inherit` to remove it. Stacked
-groups need 100 for each series to sit on the one before it.
+Set the group's overlap, an `Integer` percentage from -100 to 100, as Excel's
+"Series Overlap" box; or `:inherit` to remove it. `g` is a group from
+[`getChartGroups`](@ref); 2-D bar groups only. Stacked groups need 100 for each
+series to sit on the one before it.
 """
 function setGroupOverlap(c::Chart, g::ChartGroup, pct)
     v = _check_pct(pct, -100, 100, "An overlap")
@@ -2480,6 +2733,71 @@ function setLegendEntryDeleted(c::Chart, positions, deleted::Union{Bool,Symbol})
     return c
 end
 
+# ── Legend position ───────────────────────────────────────────────────────────
+
+const _LEGEND_POS = (:b, :t, :l, :r, :tr)
+const _LEGEND_POS_ALIASES = Dict(:bottom => :b, :top => :t, :left => :l, :right => :r,
+                                 :topRight => :tr)
+
+_legend_pos(p::Symbol) = _check_sym(get(_LEGEND_POS_ALIASES, p, p), _LEGEND_POS, "legend position")
+
+function _legend_overlay(v)
+    v isa Bool && return v ? "1" : "0"
+    v === :inherit && return :inherit
+    throw(XLSXError("`$(repr(v))` is not a legend overlay; use `true`, `false` or `:inherit`."))
+end
+
+# Apply `f(lg, key, pfx)` to `c:legend`, creating it if absent, in one rebuild.
+function _set_legend(c::Chart, f)
+    root = chart_root(c)
+    pfx  = ns_prefixes(root)
+    lkey = (NS_C, "legend")
+    new  = rebuild_path(root, [(NS_C, "chart") => "chart", lkey => "legend"],
+                        lg -> f(lg, lkey, pfx); prefixes = pfx)
+    set_chart_root!(c, new)
+    return c
+end
+
+"""
+    setLegendPos(c::Chart, pos; overlay=nothing) -> Chart
+    setLegendPos(c::ChartEx, pos; overlay=nothing) -> ChartEx
+
+Set where the legend is drawn: `:b` (bottom), `:t` (top), `:l` (left), `:r`
+(right) or `:tr` (top-right) — Excel's five legend positions. `:bottom`, `:top`,
+`:left`, `:right` and `:topRight` are accepted too. `:inherit` removes the
+position, which Excel reads as `:r`.
+
+`overlay` also sets [`setLegendOverlay`](@ref): `true` draws the legend over the
+plot area, `false` beside it, shrinking the plot area to make room. `nothing`
+leaves it as it is.
+
+Creates the legend if the chart has none. On a `Chart`, any manual layout on the
+legend (`c:legend/c:layout`, written when a legend is dragged in Excel) is
+removed so that the position takes effect, as picking a position in Excel does.
+"""
+function setLegendPos(c::Chart, pos::Symbol; overlay = nothing)
+    p = _legend_pos(pos)
+    o = isnothing(overlay) ? nothing : _legend_overlay(overlay)
+    return _set_legend(c, (lg, key, pfx) -> begin
+        lg = _with_val(remove_child(lg, "layout"), key, pfx, "legendPos", p)
+        isnothing(o) ? lg : _with_val(lg, key, pfx, "overlay", o)
+    end)
+end
+
+"""
+    setLegendOverlay(c::Chart, overlay) -> Chart
+    setLegendOverlay(c::ChartEx, overlay) -> ChartEx
+
+`true` draws the legend over the plot area; `false` draws it beside the plot
+area, which shrinks to make room — Excel's "Show the legend without overlapping
+the chart". `:inherit` removes the setting, which Excel reads as `false`.
+Creates the legend if the chart has none.
+"""
+function setLegendOverlay(c::Chart, overlay::Union{Bool,Symbol})
+    o = _legend_overlay(overlay)
+    return _set_legend(c, (lg, key, pfx) -> _with_val(lg, key, pfx, "overlay", o))
+end
+
 const _TICK_MARKS = (:cross, :in, :out, :none)
 const _TICK_MARK_ALIASES = Dict(:inside => :in, :outside => :out)   # Excel's names
 
@@ -2536,8 +2854,9 @@ end
 """
     setAxisTextProp(c, ax, field, value) -> Chart
 
-Set one text property of the axis's tick labels (`c:txPr` on the axis). Takes
-the same fields and values as [`setLegendTextProp`](@ref).
+Set one text property of the axis's tick labels (`c:txPr` on the axis).
+
+$(_DOC_TEXT_FIELD_ARG)
 """
 setAxisTextProp(c::Chart, ax::ChartAxis, field::Symbol, value) =
     _set_axis(c, ax, (el, key, pfx) -> _txpr_with_run_prop(el, key, field, value, pfx))
@@ -2573,6 +2892,13 @@ _plotarea_steps(_) = [(NS_C, "chart") => "chart", (NS_C, "plotArea") => "plotAre
 Set the axis line, as [`setSeriesLine`](@ref) sets a series outline: several
 properties in one rebuild, `:none` for a line that draws nothing, `:inherit` to
 remove it so the chart style supplies it.
+
+$(_DOC_LINE_KWS) A keyword left unspecified is left alone.
+
+# Example
+
+    valax = first(getChartAxes(c, :value))
+    setAxisLine(c, valax; color = "gray", width = 0.75, dash = :sysDash)
 """
 function setAxisLine(c::Chart, ax::ChartAxis;
                      color = nothing, width = nothing, dash = nothing, cap = nothing,
@@ -2590,7 +2916,11 @@ setAxisLine(c::Chart, ax::ChartAxis, what::Symbol) =
     setPlotAreaLine(c, :inherit)
 
 Set the border of the plot area (`c:plotArea/c:spPr/a:ln`), as
-[`setSeriesLine`](@ref) sets a series outline.
+[`setSeriesLine`](@ref) sets a series outline: several properties in one
+rebuild, `:none` for a border that draws nothing, `:inherit` to remove it so the
+chart style supplies it.
+
+$(_DOC_LINE_KWS) A keyword left unspecified is left alone.
 """
 function setPlotAreaLine(c::Chart;
                          color = nothing, width = nothing, dash = nothing, cap = nothing,
@@ -2613,8 +2943,9 @@ end
 """
     setAxisMajorUnit(c, ax, value) -> Chart
 
-Set the interval between major ticks and gridlines (`c:majorUnit`), in the
-axis's own units; `:inherit` returns it to automatic. Value and date axes only.
+Set the interval between major ticks and gridlines (`c:majorUnit`) to `value`,
+a positive `Real` in the axis's own units; `:inherit` returns it to automatic.
+Value and date axes only.
 
 Ticks start at the axis minimum, so a minimum that is a multiple of the unit
 puts a tick at zero.
