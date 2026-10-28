@@ -147,6 +147,55 @@ end
         p = joinpath(data_directory, "general.xlsx")
         fa = XLSX.FileArray(p)
         @test fa[1] == read(p)[1]
+
+        # Reads that cross cache blocks, from views, and from several tasks at once.
+        blk = XLSX.FILEARRAY_BLOCK
+        bytes = rand(UInt8, 2blk + 12345)
+        tmp = tempname()
+        write(tmp, bytes)
+        fa = XLSX.FileArray(tmp)
+        @test length(fa) == length(bytes)
+        @test fa[1] == bytes[1] && fa[end] == bytes[end] && fa[blk + 1] == bytes[blk + 1]
+        for (start, n) in ((1, 10), (blk - 5, 10), (blk - 5, blk + 10), (1, length(bytes)), (2blk + 1, 12345))
+            dest = zeros(UInt8, n + 2)
+            copyto!(dest, Int64(2), fa, Int64(start), Int64(n))
+            @test dest[2:n+1] == bytes[start:start+n-1]
+        end
+        v = view(fa, (blk - 100):(2blk + 100))
+        @test v isa XLSX.FileArray
+        @test collect(v) == bytes[(blk - 100):(2blk + 100)]
+        @test XLSX.FileArray(tmp, Int64(blk))[1] == bytes[blk + 1]
+        ranges = [rand(1:length(bytes) - 5000) .+ (0:4999) for _ in 1:64]
+        got = fetch.([Threads.@spawn begin
+            d = zeros(UInt8, 5000)
+            copyto!(d, Int64(1), fa, Int64(first(r)), Int64(5000))
+        end for r in ranges])
+        @test all(got[i] == bytes[ranges[i]] for i in eachindex(ranges))
+        rm(tmp)
+    end
+
+    # The file isn't held open after reading, so it can be deleted or overwritten
+    # straight away, with no GC to release it (#482: this is why FileArray, not mmap).
+    @testset "file not held open after reading" begin
+        for (what, rd) in (("openxlsx", p -> XLSX.openxlsx(p)),
+                           ("readtable", p -> XLSX.readtable(p, 1)),
+                           ("stream", p -> XLSX.openxlsx(p; enable_cache=false) do xf
+                               for _ in XLSX.eachrow(xf[1]) end
+                           end))
+            p = tempname() * ".xlsx"
+            cp(joinpath(data_directory, "general.xlsx"), p)
+            GC.enable(false)
+            try
+                kept = rd(p)
+                @test (rm(p); !isfile(p))
+                write(p, "overwritten")
+                @test read(p, String) == "overwritten"
+                kept = nothing
+            finally
+                GC.enable(true)
+                rm(p; force=true)
+            end
+        end
     end
 end
 
