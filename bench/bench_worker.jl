@@ -71,6 +71,7 @@ for fixture_name in [
     "sst_unique", "sst_repeated", "sst_mixed",
     "numeric_only", "dates_heavy", "multi_sheet",
     "xl_medium", "xl_issue462", "xl_gaps",
+    "xl_issue462_cr", "large_crlf", "sst_unique_crlf",
 ]
     isnothing(ONLY_FIXTURES) || fixture_name in ONLY_FIXTURES || continue
     ext  = startswith(fixture_name, "xl_") ? ".xlsm" : ".xlsx"

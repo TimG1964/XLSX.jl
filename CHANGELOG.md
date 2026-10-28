@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- Requires XML.jl v0.4.7, and reads through its public API only: `XML.splicetext` and `XML.sourcetext` replace the XML.jl internals XLSX.jl read, including `XMLTokenizer._skip_element_raw`, which XML.jl v0.4.7 deprecates and v0.5 removes [#482](https://github.com/JuliaData/XLSX.jl/issues/482)
+- XML.jl v0.4.7 reads each part in place, whatever its line ends ([XML.jl#194](https://github.com/JuliaData/XML.jl/pull/194)): a part with CR line ends, as Excel writes after the XML declaration, is not copied to normalise them, and the `<sheetData>`-less stub of a worksheet and the raw XML of each shared string keep the bytes they were read from, CRs included
+- Streamed reads (`enable_cache=false`) and the shared string table now drop a leading BOM and line feed as other reads do
+- A CR in cell text, a rich text run or a formula is written as `&#13;`, and a CR, LF or tab in an attribute value (such as a table column name) as `&#13;`, `&#10;` or `&#9;`, so each reads back unchanged. With XML.jl v0.4.7, which normalises line ends as XML 1.0 requires, a CR written as it was read back as LF; a LF or tab in an attribute value already read back as a space. XLSX.jl writes these through `XML.escape`, which does this from XML.jl v0.4.7 ([XML.jl#186](https://github.com/JuliaData/XML.jl/pull/186))
+- **Behavior change:** text written in a file with a literal CR LF or CR, rather than `&#13;`, now reads as LF, as XML 1.0 requires (XML.jl v0.4.7). Excel itself writes a CR as `_x000D_`, which is unaffected
+- An attribute of `<sheetData>` holding `&`, `<` or `"` no longer makes the stored worksheet malformed
+-Add a `Base.size(::Worksheet)` that returns the worksheet dimension (#483)
+
 ## [v0.13.2](https://github.com/JuliaData/XLSX.jl/tree/v0.13.2) - 2026-10-21
 
 This release is largely a bug fixing release. There are a lot of small changes, mainly addressing edge cases. Some of these introduce minor behaviour changes. There is quite a long list under the fold.

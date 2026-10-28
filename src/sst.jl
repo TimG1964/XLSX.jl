@@ -106,7 +106,6 @@ function sst_load!(workbook::Workbook)
     empty!(sst.unformatted)
 
     sst_root = xml_root_element(doc)
-    xml_str = sst_root.data   # underlying string for zero-copy slice
 
     uc = XML.get(sst_root, "uniqueCount", nothing)
     if !isnothing(uc)
@@ -122,10 +121,8 @@ function sst_load!(workbook::Workbook)
         XML.nodetype(c) == XML.Element || continue
         localname(c) == "si" || (XML.skip_element!(c); continue)
         child = XML.LazyNode(c)
-        si_start = c.token.offset + 1
         XML.skip_element!(c)
-        si_end = c.st.state.pos
-        push!(sst.shared_strings, xml_str[si_start:si_end-1])
+        push!(sst.shared_strings, String(XML.sourcetext(child)))
         push!(sst.unformatted, _si_unformatted(child))
     end
 

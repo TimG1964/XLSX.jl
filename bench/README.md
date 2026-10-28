@@ -18,6 +18,9 @@ released versions v0.10–v0.13, upstream `master` on GitHub, and the working tr
                 v0_11/
                 v0_12/
                 v0_13/
+                v0_13_2/
+                v0_13_2_xmlmain/
+                dev_xmlmain/
 
    This folder can be the repository's own `bench/` directory or a standalone
    benchmark project outside the repository. Two environments track unreleased code:
@@ -30,7 +33,14 @@ released versions v0.10–v0.13, upstream `master` on GitHub, and the working tr
      (`[sources] XLSX = {url = "https://github.com/JuliaData/XLSX.jl", rev = "master"}`),
      fetched when the environment is instantiated. It works anywhere.
 
-   Both need Julia 1.11 or later for `[sources]`. The `v0_*` environments pin
+   - `envs/v0_13_2` pins XLSX v0.13.2 with XML.jl v0.4.6, and `envs/v0_13_2_xmlmain`
+     the same release with XML.jl `main`; `envs/dev_xmlmain` is `envs/dev` with XML.jl
+     `main`. Together they separate what XML.jl v0.4.7 gains from what XLSX.jl gains
+     with it (#482). Once v0.4.7 is registered, `envs/dev` suffices for the latter.
+     `envs/v0_13_2_xml194` and `envs/dev_xml194` do the same with XML.jl#194
+     (`rev = "read-string-in-place"`), until it is merged.
+
+   Those using `[sources]` need Julia 1.11 or later. The other `v0_*` environments pin
    registered releases.
 
 2. If using a standalone folder, copy the benchmark scripts from the XLSX.jl repo into it:
@@ -38,12 +48,15 @@ released versions v0.10–v0.13, upstream `master` on GitHub, and the working tr
         bench/bench_worker.jl
         bench/generate_fixtures.jl
         bench/generate_xl_fixtures.jl
+        bench/generate_cr_fixtures.jl
         bench/xl_fixture_spec.jl
         bench/check_xl_fixtures.jl
         bench/quick.jl
         bench/report.jl
         bench/run_benchmarks.jl
         bench/worksheet_read.jl
+        bench/xml047.jl
+        bench/profile482.jl
 
    These scripts load XLSX.jl **from the active environment**, i.e. the installed version.
 
@@ -73,6 +86,7 @@ released versions v0.10–v0.13, upstream `master` on GitHub, and the working tr
 
         julia --project=. generate_fixtures.jl
         julia --project=. generate_xl_fixtures.jl
+        julia --project=. generate_cr_fixtures.jl
 
    Fixtures are shared across all versions. They, and everything in `results/`, are
    ignored by git.
@@ -84,6 +98,14 @@ released versions v0.10–v0.13, upstream `master` on GitHub, and the working tr
 
    This script calls `bench_worker.jl` once per version, activating the right
    environment each time. A version whose results file already exists is skipped.
+
+   Results from different machines can't be compared. To compare versions afresh,
+   give the runs a directory of their own, for `report.jl` too:
+
+        BENCH_RESULTS=results/xml194 julia --project=. run_benchmarks.jl v0.13.2 v0.13.2+xmlmain v0.13.2+xml194 dev+xml194
+        BENCH_RESULTS=results/xml194 julia --project=. report.jl
+
+   `report.jl` shows only the versions, and ratios, that directory has.
 
 7. Report results:
 
@@ -111,6 +133,27 @@ values, then times `readxlsx` and `readtable` (median of five warmed `@timed` sa
 It needs no fixtures and no BenchmarkTools, so it is a quick repro for read-path changes:
 
     julia --project=envs/dev --check-bounds=yes worksheet_read.jl
+
+### XML.jl v0.4.7 reads (#482)
+
+`xml047.jl` times the two reads #482 moves onto XML.jl's public API, `splitNode` on the
+`xl_issue462` Data sheet with and without a CR, and `sst_load!` on `sst_unique` with LF
+and CR LF line ends, in the active environment. Run it in each environment, on one
+machine in one session; the digest ending each line must match across them:
+
+    julia --project=envs/v0_13_2 xml047.jl
+    julia --project=envs/v0_13_2_xmlmain xml047.jl
+    julia --project=envs/v0_13_2_xml194 xml047.jl
+    julia --project=envs/dev_xml194 xml047.jl
+
+`XML047_SAMPLES=21` takes the median of more samples.
+
+`profile482.jl` profiles one benchmark of `bench_worker.jl`, by default `xl_issue462`
+`readtable`, and writes flat and tree profiles, and a `pprof` file if PProf loads, to
+`results/profiles`. Run it in two environments to compare them:
+
+    julia --project=envs/v0_13_2 --threads=8 profile482.jl xl_issue462 readtable
+    julia --project=envs/v0_13_2_xml194 --threads=8 profile482.jl xl_issue462 readtable
 
 ### Maintainability check
 
@@ -166,6 +209,15 @@ formula cells with cached values (half shared, the rest long lookups).
 | xl_issue462 | 30,000 | 137 MB | The #462 shape; gap rows only after the table |
 | xl_gaps | 3,000 | 13 MB | Absent, helper-only and empty rows inside the table |
 
+Copied by `generate_cr_fixtures.jl` with CR line ends in their worksheet and shared
+string XML (#482):
+
+| Fixture | Copy of | Line ends |
+|---------|---------|-----------|
+| xl_issue462_cr | xl_issue462 | One CR LF, after each part's XML declaration |
+| large_crlf | large | Every LF a CR LF |
+| sst_unique_crlf | sst_unique | Every LF a CR LF |
+
 `readtable_subset` is the #462 call, `readtable(path, "Data", "A:CF"; first_row=5)`,
 which stops at the first empty row. `readtable_gaps` reads `xl_gaps` with
 `stop_in_empty_row=false, keep_empty_rows=true`. v0.10.4 drops absent rows in that
@@ -194,5 +246,7 @@ sheets and every workbook in `test/data`. Two environment variables extend it:
   `xl_*` fixtures
 - `v0.12` — Updated XLSX.jl implementation adopting XML.jl v0.4
 - `v0.13` — Adds native Excel chart support
+- `v0.13.2`, `v0.13.2+xmlmain`, `v0.13.2+xml194` — the last release, with XML.jl v0.4.6, `main` and #194
 - `master` — upstream `master` on GitHub
 - `dev` — the working tree
+- `dev+xmlmain`, `dev+xml194` — the working tree with XML.jl `main` and #194

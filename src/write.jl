@@ -187,7 +187,7 @@ function add_node_formula!(io, f::Formula, pfx)
     # Write unhandled attributes
     if !isnothing(f.unhandled)
         for (k, v) in f.unhandled
-            write(io, " ", k, "=\"", XML.escape(v), "\"")
+            write(io, " ", k, "=\"", XML.escape(v; attribute = true), "\"")
         end
     end
     
@@ -199,7 +199,7 @@ function add_node_formula!(io, f::FormulaReference, pfx)
     
     if !isnothing(f.unhandled)
         for (k, v) in f.unhandled
-            write(io, " ", k, "=\"", XML.escape(v), "\"")
+            write(io, " ", k, "=\"", XML.escape(v; attribute = true), "\"")
         end
     end
     
@@ -213,7 +213,7 @@ function add_node_formula!(io, f::ReferencedFormula, pfx)
     
     if !isnothing(f.unhandled)
         for (k, v) in f.unhandled
-            write(io, " ", k, "=\"", XML.escape(v), "\"")
+            write(io, " ", k, "=\"", XML.escape(v; attribute = true), "\"")
         end
     end
     
@@ -595,7 +595,7 @@ function process_cache_row!(row_node::IOBuffer, column_indexes::Vector{Int}, cac
     end
 
     for (attribute, value) in unhandled_attributes
-        write(row_node, " ", attribute, "=\"", XML.escape(value), "\"")
+        write(row_node, " ", attribute, "=\"", XML.escape(value; attribute = true), "\"")
     end
 
     write(row_node, ">\n")

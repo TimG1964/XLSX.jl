@@ -1063,25 +1063,8 @@ function strip_bom_and_lf!(bytes::Vector{UInt8})
     end
 end
 
-# Byte span `start:stop-1` of element `n` in its source, found with XML.jl's raw
-# element scanner (the one `XML.skip_element!` uses), which hops between `<`s without
-# building tokens. `XML.sourcespan` gives the same span but runs the full tokenizer
-# over the element, which for a large `<sheetData>` costs several times more (#462).
-# Switch to `XML.sourcespan` once XML.jl#157 makes it use the raw scanner too.
-#
-# The raw scanner returns `ncodeunits + 1` both for an element that ends the source and
-# for one that is never closed; that case defers to `XML.sourcespan`, so malformed XML
-# fails exactly as before.
-function _element_span(n::XML.LazyNode)
-    start = n.token.offset + 1
-    stop = XML.XMLTokenizer._skip_element_raw(n.data, start)
-    if stop > ncodeunits(n.data)
-        span = XML.sourcespan(n)
-        return first(span), nextind(n.data, last(span))
-    end
-    return start, stop
-end
-
+# XML.jl reads `xml_str` in place, whatever its line ends, and `XML.splicetext` splices
+# its own bytes, CRs included (#482).
 function splitNode(xml_str::String, skipnode::String)
     c = XML.Cursor(xml_str)
 
@@ -1112,16 +1095,11 @@ function splitNode(xml_str::String, skipnode::String)
     replacement = if isnothing(attrs) || isempty(attrs)
         "<$(target_tag)/>"
     else
-        attr_str = join(("$(k)=\"$(v)\"" for (k,v) in attrs), " ")
+        attr_str = join(("$(k)=\"$(XML.escape(v; attribute = true))\"" for (k,v) in attrs), " ")
         "<$(target_tag) $(attr_str)/>"
     end
 
-    # Slice the string the offsets index: XML.jl may hold a line-ending-normalised copy (#472).
-    start, stop = _element_span(target_lazy)
-    src = target_lazy.data
-    stripped_xml = string(SubString(src, firstindex(src), prevind(src, start)),
-                          replacement, SubString(src, stop))
-    return stripped_xml, ""
+    return String(XML.splicetext(target_lazy, replacement)), ""
 end
 
 # A worksheet part. Not only `sheetN.xml`: the part name is the producer's choice
