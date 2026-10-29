@@ -624,6 +624,12 @@ end
     zip = ZipReader(read(out))
     tbl = String(zip_readentry(zip, only(filter(n -> occursin(r"^xl/tables/", n), zip_names(zip)))))
     @test occursin("name=\"a&#13;&#10;b\"", tbl) && occursin("name=\"c&#9;d\"", tbl)
+    # Excel refuses these two, so they are written differently:
+    # a run of only "\r" keeps xml:space, and a formula's line breaks become LF
+    @test occursin("<t xml:space=\"preserve\">&#13;</t>", sst)
+    sheet = String(zip_readentry(zip, "xl/worksheets/sheet1.xml"))
+    @test occursin("1+\n2", sheet) && !occursin("&#13;", sheet)
+    @test XLSX.getFormula(s, "C1") == "=1+\n2"
 
     for xf in (XLSX.readxlsx(out), XLSX.openxlsx(out; mode = "rw"))
         s2 = xf[1]
@@ -631,7 +637,7 @@ end
         @test [s2[i, 2] for i in eachindex(vals)] == vals .* "!"
         @test XLSX.getRichTextString(s2, "B1").runs[1] == XLSX.RichTextRun("a\r\nb", [:bold => true])
         @test XLSX.table(s2, "T").columns == ["a\r\nb", "c\td"]
-        xf.is_writable && @test XLSX.getFormula(s2, "C1") == "=1+\r\n2"
+        xf.is_writable && @test XLSX.getFormula(s2, "C1") == "=1+\n2"
     end
     SAVE_FILES && save_outfile(f)
     isfile(out) && rm(out)
@@ -665,6 +671,7 @@ end
         out = "sst_eol_out.xlsx"
         XLSX.writexlsx(out, xf; overwrite = true)
         @test [XLSX.readxlsx(out)[1][i, 1] for i in 1:4] == expected
+        SAVE_FILES && save_outfile(out)
         rm(p); rm(out)
     end
     rm(src)

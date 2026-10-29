@@ -800,6 +800,8 @@ Formulae must be valid Excel formulae and written in US english with comma
 separators. Cell references may be absolute or relative references in either 
 the row or the column or both (e.g. `\$A\$2`). No validation of the specified 
 formula is made by `XLSX.jl` and formulae are usually stored verbatim, as given.
+The exception is line breaks: Excel refuses a formula containing a carriage return,
+so `"\\r\\n"` and `"\\r"` are stored as `"\\n"` (as Excel itself does for Alt+Enter).
 
 Non-contiguous ranges are not supported by `setFormula`. Set the formula in 
 each cell or contiguous range separately.
@@ -937,6 +939,10 @@ setFormula(ws::Worksheet, row::Union{Integer,UnitRange{<:Integer}}, ::Colon; kw.
 setFormula(ws::Worksheet, ::Colon, col::Union{Integer,UnitRange{<:Integer}}; kw...) = process_colon(setFormula, ws, nothing, col; kw...)
 setFormula(ws::Worksheet, ::Colon, ::Colon; kw...) = setFormula(ws, :; kw...)
 setFormula(ws::Worksheet, ::Colon; kw...) = process_colon(setFormula, ws, nothing, nothing; kw...)
+# Excel won't open a file with a carriage return in a formula (`&#13;` in `<f>`):
+# a line break in a formula is a bare LF, as Alt+Enter writes it.
+_formula_line_ends(f::AbstractString) = occursin('\r', f) ? replace(f, "\r\n" => "\n", '\r' => '\n') : f
+
 # Non-contiguous ranges, and vectors or step ranges of rows or columns, aren't supported:
 # each would need its own handling, since the cellformat-helpers functions can't process
 # setFormula's keywords.
@@ -945,6 +951,8 @@ function setFormula(ws::Worksheet, rng::CellRange; val::AbstractString, raw::Boo
     xf = get_xlsxfile(ws)
 
     _require_writable(xf, "set formula")
+
+    val = _formula_line_ends(val)
 
     is_array = is_array_formula(val)
 
@@ -999,6 +1007,8 @@ function setFormula(ws::Worksheet, cellref::CellRef; val::AbstractString, raw::B
     xf = get_xlsxfile(ws)
 
     _require_writable(xf, "set formula")
+
+    val = _formula_line_ends(val)
 
     c = getcell(ws, cellref)
 

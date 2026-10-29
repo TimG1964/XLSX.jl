@@ -118,6 +118,7 @@
 
             path = "copy_repoint.xlsx"
             XLSX.writexlsx(path, xf; overwrite=true)
+            SAVE_FILES && save_outfile(path)
             xf2 = XLSX.openxlsx(path; mode="rw")
             @test XLSX.getFormula(xf2["Copy"], "E1") == "=Copy!A1+Other!A1"
             @test _sheet_xml_texts(xf2["Copy"], "formula") == ["(AND(Copy!\$M\$2>0, OTHER!\$A\$1>0, C1=\"abc\"))"]
@@ -393,6 +394,7 @@
             @test _sheet_xml_texts(s, "formula1") == ["#REF!"]
             @test XLSX.get_defined_name_value(XLSX.get_workbook(xf), "twice") == "=#REF!*2"
             @test XLSX.get_defined_name_value(s, "local") == "=SUM(#REF!, Sheet1!A1)"
+            SAVE_FILES && save_outfile(xf)
 
             # a read-only file can still delete a sheet, and read the rest lazily afterwards
             ro = XLSX.readxlsx(joinpath(data_directory, "general.xlsx"))
@@ -722,6 +724,7 @@
 
             path = "cf_rename.xlsx"
             XLSX.writexlsx(path, xf; overwrite=true)
+            SAVE_FILES && save_outfile(path)
             xf2 = XLSX.readxlsx(path)
             @test formulas(xf2["Other"]) == ["(AND('My Data'!\$M\$3>0, MYSHEET1!A1>0))"]
             @test formula1(xf2["Other"]) == ["'My Data'!\$A\$1:\$A\$3"]
@@ -1062,6 +1065,7 @@ end
         @test XLSX.sheetnames(xf) == ["C", "B", "A"]
         XLSX.movesheet!(xf, "C"; after=XLSX.sheetcount(xf))
         @test XLSX.sheetnames(xf) == ["B", "A", "C"]
+        SAVE_FILES && save_outfile(xf)
     end
 
     @testset "no-op moves" begin
@@ -1133,6 +1137,7 @@ end
         XLSX.writexlsx(io, xf)
         g = XLSX.opentemplate(seekstart(io))
         @test book_view(g, "activeTab") == 1
+        SAVE_FILES && save_outfile(io)
     end
 
     @testset "chartsheet workbook" begin

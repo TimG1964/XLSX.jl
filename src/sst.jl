@@ -58,8 +58,10 @@ function add_formatted_string!(wb::Workbook, str_formatted::String)::Int64
     end
 end
 
-# check if unformatted shared string needs xml:space="preserve"
-needs_preserve(s::AbstractString) = startswith(s, ' ') || endswith(s, ' ') || contains(s, '\n')  || contains(s, "  ")
+# check if a string needs xml:space="preserve". Any leading or trailing whitespace counts,
+# not just spaces: Excel refuses a rich text run of only "\r" written without it.
+needs_preserve(s::AbstractString) =
+    !isempty(s) && (isspace(first(s)) || isspace(last(s))) || contains(s, '\n') || contains(s, "  ")
 
 # allow to write cells containing only whitespace characters or with leading or trailing whitespace.
 function add_shared_string!(wb::Workbook, str_unformatted::AbstractString) :: Int
@@ -258,15 +260,9 @@ function richTextRunToXML!(io::IO, run::RichTextRun, pfx)
         end
     end
 
-    needs_preserve =
-        startswith(run.text, " ") ||
-        endswith(run.text, " ") ||
-        contains(run.text, '\n') ||
-        contains(run.text, "  ")
-
     escaped = XML.escape(run.text)
 
-    if needs_preserve
+    if needs_preserve(run.text)
         write(io, "<$(pfx)t xml:space=\"preserve\">", escaped, "</$(pfx)t>")
     else
         write(io, "<$(pfx)t>", escaped, "</$(pfx)t>")
