@@ -39,6 +39,7 @@ XLSX.addsheet!
 XLSX.renamesheet!
 XLSX.copysheet!
 XLSX.deletesheet!
+XLSX.movesheet!
 XLSX.addImage
 XLSX.getImages
 ```

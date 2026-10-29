@@ -12,7 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A CR in cell text, a rich text run or a formula is written as `&#13;`, and a CR, LF or tab in an attribute value (such as a table column name) as `&#13;`, `&#10;` or `&#9;`, so each reads back unchanged. With XML.jl v0.4.7, which normalises line ends as XML 1.0 requires, a CR written as it was read back as LF; a LF or tab in an attribute value already read back as a space. XLSX.jl writes these through `XML.escape`, which does this from XML.jl v0.4.7 ([XML.jl#186](https://github.com/JuliaData/XML.jl/pull/186))
 - **Behavior change:** text written in a file with a literal CR LF or CR, rather than `&#13;`, now reads as LF, as XML 1.0 requires (XML.jl v0.4.7). Excel itself writes a CR as `_x000D_`, which is unaffected
 - An attribute of `<sheetData>` holding `&`, `<` or `"` no longer makes the stored worksheet malformed
--Add a `Base.size(::Worksheet)` that returns the worksheet dimension (#483)
+- Add a `Base.size(::Worksheet)` that returns the worksheet dimension (#483)
+- Add `movesheet!` to change a sheet's place in the tab order, before or after another sheet. Names scoped to the sheet and the active tab stay with it
+- `renamesheet!` updates references to the renamed sheet in conditional format and data validation formulas on every sheet, and in defined names holding a formula; it updated only cell formulas, charts and defined names holding a reference. References are matched ignoring case, as Excel does, so `SHEET1!A1` (as `setConditionalFormat` writes it) is renamed too
+- `deletesheet!` replaces references to the deleted sheet with `#REF!` in conditional format and data validation formulas on the remaining sheets, and in defined names holding a formula, as it already did in cell formulas
+- **Behavior change:** `copysheet!` points the copy's references to the original sheet at the copy, as Excel does, in cell formulas, conditional formats, data validations and sheet-scoped defined names holding a formula: `=Sheet1!A1` on `Sheet1` becomes `=Copy!A1` on the copy. They were copied unchanged, so the copy read the original's cells. References to other sheets are unchanged
 
 ## [v0.13.2](https://github.com/JuliaData/XLSX.jl/tree/v0.13.2) - 2026-10-21
 

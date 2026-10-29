@@ -59,7 +59,7 @@ export
     readxlsx, openxlsx, opentemplate, newxlsx,
     writexlsx, savexlsx,
     Worksheet, sheetnames, sheetcount, hassheet,
-    addsheet!, renamesheet!, copysheet!, deletesheet!,
+    addsheet!, renamesheet!, copysheet!, deletesheet!, movesheet!,
     addImage,
     # Cells & data
     CellRef, SheetCellRef, row_number, column_number, eachtablerow,
