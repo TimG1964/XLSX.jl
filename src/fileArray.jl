@@ -3,14 +3,19 @@
 #
 # Not `Mmap.mmap`: on Windows a mapped file can't be deleted or overwritten until GC
 # finalizes the mapping, so a user couldn't rewrite a file they had just read (still the
-# case on Julia 1.13). Instead the file is read in blocks of FILEARRAY_BLOCK bytes, each
-# with its own open and close, so it is never held open between reads. ZipArchives reads
-# an entry in chunks of a few KiB, and on Windows an open per chunk cost more than the
-# read itself (#482).
+# case on Julia 1.13). Instead the file is read in blocks, each with its own open and
+# close, so it is never held open between reads. ZipArchives reads an entry in chunks of
+# a few KiB, and on Windows an open per chunk cost more than the read itself (#482).
+#
+# A block starts at FILEARRAY_FIRST_BLOCK bytes and doubles with each refill up to
+# FILEARRAY_BLOCK, so a short read, such as the central directory or a small part like
+# sharedStrings.xml, costs a short read, while a long sequential one still reads 1 MiB
+# at a time.
 #
 # ZipArchives makes a `view` per entry, in the task that reads it, and each view caches
 # its own block, so tasks reading different entries don't evict each other's blocks.
 # The lock covers the shared root array, whose headers several tasks may read at once.
+const FILEARRAY_FIRST_BLOCK = 1 << 16
 const FILEARRAY_BLOCK = 1 << 20
 
 function FileArray(filename::String, offset::Int64, len::Int64)
@@ -32,18 +37,18 @@ function Base.view(s::FileArray, inds::UnitRange{Int64})::FileArray
     FileArray(s.filename, s.offset + first(inds) - Int64(1), length(inds))
 end
 
-# Cache the block holding position `pos` (0-based). Call with `s.lock` held.
+# Cache the block starting at position `pos` (0-based), twice the size of the last one.
+# Call with `s.lock` held.
 function _fill_block!(s::FileArray, pos::Int64)
-    start = (pos ÷ FILEARRAY_BLOCK) * FILEARRAY_BLOCK
-    n = min(Int64(FILEARRAY_BLOCK), s.len - start)
+    n = min(Int64(clamp(2 * length(s.block), FILEARRAY_FIRST_BLOCK, FILEARRAY_BLOCK)), s.len - pos)
     resize!(s.block, n)
     s.block_start = Int64(-1)       # invalid until the read succeeds
     open(s.filename) do io
-        seek(io, s.offset + start)
+        seek(io, s.offset + pos)
         nb = readbytes!(io, s.block, n)
         nb == n || error("short read")
     end
-    s.block_start = start
+    s.block_start = pos
     return nothing
 end
 

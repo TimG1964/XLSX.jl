@@ -9,13 +9,8 @@ VERSIONS = [
     ("v0.11", joinpath(ROOT, "envs", "v0_11")),
     ("v0.12", joinpath(ROOT, "envs", "v0_12")),
     ("v0.13", joinpath(ROOT, "envs", "v0_13")),
-    ("v0.13.2", joinpath(ROOT, "envs", "v0_13_2")),                 # with XML.jl v0.4.6
-    ("v0.13.2+xmlmain", joinpath(ROOT, "envs", "v0_13_2_xmlmain")), # with XML.jl main
     ("master", joinpath(ROOT, "envs", "master")), # upstream master on GitHub
     ("dev",   joinpath(ROOT, "envs", "dev")),     # the working tree
-    ("dev+xmlmain", joinpath(ROOT, "envs", "dev_xmlmain")),         # with XML.jl main
-    ("v0.13.2+xml194", joinpath(ROOT, "envs", "v0_13_2_xml194")),   # with XML.jl#194
-    ("dev+xml194", joinpath(ROOT, "envs", "dev_xml194")),           # with XML.jl#194
 ]
 
 const fixtures = [
@@ -23,7 +18,6 @@ const fixtures = [
     "sst_unique", "sst_repeated", "sst_mixed",
     "numeric_only", "dates_heavy", "multi_sheet",
     "xl_medium", "xl_issue462", "xl_gaps",
-    "xl_issue462_cr", "large_crlf", "sst_unique_crlf",
 ]
 
 const benchmarks = [
@@ -60,13 +54,7 @@ let
     ratios = [("v0.11/v0.10", "v0.11", "v0.10"), ("v0.12/v0.10", "v0.12", "v0.10"),
               ("v0.13/v0.10", "v0.13", "v0.10"), ("v0.13/v0.12", "v0.13", "v0.12"),
               ("dev/v0.10", "dev", "v0.10"), ("dev/v0.12", "dev", "v0.12"), ("dev/v0.13", "dev", "v0.13"),
-              ("dev/master", "dev", "master"),
-              ("xmlmain/0.13.2", "v0.13.2+xmlmain", "v0.13.2"),
-              ("dev+xm/0.13.2", "dev+xmlmain", "v0.13.2"),
-              ("dev+xm/xmlmain", "dev+xmlmain", "v0.13.2+xmlmain"),
-              ("xml194/0.13.2", "v0.13.2+xml194", "v0.13.2"),
-              ("xml194/xmlmain", "v0.13.2+xml194", "v0.13.2+xmlmain"),
-              ("dev+194/0.13.2", "dev+xml194", "v0.13.2")]
+              ("dev/master", "dev", "master")]
     filter!(r -> haskey(all_results, r[2]) && haskey(all_results, r[3]), ratios)
 
     header = @sprintf("%-30s", "fixture / benchmark")

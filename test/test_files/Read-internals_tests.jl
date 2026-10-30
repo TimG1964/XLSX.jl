@@ -171,6 +171,15 @@ end
             copyto!(d, Int64(1), fa, Int64(first(r)), Int64(5000))
         end for r in ranges])
         @test all(got[i] == bytes[ranges[i]] for i in eachindex(ranges))
+
+        # A first read costs a small block; a long sequential read grows it to full size.
+        fa = XLSX.FileArray(tmp)
+        @test fa[end] == bytes[end]
+        @test length(fa.block) ≤ XLSX.FILEARRAY_FIRST_BLOCK
+        fa = XLSX.FileArray(tmp)
+        n = 2blk - XLSX.FILEARRAY_FIRST_BLOCK   # the doubling blocks up to and including a full one
+        @test copyto!(zeros(UInt8, n), Int64(1), fa, Int64(1), Int64(n)) == bytes[1:n]
+        @test length(fa.block) == blk
         rm(tmp)
     end
 
